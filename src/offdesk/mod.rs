@@ -85,14 +85,16 @@ pub use decision::{
 pub use implementation_packet::{
     draft_implementation_packet, implementation_packet_from_path,
     implementation_packet_record_from_path, latest_implementation_packet_for_project,
-    operator_safe_implementation_packet_summary, AlignmentReviewOutcome, ImplementationAlignment,
-    ImplementationCapabilityMapping, ImplementationCloseout, ImplementationDesign,
-    ImplementationExecution, ImplementationPacket, ImplementationPacketDraftInput,
-    ImplementationPacketSummary, ImplementationScope, ImplementationSourceIntent,
-    ImplementationValidation, LatestImplementationPacket, RecursiveAlignmentChecks,
-    RecursiveAlignmentReview, IMPLEMENTATION_PACKETS_DIR, IMPLEMENTATION_PACKET_FILE,
+    operator_safe_implementation_packet_summary, work_slice_execution_receipts_from_path,
+    AlignmentReviewOutcome, ImplementationAlignment, ImplementationCapabilityMapping,
+    ImplementationCloseout, ImplementationDesign, ImplementationExecution, ImplementationPacket,
+    ImplementationPacketDraftInput, ImplementationPacketSummary, ImplementationScope,
+    ImplementationSourceIntent, ImplementationValidation, LatestImplementationPacket,
+    RecursiveAlignmentChecks, RecursiveAlignmentReview, WorkSliceExecutionReceipt,
+    WorkSliceExecutionStatus, IMPLEMENTATION_PACKETS_DIR, IMPLEMENTATION_PACKET_FILE,
     IMPLEMENTATION_PACKET_MD_FILE, IMPLEMENTATION_PACKET_SCHEMA, RECURSIVE_ALIGNMENT_REVIEW_FILE,
-    RECURSIVE_ALIGNMENT_REVIEW_SCHEMA,
+    RECURSIVE_ALIGNMENT_REVIEW_SCHEMA, WORK_SLICE_EXECUTION_RECEIPTS_FILE,
+    WORK_SLICE_EXECUTION_RECEIPT_SCHEMA,
 };
 pub use mode_contract::{
     assess_offdesk_mode, mode_requires_separate_review, OffdeskModeAssessment,

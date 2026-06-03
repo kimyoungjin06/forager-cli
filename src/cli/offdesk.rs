@@ -22,12 +22,13 @@ use crate::offdesk::{
     implementation_packet_record_from_path, latest_implementation_packet_for_project,
     launch_background_command, launch_background_run, operator_safe_report,
     pending_approval_operator_views, poll_background_runs, recommend_provider_fallback,
-    reconcile_tasks_with_background_outcomes, run_offdesk_tick, ActionApprovalRequest,
-    AdaptiveWikiActivationMode, AdaptiveWikiAgentMode, AdaptiveWikiAgentModeFilter,
-    AdaptiveWikiAuditAction, AdaptiveWikiAuditRecord, AdaptiveWikiCandidate,
-    AdaptiveWikiCandidateInput, AdaptiveWikiConfidence, AdaptiveWikiCorrectionRecurrenceReport,
-    AdaptiveWikiEntry, AdaptiveWikiEpisodeEvaluationReport, AdaptiveWikiGraphReport,
-    AdaptiveWikiHumanCandidate, AdaptiveWikiHumanEntry, AdaptiveWikiKind, AdaptiveWikiLintReport,
+    reconcile_tasks_with_background_outcomes, run_offdesk_tick,
+    work_slice_execution_receipts_from_path, ActionApprovalRequest, AdaptiveWikiActivationMode,
+    AdaptiveWikiAgentMode, AdaptiveWikiAgentModeFilter, AdaptiveWikiAuditAction,
+    AdaptiveWikiAuditRecord, AdaptiveWikiCandidate, AdaptiveWikiCandidateInput,
+    AdaptiveWikiConfidence, AdaptiveWikiCorrectionRecurrenceReport, AdaptiveWikiEntry,
+    AdaptiveWikiEpisodeEvaluationReport, AdaptiveWikiGraphReport, AdaptiveWikiHumanCandidate,
+    AdaptiveWikiHumanEntry, AdaptiveWikiKind, AdaptiveWikiLintReport,
     AdaptiveWikiLiveEpisodeFilter, AdaptiveWikiLiveEpisodeTraceReport,
     AdaptiveWikiMarkdownExportReport, AdaptiveWikiOrigin, AdaptiveWikiProjectionBudget,
     AdaptiveWikiProjectionComparisonReport, AdaptiveWikiProjectionPolicy,
@@ -52,6 +53,7 @@ use crate::offdesk::{
     OffdeskTaskView, OffdeskTickOptions, PendingActionApproval, ProviderCapacityState,
     ProviderCapacityStore, ProviderFallbackRecommendation, ResumeStatus, RiskLevel, SchedulerGate,
     SchedulerGateRequest, SchedulerGateStatus, TaskResumeState, TaskResumeStore,
+    WorkSliceExecutionReceipt, WORK_SLICE_EXECUTION_RECEIPTS_FILE,
 };
 use crate::session::{get_profile_dir, resolved_app_dir_path, DEFAULT_PROFILE};
 
@@ -2444,15 +2446,37 @@ struct CloseoutPacketCoverageDetail {
     status: &'static str,
     reason: String,
     evidence_refs: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    receipt_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    summary: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    validation_refs: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    artifact_refs: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    open_questions: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    drift_signals: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_safe_action: Option<String>,
 }
 
 struct CloseoutPacketAggregate {
     summary: ImplementationPacketSummary,
     evidence_refs: BTreeSet<String>,
     match_refs: BTreeMap<String, String>,
+    receipt_search_dirs: BTreeSet<String>,
+    task_ids: BTreeSet<String>,
+    background_ticket_ids: BTreeSet<String>,
     has_completed_evidence: bool,
     has_active_evidence: bool,
     has_failed_evidence: bool,
+}
+
+struct LoadedWorkSliceExecutionReceipt {
+    receipt: WorkSliceExecutionReceipt,
+    source: String,
 }
 
 struct CloseoutPacketDetailGroups {
@@ -2483,6 +2507,8 @@ struct CloseoutTask {
     artifact_refs: Vec<CapabilityArtifactRef>,
     #[serde(skip_serializing_if = "Option::is_none")]
     implementation_packet: Option<crate::offdesk::ImplementationPacketSummary>,
+    #[serde(skip)]
+    receipt_search_dirs: Vec<String>,
     preview: String,
     reason: String,
 }
@@ -2509,6 +2535,8 @@ struct CloseoutBackgroundRun {
     runtime_handle_alive: bool,
     result_artifact_present: bool,
     log_artifact_present: bool,
+    #[serde(skip)]
+    receipt_search_dirs: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -7957,6 +7985,7 @@ fn option_matches(filter: Option<&str>, value: &str) -> bool {
 
 fn closeout_task_summary(task: &OffdeskTask) -> CloseoutTask {
     let view = task.operator_view();
+    let receipt_search_dirs = closeout_receipt_search_dirs_for_task(task);
     CloseoutTask {
         task_id: view.task_id,
         request_id: view.request_id,
@@ -7977,12 +8006,14 @@ fn closeout_task_summary(task: &OffdeskTask) -> CloseoutTask {
             .map(crate::offdesk::operator_safe_text),
         artifact_refs: view.artifact_refs,
         implementation_packet: view.implementation_packet,
+        receipt_search_dirs,
         preview: view.preview,
         reason: view.reason,
     }
 }
 
 fn closeout_background_summary(probe: &BackgroundProbe) -> CloseoutBackgroundRun {
+    let receipt_search_dirs = closeout_receipt_search_dirs_for_background(probe);
     CloseoutBackgroundRun {
         ticket_id: crate::offdesk::operator_safe_text(&probe.ticket_id),
         runner_kind: probe.runner_kind,
@@ -8018,7 +8049,48 @@ fn closeout_background_summary(probe: &BackgroundProbe) -> CloseoutBackgroundRun
         runtime_handle_alive: probe.runtime_handle_alive,
         result_artifact_present: probe.result_artifact_present,
         log_artifact_present: probe.log_artifact_present,
+        receipt_search_dirs,
     }
+}
+
+fn closeout_receipt_search_dirs_for_task(task: &OffdeskTask) -> Vec<String> {
+    let mut dirs = BTreeSet::new();
+    closeout_add_receipt_search_path(&mut dirs, Some(&task.workdir));
+    closeout_add_receipt_search_path(&mut dirs, task.result_artifact_path.as_deref());
+    closeout_add_receipt_search_path(&mut dirs, task.log_artifact_path.as_deref());
+    if let Some(packet) = task.implementation_packet.as_ref() {
+        closeout_add_receipt_search_path(&mut dirs, Some(&packet.artifact_dir));
+        closeout_add_receipt_search_path(&mut dirs, Some(&packet.packet_path));
+    }
+    for artifact in &task.artifact_refs {
+        closeout_add_receipt_search_path(&mut dirs, artifact.path.as_deref());
+    }
+    dirs.into_iter().collect()
+}
+
+fn closeout_receipt_search_dirs_for_background(probe: &BackgroundProbe) -> Vec<String> {
+    let mut dirs = BTreeSet::new();
+    closeout_add_receipt_search_path(&mut dirs, probe.working_dir.as_deref());
+    closeout_add_receipt_search_path(&mut dirs, probe.result_artifact_path.as_deref());
+    closeout_add_receipt_search_path(&mut dirs, probe.log_artifact_path.as_deref());
+    if let Some(packet) = probe.implementation_packet.as_ref() {
+        closeout_add_receipt_search_path(&mut dirs, Some(&packet.artifact_dir));
+        closeout_add_receipt_search_path(&mut dirs, Some(&packet.packet_path));
+    }
+    dirs.into_iter().collect()
+}
+
+fn closeout_add_receipt_search_path(dirs: &mut BTreeSet<String>, path: Option<&str>) {
+    let Some(path) = path.map(str::trim).filter(|path| !path.is_empty()) else {
+        return;
+    };
+    let path = Path::new(path);
+    let dir = if path.is_dir() {
+        path
+    } else {
+        path.parent().unwrap_or(path)
+    };
+    dirs.insert(dir.to_string_lossy().to_string());
 }
 
 struct CloseoutFileOperationInput<'a> {
@@ -8421,6 +8493,13 @@ fn closeout_implementation_packet_coverage(
         };
         let task_id = crate::offdesk::operator_safe_text(&task.task_id);
         let entry = closeout_packet_entry(&mut packets, summary);
+        entry.task_ids.insert(task.task_id.clone());
+        if let Some(ticket_id) = task.background_ticket_id.as_deref() {
+            entry.background_ticket_ids.insert(ticket_id.to_string());
+        }
+        entry
+            .receipt_search_dirs
+            .extend(task.receipt_search_dirs.iter().cloned());
         entry.evidence_refs.insert(format!(
             "task:{task_id}:status:{}",
             closeout_task_status_label(task.status)
@@ -8486,6 +8565,13 @@ fn closeout_implementation_packet_coverage(
         };
         let ticket_id = crate::offdesk::operator_safe_text(&run.ticket_id);
         let entry = closeout_packet_entry(&mut packets, summary);
+        entry.background_ticket_ids.insert(run.ticket_id.clone());
+        if let Some(task_id) = run.task_id.as_deref() {
+            entry.task_ids.insert(task_id.to_string());
+        }
+        entry
+            .receipt_search_dirs
+            .extend(run.receipt_search_dirs.iter().cloned());
         entry.evidence_refs.insert(format!(
             "background:{ticket_id}:phase:{}",
             closeout_background_phase_label(run.phase)
@@ -8581,13 +8667,25 @@ fn closeout_packet_entry<'a>(
     packets
         .entry(key)
         .or_insert_with(|| CloseoutPacketAggregate {
+            receipt_search_dirs: closeout_packet_summary_receipt_search_dirs(&summary),
             summary,
             evidence_refs: BTreeSet::new(),
             match_refs: BTreeMap::new(),
+            task_ids: BTreeSet::new(),
+            background_ticket_ids: BTreeSet::new(),
             has_completed_evidence: false,
             has_active_evidence: false,
             has_failed_evidence: false,
         })
+}
+
+fn closeout_packet_summary_receipt_search_dirs(
+    summary: &ImplementationPacketSummary,
+) -> BTreeSet<String> {
+    let mut dirs = BTreeSet::new();
+    closeout_add_receipt_search_path(&mut dirs, Some(&summary.artifact_dir));
+    closeout_add_receipt_search_path(&mut dirs, Some(&summary.packet_path));
+    dirs
 }
 
 fn closeout_packet_key(summary: &ImplementationPacketSummary) -> String {
@@ -8645,17 +8743,33 @@ fn closeout_packet_detail_coverage(
     }
 
     match implementation_packet_record_from_path(Path::new(packet_path)) {
-        Ok(packet) => CloseoutPacketDetailGroups {
-            detail_source: "implementation_packet",
-            detail_error: None,
-            work_slices: closeout_work_slice_details(&packet.design.work_slices, packet_status),
-            validation_items: closeout_validation_item_details(&packet, aggregate, packet_status),
-            expected_artifacts: closeout_expected_artifact_details(
-                &packet.closeout.expected_artifacts,
-                aggregate,
-                packet_status,
-            ),
-        },
+        Ok(packet) => {
+            let (work_slice_receipts, receipt_error) = closeout_load_work_slice_receipts(aggregate);
+            let detail_source = if work_slice_receipts.is_empty() {
+                "implementation_packet"
+            } else {
+                "implementation_packet_and_work_slice_receipts"
+            };
+            CloseoutPacketDetailGroups {
+                detail_source,
+                detail_error: receipt_error,
+                work_slices: closeout_work_slice_details(
+                    &packet.design.work_slices,
+                    packet_status,
+                    &work_slice_receipts,
+                ),
+                validation_items: closeout_validation_item_details(
+                    &packet,
+                    aggregate,
+                    packet_status,
+                ),
+                expected_artifacts: closeout_expected_artifact_details(
+                    &packet.closeout.expected_artifacts,
+                    aggregate,
+                    packet_status,
+                ),
+            }
+        }
         Err(error) => CloseoutPacketDetailGroups {
             detail_source: "summary_only",
             detail_error: Some(crate::offdesk::operator_safe_text(&error.to_string())),
@@ -8681,17 +8795,201 @@ fn closeout_packet_detail_coverage(
 fn closeout_work_slice_details(
     work_slices: &[String],
     packet_status: &'static str,
+    receipts: &[LoadedWorkSliceExecutionReceipt],
 ) -> Vec<CloseoutPacketCoverageDetail> {
     work_slices
         .iter()
-        .map(|slice| CloseoutPacketCoverageDetail {
-            category: "work_slice",
-            label: crate::offdesk::operator_safe_text(slice),
-            status: packet_status,
-            reason: "Work-slice execution evidence is not itemized yet; this item inherits the packet-level closeout status and needs manual review.".to_string(),
-            evidence_refs: Vec::new(),
+        .enumerate()
+        .map(|(index, slice)| {
+            if let Some(receipt) = closeout_work_slice_receipt_for(receipts, index, slice) {
+                return closeout_work_slice_detail_from_receipt(slice, receipt);
+            }
+            CloseoutPacketCoverageDetail {
+                category: "work_slice",
+                label: crate::offdesk::operator_safe_text(slice),
+                status: packet_status,
+                reason: "Work-slice execution evidence is not itemized yet; this item inherits the packet-level closeout status and needs manual review.".to_string(),
+                evidence_refs: Vec::new(),
+                receipt_source: None,
+                summary: None,
+                validation_refs: Vec::new(),
+                artifact_refs: Vec::new(),
+                open_questions: Vec::new(),
+                drift_signals: Vec::new(),
+                next_safe_action: None,
+            }
         })
         .collect()
+}
+
+fn closeout_load_work_slice_receipts(
+    aggregate: &CloseoutPacketAggregate,
+) -> (Vec<LoadedWorkSliceExecutionReceipt>, Option<String>) {
+    let mut receipts = Vec::new();
+    let mut errors = Vec::new();
+    for dir in &aggregate.receipt_search_dirs {
+        let path = Path::new(dir).join(WORK_SLICE_EXECUTION_RECEIPTS_FILE);
+        match work_slice_execution_receipts_from_path(&path) {
+            Ok(records) => {
+                for receipt in records {
+                    if closeout_work_slice_receipt_matches(aggregate, &receipt) {
+                        receipts.push(LoadedWorkSliceExecutionReceipt {
+                            receipt,
+                            source: crate::offdesk::operator_safe_text(
+                                path.to_string_lossy().as_ref(),
+                            ),
+                        });
+                    }
+                }
+            }
+            Err(error) => errors.push(crate::offdesk::operator_safe_text(&error.to_string())),
+        }
+    }
+    let error = if errors.is_empty() {
+        None
+    } else {
+        Some(errors.into_iter().take(3).collect::<Vec<_>>().join("; "))
+    };
+    (receipts, error)
+}
+
+fn closeout_work_slice_receipt_matches(
+    aggregate: &CloseoutPacketAggregate,
+    receipt: &WorkSliceExecutionReceipt,
+) -> bool {
+    if !closeout_optional_text_matches(&receipt.packet_id, &aggregate.summary.packet_id) {
+        return false;
+    }
+    if !receipt.project_key.trim().is_empty()
+        && !closeout_optional_text_matches(&receipt.project_key, &aggregate.summary.project_key)
+    {
+        return false;
+    }
+    if let Some(task_id) = receipt
+        .task_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    {
+        if !aggregate.task_ids.is_empty()
+            && !aggregate
+                .task_ids
+                .iter()
+                .any(|known| closeout_optional_text_matches(task_id, known))
+        {
+            return false;
+        }
+    }
+    if let Some(ticket_id) = receipt
+        .background_ticket_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    {
+        if !aggregate.background_ticket_ids.is_empty()
+            && !aggregate
+                .background_ticket_ids
+                .iter()
+                .any(|known| closeout_optional_text_matches(ticket_id, known))
+        {
+            return false;
+        }
+    }
+    true
+}
+
+fn closeout_optional_text_matches(left: &str, right: &str) -> bool {
+    let left = left.trim();
+    let right = right.trim();
+    if left.is_empty() || right.is_empty() {
+        return true;
+    }
+    left == right || closeout_match_text(left) == closeout_match_text(right)
+}
+
+fn closeout_work_slice_receipt_for<'a>(
+    receipts: &'a [LoadedWorkSliceExecutionReceipt],
+    slice_index: usize,
+    slice_label: &str,
+) -> Option<&'a LoadedWorkSliceExecutionReceipt> {
+    let normalized_label = closeout_match_text(slice_label);
+    receipts
+        .iter()
+        .find(|loaded| closeout_match_text(&loaded.receipt.slice_label) == normalized_label)
+        .or_else(|| {
+            receipts
+                .iter()
+                .find(|loaded| loaded.receipt.slice_index == Some(slice_index))
+        })
+        .or_else(|| {
+            receipts.iter().find(|loaded| {
+                loaded.receipt.slice_id.as_deref().is_some_and(|slice_id| {
+                    let slice_id = closeout_match_text(slice_id);
+                    slice_id == format!("slice-{}", slice_index)
+                        || slice_id == format!("slice-{}", slice_index + 1)
+                        || slice_id == format!("slice_{}", slice_index)
+                        || slice_id == format!("slice_{}", slice_index + 1)
+                })
+            })
+        })
+}
+
+fn closeout_work_slice_detail_from_receipt(
+    packet_slice_label: &str,
+    loaded: &LoadedWorkSliceExecutionReceipt,
+) -> CloseoutPacketCoverageDetail {
+    let receipt = &loaded.receipt;
+    let status = receipt.status.as_str();
+    let summary = crate::offdesk::operator_safe_text(&receipt.summary);
+    let reason = if summary.is_empty() {
+        format!("Work-slice execution receipt reports `{status}`.")
+    } else {
+        format!("Work-slice execution receipt reports `{status}`: {summary}")
+    };
+    CloseoutPacketCoverageDetail {
+        category: "work_slice",
+        label: crate::offdesk::operator_safe_text(packet_slice_label),
+        status,
+        reason,
+        evidence_refs: receipt
+            .evidence_refs
+            .iter()
+            .map(|value| crate::offdesk::operator_safe_text(value))
+            .collect(),
+        receipt_source: Some(loaded.source.clone()),
+        summary: if summary.is_empty() {
+            None
+        } else {
+            Some(summary)
+        },
+        validation_refs: receipt
+            .validation_refs
+            .iter()
+            .map(|value| crate::offdesk::operator_safe_text(value))
+            .collect(),
+        artifact_refs: receipt
+            .artifact_refs
+            .iter()
+            .map(|value| crate::offdesk::operator_safe_text(value))
+            .collect(),
+        open_questions: receipt
+            .open_questions
+            .iter()
+            .map(|value| crate::offdesk::operator_safe_text(value))
+            .collect(),
+        drift_signals: receipt
+            .drift_signals
+            .iter()
+            .map(|value| crate::offdesk::operator_safe_text(value))
+            .collect(),
+        next_safe_action: if receipt.next_safe_action.trim().is_empty() {
+            None
+        } else {
+            Some(crate::offdesk::operator_safe_text(
+                &receipt.next_safe_action,
+            ))
+        },
+    }
 }
 
 fn closeout_validation_item_details(
@@ -8748,6 +9046,13 @@ fn closeout_push_validation_details(
             status,
             reason,
             evidence_refs,
+            receipt_source: None,
+            summary: None,
+            validation_refs: Vec::new(),
+            artifact_refs: Vec::new(),
+            open_questions: Vec::new(),
+            drift_signals: Vec::new(),
+            next_safe_action: None,
         });
     }
 }
@@ -8769,6 +9074,13 @@ fn closeout_expected_artifact_details(
                 status,
                 reason,
                 evidence_refs,
+                receipt_source: None,
+                summary: None,
+                validation_refs: Vec::new(),
+                artifact_refs: Vec::new(),
+                open_questions: Vec::new(),
+                drift_signals: Vec::new(),
+                next_safe_action: None,
             }
         })
         .collect()
@@ -8810,6 +9122,13 @@ fn closeout_summary_only_details(
             reason: "Only the packet summary was available, so item text could not be inspected."
                 .to_string(),
             evidence_refs: Vec::new(),
+            receipt_source: None,
+            summary: None,
+            validation_refs: Vec::new(),
+            artifact_refs: Vec::new(),
+            open_questions: Vec::new(),
+            drift_signals: Vec::new(),
+            next_safe_action: None,
         })
         .collect()
 }
@@ -9650,6 +9969,16 @@ fn render_packet_detail_group(
             detail.status,
             truncate_closeout_text(&detail.label, 80)
         ));
+        if detail.status != "completed" {
+            if let Some(next) = detail.next_safe_action.as_deref() {
+                output.push_str(&format!(" (next: {})", truncate_closeout_text(next, 100)));
+            } else if let Some(summary) = detail.summary.as_deref() {
+                output.push_str(&format!(
+                    " (summary: {})",
+                    truncate_closeout_text(summary, 100)
+                ));
+            }
+        }
         if !detail.evidence_refs.is_empty() {
             output.push_str(" (evidence:");
             for evidence in detail.evidence_refs.iter().take(2) {

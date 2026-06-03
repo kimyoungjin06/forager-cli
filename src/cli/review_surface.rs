@@ -1098,6 +1098,13 @@ fn closeout_packet_detail_projection(item: &Value, key: &str) -> Vec<Value> {
                 "label": safe_value_text(detail, "label"),
                 "status": safe_value_text(detail, "status"),
                 "reason": safe_value_text(detail, "reason"),
+                "summary": safe_value_text(detail, "summary"),
+                "next_safe_action": safe_value_text(detail, "next_safe_action"),
+                "drift_signals": detail
+                    .get("drift_signals")
+                    .and_then(Value::as_array)
+                    .map(|signals| signals.iter().take(3).filter_map(Value::as_str).map(operator_safe_text).collect::<Vec<_>>())
+                    .unwrap_or_default(),
                 "evidence_refs": detail
                     .get("evidence_refs")
                     .and_then(Value::as_array)

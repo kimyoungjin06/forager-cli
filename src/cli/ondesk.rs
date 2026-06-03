@@ -1935,6 +1935,7 @@ fn render_closeout_packet_coverage_prompt_section(output: &mut String, surface: 
                 safe(packet_id),
                 safe(status)
             ));
+            render_packet_coverage_detail_prompt_group(output, item, "work_slices");
             render_packet_coverage_detail_prompt_group(output, item, "validation_items");
             render_packet_coverage_detail_prompt_group(output, item, "expected_artifacts");
         }
@@ -1966,6 +1967,20 @@ fn render_packet_coverage_detail_prompt_group(output: &mut String, item: &Value,
         let status = value_text(detail, "/status").unwrap_or("unknown");
         let label = value_text(detail, "/label").unwrap_or("unknown");
         output.push_str(&format!(" [{}] {}", safe(status), safe(label)));
+        if status != "completed" {
+            if let Some(next) = value_text(detail, "/next_safe_action") {
+                if !next.is_empty() {
+                    output.push_str(&format!(" (next: {})", safe(&truncate_chars(next, 120).0)));
+                }
+            } else if let Some(summary) = value_text(detail, "/summary") {
+                if !summary.is_empty() {
+                    output.push_str(&format!(
+                        " (summary: {})",
+                        safe(&truncate_chars(summary, 120).0)
+                    ));
+                }
+            }
+        }
     }
     output.push('\n');
 }

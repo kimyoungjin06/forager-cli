@@ -910,6 +910,273 @@ fn offdesk_closeout_flags_missing_packet_detail_evidence() -> Result<()> {
 
 #[test]
 #[serial]
+fn offdesk_closeout_uses_work_slice_execution_receipts() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    fs::write(temp.path().join("README.md"), "# Project\n")?;
+    fs::write(
+        temp.path().join("PROJECT_STATE.md"),
+        format!("# Project State\n\nUpdated: {}\n", Utc::now().date_naive()),
+    )?;
+    fs::write(temp.path().join("DECISIONS.md"), "# Decisions\n")?;
+    fs::write(
+        temp.path().join("DELIVERABLES.md"),
+        "# Deliverables\n\n- `README.md`: project overview.\n",
+    )?;
+
+    let artifact_dir = temp.path().join("run-artifacts");
+    fs::create_dir_all(&artifact_dir)?;
+    let result_path = artifact_dir.join("result.json");
+    fs::write(&result_path, "{\"status\":\"ok\"}")?;
+
+    let now = Utc::now();
+    let packet_dir = artifact_dir
+        .join("implementation_packets")
+        .join("packet-slice-receipts");
+    fs::create_dir_all(&packet_dir)?;
+    let packet_path = packet_dir.join("IMPLEMENTATION_PACKET.json");
+    let alignment_path = packet_dir.join("RECURSIVE_ALIGNMENT_REVIEW.json");
+    let packet_markdown_path = packet_dir.join("IMPLEMENTATION_PACKET.md");
+    let packet_record = json!({
+        "schema": "implementation_packet.v1",
+        "packet_id": "packet-slice-receipts",
+        "created_at": now,
+        "project_key": "project",
+        "project_root": temp.path().to_str().expect("utf-8 temp path"),
+        "source_intent": {
+            "user_goal": "Closeout should judge each work slice from execution receipts.",
+            "why_now": "Packet-level completion hides slice-level drift.",
+            "success_state": "Ondesk can see which slice drifted before accepting the run."
+        },
+        "alignment": {
+            "north_star_fit": "Slice receipts keep evidence, choices, and continuity itemized.",
+            "brand_fit": "Forager remains the local supervisor rather than trusting worker prose.",
+            "product_boundary": "Receipts report execution only; closeout acceptance remains separate.",
+            "anti_drift_notes": []
+        },
+        "scope": {
+            "included": ["slice receipt coverage"],
+            "excluded": ["accepted truth"],
+            "allowed_files": [],
+            "mutation_boundary": "closeout artifacts only",
+            "non_authorized_actions": ["cleanup"]
+        },
+        "capability_mapping": [{
+            "capability_id": "FD-016",
+            "reason": "Work-slice execution receipts."
+        }],
+        "design": {
+            "approach": "Use slice receipts before packet-level inherited status.",
+            "work_slices": ["receipt completed slice", "receipt drifted slice"],
+            "interfaces": [],
+            "data_contracts": ["work_slice_execution_receipt.v1"],
+            "compatibility_notes": []
+        },
+        "execution": {
+            "preferred_worker": "hosted_harness",
+            "worker_requirements": [],
+            "commands": [],
+            "stop_conditions": ["missing slice receipt"],
+            "rollback_or_recovery": []
+        },
+        "validation": {
+            "tests": [],
+            "smoke_checks": [],
+            "manual_review": [],
+            "evidence_required": []
+        },
+        "closeout": {
+            "expected_artifacts": [],
+            "accepted_truth_rule": "Execution evidence is not accepted truth.",
+            "handoff_summary_requirements": []
+        },
+        "recursive_alignment_review": {
+            "schema": "recursive_alignment_review.v1",
+            "reviewer": "deterministic_gate",
+            "outcome": "pass",
+            "checks": {
+                "original_goal_coverage": "complete",
+                "north_star_alignment": "acceptable",
+                "brand_alignment": "acceptable",
+                "scope_balance": "right_sized",
+                "capability_coverage": "complete",
+                "evidence_sufficiency": "sufficient",
+                "completion_definition": "testable"
+            },
+            "drift_signals": [],
+            "missing_decisions": [],
+            "required_revisions": [],
+            "safe_to_delegate": true
+        }
+    });
+    fs::write(&packet_path, serde_json::to_string_pretty(&packet_record)?)?;
+    fs::write(&alignment_path, "{}")?;
+    fs::write(&packet_markdown_path, "# Implementation Packet\n")?;
+
+    let receipts = vec![
+        json!({
+            "schema": "work_slice_execution_receipt.v1",
+            "packet_id": "packet-slice-receipts",
+            "project_key": "project",
+            "task_id": "task-slice-receipts",
+            "generated_at": now,
+            "producer": "runner",
+            "slice_index": 0,
+            "slice_label": "receipt completed slice",
+            "status": "completed",
+            "summary": "The completed slice produced the expected state.",
+            "evidence_refs": ["slice-complete-result.json"],
+            "validation_refs": [],
+            "artifact_refs": ["slice-complete-result.json"],
+            "open_questions": [],
+            "drift_signals": [],
+            "next_safe_action": "Review the closeout package."
+        }),
+        json!({
+            "schema": "work_slice_execution_receipt.v1",
+            "packet_id": "packet-slice-receipts",
+            "project_key": "project",
+            "task_id": "task-slice-receipts",
+            "generated_at": now,
+            "producer": "runner",
+            "slice_index": 1,
+            "slice_label": "receipt drifted slice",
+            "status": "drifted",
+            "summary": "The worker changed the slice boundary before collecting evidence.",
+            "evidence_refs": ["slice-drift-log.txt"],
+            "validation_refs": [],
+            "artifact_refs": [],
+            "open_questions": ["Confirm whether the new slice boundary is acceptable."],
+            "drift_signals": ["slice_boundary_changed_without_packet_update"],
+            "next_safe_action": "Revise the packet or rerun this slice before accepting truth."
+        }),
+    ];
+    fs::write(
+        artifact_dir.join("work_slice_receipts.jsonl"),
+        receipts
+            .iter()
+            .map(serde_json::to_string)
+            .collect::<std::result::Result<Vec<_>, _>>()?
+            .join("\n")
+            + "\n",
+    )?;
+
+    let packet_summary = json!({
+        "packet_id": "packet-slice-receipts",
+        "created_at": now,
+        "project_key": "project",
+        "artifact_dir": packet_dir.to_str().expect("utf-8 packet dir"),
+        "packet_path": packet_path.to_str().expect("utf-8 packet path"),
+        "alignment_review_path": alignment_path.to_str().expect("utf-8 alignment path"),
+        "markdown_path": packet_markdown_path.to_str().expect("utf-8 packet markdown path"),
+        "goal": "Closeout should judge each work slice from execution receipts.",
+        "success_state": "Ondesk can see which slice drifted before accepting the run.",
+        "preferred_worker": "hosted_harness",
+        "safe_to_delegate": true,
+        "outcome": "pass",
+        "required_revisions": [],
+        "drift_signals": [],
+        "missing_decisions": [],
+        "work_slice_count": 2,
+        "capability_mapping_count": 1,
+        "validation_item_count": 0,
+        "stop_condition_count": 1,
+        "expected_artifact_count": 0
+    });
+    fs::write(
+        profile_dir.join("offdesk_tasks.json"),
+        serde_json::to_string_pretty(&json!([
+            {
+                "task_id": "task-slice-receipts",
+                "request_id": "request-slice-receipts",
+                "project_key": "project",
+                "status": "completed",
+                "capability_id": "inspect.status",
+                "runner_kind": "local_tmux",
+                "command": "true",
+                "workdir": temp.path().to_str().expect("utf-8 temp path"),
+                "attempt_count": 1,
+                "created_at": now,
+                "updated_at": now,
+                "preview": "slice receipt closeout",
+                "reason": "slice receipt test",
+                "implementation_packet": packet_summary,
+                "result_artifact_path": result_path.to_str().expect("utf-8 result path")
+            }
+        ]))?,
+    )?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "closeout",
+            "--project-key",
+            "project",
+            "--task-id",
+            "task-slice-receipts",
+            "--dry-run",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(report["summary"]["packet_goals_completed"], 1);
+    assert_eq!(report["summary"]["packet_detail_items"], 2);
+    assert_eq!(report["summary"]["packet_detail_items_completed"], 1);
+    assert_eq!(report["summary"]["packet_detail_items_drifted"], 1);
+    assert!(report["open_decisions"]
+        .as_array()
+        .expect("open decisions")
+        .iter()
+        .any(|decision| decision["kind"] == "implementation_packet_coverage_review"));
+    assert_eq!(
+        report["implementation_packet_coverage"]["items"][0]["detail_source"],
+        "implementation_packet_and_work_slice_receipts"
+    );
+    let work_slices = report["implementation_packet_coverage"]["items"][0]["work_slices"]
+        .as_array()
+        .expect("work slices");
+    assert!(work_slices.iter().any(|item| {
+        item["label"] == "receipt completed slice"
+            && item["status"] == "completed"
+            && item["receipt_source"]
+                .as_str()
+                .unwrap_or_default()
+                .ends_with("work_slice_receipts.jsonl")
+    }));
+    assert!(work_slices.iter().any(|item| {
+        item["label"] == "receipt drifted slice"
+            && item["status"] == "drifted"
+            && item["next_safe_action"]
+                == "Revise the packet or rerun this slice before accepting truth."
+            && item["drift_signals"]
+                .as_array()
+                .expect("drift signals")
+                .iter()
+                .any(|signal| signal == "slice_boundary_changed_without_packet_update")
+    }));
+
+    let return_package_path = PathBuf::from(
+        report["artifacts"]["return_package_markdown"]
+            .as_str()
+            .expect("return package path"),
+    );
+    let return_package = fs::read_to_string(return_package_path)?;
+    assert!(return_package.contains("work_slices:"));
+    assert!(return_package.contains("[drifted] receipt drifted slice"));
+    assert!(
+        return_package.contains("Revise the packet or rerun this slice before accepting truth.")
+    );
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn offdesk_closeout_prefers_prepared_repo_for_documentation_governance() -> Result<()> {
     let temp = tempdir()?;
     let profile_dir = profile_dir(temp.path());

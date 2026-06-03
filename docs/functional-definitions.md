@@ -1147,9 +1147,8 @@ P2 expansion slice:
    labels for decisions, closeouts, retention reviews, and prompt packages.
 4. Add a read-only evidence source registry and local evidence index before any
    writable memory or MCP surface.
-5. Implement `work_slice_execution_receipt.v1` collection and closeout
-   projection after enough closeout evidence exists to define completed,
-   deferred, missing, and drifted status consistently.
+5. Broaden `work_slice_execution_receipt.v1` from closeout sidecar collection
+   into normal worker-runner emission and richer drift explanations.
 6. Add `context_packet.v1` for hosted harness launch, Council review, and
    Ondesk resume once evidence refs are retrievable.
 7. Add failure-learning candidates from failed sessions, corrected commands,

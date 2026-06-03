@@ -14,10 +14,12 @@ use super::redaction::operator_safe_text;
 
 pub const IMPLEMENTATION_PACKET_SCHEMA: &str = "implementation_packet.v1";
 pub const RECURSIVE_ALIGNMENT_REVIEW_SCHEMA: &str = "recursive_alignment_review.v1";
+pub const WORK_SLICE_EXECUTION_RECEIPT_SCHEMA: &str = "work_slice_execution_receipt.v1";
 pub const IMPLEMENTATION_PACKETS_DIR: &str = "implementation_packets";
 pub const IMPLEMENTATION_PACKET_FILE: &str = "IMPLEMENTATION_PACKET.json";
 pub const RECURSIVE_ALIGNMENT_REVIEW_FILE: &str = "RECURSIVE_ALIGNMENT_REVIEW.json";
 pub const IMPLEMENTATION_PACKET_MD_FILE: &str = "IMPLEMENTATION_PACKET.md";
+pub const WORK_SLICE_EXECUTION_RECEIPTS_FILE: &str = "work_slice_receipts.jsonl";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImplementationPacket {
@@ -200,6 +202,59 @@ pub struct RecursiveAlignmentChecks {
     pub completion_definition: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkSliceExecutionReceipt {
+    pub schema: String,
+    pub packet_id: String,
+    pub project_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_ticket_id: Option<String>,
+    pub generated_at: String,
+    pub producer: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slice_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slice_index: Option<usize>,
+    pub slice_label: String,
+    pub status: WorkSliceExecutionStatus,
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence_refs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub validation_refs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifact_refs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub open_questions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub drift_signals: Vec<String>,
+    #[serde(default)]
+    pub next_safe_action: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkSliceExecutionStatus {
+    Completed,
+    Deferred,
+    Missing,
+    Drifted,
+}
+
+impl WorkSliceExecutionStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::Deferred => "deferred",
+            Self::Missing => "missing",
+            Self::Drifted => "drifted",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ImplementationPacketDraftInput {
     pub packet_id: String,
@@ -297,6 +352,46 @@ pub fn implementation_packet_record_from_path(path: &Path) -> Result<Implementat
         .with_context(|| format!("read implementation packet {}", packet_path.display()))?;
     serde_json::from_str(&packet_content)
         .with_context(|| format!("parse implementation packet {}", packet_path.display()))
+}
+
+pub fn work_slice_execution_receipts_from_path(
+    path: &Path,
+) -> Result<Vec<WorkSliceExecutionReceipt>> {
+    let receipts_path = if path.is_dir() {
+        path.join(WORK_SLICE_EXECUTION_RECEIPTS_FILE)
+    } else {
+        path.to_path_buf()
+    };
+    if !receipts_path.exists() {
+        return Ok(Vec::new());
+    }
+    let content = fs::read_to_string(&receipts_path)
+        .with_context(|| format!("read work-slice receipts {}", receipts_path.display()))?;
+    let mut receipts = Vec::new();
+    for (index, line) in content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .enumerate()
+    {
+        let receipt: WorkSliceExecutionReceipt = serde_json::from_str(line).with_context(|| {
+            format!(
+                "parse work-slice receipt {} line {}",
+                receipts_path.display(),
+                index + 1
+            )
+        })?;
+        if receipt.schema != WORK_SLICE_EXECUTION_RECEIPT_SCHEMA {
+            anyhow::bail!(
+                "unsupported work-slice receipt schema `{}` in {} line {}",
+                receipt.schema,
+                receipts_path.display(),
+                index + 1
+            );
+        }
+        receipts.push(receipt);
+    }
+    Ok(receipts)
 }
 
 pub fn operator_safe_implementation_packet_summary(
@@ -636,5 +731,44 @@ mod tests {
             .recursive_alignment_review
             .required_revisions
             .contains(&"validation_plan_missing".to_string()));
+    }
+
+    #[test]
+    fn work_slice_receipts_load_from_jsonl() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let receipts_path = temp.path().join(WORK_SLICE_EXECUTION_RECEIPTS_FILE);
+        fs::write(
+            &receipts_path,
+            format!(
+                "{}\n",
+                serde_json::to_string(&WorkSliceExecutionReceipt {
+                    schema: WORK_SLICE_EXECUTION_RECEIPT_SCHEMA.to_string(),
+                    packet_id: "packet-one".to_string(),
+                    project_key: "forager-cli".to_string(),
+                    task_id: Some("task-one".to_string()),
+                    background_ticket_id: None,
+                    generated_at: Utc::now().to_rfc3339(),
+                    producer: "runner".to_string(),
+                    slice_id: Some("slice-0".to_string()),
+                    slice_index: Some(0),
+                    slice_label: "state".to_string(),
+                    status: WorkSliceExecutionStatus::Completed,
+                    summary: "State slice completed.".to_string(),
+                    evidence_refs: vec!["result.json".to_string()],
+                    validation_refs: Vec::new(),
+                    artifact_refs: Vec::new(),
+                    open_questions: Vec::new(),
+                    drift_signals: Vec::new(),
+                    next_safe_action: "Continue closeout review.".to_string(),
+                })?
+            ),
+        )?;
+
+        let receipts = work_slice_execution_receipts_from_path(temp.path())?;
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].packet_id, "packet-one");
+        assert_eq!(receipts[0].status, WorkSliceExecutionStatus::Completed);
+        assert_eq!(receipts[0].slice_label, "state");
+        Ok(())
     }
 }

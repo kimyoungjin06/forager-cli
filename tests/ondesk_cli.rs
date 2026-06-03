@@ -278,11 +278,11 @@ fn ondesk_review_surface_summarizes_closeout_receipt_before_paths() -> Result<()
                 "deferred": 0,
                 "missing": 0,
                 "drifted": 0,
-                "detail_items": 2,
+                "detail_items": 3,
                 "detail_items_completed": 1,
                 "detail_items_deferred": 0,
                 "detail_items_missing": 1,
-                "detail_items_drifted": 0,
+                "detail_items_drifted": 1,
                 "items": [
                     {
                         "packet_id": "packet-closeout-project",
@@ -292,7 +292,17 @@ fn ondesk_review_surface_summarizes_closeout_receipt_before_paths() -> Result<()
                         "goal_status": "completed",
                         "reason": "Execution evidence exists; closeout review still applies.",
                         "detail_source": "implementation_packet",
-                        "work_slices": [],
+                        "work_slices": [
+                            {
+                                "category": "work_slice",
+                                "label": "receipt drifted slice",
+                                "status": "drifted",
+                                "reason": "Work-slice execution receipt reports drifted.",
+                                "evidence_refs": ["slice-drift-log.txt"],
+                                "summary": "The worker changed the slice boundary.",
+                                "next_safe_action": "Revise the packet before accepting truth."
+                            }
+                        ],
                         "validation_items": [
                             {
                                 "category": "validation_test",
@@ -497,11 +507,11 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
                 "deferred": 0,
                 "missing": 0,
                 "drifted": 0,
-                "detail_items": 2,
+                "detail_items": 3,
                 "detail_items_completed": 1,
                 "detail_items_deferred": 0,
                 "detail_items_missing": 1,
-                "detail_items_drifted": 0,
+                "detail_items_drifted": 1,
                 "items": [
                     {
                         "packet_id": "packet-twinpaper",
@@ -511,7 +521,17 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
                         "goal_status": "completed",
                         "reason": "Execution evidence exists; closeout review still applies.",
                         "detail_source": "implementation_packet",
-                        "work_slices": [],
+                        "work_slices": [
+                            {
+                                "category": "work_slice",
+                                "label": "receipt drifted slice",
+                                "status": "drifted",
+                                "reason": "Work-slice execution receipt reports drifted.",
+                                "evidence_refs": ["slice-drift-log.txt"],
+                                "summary": "The worker changed the slice boundary.",
+                                "next_safe_action": "Revise the packet before accepting truth."
+                            }
+                        ],
                         "validation_items": [
                             {
                                 "category": "validation_test",
@@ -622,8 +642,11 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
     assert!(content.contains("accepted_truth: pending via closeout_receipt.v1"));
     assert!(content.contains("receipt_acceptance_status: approved_with_followups"));
     assert!(content.contains("closeout_implementation_packet_coverage:"));
-    assert!(content.contains("detail_items: 1 completed, 0 deferred, 1 missing"));
+    assert!(content.contains("detail_items: 1 completed, 0 deferred, 1 missing, 1 drifted"));
     assert!(content.contains("packet packet-twinpaper: completed"));
+    assert!(content.contains(
+        "work_slices: [drifted] receipt drifted slice (next: Revise the packet before accepting truth.)"
+    ));
     assert!(content.contains("validation_items: [missing] missing-validation.txt"));
     assert!(content.contains("judgment_routes:"));
     assert!(content.contains("decision-council-route: council"));
