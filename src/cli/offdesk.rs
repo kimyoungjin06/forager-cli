@@ -18,15 +18,18 @@ use super::project_audit::{
 };
 use crate::offdesk::{
     assess_offdesk_mode, build_graph_export_files, build_usage_records_with_policy,
-    default_capability_registry, launch_background_command, launch_background_run,
-    operator_safe_report, pending_approval_operator_views, poll_background_runs,
-    recommend_provider_fallback, reconcile_tasks_with_background_outcomes, run_offdesk_tick,
-    ActionApprovalRequest, AdaptiveWikiActivationMode, AdaptiveWikiAgentMode,
-    AdaptiveWikiAgentModeFilter, AdaptiveWikiAuditAction, AdaptiveWikiAuditRecord,
-    AdaptiveWikiCandidate, AdaptiveWikiCandidateInput, AdaptiveWikiConfidence,
-    AdaptiveWikiCorrectionRecurrenceReport, AdaptiveWikiEntry, AdaptiveWikiEpisodeEvaluationReport,
-    AdaptiveWikiGraphReport, AdaptiveWikiHumanCandidate, AdaptiveWikiHumanEntry, AdaptiveWikiKind,
-    AdaptiveWikiLintReport, AdaptiveWikiLiveEpisodeFilter, AdaptiveWikiLiveEpisodeTraceReport,
+    default_capability_registry, implementation_packet_from_path,
+    implementation_packet_record_from_path, latest_implementation_packet_for_project,
+    launch_background_command, launch_background_run, operator_safe_report,
+    pending_approval_operator_views, poll_background_runs, recommend_provider_fallback,
+    reconcile_tasks_with_background_outcomes, run_offdesk_tick,
+    work_slice_execution_receipts_from_path, ActionApprovalRequest, AdaptiveWikiActivationMode,
+    AdaptiveWikiAgentMode, AdaptiveWikiAgentModeFilter, AdaptiveWikiAuditAction,
+    AdaptiveWikiAuditRecord, AdaptiveWikiCandidate, AdaptiveWikiCandidateInput,
+    AdaptiveWikiConfidence, AdaptiveWikiCorrectionRecurrenceReport, AdaptiveWikiEntry,
+    AdaptiveWikiEpisodeEvaluationReport, AdaptiveWikiGraphReport, AdaptiveWikiHumanCandidate,
+    AdaptiveWikiHumanEntry, AdaptiveWikiKind, AdaptiveWikiLintReport,
+    AdaptiveWikiLiveEpisodeFilter, AdaptiveWikiLiveEpisodeTraceReport,
     AdaptiveWikiMarkdownExportReport, AdaptiveWikiOrigin, AdaptiveWikiProjectionBudget,
     AdaptiveWikiProjectionComparisonReport, AdaptiveWikiProjectionPolicy,
     AdaptiveWikiProjectionReport, AdaptiveWikiProjectionReviewExpiredPolicy,
@@ -42,6 +45,7 @@ use crate::offdesk::{
     BackgroundRunnerKind, BackgroundRunnerPhase, CapabilityArtifactRef, CapabilityDescriptor,
     DecisionLedger, DecisionReceipt, DecisionRecord, DecisionRecordView, DecisionStatus,
     DecisionTraceRef, DecisionValidationIssue, ExecutionBrief, ExecutionHandoff,
+    ImplementationPacket, ImplementationPacketSummary, LatestImplementationPacket,
     LocalCommandLaunchSpec, MutationRestoreOperation, MutationRestorePlan, MutationSnapshot,
     MutationSnapshotStore, MutationSnapshotVerification, OffdeskModeAssessment,
     OffdeskModeLifecycle, OffdeskNextSafeAction, OffdeskPendingApprovalView, OffdeskTask,
@@ -49,6 +53,7 @@ use crate::offdesk::{
     OffdeskTaskView, OffdeskTickOptions, PendingActionApproval, ProviderCapacityState,
     ProviderCapacityStore, ProviderFallbackRecommendation, ResumeStatus, RiskLevel, SchedulerGate,
     SchedulerGateRequest, SchedulerGateStatus, TaskResumeState, TaskResumeStore,
+    WorkSliceExecutionReceipt, WORK_SLICE_EXECUTION_RECEIPTS_FILE,
 };
 use crate::session::{get_profile_dir, resolved_app_dir_path, DEFAULT_PROFILE};
 
@@ -268,6 +273,10 @@ pub struct LaunchArgs {
     #[arg(long = "artifact", value_parser = parse_artifact_ref)]
     artifact_refs: Vec<CapabilityArtifactRef>,
 
+    /// Implementation packet JSON or artifact directory to bind to this launch
+    #[arg(long)]
+    implementation_packet: Option<PathBuf>,
+
     /// Artifact kind used to match adaptive wiki entries
     #[arg(long)]
     artifact_kind: Option<String>,
@@ -381,6 +390,10 @@ pub struct EnqueueArgs {
     /// Artifact reference in ARTIFACT_ID=PATH form
     #[arg(long = "artifact", value_parser = parse_artifact_ref)]
     artifact_refs: Vec<CapabilityArtifactRef>,
+
+    /// Implementation packet JSON or artifact directory to bind to this task
+    #[arg(long)]
+    implementation_packet: Option<PathBuf>,
 
     /// Artifact kind used to match adaptive wiki entries
     #[arg(long)]
@@ -2331,6 +2344,7 @@ struct OffdeskCloseoutReport {
     read_only_project_state: bool,
     filters: CloseoutFilters,
     summary: CloseoutSummary,
+    implementation_packet_coverage: CloseoutImplementationPacketCoverage,
     tasks: Vec<CloseoutTask>,
     background_runs: Vec<CloseoutBackgroundRun>,
     file_operations: Vec<CloseoutFileOperation>,
@@ -2371,8 +2385,106 @@ struct CloseoutSummary {
     decision_records_scanned: usize,
     open_decision_records: usize,
     invalid_decision_records: usize,
+    implementation_packets_scanned: usize,
+    packet_goals_completed: usize,
+    packet_goals_deferred: usize,
+    packet_goals_missing: usize,
+    packet_goals_drifted: usize,
+    packet_detail_items: usize,
+    packet_detail_items_completed: usize,
+    packet_detail_items_deferred: usize,
+    packet_detail_items_missing: usize,
+    packet_detail_items_drifted: usize,
     missing_artifacts: usize,
     return_package_required: bool,
+}
+
+#[derive(Default, Serialize)]
+struct CloseoutImplementationPacketCoverage {
+    packet_count: usize,
+    completed: usize,
+    deferred: usize,
+    missing: usize,
+    drifted: usize,
+    detail_items: usize,
+    detail_items_completed: usize,
+    detail_items_deferred: usize,
+    detail_items_missing: usize,
+    detail_items_drifted: usize,
+    items: Vec<CloseoutImplementationPacketCoverageItem>,
+}
+
+#[derive(Serialize)]
+struct CloseoutImplementationPacketCoverageItem {
+    packet_id: String,
+    project_key: String,
+    goal: String,
+    success_state: String,
+    outcome: String,
+    safe_to_delegate: bool,
+    goal_status: &'static str,
+    reason: String,
+    evidence_refs: Vec<String>,
+    required_revisions: Vec<String>,
+    drift_signals: Vec<String>,
+    missing_decisions: Vec<String>,
+    work_slice_count: usize,
+    validation_item_count: usize,
+    expected_artifact_count: usize,
+    detail_source: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail_error: Option<String>,
+    work_slices: Vec<CloseoutPacketCoverageDetail>,
+    validation_items: Vec<CloseoutPacketCoverageDetail>,
+    expected_artifacts: Vec<CloseoutPacketCoverageDetail>,
+}
+
+#[derive(Serialize)]
+struct CloseoutPacketCoverageDetail {
+    category: &'static str,
+    label: String,
+    status: &'static str,
+    reason: String,
+    evidence_refs: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    receipt_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    summary: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    validation_refs: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    artifact_refs: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    open_questions: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    drift_signals: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_safe_action: Option<String>,
+}
+
+struct CloseoutPacketAggregate {
+    summary: ImplementationPacketSummary,
+    evidence_refs: BTreeSet<String>,
+    match_refs: BTreeMap<String, String>,
+    receipt_search_dirs: BTreeSet<String>,
+    task_ids: BTreeSet<String>,
+    background_ticket_ids: BTreeSet<String>,
+    has_completed_evidence: bool,
+    has_active_evidence: bool,
+    has_failed_evidence: bool,
+}
+
+struct LoadedWorkSliceExecutionReceipt {
+    receipt: WorkSliceExecutionReceipt,
+    source: String,
+}
+
+struct CloseoutPacketDetailGroups {
+    detail_source: &'static str,
+    detail_error: Option<String>,
+    work_slices: Vec<CloseoutPacketCoverageDetail>,
+    validation_items: Vec<CloseoutPacketCoverageDetail>,
+    expected_artifacts: Vec<CloseoutPacketCoverageDetail>,
 }
 
 #[derive(Serialize)]
@@ -2393,6 +2505,10 @@ struct CloseoutTask {
     #[serde(skip_serializing_if = "Option::is_none")]
     log_artifact_path: Option<String>,
     artifact_refs: Vec<CapabilityArtifactRef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    implementation_packet: Option<crate::offdesk::ImplementationPacketSummary>,
+    #[serde(skip)]
+    receipt_search_dirs: Vec<String>,
     preview: String,
     reason: String,
 }
@@ -2414,9 +2530,13 @@ struct CloseoutBackgroundRun {
     result_artifact_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     log_artifact_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    implementation_packet: Option<crate::offdesk::ImplementationPacketSummary>,
     runtime_handle_alive: bool,
     result_artifact_present: bool,
     log_artifact_present: bool,
+    #[serde(skip)]
+    receipt_search_dirs: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -2636,6 +2756,14 @@ pub async fn run(profile: &str, command: OffdeskCommands) -> Result<()> {
 async fn enqueue(profile: &str, args: EnqueueArgs) -> Result<()> {
     let now = Utc::now();
     let brief = load_execution_brief(args.brief.as_ref())?;
+    let profile_dir = get_profile_dir(profile)?;
+    let implementation_packet = resolve_implementation_packet_context(
+        &profile_dir,
+        &args.project_key,
+        args.implementation_packet.as_deref(),
+    )?;
+    let mut artifact_refs = args.artifact_refs;
+    attach_implementation_packet_artifact_refs(&mut artifact_refs, implementation_packet.as_ref());
     let task = OffdeskTask::new(
         OffdeskTaskInput {
             task_id: args.task_id,
@@ -2652,7 +2780,10 @@ async fn enqueue(profile: &str, args: EnqueueArgs) -> Result<()> {
             execution_brief: brief,
             not_before: parse_rfc3339(args.not_before.as_deref())?,
             mutation_class: args.mutation_class,
-            artifact_refs: args.artifact_refs,
+            artifact_refs,
+            implementation_packet: implementation_packet
+                .as_ref()
+                .map(|packet| packet.summary.clone()),
             artifact_kind: args.artifact_kind,
             agent_mode: args.agent_mode,
             provider_id: args.provider_id,
@@ -2679,6 +2810,9 @@ async fn enqueue(profile: &str, args: EnqueueArgs) -> Result<()> {
     println!("Enqueued offdesk task {}", task.task_id);
     println!("  capability: {}", task.capability_id);
     println!("  runner:     {:?}", task.runner_kind);
+    if let Some(packet) = task.implementation_packet.as_ref() {
+        println!("  packet:     {} ({})", packet.packet_id, packet.outcome);
+    }
     Ok(())
 }
 
@@ -6092,6 +6226,14 @@ async fn launch(profile: &str, args: LaunchArgs) -> Result<()> {
     let agent_mode = args.agent_mode;
     let json = args.json;
     let brief = load_execution_brief(args.brief.as_ref())?;
+    let profile_dir = get_profile_dir(profile)?;
+    let implementation_packet = resolve_implementation_packet_context(
+        &profile_dir,
+        &args.project_key,
+        args.implementation_packet.as_deref(),
+    )?;
+    let mut artifact_refs = args.artifact_refs;
+    attach_implementation_packet_artifact_refs(&mut artifact_refs, implementation_packet.as_ref());
     let mut gate_request = SchedulerGateRequest::new(
         args.capability_id,
         args.project_key,
@@ -6099,7 +6241,7 @@ async fn launch(profile: &str, args: LaunchArgs) -> Result<()> {
         args.task_id,
     );
     gate_request.mutation_class = args.mutation_class;
-    gate_request.artifact_refs = args.artifact_refs;
+    gate_request.artifact_refs = artifact_refs;
     gate_request.artifact_kind = args.artifact_kind;
     gate_request.agent_mode = agent_mode;
     gate_request.preview = args.preview;
@@ -6112,11 +6254,13 @@ async fn launch(profile: &str, args: LaunchArgs) -> Result<()> {
     let mut launch_request = BackgroundLaunchRequest::new(gate_request, args.runner);
     launch_request.ticket_id = args.ticket_id;
     launch_request.launch_spec_summary = args.launch_spec;
+    launch_request.implementation_packet = implementation_packet
+        .as_ref()
+        .map(|packet| packet.summary.clone());
     launch_request.runtime_handle_alive = args.runtime_alive;
     launch_request.provider_launch_spec_reconstructable = args.provider_launch_spec_reconstructable;
     launch_request.ack_timeout_sec = args.ack_timeout_sec;
 
-    let profile_dir = get_profile_dir(profile)?;
     let gate = SchedulerGate::with_provider_capacity(
         ApprovalLedger::new(&profile_dir),
         ProviderCapacityStore::new(&profile_dir),
@@ -6157,6 +6301,9 @@ async fn launch(profile: &str, args: LaunchArgs) -> Result<()> {
                 "  agent_mode: {}",
                 adaptive_wiki_agent_mode_cli_value(agent_mode)
             );
+        }
+        if let Some(packet) = probe.implementation_packet.as_ref() {
+            println!("  packet:    {} ({})", packet.packet_id, packet.outcome);
         }
     }
     Ok(())
@@ -7029,6 +7176,8 @@ fn build_closeout_report(profile: &str, args: &CloseoutArgs) -> Result<OffdeskCl
         .iter()
         .map(closeout_background_summary)
         .collect::<Vec<_>>();
+    let implementation_packet_coverage =
+        closeout_implementation_packet_coverage(&closeout_tasks, &closeout_background_runs);
     let decision_records = closeout_decision_records(&profile_dir, &tasks, &background_runs, args)?;
 
     let mut file_operations = closeout_file_operations(&tasks, &background_runs);
@@ -7073,6 +7222,7 @@ fn build_closeout_report(profile: &str, args: &CloseoutArgs) -> Result<OffdeskCl
         git_snapshot.as_ref(),
         args,
         documentation_governance.as_ref(),
+        &implementation_packet_coverage,
     );
     let verification_commands =
         closeout_verification_commands(args, documentation_governance.as_ref());
@@ -7103,6 +7253,7 @@ fn build_closeout_report(profile: &str, args: &CloseoutArgs) -> Result<OffdeskCl
             "unsafe_operations": ["operation path or id"],
             "missing_evidence": ["required file, artifact, or command"],
             "required_first_reads": ["paths the next Ondesk harness must read first"],
+            "packet_goal_coverage": "completed|deferred|missing|drifted",
             "notes": "short rationale"
         }),
         safety_rules: vec![
@@ -7120,6 +7271,7 @@ fn build_closeout_report(profile: &str, args: &CloseoutArgs) -> Result<OffdeskCl
         &closeout_background_runs,
         &file_operations,
         &decision_records,
+        &implementation_packet_coverage,
     );
 
     let report = OffdeskCloseoutReport {
@@ -7133,6 +7285,7 @@ fn build_closeout_report(profile: &str, args: &CloseoutArgs) -> Result<OffdeskCl
         read_only_project_state: true,
         filters,
         summary,
+        implementation_packet_coverage,
         tasks: closeout_tasks,
         background_runs: closeout_background_runs,
         file_operations,
@@ -7832,6 +7985,7 @@ fn option_matches(filter: Option<&str>, value: &str) -> bool {
 
 fn closeout_task_summary(task: &OffdeskTask) -> CloseoutTask {
     let view = task.operator_view();
+    let receipt_search_dirs = closeout_receipt_search_dirs_for_task(task);
     CloseoutTask {
         task_id: view.task_id,
         request_id: view.request_id,
@@ -7851,12 +8005,15 @@ fn closeout_task_summary(task: &OffdeskTask) -> CloseoutTask {
             .as_deref()
             .map(crate::offdesk::operator_safe_text),
         artifact_refs: view.artifact_refs,
+        implementation_packet: view.implementation_packet,
+        receipt_search_dirs,
         preview: view.preview,
         reason: view.reason,
     }
 }
 
 fn closeout_background_summary(probe: &BackgroundProbe) -> CloseoutBackgroundRun {
+    let receipt_search_dirs = closeout_receipt_search_dirs_for_background(probe);
     CloseoutBackgroundRun {
         ticket_id: crate::offdesk::operator_safe_text(&probe.ticket_id),
         runner_kind: probe.runner_kind,
@@ -7885,10 +8042,55 @@ fn closeout_background_summary(probe: &BackgroundProbe) -> CloseoutBackgroundRun
             .log_artifact_path
             .as_deref()
             .map(crate::offdesk::operator_safe_text),
+        implementation_packet: probe
+            .implementation_packet
+            .as_ref()
+            .map(crate::offdesk::operator_safe_implementation_packet_summary),
         runtime_handle_alive: probe.runtime_handle_alive,
         result_artifact_present: probe.result_artifact_present,
         log_artifact_present: probe.log_artifact_present,
+        receipt_search_dirs,
     }
+}
+
+fn closeout_receipt_search_dirs_for_task(task: &OffdeskTask) -> Vec<String> {
+    let mut dirs = BTreeSet::new();
+    closeout_add_receipt_search_path(&mut dirs, Some(&task.workdir));
+    closeout_add_receipt_search_path(&mut dirs, task.result_artifact_path.as_deref());
+    closeout_add_receipt_search_path(&mut dirs, task.log_artifact_path.as_deref());
+    if let Some(packet) = task.implementation_packet.as_ref() {
+        closeout_add_receipt_search_path(&mut dirs, Some(&packet.artifact_dir));
+        closeout_add_receipt_search_path(&mut dirs, Some(&packet.packet_path));
+    }
+    for artifact in &task.artifact_refs {
+        closeout_add_receipt_search_path(&mut dirs, artifact.path.as_deref());
+    }
+    dirs.into_iter().collect()
+}
+
+fn closeout_receipt_search_dirs_for_background(probe: &BackgroundProbe) -> Vec<String> {
+    let mut dirs = BTreeSet::new();
+    closeout_add_receipt_search_path(&mut dirs, probe.working_dir.as_deref());
+    closeout_add_receipt_search_path(&mut dirs, probe.result_artifact_path.as_deref());
+    closeout_add_receipt_search_path(&mut dirs, probe.log_artifact_path.as_deref());
+    if let Some(packet) = probe.implementation_packet.as_ref() {
+        closeout_add_receipt_search_path(&mut dirs, Some(&packet.artifact_dir));
+        closeout_add_receipt_search_path(&mut dirs, Some(&packet.packet_path));
+    }
+    dirs.into_iter().collect()
+}
+
+fn closeout_add_receipt_search_path(dirs: &mut BTreeSet<String>, path: Option<&str>) {
+    let Some(path) = path.map(str::trim).filter(|path| !path.is_empty()) else {
+        return;
+    };
+    let path = Path::new(path);
+    let dir = if path.is_dir() {
+        path
+    } else {
+        path.parent().unwrap_or(path)
+    };
+    dirs.insert(dir.to_string_lossy().to_string());
 }
 
 struct CloseoutFileOperationInput<'a> {
@@ -8030,6 +8232,71 @@ fn archive_destination_for(path: &str) -> Option<String> {
         .file_name()
         .and_then(|name| name.to_str())
         .map(|name| format!("archive/{name}"))
+}
+
+fn resolve_implementation_packet_context(
+    profile_dir: &Path,
+    project_key: &str,
+    explicit_path: Option<&Path>,
+) -> Result<Option<LatestImplementationPacket>> {
+    let packet = if let Some(path) = explicit_path {
+        Some(implementation_packet_from_path(path).with_context(|| {
+            format!(
+                "load implementation packet for project {} from {}",
+                crate::offdesk::operator_safe_text(project_key),
+                crate::offdesk::operator_safe_text(path.to_string_lossy().as_ref())
+            )
+        })?)
+    } else {
+        latest_implementation_packet_for_project(profile_dir, Some(project_key))?
+    };
+    if let Some(packet) = packet.as_ref() {
+        if packet.summary.project_key != project_key {
+            bail!(
+                "implementation packet project_key {} does not match requested project_key {}",
+                packet.summary.project_key,
+                crate::offdesk::operator_safe_text(project_key)
+            );
+        }
+    }
+    Ok(packet)
+}
+
+fn attach_implementation_packet_artifact_refs(
+    artifact_refs: &mut Vec<CapabilityArtifactRef>,
+    packet: Option<&LatestImplementationPacket>,
+) {
+    let Some(packet) = packet else {
+        return;
+    };
+    push_unique_artifact_ref(artifact_refs, "implementation_packet", &packet.packet_path);
+    push_unique_artifact_ref(
+        artifact_refs,
+        "recursive_alignment_review",
+        &packet.alignment_review_path,
+    );
+    push_unique_artifact_ref(
+        artifact_refs,
+        "implementation_packet_markdown",
+        &packet.markdown_path,
+    );
+}
+
+fn push_unique_artifact_ref(
+    artifact_refs: &mut Vec<CapabilityArtifactRef>,
+    artifact_id: &str,
+    path: &Path,
+) {
+    if artifact_refs
+        .iter()
+        .any(|artifact| artifact.artifact_id == artifact_id)
+    {
+        return;
+    }
+    artifact_refs.push(CapabilityArtifactRef::new(
+        artifact_id.to_string(),
+        Some(path.to_string_lossy().into_owned()),
+    ));
 }
 
 fn closeout_git_snapshot(
@@ -8215,6 +8482,794 @@ fn closeout_decision_record_subject(record: &DecisionRecord) -> &str {
         .unwrap_or(record.decision_request.summary.as_str())
 }
 
+fn closeout_implementation_packet_coverage(
+    tasks: &[CloseoutTask],
+    background_runs: &[CloseoutBackgroundRun],
+) -> CloseoutImplementationPacketCoverage {
+    let mut packets = BTreeMap::<String, CloseoutPacketAggregate>::new();
+    for task in tasks {
+        let Some(summary) = task.implementation_packet.as_ref() else {
+            continue;
+        };
+        let task_id = crate::offdesk::operator_safe_text(&task.task_id);
+        let entry = closeout_packet_entry(&mut packets, summary);
+        entry.task_ids.insert(task.task_id.clone());
+        if let Some(ticket_id) = task.background_ticket_id.as_deref() {
+            entry.background_ticket_ids.insert(ticket_id.to_string());
+        }
+        entry
+            .receipt_search_dirs
+            .extend(task.receipt_search_dirs.iter().cloned());
+        entry.evidence_refs.insert(format!(
+            "task:{task_id}:status:{}",
+            closeout_task_status_label(task.status)
+        ));
+        if task.result_artifact_path.is_some() {
+            entry
+                .evidence_refs
+                .insert(format!("task:{task_id}:result_artifact"));
+        }
+        if let Some(path) = task.result_artifact_path.as_deref() {
+            closeout_packet_add_match_ref(
+                entry,
+                path,
+                &format!("task:{task_id}:result:{}", closeout_path_tail(path)),
+            );
+        }
+        if task.log_artifact_path.is_some() {
+            entry
+                .evidence_refs
+                .insert(format!("task:{task_id}:log_artifact"));
+        }
+        if let Some(path) = task.log_artifact_path.as_deref() {
+            closeout_packet_add_match_ref(
+                entry,
+                path,
+                &format!("task:{task_id}:log:{}", closeout_path_tail(path)),
+            );
+        }
+        for artifact in &task.artifact_refs {
+            closeout_packet_add_match_ref(
+                entry,
+                &artifact.artifact_id,
+                &format!("task:{task_id}:artifact:{}", artifact.artifact_id),
+            );
+            if let Some(path) = artifact.path.as_deref() {
+                closeout_packet_add_match_ref(
+                    entry,
+                    path,
+                    &format!(
+                        "task:{task_id}:artifact:{}:{}",
+                        artifact.artifact_id,
+                        closeout_path_tail(path)
+                    ),
+                );
+            }
+        }
+        match task.status {
+            OffdeskTaskStatus::Completed => entry.has_completed_evidence = true,
+            OffdeskTaskStatus::Failed | OffdeskTaskStatus::Cancelled => {
+                entry.has_failed_evidence = true
+            }
+            OffdeskTaskStatus::Queued
+            | OffdeskTaskStatus::PendingApproval
+            | OffdeskTaskStatus::Launched
+            | OffdeskTaskStatus::Running
+            | OffdeskTaskStatus::ResumePending => entry.has_active_evidence = true,
+        }
+    }
+
+    for run in background_runs {
+        let Some(summary) = run.implementation_packet.as_ref() else {
+            continue;
+        };
+        let ticket_id = crate::offdesk::operator_safe_text(&run.ticket_id);
+        let entry = closeout_packet_entry(&mut packets, summary);
+        entry.background_ticket_ids.insert(run.ticket_id.clone());
+        if let Some(task_id) = run.task_id.as_deref() {
+            entry.task_ids.insert(task_id.to_string());
+        }
+        entry
+            .receipt_search_dirs
+            .extend(run.receipt_search_dirs.iter().cloned());
+        entry.evidence_refs.insert(format!(
+            "background:{ticket_id}:phase:{}",
+            closeout_background_phase_label(run.phase)
+        ));
+        if run.result_artifact_present {
+            entry
+                .evidence_refs
+                .insert(format!("background:{ticket_id}:result_artifact"));
+        }
+        if let Some(path) = run.result_artifact_path.as_deref() {
+            closeout_packet_add_match_ref(
+                entry,
+                path,
+                &format!("background:{ticket_id}:result:{}", closeout_path_tail(path)),
+            );
+        }
+        if run.log_artifact_present {
+            entry
+                .evidence_refs
+                .insert(format!("background:{ticket_id}:log_artifact"));
+        }
+        if let Some(path) = run.log_artifact_path.as_deref() {
+            closeout_packet_add_match_ref(
+                entry,
+                path,
+                &format!("background:{ticket_id}:log:{}", closeout_path_tail(path)),
+            );
+        }
+        match run.phase {
+            BackgroundRunnerPhase::Completed | BackgroundRunnerPhase::ResultReceived => {
+                entry.has_completed_evidence = true
+            }
+            BackgroundRunnerPhase::Failed
+            | BackgroundRunnerPhase::StaleNoAck
+            | BackgroundRunnerPhase::StaleLostCallback
+            | BackgroundRunnerPhase::Reconstructable => entry.has_failed_evidence = true,
+            BackgroundRunnerPhase::Launched
+            | BackgroundRunnerPhase::HandoffEmitted
+            | BackgroundRunnerPhase::PickupAcknowledged => entry.has_active_evidence = true,
+        }
+    }
+
+    let mut coverage = CloseoutImplementationPacketCoverage::default();
+    for aggregate in packets.into_values() {
+        let (goal_status, reason) = closeout_packet_goal_status(&aggregate);
+        let details = closeout_packet_detail_coverage(&aggregate, goal_status);
+        match goal_status {
+            "completed" => coverage.completed += 1,
+            "deferred" => coverage.deferred += 1,
+            "missing" => coverage.missing += 1,
+            "drifted" => coverage.drifted += 1,
+            _ => {}
+        }
+        closeout_count_packet_details(&mut coverage, &details.work_slices);
+        closeout_count_packet_details(&mut coverage, &details.validation_items);
+        closeout_count_packet_details(&mut coverage, &details.expected_artifacts);
+        let summary = aggregate.summary;
+        coverage
+            .items
+            .push(CloseoutImplementationPacketCoverageItem {
+                packet_id: summary.packet_id,
+                project_key: summary.project_key,
+                goal: summary.goal,
+                success_state: summary.success_state,
+                outcome: summary.outcome,
+                safe_to_delegate: summary.safe_to_delegate,
+                goal_status,
+                reason,
+                evidence_refs: aggregate.evidence_refs.into_iter().take(20).collect(),
+                required_revisions: summary.required_revisions,
+                drift_signals: summary.drift_signals,
+                missing_decisions: summary.missing_decisions,
+                work_slice_count: summary.work_slice_count,
+                validation_item_count: summary.validation_item_count,
+                expected_artifact_count: summary.expected_artifact_count,
+                detail_source: details.detail_source,
+                detail_error: details.detail_error,
+                work_slices: details.work_slices,
+                validation_items: details.validation_items,
+                expected_artifacts: details.expected_artifacts,
+            });
+    }
+    coverage.packet_count = coverage.items.len();
+    coverage
+}
+
+fn closeout_packet_entry<'a>(
+    packets: &'a mut BTreeMap<String, CloseoutPacketAggregate>,
+    summary: &ImplementationPacketSummary,
+) -> &'a mut CloseoutPacketAggregate {
+    let summary = crate::offdesk::operator_safe_implementation_packet_summary(summary);
+    let key = closeout_packet_key(&summary);
+    packets
+        .entry(key)
+        .or_insert_with(|| CloseoutPacketAggregate {
+            receipt_search_dirs: closeout_packet_summary_receipt_search_dirs(&summary),
+            summary,
+            evidence_refs: BTreeSet::new(),
+            match_refs: BTreeMap::new(),
+            task_ids: BTreeSet::new(),
+            background_ticket_ids: BTreeSet::new(),
+            has_completed_evidence: false,
+            has_active_evidence: false,
+            has_failed_evidence: false,
+        })
+}
+
+fn closeout_packet_summary_receipt_search_dirs(
+    summary: &ImplementationPacketSummary,
+) -> BTreeSet<String> {
+    let mut dirs = BTreeSet::new();
+    closeout_add_receipt_search_path(&mut dirs, Some(&summary.artifact_dir));
+    closeout_add_receipt_search_path(&mut dirs, Some(&summary.packet_path));
+    dirs
+}
+
+fn closeout_packet_key(summary: &ImplementationPacketSummary) -> String {
+    let packet_id = summary.packet_id.trim();
+    if !packet_id.is_empty() {
+        return packet_id.to_string();
+    }
+    let packet_path = summary.packet_path.trim();
+    if !packet_path.is_empty() {
+        return packet_path.to_string();
+    }
+    format!("{}:{}", summary.project_key, summary.created_at)
+}
+
+fn closeout_packet_add_match_ref(
+    aggregate: &mut CloseoutPacketAggregate,
+    candidate: &str,
+    evidence_ref: &str,
+) {
+    let candidate = candidate.trim();
+    if candidate.is_empty() {
+        return;
+    }
+    aggregate.match_refs.insert(
+        closeout_match_text(candidate),
+        crate::offdesk::operator_safe_text(evidence_ref),
+    );
+}
+
+fn closeout_packet_detail_coverage(
+    aggregate: &CloseoutPacketAggregate,
+    packet_status: &'static str,
+) -> CloseoutPacketDetailGroups {
+    let packet_path = aggregate.summary.packet_path.trim();
+    if packet_path.is_empty() {
+        return CloseoutPacketDetailGroups {
+            detail_source: "summary_only",
+            detail_error: Some("implementation packet path is unavailable".to_string()),
+            work_slices: closeout_summary_only_details(
+                "work_slice",
+                aggregate.summary.work_slice_count,
+                packet_status,
+            ),
+            validation_items: closeout_summary_only_details(
+                "validation",
+                aggregate.summary.validation_item_count,
+                packet_status,
+            ),
+            expected_artifacts: closeout_summary_only_details(
+                "expected_artifact",
+                aggregate.summary.expected_artifact_count,
+                packet_status,
+            ),
+        };
+    }
+
+    match implementation_packet_record_from_path(Path::new(packet_path)) {
+        Ok(packet) => {
+            let (work_slice_receipts, receipt_error) = closeout_load_work_slice_receipts(aggregate);
+            let detail_source = if work_slice_receipts.is_empty() {
+                "implementation_packet"
+            } else {
+                "implementation_packet_and_work_slice_receipts"
+            };
+            CloseoutPacketDetailGroups {
+                detail_source,
+                detail_error: receipt_error,
+                work_slices: closeout_work_slice_details(
+                    &packet.design.work_slices,
+                    packet_status,
+                    &work_slice_receipts,
+                ),
+                validation_items: closeout_validation_item_details(
+                    &packet,
+                    aggregate,
+                    packet_status,
+                ),
+                expected_artifacts: closeout_expected_artifact_details(
+                    &packet.closeout.expected_artifacts,
+                    aggregate,
+                    packet_status,
+                ),
+            }
+        }
+        Err(error) => CloseoutPacketDetailGroups {
+            detail_source: "summary_only",
+            detail_error: Some(crate::offdesk::operator_safe_text(&error.to_string())),
+            work_slices: closeout_summary_only_details(
+                "work_slice",
+                aggregate.summary.work_slice_count,
+                packet_status,
+            ),
+            validation_items: closeout_summary_only_details(
+                "validation",
+                aggregate.summary.validation_item_count,
+                packet_status,
+            ),
+            expected_artifacts: closeout_summary_only_details(
+                "expected_artifact",
+                aggregate.summary.expected_artifact_count,
+                packet_status,
+            ),
+        },
+    }
+}
+
+fn closeout_work_slice_details(
+    work_slices: &[String],
+    packet_status: &'static str,
+    receipts: &[LoadedWorkSliceExecutionReceipt],
+) -> Vec<CloseoutPacketCoverageDetail> {
+    work_slices
+        .iter()
+        .enumerate()
+        .map(|(index, slice)| {
+            if let Some(receipt) = closeout_work_slice_receipt_for(receipts, index, slice) {
+                return closeout_work_slice_detail_from_receipt(slice, receipt);
+            }
+            CloseoutPacketCoverageDetail {
+                category: "work_slice",
+                label: crate::offdesk::operator_safe_text(slice),
+                status: packet_status,
+                reason: "Work-slice execution evidence is not itemized yet; this item inherits the packet-level closeout status and needs manual review.".to_string(),
+                evidence_refs: Vec::new(),
+                receipt_source: None,
+                summary: None,
+                validation_refs: Vec::new(),
+                artifact_refs: Vec::new(),
+                open_questions: Vec::new(),
+                drift_signals: Vec::new(),
+                next_safe_action: None,
+            }
+        })
+        .collect()
+}
+
+fn closeout_load_work_slice_receipts(
+    aggregate: &CloseoutPacketAggregate,
+) -> (Vec<LoadedWorkSliceExecutionReceipt>, Option<String>) {
+    let mut receipts = Vec::new();
+    let mut errors = Vec::new();
+    for dir in &aggregate.receipt_search_dirs {
+        let path = Path::new(dir).join(WORK_SLICE_EXECUTION_RECEIPTS_FILE);
+        match work_slice_execution_receipts_from_path(&path) {
+            Ok(records) => {
+                for receipt in records {
+                    if closeout_work_slice_receipt_matches(aggregate, &receipt) {
+                        receipts.push(LoadedWorkSliceExecutionReceipt {
+                            receipt,
+                            source: crate::offdesk::operator_safe_text(
+                                path.to_string_lossy().as_ref(),
+                            ),
+                        });
+                    }
+                }
+            }
+            Err(error) => errors.push(crate::offdesk::operator_safe_text(&error.to_string())),
+        }
+    }
+    let error = if errors.is_empty() {
+        None
+    } else {
+        Some(errors.into_iter().take(3).collect::<Vec<_>>().join("; "))
+    };
+    (receipts, error)
+}
+
+fn closeout_work_slice_receipt_matches(
+    aggregate: &CloseoutPacketAggregate,
+    receipt: &WorkSliceExecutionReceipt,
+) -> bool {
+    if !closeout_optional_text_matches(&receipt.packet_id, &aggregate.summary.packet_id) {
+        return false;
+    }
+    if !receipt.project_key.trim().is_empty()
+        && !closeout_optional_text_matches(&receipt.project_key, &aggregate.summary.project_key)
+    {
+        return false;
+    }
+    if let Some(task_id) = receipt
+        .task_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    {
+        if !aggregate.task_ids.is_empty()
+            && !aggregate
+                .task_ids
+                .iter()
+                .any(|known| closeout_optional_text_matches(task_id, known))
+        {
+            return false;
+        }
+    }
+    if let Some(ticket_id) = receipt
+        .background_ticket_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    {
+        if !aggregate.background_ticket_ids.is_empty()
+            && !aggregate
+                .background_ticket_ids
+                .iter()
+                .any(|known| closeout_optional_text_matches(ticket_id, known))
+        {
+            return false;
+        }
+    }
+    true
+}
+
+fn closeout_optional_text_matches(left: &str, right: &str) -> bool {
+    let left = left.trim();
+    let right = right.trim();
+    if left.is_empty() || right.is_empty() {
+        return true;
+    }
+    left == right || closeout_match_text(left) == closeout_match_text(right)
+}
+
+fn closeout_work_slice_receipt_for<'a>(
+    receipts: &'a [LoadedWorkSliceExecutionReceipt],
+    slice_index: usize,
+    slice_label: &str,
+) -> Option<&'a LoadedWorkSliceExecutionReceipt> {
+    let normalized_label = closeout_match_text(slice_label);
+    receipts
+        .iter()
+        .find(|loaded| closeout_match_text(&loaded.receipt.slice_label) == normalized_label)
+        .or_else(|| {
+            receipts
+                .iter()
+                .find(|loaded| loaded.receipt.slice_index == Some(slice_index))
+        })
+        .or_else(|| {
+            receipts.iter().find(|loaded| {
+                loaded.receipt.slice_id.as_deref().is_some_and(|slice_id| {
+                    let slice_id = closeout_match_text(slice_id);
+                    slice_id == format!("slice-{}", slice_index)
+                        || slice_id == format!("slice-{}", slice_index + 1)
+                        || slice_id == format!("slice_{}", slice_index)
+                        || slice_id == format!("slice_{}", slice_index + 1)
+                })
+            })
+        })
+}
+
+fn closeout_work_slice_detail_from_receipt(
+    packet_slice_label: &str,
+    loaded: &LoadedWorkSliceExecutionReceipt,
+) -> CloseoutPacketCoverageDetail {
+    let receipt = &loaded.receipt;
+    let status = receipt.status.as_str();
+    let summary = crate::offdesk::operator_safe_text(&receipt.summary);
+    let reason = if summary.is_empty() {
+        format!("Work-slice execution receipt reports `{status}`.")
+    } else {
+        format!("Work-slice execution receipt reports `{status}`: {summary}")
+    };
+    CloseoutPacketCoverageDetail {
+        category: "work_slice",
+        label: crate::offdesk::operator_safe_text(packet_slice_label),
+        status,
+        reason,
+        evidence_refs: receipt
+            .evidence_refs
+            .iter()
+            .map(|value| crate::offdesk::operator_safe_text(value))
+            .collect(),
+        receipt_source: Some(loaded.source.clone()),
+        summary: if summary.is_empty() {
+            None
+        } else {
+            Some(summary)
+        },
+        validation_refs: receipt
+            .validation_refs
+            .iter()
+            .map(|value| crate::offdesk::operator_safe_text(value))
+            .collect(),
+        artifact_refs: receipt
+            .artifact_refs
+            .iter()
+            .map(|value| crate::offdesk::operator_safe_text(value))
+            .collect(),
+        open_questions: receipt
+            .open_questions
+            .iter()
+            .map(|value| crate::offdesk::operator_safe_text(value))
+            .collect(),
+        drift_signals: receipt
+            .drift_signals
+            .iter()
+            .map(|value| crate::offdesk::operator_safe_text(value))
+            .collect(),
+        next_safe_action: if receipt.next_safe_action.trim().is_empty() {
+            None
+        } else {
+            Some(crate::offdesk::operator_safe_text(
+                &receipt.next_safe_action,
+            ))
+        },
+    }
+}
+
+fn closeout_validation_item_details(
+    packet: &ImplementationPacket,
+    aggregate: &CloseoutPacketAggregate,
+    packet_status: &'static str,
+) -> Vec<CloseoutPacketCoverageDetail> {
+    let mut items = Vec::new();
+    closeout_push_validation_details(
+        &mut items,
+        "validation_test",
+        &packet.validation.tests,
+        aggregate,
+        packet_status,
+    );
+    closeout_push_validation_details(
+        &mut items,
+        "smoke_check",
+        &packet.validation.smoke_checks,
+        aggregate,
+        packet_status,
+    );
+    closeout_push_validation_details(
+        &mut items,
+        "manual_review",
+        &packet.validation.manual_review,
+        aggregate,
+        packet_status,
+    );
+    closeout_push_validation_details(
+        &mut items,
+        "evidence_required",
+        &packet.validation.evidence_required,
+        aggregate,
+        packet_status,
+    );
+    items
+}
+
+fn closeout_push_validation_details(
+    items: &mut Vec<CloseoutPacketCoverageDetail>,
+    category: &'static str,
+    labels: &[String],
+    aggregate: &CloseoutPacketAggregate,
+    packet_status: &'static str,
+) {
+    for label in labels {
+        let evidence_refs = closeout_packet_matching_refs(aggregate, label);
+        let (status, reason) =
+            closeout_detail_status_from_match(packet_status, !evidence_refs.is_empty());
+        items.push(CloseoutPacketCoverageDetail {
+            category,
+            label: crate::offdesk::operator_safe_text(label),
+            status,
+            reason,
+            evidence_refs,
+            receipt_source: None,
+            summary: None,
+            validation_refs: Vec::new(),
+            artifact_refs: Vec::new(),
+            open_questions: Vec::new(),
+            drift_signals: Vec::new(),
+            next_safe_action: None,
+        });
+    }
+}
+
+fn closeout_expected_artifact_details(
+    expected_artifacts: &[String],
+    aggregate: &CloseoutPacketAggregate,
+    packet_status: &'static str,
+) -> Vec<CloseoutPacketCoverageDetail> {
+    expected_artifacts
+        .iter()
+        .map(|artifact| {
+            let evidence_refs = closeout_packet_matching_refs(aggregate, artifact);
+            let (status, reason) =
+                closeout_detail_status_from_match(packet_status, !evidence_refs.is_empty());
+            CloseoutPacketCoverageDetail {
+                category: "expected_artifact",
+                label: crate::offdesk::operator_safe_text(artifact),
+                status,
+                reason,
+                evidence_refs,
+                receipt_source: None,
+                summary: None,
+                validation_refs: Vec::new(),
+                artifact_refs: Vec::new(),
+                open_questions: Vec::new(),
+                drift_signals: Vec::new(),
+                next_safe_action: None,
+            }
+        })
+        .collect()
+}
+
+fn closeout_detail_status_from_match(
+    packet_status: &'static str,
+    has_match: bool,
+) -> (&'static str, String) {
+    if matches!(packet_status, "deferred" | "missing" | "drifted") {
+        return (
+            packet_status,
+            "Packet-level status prevents item-level acceptance.".to_string(),
+        );
+    }
+    if has_match {
+        (
+            "completed",
+            "Closeout evidence matched this packet item.".to_string(),
+        )
+    } else {
+        (
+            "missing",
+            "No closeout artifact or evidence ref matched this packet item.".to_string(),
+        )
+    }
+}
+
+fn closeout_summary_only_details(
+    category: &'static str,
+    count: usize,
+    packet_status: &'static str,
+) -> Vec<CloseoutPacketCoverageDetail> {
+    (0..count)
+        .map(|index| CloseoutPacketCoverageDetail {
+            category,
+            label: format!("{category}_{}", index + 1),
+            status: packet_status,
+            reason: "Only the packet summary was available, so item text could not be inspected."
+                .to_string(),
+            evidence_refs: Vec::new(),
+            receipt_source: None,
+            summary: None,
+            validation_refs: Vec::new(),
+            artifact_refs: Vec::new(),
+            open_questions: Vec::new(),
+            drift_signals: Vec::new(),
+            next_safe_action: None,
+        })
+        .collect()
+}
+
+fn closeout_packet_matching_refs(
+    aggregate: &CloseoutPacketAggregate,
+    requirement: &str,
+) -> Vec<String> {
+    let requirement = closeout_match_text(requirement);
+    if requirement.is_empty() {
+        return Vec::new();
+    }
+    aggregate
+        .match_refs
+        .iter()
+        .filter(|(candidate, _)| {
+            let basename = closeout_match_basename(candidate);
+            candidate.contains(&requirement)
+                || requirement.contains(candidate.as_str())
+                || (!basename.is_empty()
+                    && (basename.contains(&requirement) || requirement.contains(&basename)))
+        })
+        .map(|(_, evidence)| evidence.clone())
+        .take(5)
+        .collect()
+}
+
+fn closeout_count_packet_details(
+    coverage: &mut CloseoutImplementationPacketCoverage,
+    details: &[CloseoutPacketCoverageDetail],
+) {
+    for detail in details {
+        coverage.detail_items += 1;
+        match detail.status {
+            "completed" => coverage.detail_items_completed += 1,
+            "deferred" => coverage.detail_items_deferred += 1,
+            "missing" => coverage.detail_items_missing += 1,
+            "drifted" => coverage.detail_items_drifted += 1,
+            _ => {}
+        }
+    }
+}
+
+fn closeout_match_text(value: &str) -> String {
+    let mut out = String::new();
+    let mut last_space = false;
+    for ch in value.chars().flat_map(char::to_lowercase) {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-' | '/' | '\\') {
+            out.push(ch);
+            last_space = false;
+        } else if !last_space {
+            out.push(' ');
+            last_space = true;
+        }
+    }
+    out.trim().to_string()
+}
+
+fn closeout_match_basename(value: &str) -> String {
+    value
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(value)
+        .trim()
+        .to_string()
+}
+
+fn closeout_path_tail(path: &str) -> String {
+    crate::offdesk::operator_safe_text(
+        Path::new(path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(path),
+    )
+}
+
+fn closeout_packet_goal_status(aggregate: &CloseoutPacketAggregate) -> (&'static str, String) {
+    let summary = &aggregate.summary;
+    if !summary.safe_to_delegate
+        || !summary.outcome.eq_ignore_ascii_case("pass")
+        || !summary.required_revisions.is_empty()
+        || !summary.drift_signals.is_empty()
+        || !summary.missing_decisions.is_empty()
+    {
+        return (
+            "drifted",
+            "Implementation packet alignment was not clean; revise the packet or resolve listed drift before accepting the run.".to_string(),
+        );
+    }
+    if aggregate.has_failed_evidence {
+        return (
+            "drifted",
+            "Execution evidence shows failed, cancelled, stale, or reconstructable work for this packet.".to_string(),
+        );
+    }
+    if aggregate.has_active_evidence {
+        return (
+            "deferred",
+            "Execution is still queued, running, pending approval, or waiting for resume."
+                .to_string(),
+        );
+    }
+    if aggregate.has_completed_evidence {
+        return (
+            "completed",
+            "Execution evidence exists for this packet; acceptance still depends on closeout review and first-read verification.".to_string(),
+        );
+    }
+    (
+        "missing",
+        "The packet is linked to closeout, but no task or background completion evidence was found.".to_string(),
+    )
+}
+
+fn closeout_task_status_label(status: OffdeskTaskStatus) -> &'static str {
+    match status {
+        OffdeskTaskStatus::Queued => "queued",
+        OffdeskTaskStatus::PendingApproval => "pending_approval",
+        OffdeskTaskStatus::Launched => "launched",
+        OffdeskTaskStatus::Running => "running",
+        OffdeskTaskStatus::Completed => "completed",
+        OffdeskTaskStatus::Failed => "failed",
+        OffdeskTaskStatus::ResumePending => "resume_pending",
+        OffdeskTaskStatus::Cancelled => "cancelled",
+    }
+}
+
+fn closeout_background_phase_label(phase: BackgroundRunnerPhase) -> &'static str {
+    match phase {
+        BackgroundRunnerPhase::Launched => "launched",
+        BackgroundRunnerPhase::HandoffEmitted => "handoff_emitted",
+        BackgroundRunnerPhase::PickupAcknowledged => "pickup_acknowledged",
+        BackgroundRunnerPhase::ResultReceived => "result_received",
+        BackgroundRunnerPhase::Completed => "completed",
+        BackgroundRunnerPhase::Failed => "failed",
+        BackgroundRunnerPhase::StaleNoAck => "stale_no_ack",
+        BackgroundRunnerPhase::StaleLostCallback => "stale_lost_callback",
+        BackgroundRunnerPhase::Reconstructable => "reconstructable",
+    }
+}
+
 fn closeout_open_decisions(
     tasks: &[OffdeskTask],
     operations: &[CloseoutFileOperation],
@@ -8222,6 +9277,7 @@ fn closeout_open_decisions(
     git_snapshot: Option<&CloseoutGitSnapshot>,
     args: &CloseoutArgs,
     documentation_governance: Option<&CloseoutDocumentationGovernance>,
+    implementation_packet_coverage: &CloseoutImplementationPacketCoverage,
 ) -> Vec<CloseoutDecision> {
     let mut decisions = Vec::new();
     let active_or_blocked = tasks
@@ -8249,6 +9305,29 @@ fn closeout_open_decisions(
             kind: "missing_artifact",
             detail: format!("{missing} referenced artifacts are missing or not yet observed."),
             suggested_command: "forager offdesk poll --json".to_string(),
+        });
+    }
+    let unresolved_packets = implementation_packet_coverage.deferred
+        + implementation_packet_coverage.missing
+        + implementation_packet_coverage.drifted
+        + implementation_packet_coverage.detail_items_deferred
+        + implementation_packet_coverage.detail_items_missing
+        + implementation_packet_coverage.detail_items_drifted;
+    if unresolved_packets > 0 {
+        decisions.push(CloseoutDecision {
+            kind: "implementation_packet_coverage_review",
+            detail: format!(
+                "{unresolved_packets} implementation packet coverage item(s) need review: packet goals {} deferred, {} missing, {} drifted; detail items {} deferred, {} missing, {} drifted.",
+                implementation_packet_coverage.deferred,
+                implementation_packet_coverage.missing,
+                implementation_packet_coverage.drifted,
+                implementation_packet_coverage.detail_items_deferred,
+                implementation_packet_coverage.detail_items_missing,
+                implementation_packet_coverage.detail_items_drifted
+            ),
+            suggested_command:
+                "Review `implementation_packet_coverage` in closeout_plan.json before accepting this run."
+                    .to_string(),
         });
     }
     let archive_candidates = operations
@@ -8480,6 +9559,7 @@ fn summarize_closeout(
     background_runs: &[CloseoutBackgroundRun],
     operations: &[CloseoutFileOperation],
     decision_records: &[CloseoutDecisionRecord],
+    implementation_packet_coverage: &CloseoutImplementationPacketCoverage,
 ) -> CloseoutSummary {
     let mut summary = CloseoutSummary {
         tasks_scanned: tasks.len(),
@@ -8507,6 +9587,16 @@ fn summarize_closeout(
             .iter()
             .filter(|decision| !decision.validation_issues.is_empty())
             .count(),
+        implementation_packets_scanned: implementation_packet_coverage.packet_count,
+        packet_goals_completed: implementation_packet_coverage.completed,
+        packet_goals_deferred: implementation_packet_coverage.deferred,
+        packet_goals_missing: implementation_packet_coverage.missing,
+        packet_goals_drifted: implementation_packet_coverage.drifted,
+        packet_detail_items: implementation_packet_coverage.detail_items,
+        packet_detail_items_completed: implementation_packet_coverage.detail_items_completed,
+        packet_detail_items_deferred: implementation_packet_coverage.detail_items_deferred,
+        packet_detail_items_missing: implementation_packet_coverage.detail_items_missing,
+        packet_detail_items_drifted: implementation_packet_coverage.detail_items_drifted,
         return_package_required: true,
         ..CloseoutSummary::default()
     };
@@ -8593,6 +9683,10 @@ fn render_closeout_plan_markdown(report: &OffdeskCloseoutReport) -> String {
         report.summary.open_decision_records,
         report.summary.invalid_decision_records
     ));
+    render_implementation_packet_coverage_markdown(
+        &mut output,
+        &report.implementation_packet_coverage,
+    );
     output.push_str("## File Operations\n");
     if report.file_operations.is_empty() {
         output.push_str("- No file operations proposed.\n");
@@ -8631,6 +9725,10 @@ fn render_closeout_return_package(report: &OffdeskCloseoutReport) -> String {
     output.push_str("# Ondesk Return Package\n\n");
     output.push_str("Use this package to rehydrate a fresh Ondesk harness after Offdesk work.\n\n");
     render_return_status(&mut output, report);
+    render_implementation_packet_coverage_markdown(
+        &mut output,
+        &report.implementation_packet_coverage,
+    );
     render_return_decisions(&mut output, report);
     output.push_str("## Required First Reads\n");
     let first_reads = prioritized_closeout_first_reads(&report.required_first_reads);
@@ -8697,6 +9795,26 @@ fn render_return_status(output: &mut String, report: &OffdeskCloseoutReport) {
         report.summary.delete_candidates,
         report.summary.missing_artifacts
     ));
+    if report.summary.implementation_packets_scanned > 0 {
+        output.push_str(&format!(
+            "- implementation packets: {} scanned; {} completed, {} deferred, {} missing, {} drifted\n",
+            report.summary.implementation_packets_scanned,
+            report.summary.packet_goals_completed,
+            report.summary.packet_goals_deferred,
+            report.summary.packet_goals_missing,
+            report.summary.packet_goals_drifted
+        ));
+        if report.summary.packet_detail_items > 0 {
+            output.push_str(&format!(
+                "- packet detail items: {} completed, {} deferred, {} missing, {} drifted / {} total\n",
+                report.summary.packet_detail_items_completed,
+                report.summary.packet_detail_items_deferred,
+                report.summary.packet_detail_items_missing,
+                report.summary.packet_detail_items_drifted,
+                report.summary.packet_detail_items
+            ));
+        }
+    }
     if let Some(governance) = &report.documentation_governance {
         if governance.error.is_some() {
             output.push_str("- documentation governance: audit unavailable\n");
@@ -8731,6 +9849,146 @@ fn render_return_decisions(output: &mut String, report: &OffdeskCloseoutReport) 
             "- ... {} more decision(s) are listed in `closeout_plan.json`.\n",
             report.open_decisions.len() - CLOSEOUT_RETURN_DECISION_LIMIT
         ));
+    }
+    output.push('\n');
+}
+
+fn render_implementation_packet_coverage_markdown(
+    output: &mut String,
+    coverage: &CloseoutImplementationPacketCoverage,
+) {
+    output.push_str("## Implementation Packet Coverage\n");
+    if coverage.packet_count == 0 {
+        output.push_str("- No implementation packet was linked to the matched closeout work.\n\n");
+        return;
+    }
+    output.push_str(&format!(
+        "- packets: {} scanned; {} completed, {} deferred, {} missing, {} drifted\n",
+        coverage.packet_count,
+        coverage.completed,
+        coverage.deferred,
+        coverage.missing,
+        coverage.drifted
+    ));
+    if coverage.detail_items > 0 {
+        output.push_str(&format!(
+            "- detail items: {} completed, {} deferred, {} missing, {} drifted / {} total\n",
+            coverage.detail_items_completed,
+            coverage.detail_items_deferred,
+            coverage.detail_items_missing,
+            coverage.detail_items_drifted,
+            coverage.detail_items
+        ));
+    }
+    for item in coverage.items.iter().take(CLOSEOUT_RETURN_DECISION_LIMIT) {
+        output.push_str(&format!(
+            "- {}: status=`{}` safe_to_delegate={} outcome=`{}`\n",
+            item.packet_id, item.goal_status, item.safe_to_delegate, item.outcome
+        ));
+        output.push_str(&format!("  - goal: {}\n", item.goal));
+        output.push_str(&format!("  - success_state: {}\n", item.success_state));
+        output.push_str(&format!("  - reason: {}\n", item.reason));
+        output.push_str(&format!("  - detail_source: `{}`\n", item.detail_source));
+        if let Some(error) = item.detail_error.as_deref() {
+            output.push_str(&format!("  - detail_error: {}\n", error));
+        }
+        render_packet_detail_group(output, "work_slices", &item.work_slices);
+        render_packet_detail_group(output, "validation_items", &item.validation_items);
+        render_packet_detail_group(output, "expected_artifacts", &item.expected_artifacts);
+        if !item.evidence_refs.is_empty() {
+            output.push_str("  - evidence:");
+            for evidence in item.evidence_refs.iter().take(5) {
+                output.push_str(&format!(" `{evidence}`"));
+            }
+            if item.evidence_refs.len() > 5 {
+                output.push_str(&format!(" (+{} more)", item.evidence_refs.len() - 5));
+            }
+            output.push('\n');
+        }
+        if !item.required_revisions.is_empty() {
+            output.push_str("  - required_revisions:");
+            for revision in item.required_revisions.iter().take(3) {
+                output.push_str(&format!(" {}", truncate_closeout_text(revision, 120)));
+            }
+            if item.required_revisions.len() > 3 {
+                output.push_str(&format!(" (+{} more)", item.required_revisions.len() - 3));
+            }
+            output.push('\n');
+        }
+        if !item.drift_signals.is_empty() {
+            output.push_str("  - drift_signals:");
+            for signal in item.drift_signals.iter().take(3) {
+                output.push_str(&format!(" {}", truncate_closeout_text(signal, 120)));
+            }
+            if item.drift_signals.len() > 3 {
+                output.push_str(&format!(" (+{} more)", item.drift_signals.len() - 3));
+            }
+            output.push('\n');
+        }
+        if !item.missing_decisions.is_empty() {
+            output.push_str("  - missing_decisions:");
+            for decision in item.missing_decisions.iter().take(3) {
+                output.push_str(&format!(" {}", truncate_closeout_text(decision, 120)));
+            }
+            if item.missing_decisions.len() > 3 {
+                output.push_str(&format!(" (+{} more)", item.missing_decisions.len() - 3));
+            }
+            output.push('\n');
+        }
+    }
+    if coverage.items.len() > CLOSEOUT_RETURN_DECISION_LIMIT {
+        output.push_str(&format!(
+            "- ... {} more packet coverage item(s) are listed in `closeout_plan.json`.\n",
+            coverage.items.len() - CLOSEOUT_RETURN_DECISION_LIMIT
+        ));
+    }
+    output.push('\n');
+}
+
+fn render_packet_detail_group(
+    output: &mut String,
+    title: &str,
+    details: &[CloseoutPacketCoverageDetail],
+) {
+    if details.is_empty() {
+        return;
+    }
+    let attention = details
+        .iter()
+        .filter(|detail| detail.status != "completed")
+        .collect::<Vec<_>>();
+    let shown = if attention.is_empty() {
+        details.iter().take(3).collect::<Vec<_>>()
+    } else {
+        attention.into_iter().take(3).collect::<Vec<_>>()
+    };
+    output.push_str(&format!("  - {title}:"));
+    for detail in shown {
+        output.push_str(&format!(
+            " [{}] {}",
+            detail.status,
+            truncate_closeout_text(&detail.label, 80)
+        ));
+        if detail.status != "completed" {
+            if let Some(next) = detail.next_safe_action.as_deref() {
+                output.push_str(&format!(" (next: {})", truncate_closeout_text(next, 100)));
+            } else if let Some(summary) = detail.summary.as_deref() {
+                output.push_str(&format!(
+                    " (summary: {})",
+                    truncate_closeout_text(summary, 100)
+                ));
+            }
+        }
+        if !detail.evidence_refs.is_empty() {
+            output.push_str(" (evidence:");
+            for evidence in detail.evidence_refs.iter().take(2) {
+                output.push_str(&format!(" `{evidence}`"));
+            }
+            output.push(')');
+        }
+    }
+    if details.len() > 3 {
+        output.push_str(&format!(" (+{} more)", details.len() - 3));
     }
     output.push('\n');
 }
@@ -8976,13 +10234,18 @@ fn render_commercial_review_packet(report: &OffdeskCloseoutReport) -> String {
     output.push_str("## Required Verdict Schema\n");
     output.push_str("```json\n");
     output.push_str(
-        "{\n  \"verdict\": \"approved|revise|blocked\",\n  \"unsafe_operations\": [],\n  \"missing_evidence\": [],\n  \"required_first_reads\": [],\n  \"notes\": \"\"\n}\n",
+        "{\n  \"verdict\": \"approved|revise|blocked\",\n  \"unsafe_operations\": [],\n  \"missing_evidence\": [],\n  \"required_first_reads\": [],\n  \"packet_goal_coverage\": \"completed|deferred|missing|drifted\",\n  \"notes\": \"\"\n}\n",
     );
     output.push_str("```\n\n");
     output.push_str("## Safety Rules\n");
     for rule in &report.review_contract.safety_rules {
         output.push_str(&format!("- {rule}\n"));
     }
+    output.push('\n');
+    render_implementation_packet_coverage_markdown(
+        &mut output,
+        &report.implementation_packet_coverage,
+    );
     output.push_str("\n## Candidate Operations\n");
     if report.file_operations.is_empty() {
         output.push_str("- No file operations proposed.\n");
@@ -9026,6 +10289,26 @@ fn print_closeout_report(report: &OffdeskCloseoutReport) {
         report.summary.delete_candidates,
         report.summary.operations_requiring_commercial_review
     );
+    if report.summary.implementation_packets_scanned > 0 {
+        println!(
+            "  packets:      scanned={} completed={} deferred={} missing={} drifted={}",
+            report.summary.implementation_packets_scanned,
+            report.summary.packet_goals_completed,
+            report.summary.packet_goals_deferred,
+            report.summary.packet_goals_missing,
+            report.summary.packet_goals_drifted
+        );
+        if report.summary.packet_detail_items > 0 {
+            println!(
+                "  packet items: completed={} deferred={} missing={} drifted={} total={}",
+                report.summary.packet_detail_items_completed,
+                report.summary.packet_detail_items_deferred,
+                report.summary.packet_detail_items_missing,
+                report.summary.packet_detail_items_drifted,
+                report.summary.packet_detail_items
+            );
+        }
+    }
     println!("  dry_run:      true (no project files moved or deleted)");
     println!("Artifacts:");
     println!("  plan:         {}", report.artifacts.closeout_plan_json);
@@ -11376,10 +12659,15 @@ fn print_tasks(tasks: &[OffdeskTaskView]) {
 
 fn print_decisions(records: &[DecisionRecord]) {
     println!(
-        "{:<28} {:<16} {:<10} {:<10} {:<18} SUBJECT",
-        "DECISION", "STATUS", "MATERIAL", "TARGET", "TASK"
+        "{:<28} {:<16} {:<10} {:<18} {:<10} {:<18} SUBJECT",
+        "DECISION", "STATUS", "MATERIAL", "EVAL", "TARGET", "TASK"
     );
     for record in records {
+        let evaluator = record
+            .judgment_route
+            .as_ref()
+            .map(|route| route.evaluator.as_str())
+            .unwrap_or("-");
         let target = record
             .route
             .as_ref()
@@ -11391,16 +12679,24 @@ fn print_decisions(records: &[DecisionRecord]) {
             .map(|brief| brief.subject.as_str())
             .unwrap_or(record.decision_request.kind.as_str());
         println!(
-            "{:<28} {:<16} {:<10} {:<10} {:<18} {}",
+            "{:<28} {:<16} {:<10} {:<18} {:<10} {:<18} {}",
             record.decision_id,
             record.status.as_str(),
             record.materiality.as_str(),
+            evaluator,
             target,
             record.task_id,
             subject
         );
         if !record.decision_request.summary.trim().is_empty() {
             println!("  summary: {}", record.decision_request.summary);
+        }
+        if let Some(judgment) = record.judgment_route.as_ref() {
+            println!(
+                "  judgment: {} ({})",
+                judgment.evaluator.as_str(),
+                judgment.reason
+            );
         }
         if let Some(route) = record.route.as_ref() {
             println!("  route:   {} ({})", route.target.as_str(), route.reason);
@@ -11448,9 +12744,28 @@ fn print_decision(record: &DecisionRecord) {
             }
         }
     }
+    if let Some(judgment) = record.judgment_route.as_ref() {
+        println!();
+        println!("Judgment route:");
+        println!("  evaluator: {}", judgment.evaluator.as_str());
+        println!("  reason:    {}", judgment.reason);
+        println!(
+            "  selected:  {} by {}",
+            judgment.selected_at, judgment.selected_by
+        );
+        if let Some(default) = judgment.default_if_no_reply.as_deref() {
+            println!("  default:   {}", default);
+        }
+        if !judgment.policy_basis.is_empty() {
+            println!("  policy:");
+            for basis in &judgment.policy_basis {
+                println!("    - {}", basis);
+            }
+        }
+    }
     if let Some(route) = record.route.as_ref() {
         println!();
-        println!("Route:");
+        println!("Delivery route:");
         println!("  target:  {}", route.target.as_str());
         println!("  reason:  {}", route.reason);
         if let Some(default) = route.default_if_no_reply.as_deref() {

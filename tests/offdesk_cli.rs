@@ -101,6 +101,104 @@ fn profile_dir_for(home: &std::path::Path, profile: &str) -> std::path::PathBuf 
     }
 }
 
+fn write_implementation_packet_fixture(
+    home: &std::path::Path,
+    project_key: &str,
+    packet_id: &str,
+) -> Result<std::path::PathBuf> {
+    let packet_dir = profile_dir(home)
+        .join("implementation_packets")
+        .join(format!("20260603T000000Z_{project_key}"));
+    fs::create_dir_all(&packet_dir)?;
+    let packet = json!({
+        "schema": "implementation_packet.v1",
+        "packet_id": packet_id,
+        "created_at": Utc::now(),
+        "project_key": project_key,
+        "project_root": home.display().to_string(),
+        "source_intent": {
+            "user_goal": "Bind delegated Offdesk execution to the original design intent.",
+            "why_now": "The queued task should carry its design packet into launch records.",
+            "success_state": "Task JSON and background records expose packet readiness without raw path-first output."
+        },
+        "alignment": {
+            "north_star_fit": "Keeps delegated work tied to the project direction.",
+            "brand_fit": "Supports design-first harness execution.",
+            "product_boundary": "Metadata only; no runtime authority is granted.",
+            "anti_drift_notes": ["Do not treat packet presence as execution approval."]
+        },
+        "scope": {
+            "included": ["task metadata", "background probe metadata"],
+            "excluded": ["approval bypass"],
+            "allowed_files": ["src/offdesk/task_queue.rs", "src/offdesk/background.rs"],
+            "mutation_boundary": "Attach optional summary only.",
+            "non_authorized_actions": ["Do not launch without existing gate behavior."]
+        },
+        "capability_mapping": [
+            {
+                "capability_id": "FD-016",
+                "reason": "Substantial delegated work needs an implementation packet."
+            }
+        ],
+        "design": {
+            "approach": "Attach latest project packet to queued task records.",
+            "work_slices": ["resolve latest packet", "attach artifact refs"],
+            "interfaces": ["offdesk task JSON", "background probe JSON"],
+            "data_contracts": ["implementation_packet.v1"],
+            "compatibility_notes": ["Missing packet leaves the field absent."]
+        },
+        "execution": {
+            "preferred_worker": "hosted_harness",
+            "worker_requirements": ["packet is metadata only"],
+            "commands": ["forager offdesk enqueue ... --json"],
+            "stop_conditions": ["packet project key mismatch"],
+            "rollback_or_recovery": ["omit implementation_packet field"]
+        },
+        "validation": {
+            "tests": ["cargo test --test offdesk_cli offdesk_enqueue_tasks_json_redacts_command"],
+            "smoke_checks": ["forager offdesk tasks --json"],
+            "manual_review": ["confirm no raw JSON path is primary surface"],
+            "evidence_required": ["task artifact refs include implementation packet"]
+        },
+        "closeout": {
+            "expected_artifacts": ["IMPLEMENTATION_PACKET.json", "RECURSIVE_ALIGNMENT_REVIEW.json", "IMPLEMENTATION_PACKET.md"],
+            "accepted_truth_rule": "Execution completion is not acceptance.",
+            "handoff_summary_requirements": ["state packet outcome and safe_to_delegate"]
+        },
+        "recursive_alignment_review": {
+            "schema": "recursive_alignment_review.v1",
+            "reviewer": "deterministic_gate",
+            "outcome": "pass",
+            "checks": {
+                "original_goal_coverage": "complete",
+                "north_star_alignment": "complete",
+                "brand_alignment": "complete",
+                "scope_balance": "complete",
+                "capability_coverage": "complete",
+                "evidence_sufficiency": "complete",
+                "completion_definition": "complete"
+            },
+            "drift_signals": [],
+            "missing_decisions": [],
+            "required_revisions": [],
+            "safe_to_delegate": true
+        }
+    });
+    fs::write(
+        packet_dir.join("IMPLEMENTATION_PACKET.json"),
+        serde_json::to_string_pretty(&packet)?,
+    )?;
+    fs::write(
+        packet_dir.join("RECURSIVE_ALIGNMENT_REVIEW.json"),
+        serde_json::to_string_pretty(&packet["recursive_alignment_review"])?,
+    )?;
+    fs::write(
+        packet_dir.join("IMPLEMENTATION_PACKET.md"),
+        "# Implementation Packet\n\nBind delegated Offdesk execution to design intent.\n",
+    )?;
+    Ok(packet_dir)
+}
+
 fn legacy_profile_dir_for(home: &std::path::Path, profile: &str) -> std::path::PathBuf {
     #[cfg(target_os = "linux")]
     {
@@ -4184,6 +4282,7 @@ fn offdesk_launch_without_brief_creates_pending_and_no_background_run() -> Resul
 #[serial]
 fn offdesk_launch_with_brief_records_background_run() -> Result<()> {
     let temp = tempdir()?;
+    write_implementation_packet_fixture(temp.path(), "project", "packet-launch-test")?;
     let brief_path = temp.path().join("brief.json");
     let now = Utc::now();
     fs::write(
@@ -4227,6 +4326,14 @@ fn offdesk_launch_with_brief_records_background_run() -> Result<()> {
     assert_eq!(outcome["gate"]["status"], "proceed");
     assert_eq!(outcome["probe"]["ticket_id"], "ticket");
     assert_eq!(outcome["probe"]["phase"], "launched");
+    assert_eq!(
+        outcome["probe"]["implementation_packet"]["packet_id"],
+        "packet-launch-test"
+    );
+    assert_eq!(
+        outcome["probe"]["implementation_packet"]["safe_to_delegate"],
+        true
+    );
     assert!(!outcome["probe"]["launch_spec_summary"]
         .as_str()
         .expect("summary")
@@ -4236,6 +4343,10 @@ fn offdesk_launch_with_brief_records_background_run() -> Result<()> {
         profile_dir(temp.path()).join("background_runs.json"),
     )?)?;
     assert_eq!(runs[0]["ticket_id"], "ticket");
+    assert_eq!(
+        runs[0]["implementation_packet"]["packet_id"],
+        "packet-launch-test"
+    );
     Ok(())
 }
 
@@ -4441,6 +4552,7 @@ fn offdesk_launch_executes_local_background_command_and_poll_completes() -> Resu
 #[serial]
 fn offdesk_enqueue_tasks_json_redacts_command() -> Result<()> {
     let temp = tempdir()?;
+    write_implementation_packet_fixture(temp.path(), "project", "packet-offdesk-test")?;
 
     let output = forager_command(temp.path())
         .args([
@@ -4464,6 +4576,23 @@ fn offdesk_enqueue_tasks_json_redacts_command() -> Result<()> {
     assert!(output.status.success());
     let task: serde_json::Value = serde_json::from_slice(&output.stdout)?;
     assert_eq!(task["task_id"], "task");
+    assert_eq!(
+        task["implementation_packet"]["packet_id"],
+        "packet-offdesk-test"
+    );
+    assert_eq!(task["implementation_packet"]["outcome"], "pass");
+    assert_eq!(task["implementation_packet"]["safe_to_delegate"], true);
+    assert!(task["artifact_refs"]
+        .as_array()
+        .expect("artifact refs")
+        .iter()
+        .any(
+            |artifact| artifact["artifact_id"] == "implementation_packet"
+                && artifact["path"]
+                    .as_str()
+                    .expect("implementation packet path")
+                    .contains("IMPLEMENTATION_PACKET.json")
+        ));
     assert!(!task["command"]
         .as_str()
         .expect("command")
@@ -4474,6 +4603,10 @@ fn offdesk_enqueue_tasks_json_redacts_command() -> Result<()> {
         .output()?;
     assert!(tasks_output.status.success());
     let tasks: serde_json::Value = serde_json::from_slice(&tasks_output.stdout)?;
+    assert_eq!(
+        tasks[0]["implementation_packet"]["packet_id"],
+        "packet-offdesk-test"
+    );
     assert!(!tasks[0]["command"]
         .as_str()
         .expect("command")
@@ -5916,6 +6049,140 @@ fn offdesk_tick_launches_briefed_task_and_completes_from_sidecar() -> Result<()>
 
 #[test]
 #[serial]
+fn offdesk_tick_emits_runner_work_slice_receipts_for_packet() -> Result<()> {
+    let temp = tempdir()?;
+    write_implementation_packet_fixture(temp.path(), "project", "packet-runner-receipts")?;
+    fs::write(temp.path().join("README.md"), "# Project\n")?;
+    fs::write(
+        temp.path().join("PROJECT_STATE.md"),
+        format!("# Project State\n\nUpdated: {}\n", Utc::now().date_naive()),
+    )?;
+    fs::write(temp.path().join("DECISIONS.md"), "# Decisions\n")?;
+    fs::write(
+        temp.path().join("DELIVERABLES.md"),
+        "# Deliverables\n\n- `README.md`: project overview.\n",
+    )?;
+
+    let brief_path = temp.path().join("brief.json");
+    let result_path = temp.path().join("tick-packet-result.txt");
+    let now = Utc::now();
+    fs::write(
+        &brief_path,
+        serde_json::to_string_pretty(&json!({
+            "request_id": "request",
+            "task_id": "task",
+            "project_key": "project",
+            "approved": true,
+            "allowed_runtime_mutations": ["dispatch.runtime"],
+            "allowed_canonical_mutations": [],
+            "fresh_until": now + Duration::minutes(10)
+        }))?,
+    )?;
+    let command = format!("printf done > {}", result_path.display());
+
+    let enqueue_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "enqueue",
+            "dispatch.runtime",
+            "--runner",
+            "local-background",
+            "--project-key",
+            "project",
+            "--request-id",
+            "request",
+            "--task-id",
+            "task",
+            "--brief",
+            brief_path.to_str().expect("utf-8 path"),
+            "--cmd",
+            command.as_str(),
+            "--workdir",
+            temp.path().to_str().expect("utf-8 path"),
+            "--result-artifact",
+            result_path.to_str().expect("utf-8 path"),
+            "--json",
+        ])
+        .output()?;
+    assert!(enqueue_output.status.success());
+
+    let launch_output = forager_command(temp.path())
+        .args(["offdesk", "tick", "--json"])
+        .output()?;
+    assert!(launch_output.status.success());
+    wait_for_path(&result_path);
+
+    let complete_output = forager_command(temp.path())
+        .args(["offdesk", "tick", "--json"])
+        .output()?;
+    assert!(complete_output.status.success());
+    let complete: serde_json::Value = serde_json::from_slice(&complete_output.stdout)?;
+    assert_eq!(complete["completed"], 1);
+
+    let receipt_path = temp.path().join("work_slice_receipts.jsonl");
+    let receipt_jsonl = fs::read_to_string(&receipt_path)?;
+    let receipts = receipt_jsonl
+        .lines()
+        .map(serde_json::from_str::<serde_json::Value>)
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    assert_eq!(receipts.len(), 2);
+    assert!(receipts.iter().all(|receipt| {
+        receipt["schema"] == "work_slice_execution_receipt.v1"
+            && receipt["packet_id"] == "packet-runner-receipts"
+            && receipt["producer"] == "runner_poll"
+            && receipt["status"] == "deferred"
+            && receipt["next_safe_action"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("before accepting truth")
+    }));
+
+    let repeat_tick = forager_command(temp.path())
+        .args(["offdesk", "tick", "--json"])
+        .output()?;
+    assert!(repeat_tick.status.success());
+    assert_eq!(fs::read_to_string(&receipt_path)?.lines().count(), 2);
+
+    let closeout_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "closeout",
+            "--project-key",
+            "project",
+            "--task-id",
+            "task",
+            "--dry-run",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        closeout_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&closeout_output.stderr)
+    );
+    let closeout: serde_json::Value = serde_json::from_slice(&closeout_output.stdout)?;
+    assert_eq!(closeout["summary"]["packet_goals_completed"], 1);
+    assert_eq!(closeout["summary"]["packet_detail_items_deferred"], 2);
+    assert_eq!(
+        closeout["implementation_packet_coverage"]["items"][0]["detail_source"],
+        "implementation_packet_and_work_slice_receipts"
+    );
+    assert!(
+        closeout["implementation_packet_coverage"]["items"][0]["work_slices"]
+            .as_array()
+            .expect("work slices")
+            .iter()
+            .all(|item| item["status"] == "deferred"
+                && item["receipt_source"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .ends_with("work_slice_receipts.jsonl"))
+    );
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn offdesk_tick_injects_adaptive_wiki_runtime_context_and_records_usage() -> Result<()> {
     let temp = tempdir()?;
     let profile_dir = profile_dir(temp.path());
@@ -7284,6 +7551,15 @@ fn offdesk_tick_creates_provider_fallback_approval_then_retargets_and_launches()
         .as_str()
         .unwrap_or_default()
         .contains("runtime dispatch still needs its own approval"));
+    assert!(approval_brief["judgment_route_summary"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("deterministic gate"));
+    assert!(approval_brief["evidence_sufficiency"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("ranked fallback candidates"));
+    assert_eq!(approval_brief["default_if_no_reply"], "defer");
     assert!(approval_brief["decision_impacts"]["deny"]
         .as_str()
         .unwrap_or_default()

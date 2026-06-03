@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use super::approval::ApprovalBrief;
 
 pub const DECISION_RECORD_SCHEMA: &str = "decision_record.v1";
+pub const JUDGMENT_ROUTE_SCHEMA: &str = "judgment_route.v1";
 const DECISIONS_FILE: &str = "offdesk_decisions.jsonl";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -111,6 +112,26 @@ impl DecisionRouteTarget {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JudgmentEvaluator {
+    Council,
+    SingleHarness,
+    DeterministicGate,
+    User,
+}
+
+impl JudgmentEvaluator {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Council => "council",
+            Self::SingleHarness => "single_harness",
+            Self::DeterministicGate => "deterministic_gate",
+            Self::User => "user",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DecisionRecord {
     pub schema: String,
@@ -127,6 +148,8 @@ pub struct DecisionRecord {
     pub decision_request: DecisionRequest,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub council_review: Option<CouncilReview>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub judgment_route: Option<JudgmentRoute>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub route: Option<DecisionRoute>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -242,6 +265,21 @@ pub struct CouncilReview {
     pub risk_notes: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub option_assessment: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JudgmentRoute {
+    pub schema: String,
+    pub evaluator: JudgmentEvaluator,
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub policy_basis: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence_refs: Vec<DecisionTraceRef>,
+    pub selected_by: String,
+    pub selected_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_if_no_reply: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -436,6 +474,16 @@ mod tests {
                 trace_refs: Vec::new(),
             },
             council_review: None,
+            judgment_route: Some(JudgmentRoute {
+                schema: JUDGMENT_ROUTE_SCHEMA.to_string(),
+                evaluator: JudgmentEvaluator::Council,
+                reason: "Council review is needed before user escalation.".to_string(),
+                policy_basis: vec!["materiality=high".to_string()],
+                evidence_refs: Vec::new(),
+                selected_by: "test".to_string(),
+                selected_at: now,
+                default_if_no_reply: Some("defer".to_string()),
+            }),
             route: Some(DecisionRoute {
                 materiality: DecisionMateriality::High,
                 target: DecisionRouteTarget::User,

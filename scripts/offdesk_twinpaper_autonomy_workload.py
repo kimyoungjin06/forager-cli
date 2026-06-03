@@ -1461,6 +1461,12 @@ def build_operator_approval_brief(council_record: dict[str, Any]) -> dict[str, A
         "subject": case_display_name(council_record.get("case") or episode.get("case")),
         "primary_reason": primary_reason,
         "summary_lines": summary_lines,
+        "judgment_route_summary": "판단 경로: Council - reviewer 출력들을 비교한 뒤 다음 episode 방향을 평가합니다.",
+        "evidence_sufficiency": (
+            f"핵심 근거 {len(evidence)}건과 Council consensus가 요약되어 있으며, "
+            "원천 episode/council artifacts는 decision record evidence refs에서 회수합니다."
+        ),
+        "default_if_no_reply": "defer",
         "why_recommendation": why_recommendation,
         "failure": {
             "passed": episode.get("passed"),
@@ -1613,6 +1619,14 @@ def build_council_decision_record(
             "risk_notes": clean_list(consensus.get("risk_notes")),
             "option_assessment": clean_list(consensus.get("option_assessment")),
         },
+        judgment_evaluator="council",
+        judgment_reason="Council이 reviewer 출력들을 비교한 뒤 다음 episode 방향을 평가합니다.",
+        judgment_policy_basis=[
+            "episode 간 전환은 별도 read-only Council checkpoint가 필요합니다.",
+            "Council 출력은 mutation이나 provider retargeting을 승인하지 않습니다.",
+        ],
+        judgment_evidence_refs=trace_refs[:3],
+        judgment_selected_by="offdesk.council",
         route_target=target,
         route_reason=(
             "Council returned a non-continue or operator-review decision."

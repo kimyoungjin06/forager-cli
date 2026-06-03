@@ -94,7 +94,7 @@ pub enum Commands {
     /// Initialize and inspect project operation packets
     Project {
         #[command(subcommand)]
-        command: ProjectCommands,
+        command: Box<ProjectCommands>,
     },
 
     /// Manage git worktrees for parallel development

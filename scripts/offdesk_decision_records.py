@@ -10,6 +10,7 @@ from typing import Any
 
 
 DECISION_RECORD_SCHEMA = "decision_record.v1"
+JUDGMENT_ROUTE_SCHEMA = "judgment_route.v1"
 DECISION_LEDGER_FILE = "offdesk_decisions.jsonl"
 
 
@@ -110,6 +111,10 @@ def approval_brief_projection(brief: dict[str, Any]) -> dict[str, Any]:
     source = str(brief.get("source") or "").strip()
     if source:
         projection["source"] = source
+    for key in ("judgment_route_summary", "evidence_sufficiency", "default_if_no_reply"):
+        value = str(brief.get(key) or "").strip()
+        if value:
+            projection[key] = value
     return projection
 
 
@@ -142,6 +147,11 @@ def build_decision_record(
     evidence_refs: list[dict[str, str]] | None = None,
     request_trace_refs: list[dict[str, str]] | None = None,
     council_review: dict[str, Any] | None = None,
+    judgment_evaluator: str | None = None,
+    judgment_reason: str | None = None,
+    judgment_policy_basis: list[str] | None = None,
+    judgment_evidence_refs: list[dict[str, str]] | None = None,
+    judgment_selected_by: str | None = None,
     route_target: str | None = None,
     route_reason: str | None = None,
     route_policy_basis: list[str] | None = None,
@@ -158,6 +168,18 @@ def build_decision_record(
             "target": route_target,
             "reason": route_reason or "",
             "policy_basis": route_policy_basis or [],
+            "default_if_no_reply": default_if_no_reply,
+        }
+    judgment_route = None
+    if judgment_evaluator:
+        judgment_route = {
+            "schema": JUDGMENT_ROUTE_SCHEMA,
+            "evaluator": judgment_evaluator,
+            "reason": judgment_reason or "",
+            "policy_basis": judgment_policy_basis or [],
+            "evidence_refs": judgment_evidence_refs or [],
+            "selected_by": judgment_selected_by or "decision_router",
+            "selected_at": updated_at or now,
             "default_if_no_reply": default_if_no_reply,
         }
     record = {
@@ -184,6 +206,7 @@ def build_decision_record(
             "trace_refs": request_trace_refs or [],
         },
         "council_review": council_review,
+        "judgment_route": judgment_route,
         "route": route,
         "approval_brief": approval_brief_projection(approval_brief) if approval_brief else None,
         "trace_refs": trace_refs or [],

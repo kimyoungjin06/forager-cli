@@ -1724,6 +1724,58 @@ fn render_review_surface_prompt_section(output: &mut String, surface: &Value) {
         value_text(surface, "/closeout/execution_status").unwrap_or("unknown"),
         value_text(surface, "/closeout/review_status").unwrap_or("unknown")
     ));
+    render_closeout_packet_coverage_prompt_section(output, surface);
+    if let Some(packet_id) = value_text(surface, "/implementation_packet/packet_id") {
+        let outcome = value_text(surface, "/implementation_packet/outcome").unwrap_or("unknown");
+        let safe_to_delegate = surface
+            .pointer("/implementation_packet/safe_to_delegate")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let worker =
+            value_text(surface, "/implementation_packet/preferred_worker").unwrap_or("unknown");
+        output.push_str("- implementation_packet:\n");
+        output.push_str(&format!(
+            "  - {}: outcome={}, safe_to_delegate={}, worker={}\n",
+            safe(packet_id),
+            safe(outcome),
+            safe_to_delegate,
+            safe(worker)
+        ));
+        if let Some(goal) = value_text(surface, "/implementation_packet/goal") {
+            output.push_str(&format!("  - goal: {}\n", safe(goal)));
+        }
+        if let Some(success_state) = value_text(surface, "/implementation_packet/success_state") {
+            output.push_str(&format!("  - success_state: {}\n", safe(success_state)));
+        }
+        output.push_str(&format!(
+            "  - structure: {} slice(s), {} capability mapping(s), {} validation item(s), {} stop condition(s), {} expected artifact(s)\n",
+            value_u64(surface, "/implementation_packet/work_slice_count").unwrap_or_default(),
+            value_u64(surface, "/implementation_packet/capability_mapping_count").unwrap_or_default(),
+            value_u64(surface, "/implementation_packet/validation_item_count").unwrap_or_default(),
+            value_u64(surface, "/implementation_packet/stop_condition_count").unwrap_or_default(),
+            value_u64(surface, "/implementation_packet/expected_artifact_count").unwrap_or_default()
+        ));
+        if let Some(revisions) = surface
+            .pointer("/implementation_packet/required_revisions")
+            .and_then(Value::as_array)
+            .filter(|revisions| !revisions.is_empty())
+        {
+            output.push_str("  - required_revisions:\n");
+            for revision in revisions.iter().take(5).filter_map(Value::as_str) {
+                output.push_str(&format!("    - {}\n", safe(revision)));
+            }
+        }
+        if let Some(missing_decisions) = surface
+            .pointer("/implementation_packet/missing_decisions")
+            .and_then(Value::as_array)
+            .filter(|missing_decisions| !missing_decisions.is_empty())
+        {
+            output.push_str("  - missing_decisions:\n");
+            for decision in missing_decisions.iter().take(5).filter_map(Value::as_str) {
+                output.push_str(&format!("    - {}\n", safe(decision)));
+            }
+        }
+    }
     if let Some(runtime) = value_text(surface, "/runtime/progress_summary") {
         output.push_str(&format!("- runtime: {runtime}\n"));
     }
@@ -1731,6 +1783,34 @@ fn render_review_surface_prompt_section(output: &mut String, surface: &Value) {
         "- open_decisions: {}\n",
         value_u64(surface, "/decisions/open_count").unwrap_or_default()
     ));
+    if let Some(decisions) = surface
+        .pointer("/decisions/recent")
+        .and_then(Value::as_array)
+        .filter(|decisions| !decisions.is_empty())
+    {
+        let mut rendered = 0usize;
+        for decision in decisions {
+            let Some(evaluator) = value_text(decision, "/judgment_route/evaluator") else {
+                continue;
+            };
+            if rendered == 0 {
+                output.push_str("- judgment_routes:\n");
+            }
+            let decision_id = value_text(decision, "/decision_id").unwrap_or("decision");
+            let reason =
+                value_text(decision, "/judgment_route/reason").unwrap_or("no route reason");
+            output.push_str(&format!(
+                "  - {}: {} ({})\n",
+                safe(decision_id),
+                safe(evaluator),
+                safe(reason)
+            ));
+            rendered += 1;
+            if rendered >= 3 {
+                break;
+            }
+        }
+    }
     output.push_str(&format!(
         "- adaptive_wiki: {} candidate(s), {} review-due entry(s)\n",
         value_u64(surface, "/adaptive_wiki/candidate_count").unwrap_or_default(),
@@ -1823,6 +1903,86 @@ fn render_review_surface_prompt_section(output: &mut String, surface: &Value) {
         }
     }
     output.push_str("- artifact_refs: available in `review_surface` JSON, omitted here unless needed for audit.\n");
+}
+
+fn render_closeout_packet_coverage_prompt_section(output: &mut String, surface: &Value) {
+    let Some(coverage) = surface.pointer("/closeout/implementation_packet_coverage") else {
+        return;
+    };
+    output.push_str("- closeout_implementation_packet_coverage:\n");
+    output.push_str(&format!(
+        "  - packets: {} completed, {} deferred, {} missing, {} drifted / {} total\n",
+        value_u64(coverage, "/completed").unwrap_or_default(),
+        value_u64(coverage, "/deferred").unwrap_or_default(),
+        value_u64(coverage, "/missing").unwrap_or_default(),
+        value_u64(coverage, "/drifted").unwrap_or_default(),
+        value_u64(coverage, "/packet_count").unwrap_or_default()
+    ));
+    output.push_str(&format!(
+        "  - detail_items: {} completed, {} deferred, {} missing, {} drifted / {} total\n",
+        value_u64(coverage, "/detail_items_completed").unwrap_or_default(),
+        value_u64(coverage, "/detail_items_deferred").unwrap_or_default(),
+        value_u64(coverage, "/detail_items_missing").unwrap_or_default(),
+        value_u64(coverage, "/detail_items_drifted").unwrap_or_default(),
+        value_u64(coverage, "/detail_items").unwrap_or_default()
+    ));
+    if let Some(items) = coverage.get("items").and_then(Value::as_array) {
+        for item in items.iter().take(3) {
+            let packet_id = value_text(item, "/packet_id").unwrap_or("unknown");
+            let status = value_text(item, "/goal_status").unwrap_or("unknown");
+            output.push_str(&format!(
+                "  - packet {}: {}\n",
+                safe(packet_id),
+                safe(status)
+            ));
+            render_packet_coverage_detail_prompt_group(output, item, "work_slices");
+            render_packet_coverage_detail_prompt_group(output, item, "validation_items");
+            render_packet_coverage_detail_prompt_group(output, item, "expected_artifacts");
+        }
+    }
+}
+
+fn render_packet_coverage_detail_prompt_group(output: &mut String, item: &Value, key: &str) {
+    let Some(details) = item.get(key).and_then(Value::as_array) else {
+        return;
+    };
+    let attention = details
+        .iter()
+        .filter(|detail| {
+            value_text(detail, "/status")
+                .map(|status| status != "completed")
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+    let shown = if attention.is_empty() {
+        details.iter().take(2).collect::<Vec<_>>()
+    } else {
+        attention.into_iter().take(2).collect::<Vec<_>>()
+    };
+    if shown.is_empty() {
+        return;
+    }
+    output.push_str(&format!("    - {key}:"));
+    for detail in shown {
+        let status = value_text(detail, "/status").unwrap_or("unknown");
+        let label = value_text(detail, "/label").unwrap_or("unknown");
+        output.push_str(&format!(" [{}] {}", safe(status), safe(label)));
+        if status != "completed" {
+            if let Some(next) = value_text(detail, "/next_safe_action") {
+                if !next.is_empty() {
+                    output.push_str(&format!(" (next: {})", safe(&truncate_chars(next, 120).0)));
+                }
+            } else if let Some(summary) = value_text(detail, "/summary") {
+                if !summary.is_empty() {
+                    output.push_str(&format!(
+                        " (summary: {})",
+                        safe(&truncate_chars(summary, 120).0)
+                    ));
+                }
+            }
+        }
+    }
+    output.push('\n');
 }
 
 fn render_documentation_governance_prompt_section(

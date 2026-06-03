@@ -46,6 +46,19 @@ import { sitePath } from '../../lib/paths';
       </section>
 
       <section>
+        <h2>Packet Coverage</h2>
+        <p>
+          When Offdesk work was launched from an <a href={sitePath('/docs/implementation-packet.html')}>implementation packet</a>, closeout compares the result against the original goal, planned work slices, validation items, and expected artifacts. Packet coverage can be <code>completed</code>, <code>deferred</code>, <code>missing</code>, or <code>drifted</code>.
+        </p>
+        <p>
+          Local background and tmux runners can write conservative deferred work-slice receipts when a packet-bound run reaches a terminal result. Treat those as handoff prompts: they prove a result artifact exists, but they do not prove the slice was semantically completed.
+        </p>
+        <p>
+          Worker-authored receipts or human review can later provide stronger slice evidence. Until then, deferred, missing, and drifted slices should stay visible in Ondesk return and WebUI review.
+        </p>
+      </section>
+
+      <section>
         <h2>Record Review</h2>
         <p>
           Generating the packet is not the same as approving the closeout. After reviewing the commercial packet, record the verdict:
@@ -86,7 +99,7 @@ import { sitePath } from '../../lib/paths';
       <section>
         <h2>Ondesk Return</h2>
         <p>
-          Use <code>RETURN_PACKAGE.md</code> to start the next Ondesk harness. Read the listed result artifacts first, inspect open decisions, and run the verification commands before continuing work.
+          Use <code>RETURN_PACKAGE.md</code> to start the next Ondesk harness. Read the listed result artifacts first, inspect open decisions, review deferred, missing, or drifted packet slices, and run the verification commands before continuing work.
         </p>
         <p>
           Pair this with the <a href={sitePath('/guides/offdesk-morning-review/')}>Offdesk Morning Review Workflow</a> when reviewing overnight work.

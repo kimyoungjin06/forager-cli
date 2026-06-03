@@ -272,6 +272,58 @@ fn ondesk_review_surface_summarizes_closeout_receipt_before_paths() -> Result<()
                     "task_id": "completed-task"
                 }
             ],
+            "implementation_packet_coverage": {
+                "packet_count": 1,
+                "completed": 1,
+                "deferred": 0,
+                "missing": 0,
+                "drifted": 0,
+                "detail_items": 3,
+                "detail_items_completed": 1,
+                "detail_items_deferred": 0,
+                "detail_items_missing": 1,
+                "detail_items_drifted": 1,
+                "items": [
+                    {
+                        "packet_id": "packet-closeout-project",
+                        "project_key": "project",
+                        "goal": "Return packet coverage to Ondesk.",
+                        "success_state": "Missing packet evidence remains visible.",
+                        "goal_status": "completed",
+                        "reason": "Execution evidence exists; closeout review still applies.",
+                        "detail_source": "implementation_packet",
+                        "work_slices": [
+                            {
+                                "category": "work_slice",
+                                "label": "receipt drifted slice",
+                                "status": "drifted",
+                                "reason": "Work-slice execution receipt reports drifted.",
+                                "evidence_refs": ["slice-drift-log.txt"],
+                                "summary": "The worker changed the slice boundary.",
+                                "next_safe_action": "Revise the packet before accepting truth."
+                            }
+                        ],
+                        "validation_items": [
+                            {
+                                "category": "validation_test",
+                                "label": "missing-validation.txt",
+                                "status": "missing",
+                                "reason": "No closeout artifact matched this item.",
+                                "evidence_refs": []
+                            }
+                        ],
+                        "expected_artifacts": [
+                            {
+                                "category": "expected_artifact",
+                                "label": "result.json",
+                                "status": "completed",
+                                "reason": "Closeout evidence matched this item.",
+                                "evidence_refs": ["task:completed-task:result:result.json"]
+                            }
+                        ]
+                    }
+                ]
+            },
             "artifacts": {
                 "return_package_markdown": return_package_path
             }
@@ -348,6 +400,21 @@ fn ondesk_review_surface_summarizes_closeout_receipt_before_paths() -> Result<()
     assert_eq!(
         surface["closeout"]["review_status"],
         "approved_with_followups"
+    );
+    assert_eq!(
+        surface["closeout"]["implementation_packet_coverage"]["packet_count"],
+        1
+    );
+    assert_eq!(
+        surface["closeout"]["implementation_packet_coverage"]["detail_items_missing"],
+        1
+    );
+    assert!(
+        surface["closeout"]["implementation_packet_coverage"]["items"][0]["validation_items"]
+            .as_array()
+            .expect("coverage validation items")
+            .iter()
+            .any(|item| item["label"] == "missing-validation.txt" && item["status"] == "missing")
     );
     assert!(surface["closeout"]["unresolved_risks"]
         .as_array()
@@ -434,6 +501,58 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
                     "task_id": "task"
                 }
             ],
+            "implementation_packet_coverage": {
+                "packet_count": 1,
+                "completed": 1,
+                "deferred": 0,
+                "missing": 0,
+                "drifted": 0,
+                "detail_items": 3,
+                "detail_items_completed": 1,
+                "detail_items_deferred": 0,
+                "detail_items_missing": 1,
+                "detail_items_drifted": 1,
+                "items": [
+                    {
+                        "packet_id": "packet-twinpaper",
+                        "project_key": "twinpaper",
+                        "goal": "Return closeout packet coverage to Ondesk.",
+                        "success_state": "Ondesk prompt shows missing packet details.",
+                        "goal_status": "completed",
+                        "reason": "Execution evidence exists; closeout review still applies.",
+                        "detail_source": "implementation_packet",
+                        "work_slices": [
+                            {
+                                "category": "work_slice",
+                                "label": "receipt drifted slice",
+                                "status": "drifted",
+                                "reason": "Work-slice execution receipt reports drifted.",
+                                "evidence_refs": ["slice-drift-log.txt"],
+                                "summary": "The worker changed the slice boundary.",
+                                "next_safe_action": "Revise the packet before accepting truth."
+                            }
+                        ],
+                        "validation_items": [
+                            {
+                                "category": "validation_test",
+                                "label": "missing-validation.txt",
+                                "status": "missing",
+                                "reason": "No closeout artifact matched this item.",
+                                "evidence_refs": []
+                            }
+                        ],
+                        "expected_artifacts": [
+                            {
+                                "category": "expected_artifact",
+                                "label": "result.json",
+                                "status": "completed",
+                                "reason": "Closeout evidence matched this item.",
+                                "evidence_refs": ["task:task:result:result.json"]
+                            }
+                        ]
+                    }
+                ]
+            },
             "artifacts": {
                 "return_package_markdown": return_package_path
             }
@@ -452,6 +571,40 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
                 "closeout_receipt_json": closeout_dir.join("closeout_receipt_20260521T000000Z.json")
             }
         }))?,
+    )?;
+    let decision_record = json!({
+        "schema": "decision_record.v1",
+        "decision_id": "decision-council-route",
+        "project_key": "twinpaper",
+        "request_id": "request-council-route",
+        "task_id": "task-council-route",
+        "raised_by": "council",
+        "source_surface": "offdesk.council",
+        "materiality": "medium",
+        "status": "auto_resolved",
+        "created_at": generated_at,
+        "updated_at": generated_at,
+        "decision_request": {
+            "kind": "episode_council_continuation",
+            "summary": "Council selected the next safe continuation path.",
+            "decision_needed": "Record why this route was not escalated further.",
+            "current_scope": "Next episode continuation only.",
+            "non_authorized_scope": ["cleanup", "provider retargeting"]
+        },
+        "judgment_route": {
+            "schema": "judgment_route.v1",
+            "evaluator": "council",
+            "reason": "Council compared reviewer outputs and found the decision stayed inside the approved scope.",
+            "policy_basis": ["read-only council checkpoint"],
+            "evidence_refs": [],
+            "selected_by": "offdesk.council",
+            "selected_at": generated_at,
+            "default_if_no_reply": "continue"
+        }
+    });
+    fs::write(
+        profile_dir.join("offdesk_decisions.jsonl"),
+        format!("{}\n", serde_json::to_string(&decision_record)?),
     )?;
 
     let output = forager_command(temp.path())
@@ -488,6 +641,16 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
     assert!(content.contains("Morning Review Surface"));
     assert!(content.contains("accepted_truth: pending via closeout_receipt.v1"));
     assert!(content.contains("receipt_acceptance_status: approved_with_followups"));
+    assert!(content.contains("closeout_implementation_packet_coverage:"));
+    assert!(content.contains("detail_items: 1 completed, 0 deferred, 1 missing, 1 drifted"));
+    assert!(content.contains("packet packet-twinpaper: completed"));
+    assert!(content.contains(
+        "work_slices: [drifted] receipt drifted slice (next: Revise the packet before accepting truth.)"
+    ));
+    assert!(content.contains("validation_items: [missing] missing-validation.txt"));
+    assert!(content.contains("judgment_routes:"));
+    assert!(content.contains("decision-council-route: council"));
+    assert!(content.contains("Council compared reviewer outputs"));
     assert!(content.contains("artifact_index:"));
     assert!(content.contains("retention_review:"));
     assert!(content.contains("artifact_summaries"));
@@ -814,6 +977,147 @@ fn ondesk_prompt_package_includes_latest_project_initialization() -> Result<()> 
     assert!(content.contains("[REDACTED]"));
     assert!(!content.contains("sk-secretsecretsecretsecret"));
     assert!(!content.contains("scripts/build_bundle.py"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn ondesk_prompt_package_includes_latest_implementation_packet() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    let packet_dir = profile_dir
+        .join("implementation_packets")
+        .join("20260603T000000Z_twinpaper");
+    fs::create_dir_all(&packet_dir)?;
+    let generated_at = Utc::now();
+    let packet = json!({
+        "schema": "implementation_packet.v1",
+        "packet_id": "implementation-packet-test",
+        "created_at": generated_at,
+        "project_key": "twinpaper",
+        "project_root": temp.path().display().to_string(),
+        "source_intent": {
+            "user_goal": "Project the implementation packet into Ondesk surfaces.",
+            "why_now": "The packet is not useful until a returning operator can see it.",
+            "success_state": "The prompt package explains delegation readiness without opening raw JSON."
+        },
+        "alignment": {
+            "north_star_fit": "Keeps implementation anchored to the user's original intent.",
+            "brand_fit": "Supports design-first harness work.",
+            "product_boundary": "Read-only projection; no runtime authority is granted.",
+            "anti_drift_notes": ["Do not treat execution as accepted truth."]
+        },
+        "scope": {
+            "included": ["review_surface projection", "ondesk prompt rendering"],
+            "excluded": ["runtime launch authority"],
+            "allowed_files": ["src/cli/review_surface.rs", "src/cli/ondesk.rs"],
+            "mutation_boundary": "Only prompt and review-surface summary fields are changed.",
+            "non_authorized_actions": ["Do not enqueue offdesk work."]
+        },
+        "capability_mapping": [
+            {
+                "capability_id": "FD-016",
+                "reason": "Ondesk handoff should surface planning state."
+            }
+        ],
+        "design": {
+            "approach": "Summarize the latest packet by project key.",
+            "work_slices": ["scan packet directory", "render prompt section"],
+            "interfaces": ["review_surface.v1", "ondesk prompt-package"],
+            "data_contracts": ["implementation_packet.v1"],
+            "compatibility_notes": ["Missing packet means the field is omitted."]
+        },
+        "execution": {
+            "preferred_worker": "hosted_harness",
+            "worker_requirements": ["read-only packet projection"],
+            "commands": ["cargo test --test ondesk_cli ondesk_prompt_package_includes_latest_implementation_packet"],
+            "stop_conditions": ["implementation packet is not parseable"],
+            "rollback_or_recovery": ["remove the optional prompt section"]
+        },
+        "validation": {
+            "tests": ["cargo test --test ondesk_cli ondesk_prompt_package_includes_latest_implementation_packet"],
+            "smoke_checks": ["forager ondesk prompt-package --project-key twinpaper --json"],
+            "manual_review": ["confirm prompt content carries user-facing decision context"],
+            "evidence_required": ["prompt package JSON contains implementation_packet"]
+        },
+        "closeout": {
+            "expected_artifacts": ["IMPLEMENTATION_PACKET.json", "RECURSIVE_ALIGNMENT_REVIEW.json", "IMPLEMENTATION_PACKET.md"],
+            "accepted_truth_rule": "Execution completion is not acceptance.",
+            "handoff_summary_requirements": ["state safe_to_delegate and required revisions"]
+        },
+        "recursive_alignment_review": {
+            "schema": "recursive_alignment_review.v1",
+            "reviewer": "deterministic_gate",
+            "outcome": "pass",
+            "checks": {
+                "original_goal_coverage": "complete",
+                "north_star_alignment": "complete",
+                "brand_alignment": "complete",
+                "scope_balance": "complete",
+                "capability_coverage": "complete",
+                "evidence_sufficiency": "complete",
+                "completion_definition": "complete"
+            },
+            "drift_signals": [],
+            "missing_decisions": [],
+            "required_revisions": [],
+            "safe_to_delegate": true
+        }
+    });
+    fs::write(
+        packet_dir.join("IMPLEMENTATION_PACKET.json"),
+        serde_json::to_string_pretty(&packet)?,
+    )?;
+    fs::write(
+        packet_dir.join("RECURSIVE_ALIGNMENT_REVIEW.json"),
+        serde_json::to_string_pretty(&packet["recursive_alignment_review"])?,
+    )?;
+    fs::write(
+        packet_dir.join("IMPLEMENTATION_PACKET.md"),
+        "# Implementation Packet\n\nProject the implementation packet into Ondesk surfaces.\n",
+    )?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "ondesk",
+            "prompt-package",
+            "--project-key",
+            "twinpaper",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(
+        json["review_surface"]["implementation_packet"]["packet_id"],
+        "implementation-packet-test"
+    );
+    assert_eq!(
+        json["review_surface"]["implementation_packet"]["outcome"],
+        "pass"
+    );
+    assert_eq!(
+        json["review_surface"]["implementation_packet"]["safe_to_delegate"],
+        true
+    );
+    assert_eq!(
+        json["review_surface"]["implementation_packet"]["work_slice_count"],
+        2
+    );
+    assert_eq!(
+        json["review_surface"]["sources"]["implementation_packet"],
+        "implementation_packet.v1"
+    );
+    let content = json["content"].as_str().expect("content string");
+    assert!(content.contains("implementation_packet:"));
+    assert!(content.contains("implementation-packet-test"));
+    assert!(content.contains("safe_to_delegate=true"));
+    assert!(content.contains("worker=hosted_harness"));
+    assert!(content.contains("Project the implementation packet into Ondesk surfaces."));
     Ok(())
 }
 

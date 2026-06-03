@@ -30,11 +30,16 @@ The product direction is:
 3. Convert long-running work into small handoff artifacts.
 4. Preserve raw evidence while keeping human decision surfaces compact.
 5. Promote agent-created knowledge only through reviewable paths.
-6. Host harness-backed agents and model backends without making any one of them
+6. Route judgment through Council, capable harnesses, deterministic gates, or
+   the user according to risk, scope, and authority.
+7. Host harness-backed agents and model backends without making any one of them
    the product boundary.
-7. Integrate with higher-level orchestration without surrendering local truth.
-8. Keep Forager's own boundary at supervision, evidence, recovery, review, and
+8. Integrate with higher-level orchestration without surrendering local truth.
+9. Keep Forager's own boundary at supervision, evidence, recovery, review, and
    knowledge promotion rather than agent reasoning itself.
+10. Before delegating substantial work, preserve original intent, product
+    direction, brand boundary, scope, and completion criteria in a reviewable
+    implementation packet.
 
 ## What Forager Is
 
@@ -145,6 +150,24 @@ surfaces.
 A completed process proves that something ran. It does not prove that the result
 is correct, safe, useful, or ready to promote.
 
+### Recursive Alignment Before Delegation
+
+Subtask success is not enough. Before a substantial task is handed to Offdesk,
+Council, a hosted harness agent, or a local model episode, the design should
+record the original goal, the north-star fit, the brand boundary, the intended
+operator outcome, the excluded scope, and the evidence needed for closeout.
+
+That alignment should be checked again after execution. If the worker completed
+a narrow implementation slice but failed to serve the original purpose, closeout
+should say so instead of treating the run as accepted progress.
+
+### Routed Judgment, Not Model Attachment
+
+Judgment should be routed to the right evaluator for the decision: Council for
+tradeoffs and user-facing recommendations, a single harness-backed agent for
+narrow analysis, deterministic gates for checkable policy or test outcomes, and
+the user for authority, preference, or risk tolerance.
+
 ### Compact Human Surfaces, Full Machine Evidence
 
 Humans should start from current state, next actions, decisions, and return
@@ -173,6 +196,7 @@ observe current state
   -> request approval
   -> run under durable local supervision
   -> collect evidence
+  -> route review or judgment
   -> close out and review
   -> return to a fresh Ondesk harness
   -> promote durable knowledge deliberately
@@ -198,6 +222,12 @@ The north star is being met when these internal criteria are true:
 - Telegram, WebUI, TUI, and CLI expose the same decision model while fitting
   their own surface: compact decisions for alerts, richer review in UI, durable
   JSON for automation and audit;
+- review packets record whether judgment came from Council, a single
+  harness-backed agent, deterministic gates, or the user, and why that route was
+  selected;
+- substantial delegated work starts from an implementation packet that records
+  original intent, north-star fit, brand fit, scope, stop conditions, validation
+  plan, and recursive alignment review;
 - completed execution is separated from accepted truth: results remain pending
   review until evidence, risks, and next actions are inspectable;
 - agent-created lessons become adaptive wiki candidates first and become

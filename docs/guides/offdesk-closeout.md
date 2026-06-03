@@ -143,6 +143,42 @@ from matched run artifact directories, such as the directory containing
 `closeout_plan.json`. Receipted records remain in `decision_records` as history
 and are not treated as open unless their schema validation fails.
 
+When matched tasks or background runs carry an implementation packet summary,
+closeout also writes `implementation_packet_coverage`. The coverage section
+answers whether the packet-level goal is `completed`, `deferred`, `missing`, or
+`drifted`, and repeats that summary in `CLOSEOUT_PLAN.md`, `RETURN_PACKAGE.md`,
+and the commercial review packet. A `completed` packet coverage item means
+execution evidence exists; it still does not mean the work is accepted truth
+until closeout review and first-read verification are complete.
+
+If the original packet JSON is still readable, closeout also itemizes
+`work_slices`, `validation_items`, and `expected_artifacts`. Validation and
+expected-artifact items are marked completed only when closeout evidence refs
+match them; otherwise they remain visible as missing detail items. Work slices
+use `work_slice_execution_receipt.v1` when a nearby `work_slice_receipts.jsonl`
+sidecar exists. Closeout searches near result artifacts, runtime logs, workdirs,
+background artifacts, and implementation packet artifact dirs. Matching
+receipts can mark each slice `completed`, `deferred`, `missing`, or `drifted`
+from its own evidence refs. When no matching receipt exists, the slice still
+inherits packet-level status and should be treated as a manual-review hint
+rather than accepted evidence.
+
+For local background or tmux runs, polling writes conservative `runner_poll`
+receipts beside the result artifact when a packet-bound run reaches a terminal
+result. These receipts mark each planned slice `deferred`: the runner can prove
+that a result artifact exists, but a worker-authored receipt or human review is
+still needed before a slice is treated as semantically complete.
+
+See [Implementation Packet And Recursive Alignment Review](../implementation-packet.md)
+for the receipt schema and the runner-versus-worker evidence boundary.
+
+The latest matching `review_surface.v1` projects a compact copy of this
+coverage under `closeout.implementation_packet_coverage`, and
+`forager ondesk prompt-package` renders the packet/detail counts in the morning
+review section. This keeps deferred or drifted work slices, missing validation,
+and missing expected-artifact evidence visible when a fresh harness resumes from
+Ondesk.
+
 The return package is intentionally shorter than `closeout_plan.json` and
 `cleanup_manifest.json`. It starts with status, decisions needed, capped first
 reads, a short change summary, grouped evidence, documentation governance

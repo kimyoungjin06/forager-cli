@@ -74,6 +74,14 @@ into a fresh Ondesk session. If closeout found documentation governance
 recommendations, the return package carries the focused action list rather than
 the full audit summary.
 
+When the closeout plan includes `implementation_packet_coverage`, the shared
+review surface and prompt package also show packet/detail coverage counts. A
+fresh Ondesk harness should treat deferred, missing, or drifted work slices and
+missing validation or expected-artifact detail items as review work before
+accepted truth, even if the packet-level goal is marked completed.
+Runner-generated deferred work-slice receipts are handoff prompts, not proof
+that a slice was semantically completed.
+
 `prompt-package` also renders the compact `artifact_index.v1` and
 `artifact_retention_review.v1` projections from the shared review surface. The
 prompt shows artifact counts, retention action counts, and meaning first; paths
