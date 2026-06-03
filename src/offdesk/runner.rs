@@ -4,7 +4,7 @@ use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use uuid::Uuid;
@@ -18,7 +18,10 @@ use super::background::{
     BackgroundRunnerPhase, NotificationDecision,
 };
 use super::implementation_packet::{
-    operator_safe_implementation_packet_summary, ImplementationPacketSummary,
+    implementation_packet_record_from_path, operator_safe_implementation_packet_summary,
+    work_slice_execution_receipts_from_path, ImplementationPacketSummary,
+    WorkSliceExecutionReceipt, WorkSliceExecutionStatus, WORK_SLICE_EXECUTION_RECEIPTS_FILE,
+    WORK_SLICE_EXECUTION_RECEIPT_SCHEMA,
 };
 use super::mode_contract::{assess_offdesk_mode, OffdeskModeAssessment, OffdeskModeLifecycle};
 use super::redaction::operator_safe_text;
@@ -270,6 +273,7 @@ pub fn poll_background_runs(
         refresh_probe_runtime_evidence(probe, now)?;
         let decision = probe.evaluate(now);
         probe.phase = decision.phase;
+        let _ = emit_runner_work_slice_receipts(probe, &decision, now);
         probe.last_observed_at = Some(now);
         probe.last_recovery_evidence = Some(decision.evidence.clone());
         probe.last_recovery_terminal = Some(decision.terminal);
@@ -295,6 +299,149 @@ pub fn poll_background_runs(
 
     store.save(&probes)?;
     Ok(outcomes)
+}
+
+fn emit_runner_work_slice_receipts(
+    probe: &BackgroundProbe,
+    decision: &BackgroundRecoveryDecision,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    if !probe.result_artifact_present || !decision.terminal {
+        return Ok(());
+    }
+    let Some(summary) = probe.implementation_packet.as_ref() else {
+        return Ok(());
+    };
+    let Some(result_path) = probe.result_artifact_path.as_deref() else {
+        return Ok(());
+    };
+    let receipt_dir = Path::new(result_path).parent().unwrap_or(Path::new("."));
+    let receipt_path = receipt_dir.join(WORK_SLICE_EXECUTION_RECEIPTS_FILE);
+    let packet = implementation_packet_record_from_path(Path::new(&summary.packet_path))?;
+    if packet.design.work_slices.is_empty() {
+        return Ok(());
+    }
+
+    let existing = work_slice_execution_receipts_from_path(&receipt_path).unwrap_or_default();
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&receipt_path)
+        .with_context(|| format!("open work-slice receipt sidecar {}", receipt_path.display()))?;
+    for (index, slice) in packet.design.work_slices.iter().enumerate() {
+        if existing.iter().any(|receipt| {
+            work_slice_receipt_covers_slice(receipt, &packet.packet_id, index, slice)
+        }) {
+            continue;
+        }
+        let receipt = WorkSliceExecutionReceipt {
+            schema: WORK_SLICE_EXECUTION_RECEIPT_SCHEMA.to_string(),
+            packet_id: packet.packet_id.clone(),
+            project_key: packet.project_key.clone(),
+            task_id: probe.task_id.clone(),
+            background_ticket_id: Some(probe.ticket_id.clone()),
+            generated_at: now.to_rfc3339(),
+            producer: "runner_poll".to_string(),
+            slice_id: Some(format!("slice-{index}")),
+            slice_index: Some(index),
+            slice_label: slice.clone(),
+            status: WorkSliceExecutionStatus::Deferred,
+            summary: "Runner observed a terminal result artifact, but no worker-authored slice receipt was available for this planned work slice.".to_string(),
+            evidence_refs: runner_receipt_evidence_refs(probe, decision),
+            validation_refs: Vec::new(),
+            artifact_refs: probe
+                .result_artifact_path
+                .iter()
+                .map(|path| operator_safe_text(path))
+                .collect(),
+            open_questions: vec![
+                "Confirm whether this planned work slice was actually completed by inspecting result evidence.".to_string(),
+            ],
+            drift_signals: Vec::new(),
+            next_safe_action: "Review result evidence or replace this runner-generated receipt with worker-authored slice evidence before accepting truth.".to_string(),
+        };
+        writeln!(file, "{}", serde_json::to_string(&receipt)?)?;
+    }
+    Ok(())
+}
+
+fn work_slice_receipt_covers_slice(
+    receipt: &WorkSliceExecutionReceipt,
+    packet_id: &str,
+    slice_index: usize,
+    slice_label: &str,
+) -> bool {
+    let expected_slice_id = format!("slice-{slice_index}");
+    receipt.packet_id.trim() == packet_id.trim()
+        && (receipt.slice_index == Some(slice_index)
+            || receipt_match_text(&receipt.slice_label) == receipt_match_text(slice_label)
+            || receipt
+                .slice_id
+                .as_deref()
+                .is_some_and(|slice_id| slice_id == expected_slice_id))
+}
+
+fn runner_receipt_evidence_refs(
+    probe: &BackgroundProbe,
+    decision: &BackgroundRecoveryDecision,
+) -> Vec<String> {
+    let mut refs = Vec::new();
+    refs.push(operator_safe_text(&format!(
+        "background:{}:phase:{}",
+        probe.ticket_id,
+        runner_phase_label(decision.phase)
+    )));
+    if let Some(result_path) = probe.result_artifact_path.as_deref() {
+        refs.push(operator_safe_text(&format!(
+            "background:{}:result:{}",
+            probe.ticket_id,
+            path_tail(result_path)
+        )));
+    }
+    if let Some(log_path) = probe.log_artifact_path.as_deref() {
+        refs.push(operator_safe_text(&format!(
+            "background:{}:log:{}",
+            probe.ticket_id,
+            path_tail(log_path)
+        )));
+    }
+    refs
+}
+
+fn runner_phase_label(phase: BackgroundRunnerPhase) -> &'static str {
+    match phase {
+        BackgroundRunnerPhase::Launched => "launched",
+        BackgroundRunnerPhase::HandoffEmitted => "handoff_emitted",
+        BackgroundRunnerPhase::PickupAcknowledged => "pickup_acknowledged",
+        BackgroundRunnerPhase::ResultReceived => "result_received",
+        BackgroundRunnerPhase::Completed => "completed",
+        BackgroundRunnerPhase::Failed => "failed",
+        BackgroundRunnerPhase::StaleNoAck => "stale_no_ack",
+        BackgroundRunnerPhase::StaleLostCallback => "stale_lost_callback",
+        BackgroundRunnerPhase::Reconstructable => "reconstructable",
+    }
+}
+
+fn path_tail(path: &str) -> &str {
+    Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(path)
+}
+
+fn receipt_match_text(value: &str) -> String {
+    let mut out = String::new();
+    let mut last_space = false;
+    for ch in value.chars().flat_map(char::to_lowercase) {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-' | '/' | '\\') {
+            out.push(ch);
+            last_space = false;
+        } else if !last_space {
+            out.push(' ');
+            last_space = true;
+        }
+    }
+    out.trim().to_string()
 }
 
 fn background_mode_lifecycle(

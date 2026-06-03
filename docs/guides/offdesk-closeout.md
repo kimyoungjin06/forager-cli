@@ -163,6 +163,12 @@ from its own evidence refs. When no matching receipt exists, the slice still
 inherits packet-level status and should be treated as a manual-review hint
 rather than accepted evidence.
 
+For local background or tmux runs, polling writes conservative `runner_poll`
+receipts beside the result artifact when a packet-bound run reaches a terminal
+result. These receipts mark each planned slice `deferred`: the runner can prove
+that a result artifact exists, but a worker-authored receipt or human review is
+still needed before a slice is treated as semantically complete.
+
 The latest matching `review_surface.v1` projects a compact copy of this
 coverage under `closeout.implementation_packet_coverage`, and
 `forager ondesk prompt-package` renders the packet/detail counts in the morning

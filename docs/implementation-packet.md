@@ -263,11 +263,15 @@ Closeout should apply these rules:
 - `deferred`, `missing`, and `drifted` slices should be shown before completed
   slices in Ondesk and review surfaces.
 
-Storage stays close to runtime evidence. The initial closeout implementation
-looks for `work_slice_receipts.jsonl` beside result artifacts, runtime logs,
-workdirs, background artifacts, and implementation packet artifact dirs. A
-future runner can write the same JSONL stream directly during execution, and a
-later profile index can collect summaries without moving the source evidence.
+Storage stays close to runtime evidence. Closeout looks for
+`work_slice_receipts.jsonl` beside result artifacts, runtime logs, workdirs,
+background artifacts, and implementation packet artifact dirs. Local runners
+also write conservative `runner_poll` receipts beside the result artifact when
+a terminal result is observed for packet-bound work. Those runner-generated
+receipts use `deferred`, because the runner can prove that execution produced a
+result artifact but cannot prove semantic completion for each slice. A worker
+or reviewer may later write stronger slice receipts with completed, missing, or
+drifted status.
 
 Projection rules:
 
@@ -281,8 +285,8 @@ Projection rules:
 
 Open implementation decisions:
 
-- whether every worker must emit one receipt per slice, or closeout may
-  synthesize receipts from runtime evidence;
+- which worker backends should emit stronger worker-authored receipts instead
+  of relying on conservative runner-generated deferred receipts;
 - whether `slice_id` should be deterministic from packet id plus slice index or
   from a content hash;
 - what minimum evidence is enough to call a slice `completed`;
@@ -351,6 +355,11 @@ Implemented first slice:
   uses the receipt's completed, deferred, missing, or drifted status instead of
   inheriting packet-level status. Receipt summaries, drift signals, refs, and
   next safe action are preserved in JSON and attention summaries.
+- local background/tmux polling now emits runner-generated deferred
+  `work_slice_execution_receipt.v1` records beside the result artifact for
+  packet-bound runs when no worker-authored receipt already covers the slice.
+  This prevents closeout from treating packet-level execution completion as
+  slice-level completion.
 
 Remaining slices:
 
@@ -361,7 +370,8 @@ Remaining slices:
    collectors still need to be connected.
 3. Add Council or single-harness review prompts that critique goal coverage,
    scope balance, evidence sufficiency, and brand fit.
-4. Make worker runners emit `work_slice_execution_receipt.v1` during execution
-   instead of relying on manually created sidecars.
+4. Make hosted harness and local worker prompts emit worker-authored
+   `work_slice_execution_receipt.v1` records with stronger evidence than the
+   conservative runner-generated deferred receipts.
 5. Add richer drift explanations from deterministic gates, Council, or a
    single-harness reviewer when a receipt reports `drifted`.

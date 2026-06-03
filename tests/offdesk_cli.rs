@@ -6049,6 +6049,140 @@ fn offdesk_tick_launches_briefed_task_and_completes_from_sidecar() -> Result<()>
 
 #[test]
 #[serial]
+fn offdesk_tick_emits_runner_work_slice_receipts_for_packet() -> Result<()> {
+    let temp = tempdir()?;
+    write_implementation_packet_fixture(temp.path(), "project", "packet-runner-receipts")?;
+    fs::write(temp.path().join("README.md"), "# Project\n")?;
+    fs::write(
+        temp.path().join("PROJECT_STATE.md"),
+        format!("# Project State\n\nUpdated: {}\n", Utc::now().date_naive()),
+    )?;
+    fs::write(temp.path().join("DECISIONS.md"), "# Decisions\n")?;
+    fs::write(
+        temp.path().join("DELIVERABLES.md"),
+        "# Deliverables\n\n- `README.md`: project overview.\n",
+    )?;
+
+    let brief_path = temp.path().join("brief.json");
+    let result_path = temp.path().join("tick-packet-result.txt");
+    let now = Utc::now();
+    fs::write(
+        &brief_path,
+        serde_json::to_string_pretty(&json!({
+            "request_id": "request",
+            "task_id": "task",
+            "project_key": "project",
+            "approved": true,
+            "allowed_runtime_mutations": ["dispatch.runtime"],
+            "allowed_canonical_mutations": [],
+            "fresh_until": now + Duration::minutes(10)
+        }))?,
+    )?;
+    let command = format!("printf done > {}", result_path.display());
+
+    let enqueue_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "enqueue",
+            "dispatch.runtime",
+            "--runner",
+            "local-background",
+            "--project-key",
+            "project",
+            "--request-id",
+            "request",
+            "--task-id",
+            "task",
+            "--brief",
+            brief_path.to_str().expect("utf-8 path"),
+            "--cmd",
+            command.as_str(),
+            "--workdir",
+            temp.path().to_str().expect("utf-8 path"),
+            "--result-artifact",
+            result_path.to_str().expect("utf-8 path"),
+            "--json",
+        ])
+        .output()?;
+    assert!(enqueue_output.status.success());
+
+    let launch_output = forager_command(temp.path())
+        .args(["offdesk", "tick", "--json"])
+        .output()?;
+    assert!(launch_output.status.success());
+    wait_for_path(&result_path);
+
+    let complete_output = forager_command(temp.path())
+        .args(["offdesk", "tick", "--json"])
+        .output()?;
+    assert!(complete_output.status.success());
+    let complete: serde_json::Value = serde_json::from_slice(&complete_output.stdout)?;
+    assert_eq!(complete["completed"], 1);
+
+    let receipt_path = temp.path().join("work_slice_receipts.jsonl");
+    let receipt_jsonl = fs::read_to_string(&receipt_path)?;
+    let receipts = receipt_jsonl
+        .lines()
+        .map(serde_json::from_str::<serde_json::Value>)
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    assert_eq!(receipts.len(), 2);
+    assert!(receipts.iter().all(|receipt| {
+        receipt["schema"] == "work_slice_execution_receipt.v1"
+            && receipt["packet_id"] == "packet-runner-receipts"
+            && receipt["producer"] == "runner_poll"
+            && receipt["status"] == "deferred"
+            && receipt["next_safe_action"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("before accepting truth")
+    }));
+
+    let repeat_tick = forager_command(temp.path())
+        .args(["offdesk", "tick", "--json"])
+        .output()?;
+    assert!(repeat_tick.status.success());
+    assert_eq!(fs::read_to_string(&receipt_path)?.lines().count(), 2);
+
+    let closeout_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "closeout",
+            "--project-key",
+            "project",
+            "--task-id",
+            "task",
+            "--dry-run",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        closeout_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&closeout_output.stderr)
+    );
+    let closeout: serde_json::Value = serde_json::from_slice(&closeout_output.stdout)?;
+    assert_eq!(closeout["summary"]["packet_goals_completed"], 1);
+    assert_eq!(closeout["summary"]["packet_detail_items_deferred"], 2);
+    assert_eq!(
+        closeout["implementation_packet_coverage"]["items"][0]["detail_source"],
+        "implementation_packet_and_work_slice_receipts"
+    );
+    assert!(
+        closeout["implementation_packet_coverage"]["items"][0]["work_slices"]
+            .as_array()
+            .expect("work slices")
+            .iter()
+            .all(|item| item["status"] == "deferred"
+                && item["receipt_source"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .ends_with("work_slice_receipts.jsonl"))
+    );
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn offdesk_tick_injects_adaptive_wiki_runtime_context_and_records_usage() -> Result<()> {
     let temp = tempdir()?;
     let profile_dir = profile_dir(temp.path());
