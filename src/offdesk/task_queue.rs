@@ -13,6 +13,9 @@ use super::background::{
     BackgroundProbe, BackgroundRecoveryDecision, BackgroundRunnerKind, BackgroundRunnerPhase,
 };
 use super::capability::CapabilityArtifactRef;
+use super::implementation_packet::{
+    operator_safe_implementation_packet_summary, ImplementationPacketSummary,
+};
 use super::mode_contract::{assess_offdesk_mode, OffdeskModeAssessment, OffdeskModeLifecycle};
 use super::provider::{ProviderFallbackCandidate, ProviderFallbackRecommendation};
 use super::redaction::operator_safe_text;
@@ -63,6 +66,8 @@ pub struct OffdeskTask {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub artifact_refs: Vec<CapabilityArtifactRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub implementation_packet: Option<ImplementationPacketSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artifact_kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_mode: Option<AdaptiveWikiAgentMode>,
@@ -108,6 +113,7 @@ impl OffdeskTask {
             not_before: input.not_before,
             mutation_class: input.mutation_class,
             artifact_refs: input.artifact_refs,
+            implementation_packet: input.implementation_packet,
             artifact_kind: input.artifact_kind,
             agent_mode: input.agent_mode,
             provider_id: input.provider_id,
@@ -166,6 +172,10 @@ impl OffdeskTask {
                 .iter()
                 .map(operator_safe_artifact_ref)
                 .collect(),
+            implementation_packet: self
+                .implementation_packet
+                .as_ref()
+                .map(operator_safe_implementation_packet_summary),
             artifact_kind: self.artifact_kind.as_deref().map(operator_safe_text),
             agent_mode: self.agent_mode,
             mode_assessment,
@@ -202,6 +212,7 @@ pub struct OffdeskTaskInput {
     pub not_before: Option<DateTime<Utc>>,
     pub mutation_class: Option<String>,
     pub artifact_refs: Vec<CapabilityArtifactRef>,
+    pub implementation_packet: Option<ImplementationPacketSummary>,
     pub artifact_kind: Option<String>,
     pub agent_mode: Option<AdaptiveWikiAgentMode>,
     pub provider_id: Option<String>,
@@ -237,6 +248,8 @@ pub struct OffdeskTaskView {
     pub mutation_class: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub artifact_refs: Vec<CapabilityArtifactRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub implementation_packet: Option<ImplementationPacketSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artifact_kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1211,6 +1224,7 @@ mod tests {
             not_before: None,
             mutation_class: None,
             artifact_refs: Vec::new(),
+            implementation_packet: None,
             artifact_kind: None,
             agent_mode: None,
             provider_id: None,

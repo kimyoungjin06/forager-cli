@@ -16,7 +16,13 @@ use super::artifact_index::{
     ProjectRetentionRequestArgs, ProjectRetentionReviewArgs,
 };
 use super::project_audit::{run_audit_docs, ProjectAuditDocsArgs};
-use crate::offdesk::operator_safe_text;
+use crate::offdesk::{
+    draft_implementation_packet, operator_safe_text, ImplementationAlignment,
+    ImplementationCapabilityMapping, ImplementationCloseout, ImplementationDesign,
+    ImplementationExecution, ImplementationPacket, ImplementationPacketDraftInput,
+    ImplementationScope, ImplementationSourceIntent, ImplementationValidation,
+    RecursiveAlignmentReview,
+};
 use crate::session::get_profile_dir;
 
 const PROFILE_FILE: &str = "PROJECT_OPERATION_PROFILE.json";
@@ -28,6 +34,9 @@ const GOVERNANCE_HINTS_FILE: &str = "GOVERNANCE_SURFACE_HINTS.md";
 const WIKI_SEEDS_FILE: &str = "WIKI_SEED_CANDIDATES.json";
 const ONDESK_PACKAGE_FILE: &str = "ONDESK_START_PACKAGE.md";
 const OFFDESK_READY_FILE: &str = "OFFDESK_READY_CHECK.json";
+const IMPLEMENTATION_PACKET_FILE: &str = "IMPLEMENTATION_PACKET.json";
+const RECURSIVE_ALIGNMENT_REVIEW_FILE: &str = "RECURSIVE_ALIGNMENT_REVIEW.json";
+const IMPLEMENTATION_PACKET_MD_FILE: &str = "IMPLEMENTATION_PACKET.md";
 
 #[derive(Subcommand)]
 pub enum ProjectCommands {
@@ -59,6 +68,10 @@ pub enum ProjectCommands {
     /// Promote a retained artifact into DELIVERABLES.md with snapshot evidence
     #[command(name = "retention-promote")]
     RetentionPromote(ProjectRetentionPromoteArgs),
+
+    /// Draft a design-first implementation packet before delegated execution
+    #[command(name = "implementation-packet")]
+    ImplementationPacket(Box<ProjectImplementationPacketArgs>),
 }
 
 #[derive(Args)]
@@ -107,6 +120,144 @@ pub struct ProjectApplyGovernanceHintsArgs {
     /// Confirm that the operator reviewed the hints and approves creating missing files
     #[arg(long)]
     reviewed: bool,
+
+    /// Output machine-readable JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct ProjectImplementationPacketArgs {
+    /// Project repository/root directory the delegated work belongs to
+    path: PathBuf,
+
+    /// Stable project key used by Ondesk, Offdesk, and adaptive wiki records
+    #[arg(long)]
+    project_key: String,
+
+    /// Original operator goal this packet must preserve
+    #[arg(long)]
+    goal: String,
+
+    /// Concrete state that should be true when the work is complete
+    #[arg(long = "success-state")]
+    success_state: String,
+
+    /// Why this work matters now. Repeat to add multiple reasons.
+    #[arg(long = "why-now")]
+    why_now: Vec<String>,
+
+    /// How this serves Forager's north star: evidence, choices, and continuity
+    #[arg(long = "north-star-fit")]
+    north_star_fit: Option<String>,
+
+    /// How this preserves the current product/brand boundary
+    #[arg(long = "brand-fit")]
+    brand_fit: Option<String>,
+
+    /// What Forager owns and what the hosted worker owns
+    #[arg(long = "product-boundary")]
+    product_boundary: Option<String>,
+
+    /// In-scope work item. Repeat for multiple slices of included scope.
+    #[arg(long = "scope")]
+    scope: Vec<String>,
+
+    /// Explicit non-goal or out-of-scope item. Repeat for multiple exclusions.
+    #[arg(long = "exclude")]
+    exclude: Vec<String>,
+
+    /// File, directory, or contract the worker may inspect or edit.
+    #[arg(long = "allowed-file")]
+    allowed_file: Vec<String>,
+
+    /// Boundary for permitted mutation. Defaults to read-only packet drafting.
+    #[arg(long = "mutation-boundary")]
+    mutation_boundary: Option<String>,
+
+    /// Action this packet never authorizes by itself. Repeat for multiple actions.
+    #[arg(long = "non-authorized-action")]
+    non_authorized_action: Vec<String>,
+
+    /// Affected functional capability, optionally as FD-016:reason.
+    #[arg(long = "capability")]
+    capability: Vec<String>,
+
+    /// Intended implementation approach
+    #[arg(long = "approach")]
+    approach: Option<String>,
+
+    /// Worker execution slice. Repeat for multiple slices.
+    #[arg(long = "work-slice")]
+    work_slice: Vec<String>,
+
+    /// Interface affected or expected by the work. Repeat for multiple interfaces.
+    #[arg(long = "interface")]
+    interface: Vec<String>,
+
+    /// Data contract affected or expected by the work. Repeat for multiple contracts.
+    #[arg(long = "data-contract")]
+    data_contract: Vec<String>,
+
+    /// Compatibility note the worker must preserve.
+    #[arg(long = "compatibility-note")]
+    compatibility_note: Vec<String>,
+
+    /// Preferred worker type, such as local_model, hosted_harness, or deterministic_script
+    #[arg(long = "preferred-worker", default_value = "hosted_harness")]
+    preferred_worker: String,
+
+    /// Worker requirement that must be true before execution.
+    #[arg(long = "worker-requirement")]
+    worker_requirement: Vec<String>,
+
+    /// Command the worker or reviewer should run.
+    #[arg(long = "command")]
+    command: Vec<String>,
+
+    /// Condition where the worker must stop instead of continuing.
+    #[arg(long = "stop-condition")]
+    stop_condition: Vec<String>,
+
+    /// Recovery or rollback instruction if execution fails or stalls.
+    #[arg(long = "recovery-step")]
+    recovery_step: Vec<String>,
+
+    /// Test or verification command required for closeout.
+    #[arg(long = "validation-command")]
+    validation_command: Vec<String>,
+
+    /// Smoke check required for closeout.
+    #[arg(long = "smoke-check")]
+    smoke_check: Vec<String>,
+
+    /// Manual review item required before acceptance.
+    #[arg(long = "manual-review")]
+    manual_review: Vec<String>,
+
+    /// Evidence ref or artifact required to support the result.
+    #[arg(long = "evidence-ref")]
+    evidence_ref: Vec<String>,
+
+    /// Artifact expected from execution.
+    #[arg(long = "expected-artifact")]
+    expected_artifact: Vec<String>,
+
+    /// Handoff summary requirement for morning Ondesk review.
+    #[arg(long = "handoff-requirement")]
+    handoff_requirement: Vec<String>,
+
+    /// Reviewer route used for the recursive alignment review.
+    #[arg(long = "reviewer", default_value = "deterministic_gate")]
+    reviewer: String,
+
+    /// Write the packet artifacts to this directory
+    #[arg(long)]
+    out: Option<PathBuf>,
+
+    /// Overwrite known packet files when --out already contains files
+    #[arg(long)]
+    force: bool,
 
     /// Output machine-readable JSON
     #[arg(long)]
@@ -190,6 +341,41 @@ struct ProjectApplyGovernanceHintsOutput {
     skipped_existing_count: usize,
     operations: Vec<ProjectGovernanceSurfaceOperation>,
     audit_command: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProjectImplementationPacketOutput {
+    kind: String,
+    version: u32,
+    packet_id: String,
+    profile: String,
+    project_key: String,
+    project_root: String,
+    artifact_dir: String,
+    read_only_project_state: bool,
+    grants_runtime_authority: bool,
+    artifacts: ProjectImplementationPacketArtifacts,
+    summary: ProjectImplementationPacketSummary,
+    packet: ImplementationPacket,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProjectImplementationPacketArtifacts {
+    implementation_packet_json: String,
+    recursive_alignment_review_json: String,
+    implementation_packet_markdown: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProjectImplementationPacketSummary {
+    safe_to_delegate: bool,
+    outcome: String,
+    required_revision_count: usize,
+    drift_signal_count: usize,
+    missing_decision_count: usize,
+    validation_item_count: usize,
+    stop_condition_count: usize,
+    expected_artifact_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -462,6 +648,7 @@ pub async fn run(profile: &str, command: ProjectCommands) -> Result<()> {
         ProjectCommands::RetentionPromote(args) => {
             artifact_index::run_retention_promote(profile, args).await
         }
+        ProjectCommands::ImplementationPacket(args) => run_implementation_packet(profile, *args),
     }
 }
 
@@ -777,6 +964,392 @@ fn run_apply_governance_hints(args: ProjectApplyGovernanceHintsArgs) -> Result<(
     }
 
     Ok(())
+}
+
+fn run_implementation_packet(profile: &str, args: ProjectImplementationPacketArgs) -> Result<()> {
+    let project_key = sanitize_required("project key", &args.project_key)?;
+    let project_root = args
+        .path
+        .expanduser()
+        .canonicalize()
+        .with_context(|| format!("resolve project path {}", args.path.display()))?;
+    if !project_root.is_dir() {
+        bail!(
+            "project path is not a directory: {}",
+            project_root.display()
+        );
+    }
+
+    let profile_name = if profile.is_empty() {
+        "default"
+    } else {
+        profile
+    };
+    let generated_at = Utc::now();
+    let packet_id = format!("implementation-packet-{}", short_uuid());
+    let artifact_dir = resolve_implementation_packet_dir(
+        profile_name,
+        &project_key,
+        generated_at,
+        args.out.as_ref(),
+        args.force,
+    )?;
+    let artifacts = implementation_packet_artifact_paths(&artifact_dir);
+    let packet = draft_implementation_packet(ImplementationPacketDraftInput {
+        packet_id: packet_id.clone(),
+        created_at: generated_at,
+        project_key: project_key.clone(),
+        project_root: safe_path(&project_root),
+        source_intent: ImplementationSourceIntent {
+            user_goal: sanitize_required("goal", &args.goal)?,
+            why_now: sanitize_optional_join(
+                &args.why_now,
+                "Substantial delegated work needs a bounded, reviewable design before execution.",
+            ),
+            success_state: sanitize_required("success state", &args.success_state)?,
+        },
+        alignment: ImplementationAlignment {
+            north_star_fit: sanitize_optional(
+                args.north_star_fit.as_deref(),
+                "This work should return the operator to evidence, choices, and continuity instead of hidden execution.",
+            ),
+            brand_fit: sanitize_optional(
+                args.brand_fit.as_deref(),
+                "This work should preserve Forager as a local meta-harness rather than a single agent, memory, or notification surface.",
+            ),
+            product_boundary: sanitize_optional(
+                args.product_boundary.as_deref(),
+                "Forager owns state, approval, supervision, evidence, recovery, closeout, and reviewed knowledge promotion; the worker owns task execution inside that boundary.",
+            ),
+            anti_drift_notes: sanitize_vec(args.exclude.iter().map(|item| {
+                format!("Keep out of scope unless a new decision authorizes it: {item}")
+            })),
+        },
+        scope: ImplementationScope {
+            included: sanitize_vec(args.scope.iter()),
+            excluded: sanitize_vec(args.exclude.iter()),
+            allowed_files: sanitize_vec(args.allowed_file.iter()),
+            mutation_boundary: sanitize_optional(
+                args.mutation_boundary.as_deref(),
+                "Packet drafting is read-only for target project state; runtime mutation still needs a separate approved execution path.",
+            ),
+            non_authorized_actions: if args.non_authorized_action.is_empty() {
+                default_non_authorized_actions()
+            } else {
+                sanitize_vec(args.non_authorized_action.iter())
+            },
+        },
+        capability_mapping: capability_mappings(&args.capability),
+        design: ImplementationDesign {
+            approach: sanitize_optional(
+                args.approach.as_deref(),
+                "Convert the user goal into typed state, scoped worker instructions, validation, and closeout comparison before delegation.",
+            ),
+            work_slices: sanitize_vec(args.work_slice.iter()),
+            interfaces: sanitize_vec(args.interface.iter()),
+            data_contracts: sanitize_vec(args.data_contract.iter()),
+            compatibility_notes: sanitize_vec(args.compatibility_note.iter()),
+        },
+        execution: ImplementationExecution {
+            preferred_worker: sanitize_required("preferred worker", &args.preferred_worker)?,
+            worker_requirements: sanitize_vec(args.worker_requirement.iter()),
+            commands: sanitize_vec(args.command.iter()),
+            stop_conditions: sanitize_vec(args.stop_condition.iter()),
+            rollback_or_recovery: sanitize_vec(args.recovery_step.iter()),
+        },
+        validation: ImplementationValidation {
+            tests: sanitize_vec(args.validation_command.iter()),
+            smoke_checks: sanitize_vec(args.smoke_check.iter()),
+            manual_review: sanitize_vec(args.manual_review.iter()),
+            evidence_required: sanitize_vec(args.evidence_ref.iter()),
+        },
+        closeout: ImplementationCloseout {
+            expected_artifacts: sanitize_vec(args.expected_artifact.iter()),
+            accepted_truth_rule: "Execution completion is not acceptance; closeout must compare actual results against this implementation packet.".to_string(),
+            handoff_summary_requirements: sanitize_vec(args.handoff_requirement.iter()),
+        },
+        reviewer: sanitize_required("reviewer", &args.reviewer)?,
+    });
+
+    write_json(Path::new(&artifacts.implementation_packet_json), &packet)?;
+    write_json(
+        Path::new(&artifacts.recursive_alignment_review_json),
+        &packet.recursive_alignment_review,
+    )?;
+    write_text(
+        Path::new(&artifacts.implementation_packet_markdown),
+        &render_implementation_packet_markdown(&packet, &artifacts),
+    )?;
+
+    let summary = implementation_packet_summary(&packet.recursive_alignment_review, &packet);
+    let output = ProjectImplementationPacketOutput {
+        kind: "forager_project_implementation_packet".to_string(),
+        version: 1,
+        packet_id,
+        profile: profile_name.to_string(),
+        project_key,
+        project_root: safe_path(&project_root),
+        artifact_dir: safe_path(&artifact_dir),
+        read_only_project_state: true,
+        grants_runtime_authority: false,
+        artifacts,
+        summary,
+        packet,
+    };
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        print_implementation_packet_output(&output);
+    }
+
+    Ok(())
+}
+
+fn resolve_implementation_packet_dir(
+    profile: &str,
+    project_key: &str,
+    generated_at: DateTime<Utc>,
+    out: Option<&PathBuf>,
+    force: bool,
+) -> Result<PathBuf> {
+    let path = if let Some(out) = out {
+        if out.is_absolute() {
+            out.clone()
+        } else {
+            std::env::current_dir()?.join(out)
+        }
+    } else {
+        let timestamp = generated_at.format("%Y%m%dT%H%M%SZ").to_string();
+        get_profile_dir(profile)?
+            .join("implementation_packets")
+            .join(format!("{}_{}", timestamp, slug(project_key)))
+    };
+
+    if path.exists() && !force && has_any_entry(&path)? {
+        bail!(
+            "output directory is not empty: {}\nUse --force to overwrite known implementation packet files.",
+            path.display()
+        );
+    }
+    fs::create_dir_all(&path).with_context(|| format!("create {}", path.display()))?;
+    Ok(path.canonicalize().unwrap_or(path))
+}
+
+fn implementation_packet_artifact_paths(
+    artifact_dir: &Path,
+) -> ProjectImplementationPacketArtifacts {
+    ProjectImplementationPacketArtifacts {
+        implementation_packet_json: safe_path(&artifact_dir.join(IMPLEMENTATION_PACKET_FILE)),
+        recursive_alignment_review_json: safe_path(
+            &artifact_dir.join(RECURSIVE_ALIGNMENT_REVIEW_FILE),
+        ),
+        implementation_packet_markdown: safe_path(
+            &artifact_dir.join(IMPLEMENTATION_PACKET_MD_FILE),
+        ),
+    }
+}
+
+fn sanitize_optional(value: Option<&str>, fallback: &str) -> String {
+    value
+        .map(operator_safe_text)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+fn sanitize_optional_join(values: &[String], fallback: &str) -> String {
+    let values = sanitize_vec(values.iter());
+    if values.is_empty() {
+        fallback.to_string()
+    } else {
+        values.join(" ")
+    }
+}
+
+fn sanitize_vec<I, T>(values: I) -> Vec<String>
+where
+    I: IntoIterator<Item = T>,
+    T: AsRef<str>,
+{
+    values
+        .into_iter()
+        .map(|value| operator_safe_text(value.as_ref().trim()))
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
+fn default_non_authorized_actions() -> Vec<String> {
+    vec![
+        "runtime execution without separate approval".to_string(),
+        "cleanup, deletion, archive, or file movement".to_string(),
+        "adaptive wiki promotion".to_string(),
+        "provider or model retargeting".to_string(),
+        "accepted truth or public claim acceptance".to_string(),
+    ]
+}
+
+fn capability_mappings(values: &[String]) -> Vec<ImplementationCapabilityMapping> {
+    let mut mappings = sanitize_vec(values.iter())
+        .into_iter()
+        .map(|value| {
+            let (capability_id, reason) = value
+                .split_once(':')
+                .map(|(id, reason)| (id.trim().to_string(), reason.trim().to_string()))
+                .unwrap_or_else(|| {
+                    (
+                        value.clone(),
+                        "Affected capability for delegated implementation scope.".to_string(),
+                    )
+                });
+            ImplementationCapabilityMapping {
+                capability_id: operator_safe_text(&capability_id),
+                reason: operator_safe_text(&reason),
+            }
+        })
+        .filter(|mapping| !mapping.capability_id.is_empty())
+        .collect::<Vec<_>>();
+    if mappings.is_empty() {
+        mappings.push(ImplementationCapabilityMapping {
+            capability_id: "FD-016".to_string(),
+            reason: "Implementation packet and recursive alignment review.".to_string(),
+        });
+    }
+    mappings
+}
+
+fn implementation_packet_summary(
+    review: &RecursiveAlignmentReview,
+    packet: &ImplementationPacket,
+) -> ProjectImplementationPacketSummary {
+    ProjectImplementationPacketSummary {
+        safe_to_delegate: review.safe_to_delegate,
+        outcome: review.outcome.as_str().to_string(),
+        required_revision_count: review.required_revisions.len(),
+        drift_signal_count: review.drift_signals.len(),
+        missing_decision_count: review.missing_decisions.len(),
+        validation_item_count: packet.validation.tests.len()
+            + packet.validation.smoke_checks.len()
+            + packet.validation.manual_review.len(),
+        stop_condition_count: packet.execution.stop_conditions.len(),
+        expected_artifact_count: packet.closeout.expected_artifacts.len(),
+    }
+}
+
+fn render_implementation_packet_markdown(
+    packet: &ImplementationPacket,
+    artifacts: &ProjectImplementationPacketArtifacts,
+) -> String {
+    let mut out = String::new();
+    out.push_str("# Implementation Packet\n\n");
+    out.push_str(&format!("- packet_id: `{}`\n", packet.packet_id));
+    out.push_str(&format!("- schema: `{}`\n", packet.schema));
+    out.push_str(&format!("- project_key: `{}`\n", packet.project_key));
+    out.push_str(&format!("- created_at: `{}`\n", packet.created_at));
+    out.push_str("- grants_runtime_authority: `false`\n");
+    out.push_str("- accepted_truth: `pending_closeout_review`\n\n");
+
+    out.push_str("## Original Intent\n\n");
+    out.push_str(&format!("- goal: {}\n", packet.source_intent.user_goal));
+    out.push_str(&format!("- why_now: {}\n", packet.source_intent.why_now));
+    out.push_str(&format!(
+        "- success_state: {}\n\n",
+        packet.source_intent.success_state
+    ));
+
+    out.push_str("## Alignment\n\n");
+    out.push_str(&format!(
+        "- north_star_fit: {}\n",
+        packet.alignment.north_star_fit
+    ));
+    out.push_str(&format!("- brand_fit: {}\n", packet.alignment.brand_fit));
+    out.push_str(&format!(
+        "- product_boundary: {}\n\n",
+        packet.alignment.product_boundary
+    ));
+
+    push_markdown_list(&mut out, "Included Scope", &packet.scope.included);
+    push_markdown_list(&mut out, "Excluded Scope", &packet.scope.excluded);
+    push_markdown_list(&mut out, "Work Slices", &packet.design.work_slices);
+    push_markdown_list(
+        &mut out,
+        "Stop Conditions",
+        &packet.execution.stop_conditions,
+    );
+    push_markdown_list(&mut out, "Validation", &packet.validation.tests);
+    push_markdown_list(
+        &mut out,
+        "Expected Artifacts",
+        &packet.closeout.expected_artifacts,
+    );
+
+    out.push_str("## Recursive Alignment Review\n\n");
+    out.push_str(&format!(
+        "- outcome: `{}`\n",
+        packet.recursive_alignment_review.outcome.as_str()
+    ));
+    out.push_str(&format!(
+        "- safe_to_delegate: `{}`\n",
+        packet.recursive_alignment_review.safe_to_delegate
+    ));
+    out.push_str(&format!(
+        "- original_goal_coverage: `{}`\n",
+        packet
+            .recursive_alignment_review
+            .checks
+            .original_goal_coverage
+    ));
+    out.push_str(&format!(
+        "- scope_balance: `{}`\n",
+        packet.recursive_alignment_review.checks.scope_balance
+    ));
+    push_markdown_list(
+        &mut out,
+        "Required Revisions",
+        &packet.recursive_alignment_review.required_revisions,
+    );
+    push_markdown_list(
+        &mut out,
+        "Drift Signals",
+        &packet.recursive_alignment_review.drift_signals,
+    );
+
+    out.push_str("## Artifacts\n\n");
+    out.push_str(&format!(
+        "- packet_json: `{}`\n",
+        artifacts.implementation_packet_json
+    ));
+    out.push_str(&format!(
+        "- alignment_review_json: `{}`\n",
+        artifacts.recursive_alignment_review_json
+    ));
+    out
+}
+
+fn push_markdown_list(out: &mut String, heading: &str, values: &[String]) {
+    out.push_str(&format!("## {heading}\n\n"));
+    if values.is_empty() {
+        out.push_str("- Not supplied.\n\n");
+    } else {
+        for value in values {
+            out.push_str(&format!("- {value}\n"));
+        }
+        out.push('\n');
+    }
+}
+
+fn print_implementation_packet_output(output: &ProjectImplementationPacketOutput) {
+    println!("Implementation packet: {}", output.summary.outcome);
+    println!("  packet: {}", output.packet_id);
+    println!("  project: {}", output.project_key);
+    println!("  safe_to_delegate: {}", output.summary.safe_to_delegate);
+    println!(
+        "  required revisions: {}",
+        output.summary.required_revision_count
+    );
+    println!("  artifacts:");
+    println!("    - {}", output.artifacts.implementation_packet_markdown);
+    println!("    - {}", output.artifacts.implementation_packet_json);
+    println!("    - {}", output.artifacts.recursive_alignment_review_json);
 }
 
 fn resolve_artifact_dir(

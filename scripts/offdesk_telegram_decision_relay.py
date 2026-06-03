@@ -149,7 +149,7 @@ CARD_TEMPLATE = """<b>{headline}</b>
 {input_policy}{input_prompt_section}
 <b>범위</b>: {scope}"""
 DETAIL_TEMPLATE = """<b>{headline}</b>
-{why_recommendation_section}{review_surface_section}{failure_section}{evidence_section}{council_section}{next_action_section}{decision_impact_section}{reply_example_section}"""
+{why_recommendation_section}{judgment_route_section}{evidence_sufficiency_section}{review_surface_section}{failure_section}{evidence_section}{council_section}{next_action_section}{decision_impact_section}{reply_example_section}"""
 SECTION_TEMPLATE = """
 
 <b>{title}</b>
@@ -710,6 +710,31 @@ def default_reply_examples(request: dict[str, Any]) -> dict[str, str]:
     return examples
 
 
+def default_if_no_reply_for_request(request: dict[str, Any]) -> str:
+    record = request.get("decision_record")
+    if not isinstance(record, dict):
+        return ""
+    for key in ("judgment_route", "route"):
+        route = record.get(key)
+        if isinstance(route, dict):
+            value = str(route.get("default_if_no_reply") or "").strip()
+            if value:
+                return value
+    return ""
+
+
+def evidence_sufficiency_for_brief(brief: dict[str, Any]) -> str:
+    evidence_count = len(list_values(brief.get("evidence"), limit=20))
+    next_safe_count = len(list_items(brief.get("next_safe_actions"), limit=20))
+    if evidence_count:
+        return f"핵심 근거 {evidence_count}건이 요약되어 있고, 생략된 원천은 decision/review evidence refs에서 회수합니다."
+    if isinstance(brief.get("review_surface"), dict):
+        return "review_surface.v1 요약이 포함되어 있어 상세 검토 표면에서 원천 상태를 회수합니다."
+    if next_safe_count:
+        return f"근거 요약은 제한적이지만 next_safe_action {next_safe_count}건이 검토 순서를 제공합니다."
+    return "근거 요약이 부족합니다. 더 자세히 보기나 review surface에서 원천 상태를 확인해야 합니다."
+
+
 def normalize_approval_brief(request: dict[str, Any], raw: dict[str, Any]) -> dict[str, Any]:
     council = raw.get("council") if isinstance(raw.get("council"), dict) else {}
     context = raw.get("context") if isinstance(raw.get("context"), dict) else {}
@@ -741,6 +766,21 @@ def normalize_approval_brief(request: dict[str, Any], raw: dict[str, Any]) -> di
     normalized["next_action"] = list_values(next_action, limit=6)
     normalized["next_safe_actions"] = list_items(next_safe_actions, limit=6)
     normalized["context"] = context
+    judgment_summary = str(raw.get("judgment_route_summary") or "").strip()
+    if not judgment_summary:
+        judgment_summary = primary_judgment_route_line(request)
+    if judgment_summary:
+        normalized["judgment_route_summary"] = judgment_summary
+    evidence_sufficiency = str(raw.get("evidence_sufficiency") or "").strip()
+    if not evidence_sufficiency:
+        evidence_sufficiency = evidence_sufficiency_for_brief(normalized)
+    if evidence_sufficiency:
+        normalized["evidence_sufficiency"] = evidence_sufficiency
+    default_if_no_reply = str(raw.get("default_if_no_reply") or "").strip()
+    if not default_if_no_reply:
+        default_if_no_reply = default_if_no_reply_for_request(request)
+    if default_if_no_reply:
+        normalized["default_if_no_reply"] = default_if_no_reply
     normalized["council"] = {
         **council,
         "recommendation": recommendation
@@ -760,7 +800,16 @@ def normalize_approval_brief(request: dict[str, Any], raw: dict[str, Any]) -> di
 
 def approval_brief_text_fields(brief: dict[str, Any]) -> list[tuple[str, str]]:
     fields: list[tuple[str, str]] = []
-    for key in ("recommendation", "subject", "primary_reason", "scope", "question"):
+    for key in (
+        "recommendation",
+        "subject",
+        "primary_reason",
+        "judgment_route_summary",
+        "evidence_sufficiency",
+        "default_if_no_reply",
+        "scope",
+        "question",
+    ):
         value = str(brief.get(key) or "").strip()
         if value:
             fields.append((key, value))
@@ -898,6 +947,17 @@ def validate_approval_brief(request: dict[str, Any], *, explicit: bool) -> dict[
         available_decisions = {action["decision"] for action in action_specs_for(request)}
         if recommendation not in available_decisions:
             failures.append(f"recommendation:not_available_action:{recommendation}")
+
+    if judgment_route_for(request) and not str(brief.get("judgment_route_summary") or "").strip():
+        warnings.append("judgment_route_summary:missing")
+    if not str(brief.get("evidence_sufficiency") or "").strip():
+        warnings.append("evidence_sufficiency:missing")
+    default_if_no_reply = default_if_no_reply_for_request(request)
+    if default_if_no_reply and not str(brief.get("default_if_no_reply") or "").strip():
+        warnings.append("default_if_no_reply:missing")
+    impacts = brief.get("decision_impacts")
+    if not isinstance(impacts, dict) or not impacts:
+        warnings.append("decision_impacts:missing")
 
     options = brief.get("options")
     if options is not None:
@@ -1420,7 +1480,10 @@ def render_evidence_section(brief: dict[str, Any], *, detailed: bool = False) ->
     )
 
 
-def render_council_section(brief: dict[str, Any], *, detailed: bool = False) -> str:
+def render_council_section(request: dict[str, Any], brief: dict[str, Any], *, detailed: bool = False) -> str:
+    record = decision_record_for(request)
+    if record and not isinstance(record.get("council_review"), dict):
+        return ""
     council = brief.get("council")
     if not isinstance(council, dict):
         return ""
@@ -1493,9 +1556,12 @@ def recommendation_headline(request: dict[str, Any]) -> str:
 def approval_summary_lines(request: dict[str, Any]) -> list[str]:
     brief = brief_for(request)
     explicit_lines = list_values(brief.get("summary_lines"), limit=3)
+    judgment_line = primary_judgment_route_line(request)
     if explicit_lines:
-        return explicit_lines[:3]
+        return ([judgment_line] if judgment_line else []) + explicit_lines[:3]
     lines: list[str] = []
+    if judgment_line:
+        lines.append(judgment_line)
     context = brief.get("context") if isinstance(brief.get("context"), dict) else {}
     claim_status = str(context.get("claim_status") or "").strip()
     if claim_status == "pending_not_reportable":
@@ -1535,7 +1601,7 @@ def render_approval_summary(request: dict[str, Any]) -> str:
     lines = approval_summary_lines(request)
     if not lines:
         return ""
-    return render_blockquote(lines, max_items=3, max_chars=320) + "\n"
+    return render_blockquote(lines, max_items=4, max_chars=320) + "\n"
 
 
 def render_status_section(
@@ -1615,6 +1681,65 @@ def render_why_recommendation_section(brief: dict[str, Any]) -> str:
     return render_lines_section("왜 이 추천인가", lines, max_items=3, max_chars=300)
 
 
+def judgment_route_for(request: dict[str, Any]) -> dict[str, Any]:
+    record = decision_record_for(request)
+    route = record.get("judgment_route")
+    return route if isinstance(route, dict) else {}
+
+
+def display_judgment_evaluator(value: Any) -> str:
+    labels = {
+        "council": "Council",
+        "single_harness": "단일 harness",
+        "deterministic_gate": "결정적 gate",
+        "user": "사용자",
+    }
+    raw = str(value or "").strip()
+    return labels.get(raw, raw or "미지정")
+
+
+def primary_judgment_route_line(request: dict[str, Any]) -> str:
+    route = judgment_route_for(request)
+    if not route:
+        return ""
+    evaluator = display_judgment_evaluator(route.get("evaluator"))
+    reason = str(route.get("reason") or "").strip()
+    if reason:
+        return f"판단 경로: {evaluator} - {compact(reason, 180)}"
+    return f"판단 경로: {evaluator}"
+
+
+def render_judgment_route_section(request: dict[str, Any]) -> str:
+    route = judgment_route_for(request)
+    if not route:
+        return ""
+    lines: list[str] = []
+    evaluator = display_judgment_evaluator(route.get("evaluator"))
+    if evaluator:
+        lines.append(f"평가자: {evaluator}")
+    reason = str(route.get("reason") or "").strip()
+    if reason:
+        lines.append(f"이유: {reason}")
+    default = str(route.get("default_if_no_reply") or "").strip()
+    if default:
+        lines.append(f"무응답 기본값: {display_decision(default)}")
+    basis = list_values(route.get("policy_basis"), limit=4)
+    if basis:
+        lines.append("정책 근거: " + "; ".join(basis))
+    return render_lines_section("판단 경로", lines, max_items=5, max_chars=300)
+
+
+def render_evidence_sufficiency_section(brief: dict[str, Any]) -> str:
+    lines: list[str] = []
+    sufficiency = str(brief.get("evidence_sufficiency") or "").strip()
+    if sufficiency:
+        lines.append(sufficiency)
+    default_if_no_reply = str(brief.get("default_if_no_reply") or "").strip()
+    if default_if_no_reply:
+        lines.append(f"무응답 기본값: {display_decision(default_if_no_reply)}")
+    return render_lines_section("증거 충분성", lines, max_items=3, max_chars=300)
+
+
 def render_review_surface_section(brief: dict[str, Any]) -> str:
     surface = brief.get("review_surface")
     if not isinstance(surface, dict):
@@ -1628,6 +1753,11 @@ def render_review_surface_section(brief: dict[str, Any]) -> str:
     runtime = surface.get("runtime") if isinstance(surface.get("runtime"), dict) else {}
     decisions = surface.get("decisions") if isinstance(surface.get("decisions"), dict) else {}
     adaptive_wiki = surface.get("adaptive_wiki") if isinstance(surface.get("adaptive_wiki"), dict) else {}
+    implementation_packet = (
+        surface.get("implementation_packet")
+        if isinstance(surface.get("implementation_packet"), dict)
+        else {}
+    )
     if status.get("summary"):
         lines.append(f"상태: {status.get('summary')}")
     elif status.get("label"):
@@ -1645,6 +1775,21 @@ def render_review_surface_section(brief: dict[str, Any]) -> str:
             f"Closeout: review {closeout.get('review_status') or 'unknown'}, "
             f"execution {closeout.get('execution_status') or 'unknown'}"
         )
+    if implementation_packet:
+        packet_id = str(implementation_packet.get("packet_id") or "implementation packet").strip()
+        outcome = str(implementation_packet.get("outcome") or "unknown").strip()
+        safe_to_delegate = implementation_packet.get("safe_to_delegate")
+        revision_count = len(list_items(implementation_packet.get("required_revisions"), limit=20))
+        missing_decision_count = len(list_items(implementation_packet.get("missing_decisions"), limit=20))
+        readiness = f"Implementation packet: {packet_id}, outcome {outcome}"
+        if isinstance(safe_to_delegate, bool):
+            readiness += f", safe_to_delegate {str(safe_to_delegate).lower()}"
+        if revision_count or missing_decision_count:
+            readiness += f", revisions {revision_count}건, missing decisions {missing_decision_count}건"
+        lines.append(readiness)
+        goal = str(implementation_packet.get("goal") or "").strip()
+        if goal:
+            lines.append(f"설계 목표: {goal}")
     risks = closeout.get("unresolved_risks") if isinstance(closeout.get("unresolved_risks"), list) else []
     if risks:
         lines.append("남은 위험: " + "; ".join(str(item) for item in risks[:3]))
@@ -1751,13 +1896,17 @@ def render_detail_card(request: dict[str, Any], request_id: str) -> str:
         headline = f"{display_decision(recommendation)} 권고의 근거" if recommendation else "승인 요청의 근거"
     if brief:
         why_recommendation_section = render_why_recommendation_section(brief)
+        judgment_route_section = render_judgment_route_section(request)
+        evidence_sufficiency_section = render_evidence_sufficiency_section(brief)
         review_surface_section = render_review_surface_section(brief)
         failure_section = render_failure_section(brief)
         evidence_section = render_evidence_section(brief, detailed=True)
-        council_section = render_council_section(brief, detailed=True)
+        council_section = render_council_section(request, brief, detailed=True)
         next_action_section = render_next_action_section(brief, detailed=True)
         if not (
             why_recommendation_section
+            or judgment_route_section
+            or evidence_sufficiency_section
             or review_surface_section
             or failure_section
             or evidence_section
@@ -1768,6 +1917,8 @@ def render_detail_card(request: dict[str, Any], request_id: str) -> str:
         return DETAIL_TEMPLATE.format(
             headline=html.escape(headline),
             why_recommendation_section=why_recommendation_section,
+            judgment_route_section=judgment_route_section,
+            evidence_sufficiency_section=evidence_sufficiency_section,
             review_surface_section=review_surface_section,
             failure_section=failure_section,
             evidence_section=evidence_section,

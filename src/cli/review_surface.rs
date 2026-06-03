@@ -11,8 +11,10 @@ use std::path::{Path, PathBuf};
 use super::artifact_index;
 use super::status::current_status_json_value;
 use crate::offdesk::{
-    load_offdesk_status_summary, operator_safe_text, AdaptiveWikiStore, BackgroundProbe,
-    BackgroundRunStore, DecisionLedger, DecisionRecord, DecisionStatus, OffdeskStatusSummary,
+    latest_implementation_packet_for_project, load_offdesk_status_summary, operator_safe_text,
+    AdaptiveWikiStore, BackgroundProbe, BackgroundRunStore, DecisionLedger, DecisionRecord,
+    DecisionStatus, ImplementationPacketSummary, LatestImplementationPacket, OffdeskStatusSummary,
+    IMPLEMENTATION_PACKET_FILE, IMPLEMENTATION_PACKET_MD_FILE, RECURSIVE_ALIGNMENT_REVIEW_FILE,
 };
 use crate::session::get_profile_dir;
 
@@ -43,6 +45,8 @@ struct ReviewSurface {
     runtime: ReviewSurfaceRuntime,
     decisions: ReviewSurfaceDecisions,
     adaptive_wiki: ReviewSurfaceAdaptiveWiki,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    implementation_packet: Option<ImplementationPacketSummary>,
     artifacts: ReviewSurfaceArtifacts,
     redaction: ReviewSurfaceRedaction,
     sources: ReviewSurfaceSources,
@@ -106,9 +110,32 @@ struct ReviewSurfaceDecision {
     project_key: String,
     task_id: String,
     status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    judgment_route: Option<ReviewSurfaceJudgmentRoute>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    delivery_route: Option<ReviewSurfaceDeliveryRoute>,
     summary: String,
     decision_needed: String,
     updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+struct ReviewSurfaceJudgmentRoute {
+    evaluator: String,
+    reason: String,
+    selected_by: String,
+    selected_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default_if_no_reply: Option<String>,
+    policy_basis: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ReviewSurfaceDeliveryRoute {
+    target: String,
+    reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default_if_no_reply: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -154,6 +181,7 @@ struct ReviewSurfaceSources {
     status_json: &'static str,
     offdesk_status_summary: &'static str,
     closeout_receipt: &'static str,
+    implementation_packet: &'static str,
     artifact_index: &'static str,
     artifact_retention_review: &'static str,
 }
@@ -221,6 +249,24 @@ pub(crate) fn human_summary_from_value(surface: &Value) -> String {
     output.push_str(&format!(
         "  closeout: execution={execution}, review={review}\n"
     ));
+    if let Some(packet_id) = text_at(surface, "/implementation_packet/packet_id") {
+        let outcome = text_at(surface, "/implementation_packet/outcome").unwrap_or("unknown");
+        let safe_to_delegate = surface
+            .pointer("/implementation_packet/safe_to_delegate")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let revision_count = surface
+            .pointer("/implementation_packet/required_revisions")
+            .and_then(Value::as_array)
+            .map(Vec::len)
+            .unwrap_or_default();
+        output.push_str(&format!(
+            "  implementation packet: {packet_id}, outcome={outcome}, safe_to_delegate={safe_to_delegate}, revisions={revision_count}\n"
+        ));
+        if let Some(goal) = text_at(surface, "/implementation_packet/goal") {
+            output.push_str(&format!("  implementation goal: {goal}\n"));
+        }
+    }
     if let Some(runtime) = text_at(surface, "/runtime/progress_summary") {
         output.push_str(&format!("  runtime: {runtime}\n"));
     }
@@ -228,6 +274,13 @@ pub(crate) fn human_summary_from_value(surface: &Value) -> String {
         "  open decisions: {}\n",
         number_at(surface, "/decisions/open_count").unwrap_or_default()
     ));
+    let judgment_routes = recent_judgment_route_summary(surface);
+    if !judgment_routes.is_empty() {
+        output.push_str(&format!(
+            "  recent judgment routes: {}\n",
+            judgment_routes.join(", ")
+        ));
+    }
     output.push_str(&format!(
         "  adaptive wiki: {} candidate(s), {} review-due entry(s)\n",
         number_at(surface, "/adaptive_wiki/candidate_count").unwrap_or_default(),
@@ -326,13 +379,20 @@ fn build_review_surface(profile: &str, args: &ReviewSurfaceArgs) -> Result<Revie
         .map(operator_safe_text)
         .unwrap_or_else(|| "all".to_string());
     let latest_closeout = latest_closeout(&profile_dir, args.project_key.as_deref())?;
+    let latest_implementation_packet =
+        latest_implementation_packet_for_project(&profile_dir, args.project_key.as_deref())?;
     let artifact_index =
         artifact_index::build_profile_artifact_index_value(profile, args.project_key.as_deref())?;
     let retention_review =
         artifact_index::build_profile_retention_review_value(profile, args.project_key.as_deref())?;
     let artifact_index = artifact_index::review_surface_projection(&artifact_index);
     let retention_review = artifact_index::retention_review_projection(&retention_review);
-    let artifacts = build_artifacts(latest_closeout.as_ref(), artifact_index, retention_review);
+    let artifacts = build_artifacts(
+        latest_closeout.as_ref(),
+        latest_implementation_packet.as_ref(),
+        artifact_index,
+        retention_review,
+    );
 
     Ok(ReviewSurface {
         schema: REVIEW_SURFACE_SCHEMA,
@@ -346,6 +406,7 @@ fn build_review_surface(profile: &str, args: &ReviewSurfaceArgs) -> Result<Revie
         runtime: build_runtime(&profile_dir, &status_json, args.project_key.as_deref()),
         decisions: build_decisions(&profile_dir, args.project_key.as_deref()),
         adaptive_wiki: build_adaptive_wiki(&profile_dir, args.project_key.as_deref(), generated_at),
+        implementation_packet: latest_implementation_packet.map(|packet| packet.summary),
         artifacts,
         redaction: ReviewSurfaceRedaction {
             operator_safe: true,
@@ -355,6 +416,7 @@ fn build_review_surface(profile: &str, args: &ReviewSurfaceArgs) -> Result<Revie
             status_json: "forager status --json",
             offdesk_status_summary: "load_offdesk_status_summary",
             closeout_receipt: "closeout_receipt.v1",
+            implementation_packet: "implementation_packet.v1",
             artifact_index: "artifact_index.v1",
             artifact_retention_review: "artifact_retention_review.v1",
         },
@@ -601,10 +663,48 @@ fn review_decision(record: &DecisionRecord) -> ReviewSurfaceDecision {
         project_key: operator_safe_text(&record.project_key),
         task_id: operator_safe_text(&record.task_id),
         status: record.status.as_str().to_string(),
+        judgment_route: record
+            .judgment_route
+            .as_ref()
+            .map(|route| ReviewSurfaceJudgmentRoute {
+                evaluator: route.evaluator.as_str().to_string(),
+                reason: operator_safe_text(&route.reason),
+                selected_by: operator_safe_text(&route.selected_by),
+                selected_at: route.selected_at,
+                default_if_no_reply: route.default_if_no_reply.as_deref().map(operator_safe_text),
+                policy_basis: route
+                    .policy_basis
+                    .iter()
+                    .map(|basis| operator_safe_text(basis))
+                    .collect(),
+            }),
+        delivery_route: record
+            .route
+            .as_ref()
+            .map(|route| ReviewSurfaceDeliveryRoute {
+                target: route.target.as_str().to_string(),
+                reason: operator_safe_text(&route.reason),
+                default_if_no_reply: route.default_if_no_reply.as_deref().map(operator_safe_text),
+            }),
         summary: operator_safe_text(&record.decision_request.summary),
         decision_needed: operator_safe_text(&record.decision_request.decision_needed),
         updated_at: record.updated_at,
     }
+}
+
+fn recent_judgment_route_summary(surface: &Value) -> Vec<String> {
+    surface
+        .pointer("/decisions/recent")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flat_map(|items| items.iter())
+        .filter_map(|item| {
+            let evaluator = text_at(item, "/judgment_route/evaluator")?;
+            let decision_id = text_at(item, "/decision_id").unwrap_or("decision");
+            Some(format!("{decision_id}:{evaluator}"))
+        })
+        .take(3)
+        .collect()
 }
 
 fn decision_is_open(status: DecisionStatus) -> bool {
@@ -650,6 +750,7 @@ fn build_adaptive_wiki(
 
 fn build_artifacts(
     latest: Option<&LatestCloseout>,
+    implementation_packet: Option<&LatestImplementationPacket>,
     index: Value,
     retention_review: Value,
 ) -> ReviewSurfaceArtifacts {
@@ -715,6 +816,36 @@ fn build_artifacts(
                 );
             }
         }
+    }
+    if let Some(packet) = implementation_packet {
+        summary.push(ReviewSurfaceArtifactSummary {
+            label: "Implementation packet".to_string(),
+            why_it_matters:
+                "Captures the source intent, boundaries, validation plan, and recursive alignment gate before delegated implementation."
+                    .to_string(),
+            retention_class: "planning".to_string(),
+        });
+        push_artifact_ref(
+            &mut refs,
+            "implementation_packet",
+            "Implementation packet",
+            &packet.packet_path,
+            IMPLEMENTATION_PACKET_FILE,
+        );
+        push_artifact_ref(
+            &mut refs,
+            "recursive_alignment_review",
+            "Recursive alignment review",
+            &packet.alignment_review_path,
+            RECURSIVE_ALIGNMENT_REVIEW_FILE,
+        );
+        push_artifact_ref(
+            &mut refs,
+            "implementation_packet_markdown",
+            "Implementation packet markdown",
+            &packet.markdown_path,
+            IMPLEMENTATION_PACKET_MD_FILE,
+        );
     }
     ReviewSurfaceArtifacts {
         index,

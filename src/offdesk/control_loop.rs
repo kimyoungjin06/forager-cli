@@ -674,6 +674,7 @@ fn dispatch_task(
     let mut launch_request = BackgroundLaunchRequest::new(gate_request, task.runner_kind);
     launch_request.ticket_id = task.background_ticket_id.clone();
     launch_request.launch_spec_summary = Some(task.command.clone());
+    launch_request.implementation_packet = task.implementation_packet.clone();
     launch_request.runtime_handle_alive = true;
 
     let mut command_spec = LocalCommandLaunchSpec::new(&task.command, PathBuf::from(&task.workdir));
@@ -907,6 +908,7 @@ mod tests {
             not_before: None,
             mutation_class: None,
             artifact_refs: Vec::new(),
+            implementation_packet: None,
             artifact_kind: None,
             agent_mode: None,
             provider_id: None,

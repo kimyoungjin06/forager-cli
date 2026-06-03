@@ -809,6 +809,9 @@ fn telegram_decision_relay_accepts_request_id_scoped_decision_without_leaking_se
                     "Reason: provider capacity cooldown active.",
                     "Candidate: openai model gpt-4.1-mini."
                 ],
+                "judgment_route_summary": "판단 경로: deterministic gate - provider capacity policy selected operator approval for retargeting.",
+                "evidence_sufficiency": "Provider capacity evidence and ranked fallback candidates are summarized; dispatch still needs a separate approval.",
+                "default_if_no_reply": "defer",
                 "why_recommendation": [
                     "openai model gpt-4.1 is currently blocked by provider capacity state.",
                     "openai model gpt-4.1-mini is the first currently recommended fallback candidate."
@@ -883,7 +886,13 @@ fn telegram_decision_relay_accepts_request_id_scoped_decision_without_leaking_se
                 "Approve this provider fallback retargeting?",
                 "does not approve runtime dispatch",
             ],
-            required_detail: &["왜 이 추천인가", "핵심 근거", "선택별 의미", "답장 예시"],
+            required_detail: &[
+                "왜 이 추천인가",
+                "증거 충분성",
+                "핵심 근거",
+                "선택별 의미",
+                "답장 예시",
+            ],
             required_buttons: &[
                 "1. Approve fallback(권장)",
                 "2. Deny fallback",
@@ -899,6 +908,7 @@ fn telegram_decision_relay_accepts_request_id_scoped_decision_without_leaking_se
     assert_eq!(explicit["message_type"], "approval_request");
     assert_eq!(explicit["approval_brief_schema"], "approval_brief.v1");
     assert_eq!(explicit["approval_brief_validation"]["valid"], true);
+    assert_eq!(explicit["approval_brief_validation"]["warnings"], json!([]));
     assert!(explicit["keyboard"]["labels"]
         .as_array()
         .expect("explicit labels")
@@ -919,6 +929,7 @@ fn telegram_decision_relay_accepts_request_id_scoped_decision_without_leaking_se
         .as_str()
         .expect("explicit detail preview");
     assert!(explicit_detail.contains("승인 권고의 근거"));
+    assert!(explicit_detail.contains("증거 충분성"));
     assert!(explicit_detail.contains("선택별 의미"));
     assert!(explicit_detail.contains("fallback 후보와 비용 한계를 정리할 때까지 거부"));
 
@@ -1041,6 +1052,18 @@ print(json.dumps({"request": request, "artifacts": artifacts}, ensure_ascii=Fals
         producer_request["approval_brief"]["recommendation"],
         "revise"
     );
+    assert!(producer_request["approval_brief"]["judgment_route_summary"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("Council"));
+    assert!(producer_request["approval_brief"]["evidence_sufficiency"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("핵심 근거"));
+    assert_eq!(
+        producer_request["approval_brief"]["default_if_no_reply"],
+        "defer"
+    );
     assert!(producer_request["approval_brief"]["summary_lines"]
         .as_array()
         .expect("producer summary lines")
@@ -1072,6 +1095,16 @@ print(json.dumps({"request": request, "artifacts": artifacts}, ensure_ascii=Fals
     assert_eq!(
         producer_request["decision_record"]["route"]["target"],
         "user"
+    );
+    assert_eq!(
+        producer_request["decision_record"]["judgment_route"]["evaluator"],
+        "council"
+    );
+    assert!(
+        producer_request["decision_record"]["approval_brief"]["judgment_route_summary"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("Council")
     );
     assert_eq!(
         producer_request["decision_record"]["approval_brief"]["schema"],
@@ -1642,7 +1675,7 @@ print(json.dumps({"registry": registry_json, "state_files": state_files}, ensure
                 "기타",
                 "어떤 방향으로 진행할까요",
             ],
-            required_detail: &["상세 정보 부족", "선택별 의미"],
+            required_detail: &["증거 충분성", "선택별 의미"],
             required_buttons: &["1. 안정화 먼저", "2. 템플릿 확장", "기타", "근거 보기"],
             forbidden_user_surface: &["plan-choice-1"],
             max_primary_lines: 16,
@@ -1853,6 +1886,24 @@ fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
                     "1 missing evidence item(s) must be resolved."
                 ]
             },
+            "implementation_packet": {
+                "packet_id": "packet-ondesk-test",
+                "created_at": "2026-05-28T01:00:00Z",
+                "project_key": "twinpaper",
+                "goal": "검토 가능한 Ondesk 전환 표면에 설계 의도와 남은 결정을 함께 보여준다.",
+                "success_state": "Telegram 상세 카드가 accepted truth와 implementation readiness를 함께 보여준다.",
+                "preferred_worker": "hosted_harness",
+                "safe_to_delegate": true,
+                "outcome": "pass",
+                "required_revisions": [],
+                "drift_signals": [],
+                "missing_decisions": [],
+                "work_slice_count": 2,
+                "capability_mapping_count": 1,
+                "validation_item_count": 3,
+                "stop_condition_count": 1,
+                "expected_artifact_count": 3
+            },
             "runtime": {
                 "progress_summary": "0 queued, 0 active, 0 failed, 0 closeout-required offdesk task(s)."
             },
@@ -1932,6 +1983,18 @@ fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
         request["approval_brief"]["recommendation"],
         "start_ondesk_review"
     );
+    assert!(request["approval_brief"]["judgment_route_summary"]
+        .as_str()
+        .expect("judgment route summary")
+        .contains("사용자"));
+    assert!(request["approval_brief"]["evidence_sufficiency"]
+        .as_str()
+        .expect("evidence sufficiency")
+        .contains("review_surface.v1"));
+    assert_eq!(
+        request["approval_brief"]["default_if_no_reply"],
+        "defer_ondesk"
+    );
     assert_eq!(
         request["approval_brief"]["next_safe_actions"][0]["kind"],
         "ondesk_review_entry"
@@ -2007,6 +2070,8 @@ fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
             required_detail: &[
                 "Ondesk 전환 상세",
                 "왜 이 추천인가",
+                "판단 경로",
+                "증거 충분성",
                 "Morning Review Surface",
                 "핵심 근거",
                 "권장 다음 행동",
@@ -2014,6 +2079,9 @@ fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
                 "Closeout follow-ups need operator review",
                 "Receipt follow-ups",
                 "accepted truth",
+                "Implementation packet",
+                "safe_to_delegate true",
+                "설계 목표",
                 "ondesk review entry",
                 "선택별 의미",
             ],
@@ -2049,6 +2117,9 @@ fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
     assert!(detail_preview.contains("Ondesk 전환 상세"));
     assert!(detail_preview.contains("왜 이 추천인가"));
     assert!(detail_preview.contains("Morning Review Surface"));
+    assert!(detail_preview.contains("Implementation packet"));
+    assert!(detail_preview.contains("packet-ondesk-test"));
+    assert!(detail_preview.contains("설계 목표"));
     assert!(detail_preview.contains("핵심 근거"));
     assert!(detail_preview.contains("선택별 의미"));
     assert!(!result_text.contains("fake-token-for-test"));

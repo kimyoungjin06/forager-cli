@@ -297,6 +297,196 @@ fn project_init_rejects_unknown_operation_target() -> Result<()> {
 
 #[test]
 #[serial]
+fn project_implementation_packet_writes_read_only_alignment_packet() -> Result<()> {
+    let temp = tempdir()?;
+    let repo = temp.path().join("project");
+    write_synthetic_project(&repo)?;
+    let before_entries = fs::read_dir(&repo)?.count();
+    let out_dir = temp.path().join("implementation-packet");
+
+    let output = forager_command(temp.path())
+        .args([
+            "project",
+            "implementation-packet",
+            repo.to_str().expect("utf-8 repo path"),
+            "--project-key",
+            "demo-project",
+            "--goal",
+            "Make delegated implementation preserve the original Forager product intent.",
+            "--success-state",
+            "A worker can execute from a packet without using chat scrollback.",
+            "--why-now",
+            "Local model overnight work needs stronger design before execution.",
+            "--north-star-fit",
+            "Returns the operator to evidence, choices, and continuity.",
+            "--brand-fit",
+            "Keeps Forager as a local meta-harness rather than one hosted agent.",
+            "--scope",
+            "Typed implementation packet state",
+            "--exclude",
+            "Runtime launch approval",
+            "--allowed-file",
+            "src/offdesk/implementation_packet.rs",
+            "--capability",
+            "FD-016: implementation packet and recursive alignment review",
+            "--approach",
+            "Create typed state plus a read-only project CLI packet generator.",
+            "--work-slice",
+            "Add Rust state contract",
+            "--work-slice",
+            "Add CLI JSON projection",
+            "--data-contract",
+            "implementation_packet.v1",
+            "--data-contract",
+            "recursive_alignment_review.v1",
+            "--preferred-worker",
+            "deterministic_script",
+            "--stop-condition",
+            "Missing validation command or expected artifact",
+            "--validation-command",
+            "cargo test --test project_init_cli project_implementation_packet_writes_read_only_alignment_packet",
+            "--evidence-ref",
+            "docs/implementation-packet.md",
+            "--expected-artifact",
+            "IMPLEMENTATION_PACKET.json",
+            "--handoff-requirement",
+            "Morning Ondesk review must show whether original intent was served.",
+            "--out",
+            out_dir.to_str().expect("utf-8 out path"),
+            "--json",
+        ])
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(json["kind"], "forager_project_implementation_packet");
+    assert_eq!(json["project_key"], "demo-project");
+    assert_eq!(json["read_only_project_state"], true);
+    assert_eq!(json["grants_runtime_authority"], false);
+    assert_eq!(json["summary"]["safe_to_delegate"], true);
+    assert_eq!(json["summary"]["outcome"], "pass");
+    assert_eq!(json["summary"]["required_revision_count"], 0);
+    assert_eq!(json["packet"]["schema"], "implementation_packet.v1");
+    assert_eq!(
+        json["packet"]["recursive_alignment_review"]["schema"],
+        "recursive_alignment_review.v1"
+    );
+    assert_eq!(
+        json["packet"]["recursive_alignment_review"]["checks"]["scope_balance"],
+        "right_sized"
+    );
+    assert_eq!(
+        json["packet"]["closeout"]["accepted_truth_rule"],
+        "Execution completion is not acceptance; closeout must compare actual results against this implementation packet."
+    );
+
+    let artifacts = &json["artifacts"];
+    for key in [
+        "implementation_packet_json",
+        "recursive_alignment_review_json",
+        "implementation_packet_markdown",
+    ] {
+        let path = PathBuf::from(artifacts[key].as_str().expect("artifact path"));
+        assert!(path.exists(), "missing artifact {key}: {}", path.display());
+    }
+
+    let packet_path = PathBuf::from(
+        artifacts["implementation_packet_json"]
+            .as_str()
+            .expect("packet path"),
+    );
+    let packet: Value = serde_json::from_str(&fs::read_to_string(packet_path)?)?;
+    assert_eq!(packet["packet_id"], json["packet_id"]);
+    assert_eq!(packet["capability_mapping"][0]["capability_id"], "FD-016");
+    assert_eq!(
+        packet["validation"]["evidence_required"][0],
+        "docs/implementation-packet.md"
+    );
+
+    let review_path = PathBuf::from(
+        artifacts["recursive_alignment_review_json"]
+            .as_str()
+            .expect("review path"),
+    );
+    let review: Value = serde_json::from_str(&fs::read_to_string(review_path)?)?;
+    assert_eq!(review["outcome"], "pass");
+    assert_eq!(review["safe_to_delegate"], true);
+
+    let markdown = fs::read_to_string(
+        artifacts["implementation_packet_markdown"]
+            .as_str()
+            .expect("markdown path"),
+    )?;
+    assert!(markdown.contains("Implementation Packet"));
+    assert!(markdown.contains("safe_to_delegate: `true`"));
+    assert!(markdown.contains("Runtime launch approval"));
+
+    assert_eq!(fs::read_dir(&repo)?.count(), before_entries);
+    assert!(!repo.join(".forager").exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn project_implementation_packet_flags_missing_delegation_requirements() -> Result<()> {
+    let temp = tempdir()?;
+    let repo = temp.path().join("project");
+    write_synthetic_project(&repo)?;
+    let out_dir = temp.path().join("implementation-packet");
+
+    let output = forager_command(temp.path())
+        .args([
+            "project",
+            "implementation-packet",
+            repo.to_str().expect("utf-8 repo path"),
+            "--project-key",
+            "demo-project",
+            "--goal",
+            "Draft a weak packet for validation.",
+            "--success-state",
+            "The packet exposes missing execution requirements.",
+            "--scope",
+            "Packet shell only",
+            "--out",
+            out_dir.to_str().expect("utf-8 out path"),
+            "--json",
+        ])
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(json["summary"]["safe_to_delegate"], false);
+    assert_eq!(json["summary"]["outcome"], "revise");
+    let revisions = json["packet"]["recursive_alignment_review"]["required_revisions"]
+        .as_array()
+        .expect("required revisions");
+    for expected in [
+        "excluded_scope_missing",
+        "work_slices_missing",
+        "stop_conditions_missing",
+        "validation_plan_missing",
+        "expected_artifacts_missing",
+    ] {
+        assert!(
+            revisions.iter().any(|item| item == expected),
+            "missing revision {expected}: {revisions:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn project_apply_governance_hints_dry_run_does_not_write_surfaces() -> Result<()> {
     let temp = tempdir()?;
     let repo = temp.path().join("project");
@@ -1017,6 +1207,22 @@ fn project_artifact_index_tracks_human_outputs_and_missing_refs() -> Result<()> 
         .as_str()
         .unwrap_or_default()
         .contains("does not delete, move, archive"));
+    assert!(
+        approval["metadata"]["approval_brief"]["judgment_route_summary"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("사용자")
+    );
+    assert!(
+        approval["metadata"]["approval_brief"]["evidence_sufficiency"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("Retention review")
+    );
+    assert_eq!(
+        approval["metadata"]["approval_brief"]["default_if_no_reply"],
+        "defer"
+    );
     assert!(approval["metadata"]["approval_brief"]["options"]
         .as_array()
         .expect("options")

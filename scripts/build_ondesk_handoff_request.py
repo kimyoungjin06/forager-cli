@@ -215,6 +215,33 @@ def review_surface_artifact_summaries(surface: dict[str, Any], *, limit: int = 4
     return result
 
 
+def review_surface_implementation_packet(surface: dict[str, Any]) -> dict[str, Any]:
+    packet = surface.get("implementation_packet")
+    if not isinstance(packet, dict):
+        return {}
+    result = {
+        "packet_id": str(packet.get("packet_id") or "").strip(),
+        "created_at": str(packet.get("created_at") or "").strip(),
+        "project_key": str(packet.get("project_key") or "").strip(),
+        "goal": str(packet.get("goal") or "").strip(),
+        "success_state": str(packet.get("success_state") or "").strip(),
+        "preferred_worker": str(packet.get("preferred_worker") or "").strip(),
+        "outcome": str(packet.get("outcome") or "").strip(),
+        "safe_to_delegate": packet.get("safe_to_delegate")
+        if isinstance(packet.get("safe_to_delegate"), bool)
+        else None,
+        "required_revisions": review_surface_string_list(packet.get("required_revisions"), limit=5),
+        "drift_signals": review_surface_string_list(packet.get("drift_signals"), limit=5),
+        "missing_decisions": review_surface_string_list(packet.get("missing_decisions"), limit=5),
+        "work_slice_count": review_surface_count(packet, "work_slice_count"),
+        "capability_mapping_count": review_surface_count(packet, "capability_mapping_count"),
+        "validation_item_count": review_surface_count(packet, "validation_item_count"),
+        "stop_condition_count": review_surface_count(packet, "stop_condition_count"),
+        "expected_artifact_count": review_surface_count(packet, "expected_artifact_count"),
+    }
+    return {key: value for key, value in result.items() if value not in ("", [], None)}
+
+
 def review_surface_projection(surface: dict[str, Any]) -> dict[str, Any]:
     if surface.get("schema") != "review_surface.v1":
         return {}
@@ -224,7 +251,7 @@ def review_surface_projection(surface: dict[str, Any]) -> dict[str, Any]:
     runtime = surface.get("runtime") if isinstance(surface.get("runtime"), dict) else {}
     decisions = surface.get("decisions") if isinstance(surface.get("decisions"), dict) else {}
     adaptive_wiki = surface.get("adaptive_wiki") if isinstance(surface.get("adaptive_wiki"), dict) else {}
-    return {
+    projection = {
         "schema": "review_surface.v1",
         "status": {
             "label": str(status.get("label") or "").strip(),
@@ -254,6 +281,10 @@ def review_surface_projection(surface: dict[str, Any]) -> dict[str, Any]:
         },
         "artifact_summaries": review_surface_artifact_summaries(surface),
     }
+    implementation_packet = review_surface_implementation_packet(surface)
+    if implementation_packet:
+        projection["implementation_packet"] = implementation_packet
+    return projection
 
 
 def review_surface_evidence_lines(projection: dict[str, Any]) -> list[str]:
@@ -269,6 +300,11 @@ def review_surface_evidence_lines(projection: dict[str, Any]) -> list[str]:
     adaptive_wiki = (
         projection.get("adaptive_wiki") if isinstance(projection.get("adaptive_wiki"), dict) else {}
     )
+    implementation_packet = (
+        projection.get("implementation_packet")
+        if isinstance(projection.get("implementation_packet"), dict)
+        else {}
+    )
     if status.get("summary"):
         lines.append(f"Review surface status: {status['summary']}")
     truth_status = str(accepted_truth.get("status") or "").strip()
@@ -278,6 +314,14 @@ def review_surface_evidence_lines(projection: dict[str, Any]) -> list[str]:
     if closeout.get("review_status"):
         lines.append(
             f"Closeout review: {closeout.get('review_status')}, execution {closeout.get('execution_status') or 'unknown'}."
+        )
+    if implementation_packet:
+        outcome = str(implementation_packet.get("outcome") or "unknown").strip()
+        safe_to_delegate = implementation_packet.get("safe_to_delegate")
+        lines.append(
+            "Implementation packet: "
+            f"{implementation_packet.get('packet_id') or 'packet'}, outcome {outcome}, "
+            f"safe_to_delegate {str(safe_to_delegate).lower() if isinstance(safe_to_delegate, bool) else 'unknown'}."
         )
     risks = closeout.get("unresolved_risks") if isinstance(closeout.get("unresolved_risks"), list) else []
     if risks:
@@ -412,6 +456,12 @@ def build_request(args: argparse.Namespace) -> dict[str, Any]:
         "recommendation": "start_ondesk_review",
         "subject": args.subject,
         "summary_lines": summary_lines,
+        "judgment_route_summary": "판단 경로: 사용자 - Ondesk 검토 진입은 operator 권한 선택입니다.",
+        "evidence_sufficiency": (
+            f"Closeout/open-decision/review-surface 요약 {len(evidence)}건이 포함되어 있으며, "
+            "상세 검토는 WebUI와 review_surface.v1에서 회수합니다."
+        ),
+        "default_if_no_reply": "defer_ondesk",
         "why_recommendation": [
             "Telegram은 push 알림에 적합하지만 전체 검수 화면으로는 좁습니다.",
             "Ondesk 전환은 closeout, wiki, git 상태, prompt package를 함께 봐야 합니다.",
@@ -478,6 +528,15 @@ def build_request(args: argparse.Namespace) -> dict[str, Any]:
         ],
         options=[dict(option) for option in DEFAULT_OPTIONS],
         evidence_refs=trace_refs,
+        judgment_evaluator="user",
+        judgment_reason="Ondesk 검토 진입은 agent 단독 판단이 아니라 operator 권한 선택입니다.",
+        judgment_policy_basis=[
+            "Telegram은 검토 진입 의사만 기록합니다.",
+            "상세 검토는 WebUI, CLI, Ondesk prompt package 표면에서 진행합니다.",
+            "mutation 승인은 별도 결정으로 분리합니다.",
+        ],
+        judgment_evidence_refs=trace_refs[:3],
+        judgment_selected_by="ondesk.handoff",
         route_target="user",
         route_reason="Morning handoff requires operator choice before returning to Ondesk review.",
         route_policy_basis=[

@@ -78,6 +78,110 @@ fn offdesk_closeout_writes_dry_run_review_packet_and_return_package() -> Result<
     }
 
     let now = Utc::now();
+    let packet_dir = artifact_dir
+        .join("implementation_packets")
+        .join("packet-closeout-test");
+    fs::create_dir_all(&packet_dir)?;
+    let packet_path = packet_dir.join("IMPLEMENTATION_PACKET.json");
+    let alignment_path = packet_dir.join("RECURSIVE_ALIGNMENT_REVIEW.json");
+    let packet_markdown_path = packet_dir.join("IMPLEMENTATION_PACKET.md");
+    let packet_record = json!({
+        "schema": "implementation_packet.v1",
+        "packet_id": "packet-closeout-test",
+        "created_at": now,
+        "project_key": "project",
+        "project_root": temp.path().to_str().expect("utf-8 temp path"),
+        "source_intent": {
+            "user_goal": "Closeout must compare actual output against implementation intent.",
+            "why_now": "Packet-aware closeout needs itemized evidence before Ondesk return.",
+            "success_state": "Closeout reports completed, deferred, missing, and drifted packet goals."
+        },
+        "alignment": {
+            "north_star_fit": "Keeps evidence, choices, and continuity visible.",
+            "brand_fit": "Keeps Forager as the local meta-harness.",
+            "product_boundary": "Closeout reports evidence; it does not accept truth.",
+            "anti_drift_notes": []
+        },
+        "scope": {
+            "included": ["packet coverage closeout"],
+            "excluded": ["runtime approval", "cleanup application"],
+            "allowed_files": [],
+            "mutation_boundary": "closeout artifacts only",
+            "non_authorized_actions": ["delete", "archive", "accepted truth"]
+        },
+        "capability_mapping": [{
+            "capability_id": "FD-016",
+            "reason": "Implementation packet closeout comparison."
+        }],
+        "design": {
+            "approach": "Compare packet intent against task evidence.",
+            "work_slices": ["coverage model", "coverage rendering"],
+            "interfaces": [],
+            "data_contracts": ["implementation_packet_coverage"],
+            "compatibility_notes": []
+        },
+        "execution": {
+            "preferred_worker": "hosted_harness",
+            "worker_requirements": [],
+            "commands": [],
+            "stop_conditions": ["missing result artifact"],
+            "rollback_or_recovery": []
+        },
+        "validation": {
+            "tests": ["result.json"],
+            "smoke_checks": ["runner.log"],
+            "manual_review": [],
+            "evidence_required": ["REPORT.md"]
+        },
+        "closeout": {
+            "expected_artifacts": ["result.json", "runner.log", "REPORT.md"],
+            "accepted_truth_rule": "Execution evidence is not accepted truth.",
+            "handoff_summary_requirements": []
+        },
+        "recursive_alignment_review": {
+            "schema": "recursive_alignment_review.v1",
+            "reviewer": "deterministic_gate",
+            "outcome": "pass",
+            "checks": {
+                "original_goal_coverage": "complete",
+                "north_star_alignment": "acceptable",
+                "brand_alignment": "acceptable",
+                "scope_balance": "right_sized",
+                "capability_coverage": "complete",
+                "evidence_sufficiency": "sufficient",
+                "completion_definition": "testable"
+            },
+            "drift_signals": [],
+            "missing_decisions": [],
+            "required_revisions": [],
+            "safe_to_delegate": true
+        }
+    });
+    fs::write(&packet_path, serde_json::to_string_pretty(&packet_record)?)?;
+    fs::write(&alignment_path, "{}")?;
+    fs::write(&packet_markdown_path, "# Implementation Packet\n")?;
+    let packet_summary = json!({
+        "packet_id": "packet-closeout-test",
+        "created_at": now,
+        "project_key": "project",
+        "artifact_dir": packet_dir.to_str().expect("utf-8 packet dir"),
+        "packet_path": packet_path.to_str().expect("utf-8 packet path"),
+        "alignment_review_path": alignment_path.to_str().expect("utf-8 alignment path"),
+        "markdown_path": packet_markdown_path.to_str().expect("utf-8 packet markdown path"),
+        "goal": "Closeout must compare actual output against implementation intent.",
+        "success_state": "Closeout reports completed, deferred, missing, and drifted packet goals.",
+        "preferred_worker": "hosted_harness",
+        "safe_to_delegate": true,
+        "outcome": "pass",
+        "required_revisions": [],
+        "drift_signals": [],
+        "missing_decisions": [],
+        "work_slice_count": 2,
+        "capability_mapping_count": 1,
+        "validation_item_count": 3,
+        "stop_condition_count": 1,
+        "expected_artifact_count": 3
+    });
     fs::write(
         artifact_dir.join("offdesk_decisions.jsonl"),
         format!(
@@ -143,6 +247,7 @@ fn offdesk_closeout_writes_dry_run_review_packet_and_return_package() -> Result<
                 "artifact_refs": artifact_refs,
                 "preview": "preview token=sk-secretsecretsecretsecret",
                 "reason": "closeout test",
+                "implementation_packet": packet_summary.clone(),
                 "log_artifact_path": log_path.to_str().expect("utf-8 log path"),
                 "result_artifact_path": result_path.to_str().expect("utf-8 result path")
             }
@@ -161,6 +266,7 @@ fn offdesk_closeout_writes_dry_run_review_packet_and_return_package() -> Result<
                 "working_dir": temp.path().to_str().expect("utf-8 temp path"),
                 "log_artifact_path": log_path.to_str().expect("utf-8 log path"),
                 "result_artifact_path": result_path.to_str().expect("utf-8 result path"),
+                "implementation_packet": packet_summary.clone(),
                 "runtime_handle_alive": false,
                 "log_artifact_present": true,
                 "result_artifact_present": true
@@ -215,6 +321,76 @@ fn offdesk_closeout_writes_dry_run_review_packet_and_return_package() -> Result<
         .any(|decision| decision["kind"] == "documentation_governance_review"));
     assert_eq!(report["summary"]["decision_records_scanned"], 1);
     assert_eq!(report["summary"]["open_decision_records"], 1);
+    assert_eq!(report["summary"]["implementation_packets_scanned"], 1);
+    assert_eq!(report["summary"]["packet_goals_completed"], 1);
+    assert_eq!(report["summary"]["packet_goals_deferred"], 0);
+    assert_eq!(report["summary"]["packet_goals_missing"], 0);
+    assert_eq!(report["summary"]["packet_goals_drifted"], 0);
+    assert_eq!(report["summary"]["packet_detail_items"], 8);
+    assert_eq!(report["summary"]["packet_detail_items_completed"], 8);
+    assert_eq!(report["summary"]["packet_detail_items_deferred"], 0);
+    assert_eq!(report["summary"]["packet_detail_items_missing"], 0);
+    assert_eq!(report["summary"]["packet_detail_items_drifted"], 0);
+    assert_eq!(report["implementation_packet_coverage"]["packet_count"], 1);
+    assert_eq!(report["implementation_packet_coverage"]["completed"], 1);
+    assert_eq!(report["implementation_packet_coverage"]["detail_items"], 8);
+    assert_eq!(
+        report["implementation_packet_coverage"]["detail_items_completed"],
+        8
+    );
+    assert_eq!(
+        report["implementation_packet_coverage"]["items"][0]["packet_id"],
+        "packet-closeout-test"
+    );
+    assert_eq!(
+        report["implementation_packet_coverage"]["items"][0]["goal_status"],
+        "completed"
+    );
+    assert!(
+        report["implementation_packet_coverage"]["items"][0]["reason"]
+            .as_str()
+            .expect("packet coverage reason")
+            .contains("acceptance still depends on closeout review")
+    );
+    assert_eq!(
+        report["implementation_packet_coverage"]["items"][0]["detail_source"],
+        "implementation_packet"
+    );
+    assert_eq!(
+        report["implementation_packet_coverage"]["items"][0]["work_slices"]
+            .as_array()
+            .expect("work slices")
+            .len(),
+        2
+    );
+    assert_eq!(
+        report["implementation_packet_coverage"]["items"][0]["validation_items"]
+            .as_array()
+            .expect("validation items")
+            .len(),
+        3
+    );
+    assert!(
+        report["implementation_packet_coverage"]["items"][0]["validation_items"]
+            .as_array()
+            .expect("validation items")
+            .iter()
+            .all(|item| item["status"] == "completed")
+    );
+    assert_eq!(
+        report["implementation_packet_coverage"]["items"][0]["expected_artifacts"]
+            .as_array()
+            .expect("expected artifacts")
+            .len(),
+        3
+    );
+    assert!(
+        report["implementation_packet_coverage"]["items"][0]["expected_artifacts"]
+            .as_array()
+            .expect("expected artifacts")
+            .iter()
+            .all(|item| item["status"] == "completed")
+    );
     assert!(report["decision_records"]
         .as_array()
         .expect("decision records")
@@ -239,6 +415,11 @@ fn offdesk_closeout_writes_dry_run_review_packet_and_return_package() -> Result<
             .as_str()
             .expect("plan path"),
     );
+    let plan_markdown_path = PathBuf::from(
+        report["artifacts"]["closeout_plan_markdown"]
+            .as_str()
+            .expect("plan markdown path"),
+    );
     let manifest_path = PathBuf::from(
         report["artifacts"]["cleanup_manifest_json"]
             .as_str()
@@ -255,6 +436,7 @@ fn offdesk_closeout_writes_dry_run_review_packet_and_return_package() -> Result<
             .expect("return package path"),
     );
     assert!(plan_path.exists());
+    assert!(plan_markdown_path.exists());
     assert!(manifest_path.exists());
     assert!(review_packet_path.exists());
     assert!(return_package_path.exists());
@@ -262,6 +444,14 @@ fn offdesk_closeout_writes_dry_run_review_packet_and_return_package() -> Result<
     let plan = fs::read_to_string(plan_path)?;
     assert!(plan.contains("[REDACTED]"));
     assert!(!plan.contains("sk-secretsecretsecretsecret"));
+    let plan_markdown = fs::read_to_string(plan_markdown_path)?;
+    assert!(plan_markdown.contains("Implementation Packet Coverage"));
+    assert!(plan_markdown.contains("packet-closeout-test"));
+    assert!(plan_markdown.contains("detail items: 8 completed"));
+    assert!(plan_markdown.contains("validation_items:"));
+    assert!(plan_markdown.contains("expected_artifacts:"));
+    assert!(plan_markdown
+        .contains("Closeout must compare actual output against implementation intent."));
 
     let manifest: Value = serde_json::from_str(&fs::read_to_string(manifest_path)?)?;
     let operations = manifest.as_array().expect("manifest array");
@@ -277,10 +467,20 @@ fn offdesk_closeout_writes_dry_run_review_packet_and_return_package() -> Result<
     let review_packet = fs::read_to_string(review_packet_path)?;
     assert!(review_packet.contains("Commercial Model Closeout Review Packet"));
     assert!(review_packet.contains("\"verdict\": \"approved|revise|blocked\""));
+    assert!(
+        review_packet.contains("\"packet_goal_coverage\": \"completed|deferred|missing|drifted\"")
+    );
+    assert!(review_packet.contains("Implementation Packet Coverage"));
 
     let return_package = fs::read_to_string(&return_package_path)?;
     assert!(return_package.contains("Ondesk Return Package"));
     assert!(return_package.contains("## Status"));
+    assert!(return_package.contains("implementation packets: 1 scanned; 1 completed"));
+    assert!(return_package.contains("packet detail items: 8 completed"));
+    assert!(return_package.contains("## Implementation Packet Coverage"));
+    assert!(return_package.contains("packet-closeout-test"));
+    assert!(return_package.contains("detail_source: `implementation_packet`"));
+    assert!(return_package.contains("acceptance still depends on closeout review"));
     assert!(return_package.contains("## Decision Needed"));
     assert!(return_package.contains("Required First Reads"));
     assert!(return_package.contains("Result evidence"));
@@ -513,6 +713,198 @@ fn offdesk_closeout_review_receipt_distinguishes_acceptance_from_revision() -> R
     let return_package = fs::read_to_string(return_package_path)?;
     assert!(return_package.contains("acceptance_status: `accepted`"));
     assert!(!return_package.contains("acceptance_status: `revision_required`"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_closeout_flags_missing_packet_detail_evidence() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    fs::write(temp.path().join("README.md"), "# Project\n")?;
+    fs::write(
+        temp.path().join("PROJECT_STATE.md"),
+        format!("# Project State\n\nUpdated: {}\n", Utc::now().date_naive()),
+    )?;
+    fs::write(temp.path().join("DECISIONS.md"), "# Decisions\n")?;
+    fs::write(
+        temp.path().join("DELIVERABLES.md"),
+        "# Deliverables\n\n- `README.md`: project overview.\n",
+    )?;
+
+    let artifact_dir = temp.path().join("run-artifacts");
+    fs::create_dir_all(&artifact_dir)?;
+    let result_path = artifact_dir.join("result.json");
+    fs::write(&result_path, "{\"status\":\"ok\"}")?;
+
+    let now = Utc::now();
+    let packet_dir = artifact_dir
+        .join("implementation_packets")
+        .join("packet-missing-detail");
+    fs::create_dir_all(&packet_dir)?;
+    let packet_path = packet_dir.join("IMPLEMENTATION_PACKET.json");
+    let packet_record = json!({
+        "schema": "implementation_packet.v1",
+        "packet_id": "packet-missing-detail",
+        "created_at": now,
+        "project_key": "project",
+        "project_root": temp.path().to_str().expect("utf-8 temp path"),
+        "source_intent": {
+            "user_goal": "Closeout should flag missing validation evidence.",
+            "why_now": "Acceptance must not hide missing packet detail.",
+            "success_state": "Missing validation and expected artifacts are visible."
+        },
+        "alignment": {
+            "north_star_fit": "Evidence remains inspectable.",
+            "brand_fit": "Forager keeps supervision separate from acceptance.",
+            "product_boundary": "Closeout reports missing evidence only.",
+            "anti_drift_notes": []
+        },
+        "scope": {
+            "included": ["missing evidence detection"],
+            "excluded": ["accepted truth"],
+            "allowed_files": [],
+            "mutation_boundary": "closeout artifacts only",
+            "non_authorized_actions": ["cleanup"]
+        },
+        "capability_mapping": [{
+            "capability_id": "FD-016",
+            "reason": "Packet closeout comparison."
+        }],
+        "design": {
+            "approach": "Detect unmatched validation evidence.",
+            "work_slices": ["missing detail signal"],
+            "interfaces": [],
+            "data_contracts": ["implementation_packet_coverage"],
+            "compatibility_notes": []
+        },
+        "execution": {
+            "preferred_worker": "hosted_harness",
+            "worker_requirements": [],
+            "commands": [],
+            "stop_conditions": ["missing validation artifact"],
+            "rollback_or_recovery": []
+        },
+        "validation": {
+            "tests": ["missing-validation.txt"],
+            "smoke_checks": [],
+            "manual_review": [],
+            "evidence_required": []
+        },
+        "closeout": {
+            "expected_artifacts": ["missing-validation.txt"],
+            "accepted_truth_rule": "Execution evidence is not accepted truth.",
+            "handoff_summary_requirements": []
+        },
+        "recursive_alignment_review": {
+            "schema": "recursive_alignment_review.v1",
+            "reviewer": "deterministic_gate",
+            "outcome": "pass",
+            "checks": {
+                "original_goal_coverage": "complete",
+                "north_star_alignment": "acceptable",
+                "brand_alignment": "acceptable",
+                "scope_balance": "right_sized",
+                "capability_coverage": "complete",
+                "evidence_sufficiency": "sufficient",
+                "completion_definition": "testable"
+            },
+            "drift_signals": [],
+            "missing_decisions": [],
+            "required_revisions": [],
+            "safe_to_delegate": true
+        }
+    });
+    fs::write(&packet_path, serde_json::to_string_pretty(&packet_record)?)?;
+    let alignment_path = packet_dir.join("RECURSIVE_ALIGNMENT_REVIEW.json");
+    let packet_markdown_path = packet_dir.join("IMPLEMENTATION_PACKET.md");
+    fs::write(&alignment_path, "{}")?;
+    fs::write(&packet_markdown_path, "# Implementation Packet\n")?;
+    let packet_summary = json!({
+        "packet_id": "packet-missing-detail",
+        "created_at": now,
+        "project_key": "project",
+        "artifact_dir": packet_dir.to_str().expect("utf-8 packet dir"),
+        "packet_path": packet_path.to_str().expect("utf-8 packet path"),
+        "alignment_review_path": alignment_path.to_str().expect("utf-8 alignment path"),
+        "markdown_path": packet_markdown_path.to_str().expect("utf-8 packet markdown path"),
+        "goal": "Closeout should flag missing validation evidence.",
+        "success_state": "Missing validation and expected artifacts are visible.",
+        "preferred_worker": "hosted_harness",
+        "safe_to_delegate": true,
+        "outcome": "pass",
+        "required_revisions": [],
+        "drift_signals": [],
+        "missing_decisions": [],
+        "work_slice_count": 1,
+        "capability_mapping_count": 1,
+        "validation_item_count": 1,
+        "stop_condition_count": 1,
+        "expected_artifact_count": 1
+    });
+    fs::write(
+        profile_dir.join("offdesk_tasks.json"),
+        serde_json::to_string_pretty(&json!([
+            {
+                "task_id": "task-missing-detail",
+                "request_id": "request-missing-detail",
+                "project_key": "project",
+                "status": "completed",
+                "capability_id": "inspect.status",
+                "runner_kind": "local_tmux",
+                "command": "true",
+                "workdir": temp.path().to_str().expect("utf-8 temp path"),
+                "attempt_count": 1,
+                "created_at": now,
+                "updated_at": now,
+                "preview": "missing detail closeout",
+                "reason": "closeout detail test",
+                "implementation_packet": packet_summary,
+                "result_artifact_path": result_path.to_str().expect("utf-8 result path")
+            }
+        ]))?,
+    )?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "closeout",
+            "--project-key",
+            "project",
+            "--task-id",
+            "task-missing-detail",
+            "--dry-run",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(report["summary"]["packet_goals_completed"], 1);
+    assert_eq!(report["summary"]["packet_detail_items_missing"], 2);
+    assert!(report["open_decisions"]
+        .as_array()
+        .expect("open decisions")
+        .iter()
+        .any(|decision| decision["kind"] == "implementation_packet_coverage_review"));
+    assert!(
+        report["implementation_packet_coverage"]["items"][0]["validation_items"]
+            .as_array()
+            .expect("validation items")
+            .iter()
+            .any(|item| item["label"] == "missing-validation.txt" && item["status"] == "missing")
+    );
+    assert!(
+        report["implementation_packet_coverage"]["items"][0]["expected_artifacts"]
+            .as_array()
+            .expect("expected artifacts")
+            .iter()
+            .any(|item| item["label"] == "missing-validation.txt" && item["status"] == "missing")
+    );
     Ok(())
 }
 

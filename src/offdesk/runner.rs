@@ -17,6 +17,9 @@ use super::background::{
     BackgroundProbe, BackgroundRecoveryDecision, BackgroundRunStore, BackgroundRunnerKind,
     BackgroundRunnerPhase, NotificationDecision,
 };
+use super::implementation_packet::{
+    operator_safe_implementation_packet_summary, ImplementationPacketSummary,
+};
 use super::mode_contract::{assess_offdesk_mode, OffdeskModeAssessment, OffdeskModeLifecycle};
 use super::redaction::operator_safe_text;
 use super::scheduler::{SchedulerGate, SchedulerGateOutcome, SchedulerGateRequest};
@@ -28,6 +31,7 @@ pub struct BackgroundLaunchRequest {
     pub runner_kind: BackgroundRunnerKind,
     pub ticket_id: Option<String>,
     pub launch_spec_summary: Option<String>,
+    pub implementation_packet: Option<ImplementationPacketSummary>,
     pub runtime_handle_alive: bool,
     pub provider_launch_spec_reconstructable: bool,
     pub ack_timeout_sec: i64,
@@ -44,6 +48,7 @@ impl BackgroundLaunchRequest {
             runner_kind,
             ticket_id: None,
             launch_spec_summary: None,
+            implementation_packet: None,
             runtime_handle_alive: true,
             provider_launch_spec_reconstructable: false,
             ack_timeout_sec: 300,
@@ -190,6 +195,10 @@ fn build_background_probe(request: BackgroundLaunchRequest, now: DateTime<Utc>) 
         .launch_spec_summary
         .as_deref()
         .map(operator_safe_text);
+    probe.implementation_packet = request
+        .implementation_packet
+        .as_ref()
+        .map(operator_safe_implementation_packet_summary);
     probe.runtime_handle_alive = request.runtime_handle_alive;
     probe.provider_launch_spec_reconstructable = request.provider_launch_spec_reconstructable;
     probe.ack_timeout_sec = request.ack_timeout_sec.max(1);

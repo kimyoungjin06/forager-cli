@@ -159,6 +159,12 @@ pub struct ApprovalBrief {
     pub subject: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub summary_lines: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub judgment_route_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence_sufficiency: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_if_no_reply: Option<String>,
     pub scope: String,
     pub question: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -233,6 +239,13 @@ impl ApprovalBrief {
                 format!("Reason: {safe_trigger}."),
                 format!("Candidate: {candidate_label}."),
             ],
+            judgment_route_summary: Some(
+                "판단 경로: deterministic gate - provider capacity policy selected operator approval for retargeting.".to_string(),
+            ),
+            evidence_sufficiency: Some(
+                "Provider capacity evidence and ranked fallback candidates are summarized; dispatch still needs a separate approval.".to_string(),
+            ),
+            default_if_no_reply: Some("defer".to_string()),
             options: vec![
                 ApprovalBriefOption {
                     id: "approve".to_string(),

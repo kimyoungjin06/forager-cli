@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use super::adaptive_wiki::{AdaptiveWikiAgentMode, AdaptiveWikiProjectionPolicy};
+use super::implementation_packet::ImplementationPacketSummary;
 use super::redaction::operator_safe_text;
 
 const BACKGROUND_RUNS_FILE: &str = "background_runs.json";
@@ -66,6 +67,8 @@ pub struct BackgroundProbe {
     pub phase: BackgroundRunnerPhase,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch_spec_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub implementation_packet: Option<ImplementationPacketSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_pid: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -130,6 +133,7 @@ impl BackgroundProbe {
             runner_kind,
             phase: BackgroundRunnerPhase::Launched,
             launch_spec_summary: None,
+            implementation_packet: None,
             runtime_pid: None,
             tmux_session_name: None,
             working_dir: None,

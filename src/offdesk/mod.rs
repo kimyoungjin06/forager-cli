@@ -10,6 +10,7 @@ pub mod background;
 pub mod capability;
 pub mod control_loop;
 pub mod decision;
+pub mod implementation_packet;
 pub mod mode_contract;
 pub mod mutation;
 pub mod provider;
@@ -78,7 +79,20 @@ pub use decision::{
     CouncilReview, DecisionLedger, DecisionMateriality, DecisionOption, DecisionRaisedBy,
     DecisionReceipt, DecisionRecord, DecisionRecordView, DecisionRequest, DecisionRoute,
     DecisionRouteTarget, DecisionStatus, DecisionTraceRef, DecisionValidationIssue,
-    DecisionValidationSeverity, ExecutionHandoff, DECISION_RECORD_SCHEMA,
+    DecisionValidationSeverity, ExecutionHandoff, JudgmentEvaluator, JudgmentRoute,
+    DECISION_RECORD_SCHEMA, JUDGMENT_ROUTE_SCHEMA,
+};
+pub use implementation_packet::{
+    draft_implementation_packet, implementation_packet_from_path,
+    implementation_packet_record_from_path, latest_implementation_packet_for_project,
+    operator_safe_implementation_packet_summary, AlignmentReviewOutcome, ImplementationAlignment,
+    ImplementationCapabilityMapping, ImplementationCloseout, ImplementationDesign,
+    ImplementationExecution, ImplementationPacket, ImplementationPacketDraftInput,
+    ImplementationPacketSummary, ImplementationScope, ImplementationSourceIntent,
+    ImplementationValidation, LatestImplementationPacket, RecursiveAlignmentChecks,
+    RecursiveAlignmentReview, IMPLEMENTATION_PACKETS_DIR, IMPLEMENTATION_PACKET_FILE,
+    IMPLEMENTATION_PACKET_MD_FILE, IMPLEMENTATION_PACKET_SCHEMA, RECURSIVE_ALIGNMENT_REVIEW_FILE,
+    RECURSIVE_ALIGNMENT_REVIEW_SCHEMA,
 };
 pub use mode_contract::{
     assess_offdesk_mode, mode_requires_separate_review, OffdeskModeAssessment,

@@ -1717,6 +1717,15 @@ fn retention_request_approval_brief(
             ),
             format!("Recommended by review: {}", target.recommended_action),
         ],
+        judgment_route_summary: Some(
+            "판단 경로: 사용자 - retention follow-up changes artifact governance state and requires bounded operator approval."
+                .to_string(),
+        ),
+        evidence_sufficiency: Some(
+            "Retention review reason, artifact meaning, and up to three artifact refs are summarized; file mutation remains out of scope."
+                .to_string(),
+        ),
+        default_if_no_reply: Some("defer".to_string()),
         scope: "Approves only the retention follow-up request for this artifact; does not delete, move, archive, edit DELIVERABLES.md, publish, or accept output as truth."
             .to_string(),
         question: format!("Approve the {} retention follow-up?", action.as_str()),

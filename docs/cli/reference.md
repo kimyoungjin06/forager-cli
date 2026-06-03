@@ -40,6 +40,7 @@ This document contains the help content for the `forager` command-line program.
 * [`forager project retention-request`↴](#forager-project-retention-request)
 * [`forager project retention-apply`↴](#forager-project-retention-apply)
 * [`forager project retention-promote`↴](#forager-project-retention-promote)
+* [`forager project implementation-packet`↴](#forager-project-implementation-packet)
 * [`forager worktree`↴](#forager-worktree)
 * [`forager worktree list`↴](#forager-worktree-list)
 * [`forager worktree info`↴](#forager-worktree-info)
@@ -547,6 +548,7 @@ Initialize and inspect project operation packets
 * `retention-request` — Create an approval-only artifact retention follow-up request
 * `retention-apply` — Consume an approved artifact retention decision into a profile receipt
 * `retention-promote` — Promote a retained artifact into DELIVERABLES.md with snapshot evidence
+* `implementation-packet` — Draft a design-first implementation packet before delegated execution
 
 
 
@@ -725,6 +727,58 @@ Promote a retained artifact into DELIVERABLES.md with snapshot evidence
 * `--approval-id <APPROVAL_ID>` — Find the latest application receipt for this approval ID
 * `--title <TITLE>` — Override the deliverables entry label
 * `--reviewed` — Confirm that the artifact preview/provenance and deliverables mutation were reviewed
+* `--json` — Output machine-readable JSON
+
+
+
+## `forager project implementation-packet`
+
+Draft a design-first implementation packet before delegated execution
+
+**Usage:** `forager project implementation-packet [OPTIONS] --project-key <PROJECT_KEY> --goal <GOAL> --success-state <SUCCESS_STATE> <PATH>`
+
+###### **Arguments:**
+
+* `<PATH>` — Project repository/root directory the delegated work belongs to
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEY>` — Stable project key used by Ondesk, Offdesk, and adaptive wiki records
+* `--goal <GOAL>` — Original operator goal this packet must preserve
+* `--success-state <SUCCESS_STATE>` — Concrete state that should be true when the work is complete
+* `--why-now <WHY_NOW>` — Why this work matters now. Repeat to add multiple reasons
+* `--north-star-fit <NORTH_STAR_FIT>` — How this serves Forager's north star: evidence, choices, and continuity
+* `--brand-fit <BRAND_FIT>` — How this preserves the current product/brand boundary
+* `--product-boundary <PRODUCT_BOUNDARY>` — What Forager owns and what the hosted worker owns
+* `--scope <SCOPE>` — In-scope work item. Repeat for multiple slices of included scope
+* `--exclude <EXCLUDE>` — Explicit non-goal or out-of-scope item. Repeat for multiple exclusions
+* `--allowed-file <ALLOWED_FILE>` — File, directory, or contract the worker may inspect or edit
+* `--mutation-boundary <MUTATION_BOUNDARY>` — Boundary for permitted mutation. Defaults to read-only packet drafting
+* `--non-authorized-action <NON_AUTHORIZED_ACTION>` — Action this packet never authorizes by itself. Repeat for multiple actions
+* `--capability <CAPABILITY>` — Affected functional capability, optionally as FD-016:reason
+* `--approach <APPROACH>` — Intended implementation approach
+* `--work-slice <WORK_SLICE>` — Worker execution slice. Repeat for multiple slices
+* `--interface <INTERFACE>` — Interface affected or expected by the work. Repeat for multiple interfaces
+* `--data-contract <DATA_CONTRACT>` — Data contract affected or expected by the work. Repeat for multiple contracts
+* `--compatibility-note <COMPATIBILITY_NOTE>` — Compatibility note the worker must preserve
+* `--preferred-worker <PREFERRED_WORKER>` — Preferred worker type, such as local_model, hosted_harness, or deterministic_script
+
+  Default value: `hosted_harness`
+* `--worker-requirement <WORKER_REQUIREMENT>` — Worker requirement that must be true before execution
+* `--command <COMMAND>` — Command the worker or reviewer should run
+* `--stop-condition <STOP_CONDITION>` — Condition where the worker must stop instead of continuing
+* `--recovery-step <RECOVERY_STEP>` — Recovery or rollback instruction if execution fails or stalls
+* `--validation-command <VALIDATION_COMMAND>` — Test or verification command required for closeout
+* `--smoke-check <SMOKE_CHECK>` — Smoke check required for closeout
+* `--manual-review <MANUAL_REVIEW>` — Manual review item required before acceptance
+* `--evidence-ref <EVIDENCE_REF>` — Evidence ref or artifact required to support the result
+* `--expected-artifact <EXPECTED_ARTIFACT>` — Artifact expected from execution
+* `--handoff-requirement <HANDOFF_REQUIREMENT>` — Handoff summary requirement for morning Ondesk review
+* `--reviewer <REVIEWER>` — Reviewer route used for the recursive alignment review
+
+  Default value: `deterministic_gate`
+* `--out <OUT>` — Write the packet artifacts to this directory
+* `--force` — Overwrite known packet files when --out already contains files
 * `--json` — Output machine-readable JSON
 
 
@@ -924,6 +978,7 @@ Gate and record a background runner launch
 * `--provider-id <PROVIDER_ID>` — Provider ID to check against provider capacity cooldown state
 * `--model <MODEL>` — Provider model to check against provider capacity cooldown state
 * `--artifact <ARTIFACT_REFS>` — Artifact reference in ARTIFACT_ID=PATH form
+* `--implementation-packet <IMPLEMENTATION_PACKET>` — Implementation packet JSON or artifact directory to bind to this launch
 * `--artifact-kind <ARTIFACT_KIND>` — Artifact kind used to match adaptive wiki entries
 * `--agent-mode <AGENT_MODE>` — Agent work mode used to match adaptive wiki entries
 * `--ticket-id <TICKET_ID>` — Stable ticket ID. Generated if omitted
@@ -978,6 +1033,7 @@ Enqueue a durable offdesk task
 * `--provider-id <PROVIDER_ID>` — Provider ID to check against provider capacity cooldown state when dispatched
 * `--model <MODEL>` — Provider model to check against provider capacity cooldown state when dispatched
 * `--artifact <ARTIFACT_REFS>` — Artifact reference in ARTIFACT_ID=PATH form
+* `--implementation-packet <IMPLEMENTATION_PACKET>` — Implementation packet JSON or artifact directory to bind to this task
 * `--artifact-kind <ARTIFACT_KIND>` — Artifact kind used to match adaptive wiki entries
 * `--agent-mode <AGENT_MODE>` — Agent work mode used to match adaptive wiki entries
 * `--preview <PREVIEW>` — Operator-safe action preview

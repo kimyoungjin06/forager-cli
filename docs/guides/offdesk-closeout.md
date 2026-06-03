@@ -143,6 +143,21 @@ from matched run artifact directories, such as the directory containing
 `closeout_plan.json`. Receipted records remain in `decision_records` as history
 and are not treated as open unless their schema validation fails.
 
+When matched tasks or background runs carry an implementation packet summary,
+closeout also writes `implementation_packet_coverage`. The coverage section
+answers whether the packet-level goal is `completed`, `deferred`, `missing`, or
+`drifted`, and repeats that summary in `CLOSEOUT_PLAN.md`, `RETURN_PACKAGE.md`,
+and the commercial review packet. A `completed` packet coverage item means
+execution evidence exists; it still does not mean the work is accepted truth
+until closeout review and first-read verification are complete.
+
+If the original packet JSON is still readable, closeout also itemizes
+`work_slices`, `validation_items`, and `expected_artifacts`. Validation and
+expected-artifact items are marked completed only when closeout evidence refs
+match them; otherwise they remain visible as missing detail items. Work slices
+currently inherit the packet-level status because Forager does not yet store
+per-slice execution receipts.
+
 The return package is intentionally shorter than `closeout_plan.json` and
 `cleanup_manifest.json`. It starts with status, decisions needed, capped first
 reads, a short change summary, grouped evidence, documentation governance

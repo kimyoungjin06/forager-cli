@@ -303,6 +303,7 @@ fn seed_tasks(root: &Path, task_count: usize, now: DateTime<Utc>) -> Result<()> 
                     not_before: None,
                     mutation_class: None,
                     artifact_refs: Vec::new(),
+                    implementation_packet: None,
                     artifact_kind: None,
                     agent_mode: None,
                     provider_id: None,
