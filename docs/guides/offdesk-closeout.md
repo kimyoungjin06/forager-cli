@@ -169,11 +169,15 @@ result. These receipts mark each planned slice `deferred`: the runner can prove
 that a result artifact exists, but a worker-authored receipt or human review is
 still needed before a slice is treated as semantically complete.
 
+See [Implementation Packet And Recursive Alignment Review](../implementation-packet.md)
+for the receipt schema and the runner-versus-worker evidence boundary.
+
 The latest matching `review_surface.v1` projects a compact copy of this
 coverage under `closeout.implementation_packet_coverage`, and
 `forager ondesk prompt-package` renders the packet/detail counts in the morning
-review section. This keeps missing validation or expected-artifact evidence
-visible when a fresh harness resumes from Ondesk.
+review section. This keeps deferred or drifted work slices, missing validation,
+and missing expected-artifact evidence visible when a fresh harness resumes from
+Ondesk.
 
 The return package is intentionally shorter than `closeout_plan.json` and
 `cleanup_manifest.json`. It starts with status, decisions needed, capped first

@@ -25,7 +25,7 @@ import { sitePath } from '../../lib/paths';
         <ol>
           <li><strong>Ondesk planning:</strong> create focused sessions, isolate branches with worktrees, and decide which tasks are safe to run unattended.</li>
           <li><strong>Offdesk execution:</strong> queue durable tasks behind approval gates, provider fallback checks, recovery records, and audit trails.</li>
-          <li><strong>Morning review:</strong> inspect task status, background probes, debug bundles, maintenance reports, Council decisions, result artifacts, and closeout needs.</li>
+          <li><strong>Morning review:</strong> inspect task status, background probes, debug bundles, maintenance reports, Council decisions, result artifacts, implementation packet coverage, and closeout needs.</li>
           <li><strong>Closeout:</strong> generate the dry-run cleanup plan, commercial review packet, and Ondesk return package before resuming hands-on work.</li>
           <li><strong>Knowledge promotion:</strong> promote adaptive wiki candidates only after reviewing evidence, counterexamples, scope, and freshness.</li>
         </ol>
@@ -46,6 +46,16 @@ forager offdesk closeout --dry-run</code></pre>
         </p>
         <p>
           The TUI morning-review card and status bar now use the same <code>next_safe_actions</code> contract as <code>forager status</code>, <code>offdesk pending</code>, <code>offdesk poll</code>, and <code>offdesk maintenance-report</code>. Treat the first action as the next bounded operator step, not as broad permission to clean up files, promote wiki entries, or accept results.
+        </p>
+      </section>
+
+      <section>
+        <h2>Implementation Packet Coverage</h2>
+        <p>
+          If the overnight task started from an implementation packet, review whether the original goal, work slices, validation items, and expected artifacts came back as completed, deferred, missing, or drifted.
+        </p>
+        <p>
+          Runner-generated deferred work-slice receipts mean the supervised run reached a terminal result and left a result artifact. They are not acceptance. They are the cue for Ondesk review, worker-authored receipt follow-up, or a narrower recovery task.
         </p>
       </section>
 

@@ -1012,8 +1012,10 @@ Open Design Questions:
 - Should packets be generated from templates, from Council review, or from a
   deterministic collector plus routed judgment?
 - Which packet fields become mandatory before local-model overnight execution?
-- Should every worker emit one work-slice receipt per planned slice, or should
-  closeout synthesize missing receipts from runtime evidence where possible?
+- Which worker backends should emit worker-authored receipts beyond
+  runner-generated deferred receipts?
+- What evidence threshold promotes a slice from `deferred` into `completed`,
+  `missing`, or `drifted`?
 
 ## Cross-Capability Invariants
 
@@ -1132,6 +1134,9 @@ Completed P1 operator workflow slice:
 16. Expand packet-aware closeout into itemized work-slice, validation, and
     expected-artifact coverage. Validation and expected-artifact items are
     matched against task/background evidence refs where possible.
+17. Add typed `work_slice_execution_receipt.v1` sidecars, closeout projection,
+    Ondesk/review-surface rendering, and runner-generated deferred receipts for
+    packet-bound terminal local runs.
 
 Remaining P1 operator workflow slice:
 1. Standardize retention-class names across project templates.

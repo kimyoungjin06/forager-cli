@@ -28,7 +28,8 @@ deliberate knowledge promotion.
   patterns are translated through Forager's invariants before implementation.
 - [Implementation Packet And Recursive Alignment Review](implementation-packet.md)
   defines the design-first packet that preserves original intent, brand
-  boundary, scope, and completion criteria before substantial delegation.
+  boundary, scope, completion criteria, and work-slice receipt boundary before
+  substantial delegation.
 - [Decision Pipeline](decision-pipeline.md) defines the canonical state model
   for Agent to Council to User decisions before execution handoff.
 - [Operation Cycle](guides/operation-cycle.md) explains the Ondesk to Offdesk to

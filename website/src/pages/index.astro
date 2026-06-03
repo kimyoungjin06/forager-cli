@@ -21,7 +21,7 @@ const features = [
   {
     icon: 'groups',
     title: 'Evidence-first Offdesk',
-    description: 'Return to heartbeat, progress, logs, result artifacts, closeout packets, and decision surfaces instead of a long terminal scrollback.',
+    description: 'Return to heartbeat, progress, logs, result artifacts, packet coverage, closeout receipts, and decision surfaces instead of terminal scrollback.',
   },
   {
     icon: 'dashboard',
@@ -187,7 +187,7 @@ const promises = [
 
         <div class="space-y-9">
           <Step number={1} title="Prepare bounded work">
-            <p class="leading-relaxed text-slate-400">Capture intent, target repo, branch/worktree, agent mode, required artifacts, and approval scope.</p>
+            <p class="leading-relaxed text-slate-400">Capture intent, target repo, branch/worktree, agent mode, work slices, required artifacts, and approval scope.</p>
           </Step>
 
           <Step number={2} title="Launch under explicit approval">
@@ -195,7 +195,7 @@ const promises = [
           </Step>
 
           <Step number={3} title="Return to evidence">
-            <p class="leading-relaxed text-slate-400">Inspect heartbeat, progress, logs, result artifacts, stale or failed state, and review recommendations.</p>
+            <p class="leading-relaxed text-slate-400">Inspect heartbeat, progress, logs, result artifacts, packet coverage, stale or failed state, and review recommendations.</p>
           </Step>
 
           <Step number={4} title="Hand off to a fresh harness">
