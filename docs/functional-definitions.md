@@ -145,6 +145,7 @@ new UI should project these contracts instead of inventing a separate model.
 | `artifact_index` | FD-012 | Findable inventory of outputs, retention class, and disposal status. | User surfaces explain why an artifact matters before exposing its path. |
 | `implementation_packet.v1` | FD-016 | Design-first packet for substantial delegated work. | Human surfaces show goal, alignment, scope, and readiness; JSON preserves commands, refs, stop conditions, and validation plan. |
 | `recursive_alignment_review.v1` | FD-016 | Self-review that checks original goal coverage, north-star fit, brand fit, scope balance, and completion definition. | Surfaces show pass/revise/block and missing goals before worker launch or closeout acceptance. |
+| `work_slice_execution_receipt.v1` | FD-016 | Slice-level execution receipt for work delegated from an implementation packet. | Human surfaces show attention slices and counts; JSON preserves packet ids, slice ids, status, evidence refs, drift signals, and next safe action. |
 
 ## FD-001 Local Profile State
 
@@ -973,6 +974,7 @@ Inputs:
 Outputs:
 - `implementation_packet.v1`.
 - `recursive_alignment_review.v1`.
+- `work_slice_execution_receipt.v1` when slice-level execution evidence exists.
 - Design review outcome: `pass`, `revise`, or `block`.
 - Worker-ready execution summary when approved.
 - Closeout comparison between intended outcomes and actual results.
@@ -991,6 +993,9 @@ Acceptance Criteria:
   on evidence, or disconnected from the product direction.
 - Worker closeout reports which packet goals were completed, deferred, missing,
   or drifted.
+- Work slices with explicit receipts use slice-level status and evidence;
+  unreceipted slices remain visible as manual-review items instead of silently
+  disappearing into packet-level status.
 - Morning Ondesk review can tell whether execution served the original purpose
   rather than only completing a narrow implementation slice.
 
@@ -1007,6 +1012,8 @@ Open Design Questions:
 - Should packets be generated from templates, from Council review, or from a
   deterministic collector plus routed judgment?
 - Which packet fields become mandatory before local-model overnight execution?
+- Should every worker emit one work-slice receipt per planned slice, or should
+  closeout synthesize missing receipts from runtime evidence where possible?
 
 ## Cross-Capability Invariants
 
@@ -1140,8 +1147,9 @@ P2 expansion slice:
    labels for decisions, closeouts, retention reviews, and prompt packages.
 4. Add a read-only evidence source registry and local evidence index before any
    writable memory or MCP surface.
-5. Add explicit per-work-slice execution receipts and richer drift explanations
-   after enough closeout evidence exists.
+5. Implement `work_slice_execution_receipt.v1` collection and closeout
+   projection after enough closeout evidence exists to define completed,
+   deferred, missing, and drifted status consistently.
 6. Add `context_packet.v1` for hosted harness launch, Council review, and
    Ondesk resume once evidence refs are retrievable.
 7. Add failure-learning candidates from failed sessions, corrected commands,

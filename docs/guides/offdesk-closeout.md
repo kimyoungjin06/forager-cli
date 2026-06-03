@@ -156,7 +156,10 @@ If the original packet JSON is still readable, closeout also itemizes
 expected-artifact items are marked completed only when closeout evidence refs
 match them; otherwise they remain visible as missing detail items. Work slices
 currently inherit the packet-level status because Forager does not yet store
-per-slice execution receipts.
+per-slice execution receipts. The planned `work_slice_execution_receipt.v1`
+contract will let each slice report `completed`, `deferred`, `missing`, or
+`drifted` from its own evidence refs; until that exists, inherited work-slice
+status should be treated as a manual-review hint rather than accepted evidence.
 
 The latest matching `review_surface.v1` projects a compact copy of this
 coverage under `closeout.implementation_packet_coverage`, and
