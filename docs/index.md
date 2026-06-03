@@ -26,12 +26,18 @@ deliberate knowledge promotion.
   capabilities independently from the current UI or implementation shape.
 - [Gajae-Code Benchmarking](gajae-benchmarking.md) records how external harness
   patterns are translated through Forager's invariants before implementation.
+- [Implementation Packet And Recursive Alignment Review](implementation-packet.md)
+  defines the design-first packet that preserves original intent, brand
+  boundary, scope, and completion criteria before substantial delegation.
 - [Decision Pipeline](decision-pipeline.md) defines the canonical state model
   for Agent to Council to User decisions before execution handoff.
 - [Operation Cycle](guides/operation-cycle.md) explains the Ondesk to Offdesk to
   Ondesk loop.
 - [Hosted Harness Agents](hosted-harness-agents.md) defines how external
   harness-backed agents fit into Forager.
+- [Evidence Search And Memory Boundary](evidence-search-and-memory-boundary.md)
+  translates external memory, context-budget, and operator workflow patterns
+  into Forager's evidence, candidate, and promotion boundaries.
 - [Quick Start](quick-start.md) gets the TUI running for ordinary agent sessions.
 
 ## Why Forager?

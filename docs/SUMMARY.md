@@ -8,9 +8,13 @@
 
 [Gajae-Code Benchmarking](gajae-benchmarking.md)
 
+[Implementation Packet And Recursive Alignment Review](implementation-packet.md)
+
 [Decision Pipeline](decision-pipeline.md)
 
 [Hosted Harness Agents](hosted-harness-agents.md)
+
+[Evidence Search And Memory Boundary](evidence-search-and-memory-boundary.md)
 
 # Getting Started
 

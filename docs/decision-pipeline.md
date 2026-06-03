@@ -39,9 +39,12 @@ Forager translates that into:
 
 ```text
 Agent raises issue
-  -> Council reviews evidence and options
-  -> Decision Router classifies materiality
-  -> low or policy-resolvable: Council returns guidance to Agent
+  -> evidence and context packet are assembled
+  -> implementation packet is drafted when delegated execution needs design
+  -> Judgment Router selects Council, one harness, deterministic gate, or user
+  -> selected evaluator reviews evidence and options
+  -> Decision Router classifies delivery and authorization path
+  -> policy-resolvable: guidance or receipt is produced without interruption
   -> material: User receives a compact decision brief
   -> approved choice becomes execution handoff
   -> result closes with decision receipt
@@ -161,9 +164,46 @@ Recommended fields:
 Raw Council outputs remain evidence. The operator should receive a synthesized
 brief, not raw role transcripts.
 
+### `JudgmentRoute`
+
+Evaluator-routing object. It decides who or what should evaluate the issue
+before any delivery or execution route is selected.
+
+Recommended fields:
+
+```json
+{
+  "schema": "judgment_route.v1",
+  "evaluator": "council",
+  "reason": "The issue changes the next episode direction and has tradeoff risk.",
+  "policy_basis": [
+    "materiality=high",
+    "competing options need comparison"
+  ],
+  "evidence_refs": [],
+  "selected_by": "decision_router",
+  "selected_at": "2026-06-01T00:00:00Z"
+}
+```
+
+Evaluator targets:
+
+| Evaluator | Meaning |
+| --- | --- |
+| `council` | Use multiple perspectives for tradeoffs, disagreement, or recommendation. |
+| `single_harness` | Use one capable harness-backed agent for narrow analysis or summarization. |
+| `deterministic_gate` | Use tests, schema validation, policy checks, or state rules that can decide directly. |
+| `user` | Ask the operator because the remaining choice is authority, preference, or risk tolerance. |
+
+`JudgmentRoute` should not authorize mutation. It records the evaluation path
+and rationale. Its output may then feed `DecisionRoute`, `approval_brief.v1`,
+`ExecutionHandoff`, closeout review, or a receipt.
+
 ### `DecisionRoute`
 
-Router output. It decides whether the operator must be interrupted.
+Delivery-routing object. It decides where the evaluated decision should go next:
+back to an agent, to the user, to the approval ledger, or to closeout. It should
+not be used as the only record of who evaluated the issue.
 
 Recommended fields:
 
@@ -186,6 +226,10 @@ Targets:
 | `user` | Create an operator-facing decision brief. |
 | `approval_ledger` | Create or link a mutation approval. |
 | `closeout` | Defer until closeout review rather than interrupting runtime. |
+
+Implementation note: the current schema keeps `JudgmentRoute` and
+`DecisionRoute` as separate objects. `JudgmentRoute` records evaluator selection;
+`DecisionRoute` records delivery or execution routing.
 
 ### `DecisionBrief`
 
@@ -339,6 +383,7 @@ Current workload-specific Council scripts can become producers:
 ```text
 council record
   -> DecisionRequest + CouncilReview
+  -> JudgmentRoute
   -> DecisionRoute
   -> approval_brief.v1 projection
 ```
@@ -354,8 +399,12 @@ Current producer behavior:
 - `build_ondesk_handoff_request` also includes a `decision_record.v1` parent
   record for the morning handoff entry decision.
 - Python producers share `scripts/offdesk_decision_records.py` for stable ids,
-  approval-brief projection, trace refs, and run-local ledger mirroring.
+  judgment routes, approval-brief projection, trace refs, and run-local ledger
+  mirroring.
 - The Telegram relay continues to render from `approval_brief.v1`.
+- Telegram detail views also read `DecisionRecord.judgment_route` so the compact
+  brief can explain why Council, a deterministic gate, a single harness, or the
+  user is evaluating the decision.
 - The workload mirrors the parent record to the episode operator-decision
   directory and appends it to run-local `offdesk_decisions.jsonl`.
 - The run-local ledger is evidence for closeout and later ingestion; it does

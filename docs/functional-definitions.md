@@ -76,6 +76,7 @@ Open Design Questions:
 | FD-013 | Provider And Model Routing | Select a viable worker without hiding risk | P2 |
 | FD-014 | Harness Comparison And Evaluation | Compare agents by task evidence | P2 |
 | FD-015 | External Orchestration Boundary | Coordinate without surrendering local truth | P2 |
+| FD-016 | Implementation Packet And Alignment Review | Preserve original purpose before delegation | P1 |
 
 ## Priority And Readiness
 
@@ -120,6 +121,7 @@ Rule:
 | FD-013 Provider And Model Routing | FD-003, FD-004 | Routing changes are worker changes and may require approval. |
 | FD-014 Harness Comparison And Evaluation | FD-003, FD-007, FD-012 | Comparisons need comparable runs, accepted closeouts, and artifacts. |
 | FD-015 External Orchestration Boundary | FD-001, FD-004, FD-008 | External systems should call contracts, not become the truth source. |
+| FD-016 Implementation Packet And Alignment Review | FD-003, FD-004, FD-007, FD-008 | Delegated work needs a design packet, routed review, closeout comparison, and resume surface. |
 
 ## Shared Data Contracts
 
@@ -132,7 +134,8 @@ new UI should project these contracts instead of inventing a separate model.
 | `session_record` | FD-002 | Interactive or hosted harness session identity, cwd, provider, and lifecycle. | TUI can show compact status; detailed paths stay in JSON/details. |
 | `hosted_workload` | FD-003 | External agent command, model/provider, runtime handle, and safety envelope. | Operator summaries show who is working and why, not raw command dumps first. |
 | `decision_record.v1` | FD-004 | Durable decision, options, rationale, response, and effect. | Telegram shows the choice problem; JSON preserves ids, files, and receipts. |
-| `approval_brief.v1` | FD-004 | Human-readable decision card generated from Council or agent evidence. | Must include context, options, recommendation, tradeoff, and default timeout behavior. |
+| `judgment_route.v1` | FD-004 | Records whether evaluation is routed to Council, one harness-backed agent, deterministic gates, or the user. | Human surfaces show route and reason; JSON preserves evaluator ids, evidence refs, and route policy. |
+| `approval_brief.v1` | FD-004 | Human-readable decision card generated from routed judgment and evidence. | Must include context, options, evaluator route summary, recommendation, evidence sufficiency, tradeoff, and default timeout behavior. |
 | `decision_receipt` | FD-004 | Proof that an approval, rejection, or natural-language response was handled. | Surfaces show final status and consequence before implementation continues. |
 | `offdesk_task` | FD-005 | Unattended workload scope, guardrails, heartbeat, and stop conditions. | Summaries show progress, ETA, blockers, and interruption safety. |
 | `runtime_evidence` | FD-005 | Heartbeat, progress events, logs, and process handle evidence. | Human surfaces summarize; machine surfaces retain artifact refs. |
@@ -140,6 +143,8 @@ new UI should project these contracts instead of inventing a separate model.
 | `closeout_receipt.v1` | FD-007 | Completion status, accepted-truth state, evidence, and unresolved risk. | Never collapse `execution_complete` into `accepted`. |
 | `review_surface.v1` | FD-008 | Rich review packet shared by WebUI, Ondesk handoff, and detail views. | Rich surfaces consume this packet as their read model. |
 | `artifact_index` | FD-012 | Findable inventory of outputs, retention class, and disposal status. | User surfaces explain why an artifact matters before exposing its path. |
+| `implementation_packet.v1` | FD-016 | Design-first packet for substantial delegated work. | Human surfaces show goal, alignment, scope, and readiness; JSON preserves commands, refs, stop conditions, and validation plan. |
+| `recursive_alignment_review.v1` | FD-016 | Self-review that checks original goal coverage, north-star fit, brand fit, scope balance, and completion definition. | Surfaces show pass/revise/block and missing goals before worker launch or closeout acceptance. |
 
 ## FD-001 Local Profile State
 
@@ -292,18 +297,21 @@ Purpose:
 Actors:
 - Agent.
 - Council/reviewer.
+- Deterministic gate or local automation.
 - Operator.
 - Telegram relay or other notification bridge.
 
 Inputs:
 - Decision request.
 - Approval brief.
+- Judgment route and route rationale.
 - Options and decision impacts.
 - Scope and non-authorized boundary.
 - Optional free-form operator instruction.
 
 Outputs:
 - `decision_record.v1`.
+- `judgment_route.v1`.
 - Approval brief projection.
 - Execution handoff when approved.
 - Decision receipt when consumed or closed.
@@ -315,6 +323,8 @@ Authorization Boundary:
 
 Acceptance Criteria:
 - The operator can see what is being decided and what is not being decided.
+- The route records whether the decision was evaluated by Council, a single
+  harness-backed agent, deterministic gates, or the user.
 - Telegram or any other relay is a projection, not canonical state.
 - Free-form replies are scoped or treated as ambiguous.
 - Applied handoffs can be closed by receipt.
@@ -328,6 +338,8 @@ Primary Surfaces:
 Open Design Questions:
 - Which decision types need stricter typed options rather than generic
   approval/deny/defer choices?
+- Which policy chooses Council, one harness-backed agent, deterministic gates,
+  or direct user decision for each workflow?
 
 ## FD-005 Offdesk Runtime Supervision
 
@@ -937,6 +949,65 @@ Open Design Questions:
 - Whether a local HTTP API is needed before WebUI exists, or whether CLI JSON is
   enough for the next phase.
 
+## FD-016 Implementation Packet And Alignment Review
+
+Purpose:
+- Preserve original operator intent, Forager's north star, brand boundary,
+  scope, validation plan, and stop conditions before substantial work is
+  delegated to Offdesk, Council, a hosted harness agent, or a local model.
+
+Actors:
+- Operator.
+- Council/reviewer.
+- Hosted harness agent.
+- Local LLM worker.
+- Fresh Ondesk harness.
+
+Inputs:
+- User goal or task request.
+- Project direction and brand boundary.
+- Relevant functional capabilities.
+- Current decisions, closeout state, review surface, and evidence refs.
+- Proposed implementation approach and validation plan.
+
+Outputs:
+- `implementation_packet.v1`.
+- `recursive_alignment_review.v1`.
+- Design review outcome: `pass`, `revise`, or `block`.
+- Worker-ready execution summary when approved.
+- Closeout comparison between intended outcomes and actual results.
+
+Authorization Boundary:
+- Permits design review and worker instruction generation.
+- Does not authorize runtime mutation, cleanup, wiki promotion, retention
+  action, provider retargeting, or accepted truth by itself.
+
+Acceptance Criteria:
+- A substantial delegated task can be understood from the packet without chat
+  scrollback.
+- The packet states original goal, success state, north-star fit, brand fit,
+  included scope, excluded scope, stop conditions, and validation requirements.
+- Recursive alignment review flags when the plan is too narrow, too broad, weak
+  on evidence, or disconnected from the product direction.
+- Worker closeout reports which packet goals were completed, deferred, missing,
+  or drifted.
+- Morning Ondesk review can tell whether execution served the original purpose
+  rather than only completing a narrow implementation slice.
+
+Primary Surfaces:
+- `forager project implementation-packet` CLI JSON.
+- Offdesk launch records.
+- Council design review prompts.
+- Review surface packet.
+- Ondesk prompt package.
+- WebUI packet review.
+
+Open Design Questions:
+- Which task size or risk threshold requires a full implementation packet?
+- Should packets be generated from templates, from Council review, or from a
+  deterministic collector plus routed judgment?
+- Which packet fields become mandatory before local-model overnight execution?
+
 ## Cross-Capability Invariants
 
 - Local profile state is canonical.
@@ -947,6 +1018,8 @@ Open Design Questions:
 - Operator-facing summaries are compact and redacted.
 - Machine-readable evidence stays available.
 - Fresh harnesses start from artifacts, not from inherited chat.
+- Delegated work starts from original intent and returns to that intent at
+  closeout.
 - Legacy compatibility is explicit and should fade over time.
 
 ## Surface Projection Rules
@@ -985,6 +1058,8 @@ A capability definition is ready to become an implementation spec when it has:
 - A redaction rule for operator-facing summaries.
 - A validation plan with tests, smoke commands, or inspectable artifacts.
 - A compatibility note for transitional or legacy state.
+- A recursive alignment check when the capability can delegate substantial
+  work or affect the product direction.
 
 If one of these is unknown, the implementation spec should name the unknown
 explicitly instead of hiding it inside UI behavior.
@@ -1025,6 +1100,31 @@ Completed P1 operator workflow slice:
    surfaces.
 7. Add `project retention-request` as an approval-only bridge from retention
    review items into the pending approval ledger.
+8. Define `judgment_route.v1` beside the existing decision route so evaluator
+   routing and delivery/execution routing are not conflated.
+9. Project `judgment_route.v1` across Telegram, CLI JSON, CLI human views,
+   `review_surface.v1`, and Ondesk prompt packages.
+10. Update `approval_brief.v1` summaries to explain evaluator route, route
+    reason, recommendation, consequence, and evidence sufficiency without
+    putting raw ids or paths in the primary card.
+11. Add focused regression coverage for approval brief quality warnings, detail
+    card evidence sufficiency, and prompt-package judgment route summaries.
+12. Implement `implementation_packet.v1` and `recursive_alignment_review.v1`
+    as typed state plus `forager project implementation-packet` CLI JSON and
+    profile-local artifacts.
+13. Project the latest `implementation_packet.v1` summary into
+    `review_surface.v1` and Ondesk prompt packages so a returning harness can
+    see source intent, delegation readiness, missing decisions, and validation
+    shape before continuing.
+14. Bind implementation packet summaries to Offdesk task/background launch
+    records and Telegram/Ondesk detail projections without granting runtime
+    authority.
+15. Add packet-aware closeout comparison so linked implementation packets are
+    reported as completed, deferred, missing, or drifted before any accepted
+    truth decision.
+16. Expand packet-aware closeout into itemized work-slice, validation, and
+    expected-artifact coverage. Validation and expected-artifact items are
+    matched against task/background evidence refs where possible.
 
 Remaining P1 operator workflow slice:
 1. Standardize retention-class names across project templates.
@@ -1036,7 +1136,28 @@ P2 expansion slice:
 1. Normalize hosted harness capability contracts for Claude Code, Codex,
    OpenCode, OpenHands, Gemini CLI, and local scripts.
 2. Add harness comparison records after enough accepted evidence exists.
-3. Decide whether a local HTTP API is needed after CLI JSON proves stable.
+3. Define common source/evidence refs with source hashes and transformation
+   labels for decisions, closeouts, retention reviews, and prompt packages.
+4. Add a read-only evidence source registry and local evidence index before any
+   writable memory or MCP surface.
+5. Add explicit per-work-slice execution receipts and richer drift explanations
+   after enough closeout evidence exists.
+6. Add `context_packet.v1` for hosted harness launch, Council review, and
+   Ondesk resume once evidence refs are retrievable.
+7. Add failure-learning candidates from failed sessions, corrected commands,
+   and repeated user corrections, but route promotion through adaptive wiki or
+   runbook receipts.
+8. Add daily/operator briefing projections from deterministic collection plus
+   routed judgment.
+9. Decide whether a local HTTP API is needed after CLI JSON proves stable.
+
+P3 integration slice:
+1. Expose read-only MCP/local API tools for status, evidence search, closeout,
+   pending decisions, and wiki candidates.
+2. Add optional semantic search or compression sidecars only after rebuild,
+   retrieval, redaction, and privacy checks are proven.
+3. Keep writable external integrations approval-gated through existing decision
+   and receipt contracts.
 
 ## How To Use This Document
 
