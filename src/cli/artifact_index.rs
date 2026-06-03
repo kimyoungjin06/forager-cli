@@ -4,7 +4,7 @@ use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Duration, Utc};
 use clap::{Args, ValueEnum};
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -14,7 +14,8 @@ use std::path::{Path, PathBuf};
 use crate::offdesk::{
     operator_safe_text, ActionApprovalMetadata, ActionApprovalRequest, ApprovalBrief,
     ApprovalBriefOption, ApprovalLedger, ApprovalStatus, ArtifactRetentionApprovalMetadata,
-    PendingActionApproval, RiskLevel,
+    MutationRestorePlan, MutationSnapshotRequest, MutationSnapshotStore,
+    MutationSnapshotVerification, PendingActionApproval, RiskLevel,
 };
 use crate::session::get_profile_dir;
 
@@ -22,8 +23,11 @@ const ARTIFACT_INDEX_SCHEMA: &str = "artifact_index.v1";
 const ARTIFACT_RETENTION_REVIEW_SCHEMA: &str = "artifact_retention_review.v1";
 const ARTIFACT_RETENTION_APPROVAL_REQUEST_SCHEMA: &str = "artifact_retention_approval_request.v1";
 const ARTIFACT_RETENTION_APPLICATION_SCHEMA: &str = "artifact_retention_application.v1";
+const ARTIFACT_RETENTION_PROMOTION_SCHEMA: &str = "artifact_retention_promotion.v1";
 const ARTIFACT_RETENTION_APPLICATIONS_DIR: &str = "artifact_retention_applications";
+const ARTIFACT_RETENTION_PROMOTIONS_DIR: &str = "artifact_retention_promotions";
 const RETENTION_APPROVAL_ACTION: &str = "maintenance.artifact_cleanup";
+const RETENTION_PROMOTE_MUTATION_KIND: &str = "retention.promote_deliverable";
 const DELIVERABLE_EXTENSIONS: &[&str] = &[".html", ".png", ".jpg", ".jpeg", ".pdf"];
 const OUTPUT_ROOTS: &[&str] = &["outputs", "web", "deliverables", "previews", "gallery"];
 const MAX_INDEX_ENTRIES: usize = 240;
@@ -119,6 +123,37 @@ pub struct ProjectRetentionApplyArgs {
     /// Write the receipt to this path instead of the profile receipt directory
     #[arg(long)]
     receipt_out: Option<PathBuf>,
+
+    /// Output machine-readable JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct ProjectRetentionPromoteArgs {
+    /// Project repository/root directory whose DELIVERABLES.md should be updated.
+    /// Defaults to the current directory.
+    path: Option<PathBuf>,
+
+    /// Stable project key used to validate the retention application receipt
+    #[arg(long)]
+    project_key: String,
+
+    /// artifact_retention_application.v1 receipt path to promote from
+    #[arg(long, conflicts_with = "approval_id")]
+    receipt: Option<PathBuf>,
+
+    /// Find the latest application receipt for this approval ID
+    #[arg(long, conflicts_with = "receipt")]
+    approval_id: Option<String>,
+
+    /// Override the deliverables entry label
+    #[arg(long)]
+    title: Option<String>,
+
+    /// Confirm that the artifact preview/provenance and deliverables mutation were reviewed
+    #[arg(long)]
+    reviewed: bool,
 
     /// Output machine-readable JSON
     #[arg(long)]
@@ -353,7 +388,7 @@ struct ArtifactRetentionApplicationReport {
     authority: ArtifactRetentionApplicationAuthority,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ArtifactRetentionApplicationTarget {
     artifact_id: String,
     label: String,
@@ -371,7 +406,7 @@ struct ArtifactRetentionApplicationTarget {
     refs: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ArtifactRetentionApplicationOperation {
     operation_id: String,
     mutation_performed: bool,
@@ -382,7 +417,7 @@ struct ArtifactRetentionApplicationOperation {
     blockers: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ArtifactRetentionApplicationApproval {
     before_status: ApprovalStatus,
     after_status: ApprovalStatus,
@@ -396,6 +431,70 @@ struct ArtifactRetentionApplicationAuthority {
     writes_profile_receipt: bool,
     writes_project_state: bool,
     writes_files: bool,
+    does_not_authorize: Vec<&'static str>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ArtifactRetentionApplicationReceipt {
+    schema: String,
+    generated_at: DateTime<Utc>,
+    status: String,
+    project_key: String,
+    #[serde(default)]
+    project_root: Option<String>,
+    approval_id: String,
+    request_id: String,
+    task_id: String,
+    requested_action: String,
+    target: ArtifactRetentionApplicationTarget,
+    operation: ArtifactRetentionApplicationOperation,
+    approval: ArtifactRetentionApplicationApproval,
+}
+
+struct LoadedRetentionApplicationReceipt {
+    path: PathBuf,
+    receipt: ArtifactRetentionApplicationReceipt,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ArtifactRetentionPromotionReport {
+    schema: &'static str,
+    generated_at: DateTime<Utc>,
+    status: String,
+    project_key: String,
+    project_root: String,
+    source_receipt: ArtifactRetentionPromotionSource,
+    target: ArtifactRetentionApplicationTarget,
+    deliverables_path: String,
+    deliverables_entry: String,
+    reviewed: bool,
+    mutation_performed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    snapshot_verification: Option<MutationSnapshotVerification>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    restore_plan: Option<MutationRestorePlan>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    promotion_receipt_path: Option<String>,
+    next_actions: Vec<String>,
+    authority: ArtifactRetentionPromotionAuthority,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ArtifactRetentionPromotionSource {
+    receipt_path: String,
+    approval_id: String,
+    request_id: String,
+    task_id: String,
+    application_generated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ArtifactRetentionPromotionAuthority {
+    requires_reviewed_flag: bool,
+    requires_snapshot: bool,
+    writes_project_state: bool,
+    writes_profile_receipt: bool,
+    supported_action: &'static str,
     does_not_authorize: Vec<&'static str>,
 }
 
@@ -481,6 +580,17 @@ pub async fn run_retention_apply(profile: &str, args: ProjectRetentionApplyArgs)
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         print!("{}", retention_application_human_summary(&report));
+    }
+    Ok(())
+}
+
+pub async fn run_retention_promote(profile: &str, args: ProjectRetentionPromoteArgs) -> Result<()> {
+    let json = args.json;
+    let report = build_retention_promotion(profile, args)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        print!("{}", retention_promotion_human_summary(&report));
     }
     Ok(())
 }
@@ -984,6 +1094,442 @@ fn write_retention_application_receipt(
     }
     let content = serde_json::to_string_pretty(report).context("serialize retention receipt")?;
     fs::write(path, format!("{content}\n")).with_context(|| format!("write {}", path.display()))
+}
+
+fn build_retention_promotion(
+    profile: &str,
+    args: ProjectRetentionPromoteArgs,
+) -> Result<ArtifactRetentionPromotionReport> {
+    let project_root = resolve_project_root(args.path.as_deref())?
+        .context("project path must resolve to a directory for retention-promote")?;
+    let project_key = operator_safe_text(args.project_key.trim());
+    if project_key.trim().is_empty() {
+        bail!("--project-key cannot be empty");
+    }
+    match (args.receipt.as_ref(), args.approval_id.as_ref()) {
+        (Some(_), Some(_)) => bail!("provide only one of --receipt or --approval-id"),
+        (None, None) => bail!("provide --receipt or --approval-id"),
+        _ => {}
+    }
+
+    let profile_dir = get_profile_dir(profile)?;
+    let loaded = load_retention_application_receipt(&profile_dir, &args)?;
+    validate_retention_promotion_receipt(&loaded, &project_key, &project_root)?;
+
+    let generated_at = Utc::now();
+    let receipt = loaded.receipt;
+    let deliverables_path = project_root.join("DELIVERABLES.md");
+    if !deliverables_path.exists() {
+        bail!("DELIVERABLES.md is missing; create the governance surface before retention-promote");
+    }
+    if !deliverables_path.is_file() {
+        bail!(
+            "DELIVERABLES.md is not a file: {}",
+            deliverables_path.display()
+        );
+    }
+
+    let relative_path = promotion_relative_path(&project_root, &receipt.target)?;
+    let deliverables_entry =
+        promotion_deliverables_entry(args.title.as_deref(), &receipt.target, &relative_path)?;
+    let current = fs::read_to_string(&deliverables_path)
+        .with_context(|| format!("read {}", deliverables_path.display()))?;
+    let already_promoted = current.contains(&format!("`{relative_path}`"));
+
+    let source_receipt = ArtifactRetentionPromotionSource {
+        receipt_path: operator_safe_path(loaded.path.to_string_lossy().as_ref()),
+        approval_id: receipt.approval_id.clone(),
+        request_id: receipt.request_id.clone(),
+        task_id: receipt.task_id.clone(),
+        application_generated_at: receipt.generated_at,
+    };
+
+    if already_promoted {
+        return Ok(ArtifactRetentionPromotionReport {
+            schema: ARTIFACT_RETENTION_PROMOTION_SCHEMA,
+            generated_at,
+            status: "already_promoted".to_string(),
+            project_key: project_key.clone(),
+            project_root: operator_safe_path(project_root.to_string_lossy().as_ref()),
+            source_receipt,
+            target: receipt.target,
+            deliverables_path: operator_safe_path(deliverables_path.to_string_lossy().as_ref()),
+            deliverables_entry,
+            reviewed: args.reviewed,
+            mutation_performed: false,
+            snapshot_verification: None,
+            restore_plan: None,
+            promotion_receipt_path: None,
+            next_actions: vec![format!(
+                "forager project retention-review {} --project-key {}",
+                shell_arg(&project_root.to_string_lossy()),
+                shell_arg(&project_key)
+            )],
+            authority: retention_promotion_authority(args.reviewed, false),
+        });
+    }
+
+    let updated = append_deliverables_entry(&current, &deliverables_entry);
+    if !args.reviewed {
+        return Ok(ArtifactRetentionPromotionReport {
+            schema: ARTIFACT_RETENTION_PROMOTION_SCHEMA,
+            generated_at,
+            status: "planned_review_required".to_string(),
+            project_key: project_key.clone(),
+            project_root: operator_safe_path(project_root.to_string_lossy().as_ref()),
+            source_receipt,
+            target: receipt.target,
+            deliverables_path: operator_safe_path(deliverables_path.to_string_lossy().as_ref()),
+            deliverables_entry,
+            reviewed: false,
+            mutation_performed: false,
+            snapshot_verification: None,
+            restore_plan: None,
+            promotion_receipt_path: None,
+            next_actions: vec![format!(
+                "forager project retention-promote {} --project-key {} --approval-id {} --reviewed",
+                shell_arg(&project_root.to_string_lossy()),
+                shell_arg(&project_key),
+                shell_arg(&receipt.approval_id)
+            )],
+            authority: retention_promotion_authority(false, false),
+        });
+    }
+
+    let promotion_receipt_path =
+        resolve_retention_promotion_receipt_path(&profile_dir, generated_at, &receipt)?;
+    prepare_retention_receipt_parent(&promotion_receipt_path)?;
+
+    let snapshot_store = MutationSnapshotStore::new(&profile_dir);
+    let snapshot = snapshot_store.create_snapshot(MutationSnapshotRequest {
+        project_key: project_key.clone(),
+        request_id: receipt.request_id.clone(),
+        task_id: format!(
+            "retention-promote-{}",
+            sanitize_id_fragment(&receipt.approval_id)
+        ),
+        target_path: deliverables_path.clone(),
+        mutation_kind: RETENTION_PROMOTE_MUTATION_KIND.to_string(),
+        diff_preview: format!("Append deliverables entry:\n+ {deliverables_entry}"),
+        created_by: "project.retention_promote".to_string(),
+    })?;
+    let pre_verification = snapshot_store.verify_snapshot(&snapshot.mutation_id, generated_at)?;
+    let pre_restore_plan = snapshot_store.restore_plan(&snapshot.mutation_id, generated_at)?;
+    if !pre_verification.rollback_available || !pre_restore_plan.rollback_available {
+        bail!(
+            "mutation snapshot is not rollback-ready: {}",
+            pre_verification.blockers.join("; ")
+        );
+    }
+
+    fs::write(&deliverables_path, updated)
+        .with_context(|| format!("write {}", deliverables_path.display()))?;
+    let post_verification = snapshot_store.verify_snapshot(&snapshot.mutation_id, Utc::now())?;
+    let post_restore_plan = snapshot_store.restore_plan(&snapshot.mutation_id, Utc::now())?;
+
+    let mut report = ArtifactRetentionPromotionReport {
+        schema: ARTIFACT_RETENTION_PROMOTION_SCHEMA,
+        generated_at,
+        status: "promoted".to_string(),
+        project_key,
+        project_root: operator_safe_path(project_root.to_string_lossy().as_ref()),
+        source_receipt,
+        target: receipt.target,
+        deliverables_path: operator_safe_path(deliverables_path.to_string_lossy().as_ref()),
+        deliverables_entry,
+        reviewed: true,
+        mutation_performed: true,
+        snapshot_verification: Some(post_verification),
+        restore_plan: Some(post_restore_plan),
+        promotion_receipt_path: Some(operator_safe_path(
+            promotion_receipt_path.to_string_lossy().as_ref(),
+        )),
+        next_actions: vec![
+            format!(
+                "forager offdesk restore-plan {}",
+                shell_arg(&snapshot.mutation_id)
+            ),
+            format!(
+                "forager project retention-review {} --project-key {}",
+                shell_arg(&project_root.to_string_lossy()),
+                shell_arg(&args.project_key)
+            ),
+        ],
+        authority: retention_promotion_authority(true, true),
+    };
+    write_retention_promotion_receipt(&promotion_receipt_path, &report)?;
+    report.promotion_receipt_path = Some(operator_safe_path(
+        promotion_receipt_path.to_string_lossy().as_ref(),
+    ));
+    Ok(report)
+}
+
+fn retention_promotion_human_summary(report: &ArtifactRetentionPromotionReport) -> String {
+    let mut lines = Vec::new();
+    lines.push(format!("Artifact retention promote: {}", report.status));
+    lines.push(format!("  target: {}", report.target.label));
+    lines.push(format!("  entry: {}", report.deliverables_entry));
+    lines.push(format!(
+        "  boundary: reviewed={}, mutation_performed={}",
+        report.reviewed, report.mutation_performed
+    ));
+    if let Some(verification) = report.snapshot_verification.as_ref() {
+        lines.push(format!("  snapshot: {}", verification.mutation_id));
+        lines.push(format!(
+            "  rollback_available: {}",
+            verification.rollback_available
+        ));
+    }
+    if let Some(path) = report.promotion_receipt_path.as_deref() {
+        lines.push(format!("  receipt: {path}"));
+    }
+    if !report.next_actions.is_empty() {
+        lines.push("Next actions:".to_string());
+        for action in &report.next_actions {
+            lines.push(format!("  - {action}"));
+        }
+    }
+    lines.push(String::new());
+    lines.join("\n")
+}
+
+fn load_retention_application_receipt(
+    profile_dir: &Path,
+    args: &ProjectRetentionPromoteArgs,
+) -> Result<LoadedRetentionApplicationReceipt> {
+    if let Some(path) = args.receipt.as_ref() {
+        return read_retention_application_receipt(path);
+    }
+    let approval_id = args
+        .approval_id
+        .as_deref()
+        .map(operator_safe_text)
+        .filter(|value| !value.trim().is_empty())
+        .context("--approval-id cannot be empty")?;
+    find_retention_application_receipt(profile_dir, &approval_id)
+}
+
+fn read_retention_application_receipt(path: &Path) -> Result<LoadedRetentionApplicationReceipt> {
+    let content =
+        fs::read_to_string(path).with_context(|| format!("read receipt {}", path.display()))?;
+    let receipt = serde_json::from_str::<ArtifactRetentionApplicationReceipt>(&content)
+        .with_context(|| format!("parse receipt {}", path.display()))?;
+    Ok(LoadedRetentionApplicationReceipt {
+        path: path.to_path_buf(),
+        receipt,
+    })
+}
+
+fn find_retention_application_receipt(
+    profile_dir: &Path,
+    approval_id: &str,
+) -> Result<LoadedRetentionApplicationReceipt> {
+    let dir = profile_dir.join(ARTIFACT_RETENTION_APPLICATIONS_DIR);
+    if !dir.exists() {
+        bail!(
+            "artifact retention application receipt directory is missing: {}",
+            dir.display()
+        );
+    }
+    let mut matches = Vec::new();
+    for entry in fs::read_dir(&dir).with_context(|| format!("read {}", dir.display()))? {
+        let path = entry?.path();
+        if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(loaded) = read_retention_application_receipt(&path) else {
+            continue;
+        };
+        if loaded.receipt.approval_id == approval_id {
+            matches.push(loaded);
+        }
+    }
+    matches.sort_by_key(|loaded| loaded.receipt.generated_at);
+    matches
+        .pop()
+        .with_context(|| format!("application receipt not found for approval {approval_id}"))
+}
+
+fn validate_retention_promotion_receipt(
+    loaded: &LoadedRetentionApplicationReceipt,
+    project_key: &str,
+    project_root: &Path,
+) -> Result<()> {
+    let receipt = &loaded.receipt;
+    if receipt.schema != ARTIFACT_RETENTION_APPLICATION_SCHEMA {
+        bail!(
+            "receipt {} has schema {}, not {}",
+            loaded.path.display(),
+            receipt.schema,
+            ARTIFACT_RETENTION_APPLICATION_SCHEMA
+        );
+    }
+    if receipt.project_key != project_key {
+        bail!(
+            "receipt project_key {} does not match {}",
+            receipt.project_key,
+            project_key
+        );
+    }
+    if let Some(recorded_root) = receipt.project_root.as_deref() {
+        let current_root = operator_safe_path(project_root.to_string_lossy().as_ref());
+        if recorded_root != current_root {
+            bail!(
+                "receipt project_root {} does not match {}",
+                recorded_root,
+                current_root
+            );
+        }
+    }
+    if receipt.status != "applied_plan_recorded" {
+        bail!("receipt status must be applied_plan_recorded");
+    }
+    if receipt.requested_action != "promote" {
+        bail!(
+            "retention-promote only supports promote receipts; receipt action is {}",
+            receipt.requested_action
+        );
+    }
+    if !receipt.approval.consumed {
+        bail!("retention application approval must be consumed before promotion");
+    }
+    if receipt.operation.mutation_performed {
+        bail!("retention application receipt must be plan-only before promotion");
+    }
+    if !receipt.target.present {
+        bail!("cannot promote a missing artifact");
+    }
+    Ok(())
+}
+
+fn promotion_relative_path(
+    project_root: &Path,
+    target: &ArtifactRetentionApplicationTarget,
+) -> Result<String> {
+    let relative = target
+        .relative_path
+        .clone()
+        .unwrap_or_else(|| rel_path(project_root, Path::new(&target.path)));
+    if relative.trim().is_empty()
+        || relative.contains('\n')
+        || relative.contains('\r')
+        || relative.contains('`')
+        || relative.starts_with("../")
+        || relative == ".."
+        || Path::new(&relative).is_absolute()
+    {
+        bail!("artifact relative path is not safe for DELIVERABLES.md");
+    }
+    let target_path = project_root.join(&relative);
+    if !target_path.exists() {
+        bail!("artifact path is missing: {}", target_path.display());
+    }
+    Ok(relative)
+}
+
+fn promotion_deliverables_entry(
+    title: Option<&str>,
+    target: &ArtifactRetentionApplicationTarget,
+    relative_path: &str,
+) -> Result<String> {
+    let title = title
+        .map(operator_safe_text)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| target.label.clone())
+        .replace(['\n', '\r', '`'], " ");
+    if title.trim().is_empty() {
+        bail!("deliverables title cannot be empty");
+    }
+    Ok(format!("- {}: `{}`", title.trim(), relative_path))
+}
+
+fn append_deliverables_entry(current: &str, deliverables_entry: &str) -> String {
+    let mut updated = current.to_string();
+    if !updated.ends_with('\n') {
+        updated.push('\n');
+    }
+    if !updated.ends_with("\n\n") {
+        updated.push('\n');
+    }
+    updated.push_str(deliverables_entry);
+    updated.push('\n');
+    updated
+}
+
+fn retention_promotion_authority(
+    reviewed: bool,
+    writes_project_state: bool,
+) -> ArtifactRetentionPromotionAuthority {
+    ArtifactRetentionPromotionAuthority {
+        requires_reviewed_flag: true,
+        requires_snapshot: true,
+        writes_project_state,
+        writes_profile_receipt: writes_project_state,
+        supported_action: "promote",
+        does_not_authorize: if reviewed {
+            vec![
+                "delete files",
+                "move files",
+                "archive files",
+                "publish outputs",
+                "accept output as truth without review",
+            ]
+        } else {
+            vec![
+                "edit DELIVERABLES.md without --reviewed",
+                "delete files",
+                "move files",
+                "archive files",
+                "publish outputs",
+                "accept output as truth without review",
+            ]
+        },
+    }
+}
+
+fn resolve_retention_promotion_receipt_path(
+    profile_dir: &Path,
+    generated_at: DateTime<Utc>,
+    receipt: &ArtifactRetentionApplicationReceipt,
+) -> Result<PathBuf> {
+    let timestamp = generated_at.format("%Y%m%dT%H%M%SZ");
+    let approval_id = sanitize_id_fragment(&receipt.approval_id);
+    let dir = profile_dir.join(ARTIFACT_RETENTION_PROMOTIONS_DIR);
+    for attempt in 0..1000 {
+        let filename = if attempt == 0 {
+            format!("artifact_retention_promotion_{timestamp}_{approval_id}.json")
+        } else {
+            format!("artifact_retention_promotion_{timestamp}_{approval_id}_{attempt:03}.json")
+        };
+        let path = dir.join(filename);
+        if !path.exists() {
+            return Ok(path);
+        }
+    }
+    bail!("could not allocate a unique artifact retention promotion receipt path")
+}
+
+fn write_retention_promotion_receipt(
+    path: &Path,
+    report: &ArtifactRetentionPromotionReport,
+) -> Result<()> {
+    prepare_retention_receipt_parent(path)?;
+    let content =
+        serde_json::to_string_pretty(report).context("serialize retention promotion receipt")?;
+    fs::write(path, format!("{content}\n")).with_context(|| format!("write {}", path.display()))
+}
+
+fn prepare_retention_receipt_parent(path: &Path) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
+    if path.exists() {
+        bail!(
+            "promotion receipt output already exists: {}",
+            path.display()
+        );
+    }
+    Ok(())
 }
 
 fn shell_arg(value: &str) -> String {

@@ -755,9 +755,11 @@ Outputs:
 - `artifact_retention_review.v1`.
 - `artifact_retention_approval_request.v1`.
 - `artifact_retention_application.v1`.
+- `artifact_retention_promotion.v1`.
 - Retention recommendation.
 - Approval-only retention decision card.
 - Profile-local retention application receipt.
+- Snapshot-backed deliverables promotion receipt.
 - Review packet.
 - Disposal-safe manifest.
 
@@ -765,8 +767,10 @@ Authorization Boundary:
 - May recommend retention or disposal.
 - May record an approval request for a single retention follow-up.
 - May consume an approved retention decision into a profile-local plan receipt.
-- Does not delete, move, archive, edit deliverables, publish, or accept output
-  as truth without a later explicit mutation workflow.
+- May append one reviewed promotion entry to `DELIVERABLES.md` when a
+  rollback-ready mutation snapshot and restore plan exist.
+- Does not delete, move, archive, publish, or accept output as truth without a
+  later explicit mutation workflow.
 
 Acceptance Criteria:
 - Humans can find deliverables without opening every generated file.
@@ -780,6 +784,10 @@ Acceptance Criteria:
   `artifact_retention_application.v1`, which records the plan and keeps
   `mutation_performed=false`.
 - Repeating `retention-apply` for the same consumed approval is rejected.
+- A promote application receipt can produce `artifact_retention_promotion.v1`
+  only after `--reviewed` and a rollback-ready snapshot; dry-run output does
+  not write project files.
+- Repeating `retention-promote` for an already listed artifact is a no-op.
 - Runs do not create endless flat directories without review paths.
 - Logs and raw evidence remain available but are not the primary review surface.
 - Disposal candidates are inspectable before mutation.
@@ -789,6 +797,7 @@ Primary Surfaces:
 - `forager project retention-review`.
 - `forager project retention-request`.
 - `forager project retention-apply`.
+- `forager project retention-promote`.
 - `forager ondesk review-surface`.
 - Closeout artifacts.
 - Documentation governance reports.

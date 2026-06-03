@@ -254,6 +254,23 @@ requested keep/promote/archive/dispose plan, and keeps
 `DELIVERABLES.md` update; archive and disposal still need a separate mutation
 workflow with snapshot and restore planning.
 
+For a promote receipt, run the deliverables mutation as its own reviewed step:
+
+```bash
+forager project retention-promote /path/to/project \
+  --project-key my-project \
+  --approval-id approval_... \
+  --json
+```
+
+Without `--reviewed`, the command is a dry run and reports the exact
+`DELIVERABLES.md` line it would append. With `--reviewed`, it creates a
+mutation snapshot for `DELIVERABLES.md`, verifies that rollback evidence and a
+restore plan are available, appends one backtick-linked entry, and writes
+`artifact_retention_promotion.v1` under the profile's
+`artifact_retention_promotions/` directory. Repeating the command for an
+already listed artifact is a no-op.
+
 `forager ondesk review-surface --project-key <project> --json` embeds a compact
 projection of the matching profile-local artifact index and retention review.
 `forager ondesk prompt-package --project-key <project>` renders their counts in

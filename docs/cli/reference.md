@@ -39,6 +39,7 @@ This document contains the help content for the `forager` command-line program.
 * [`forager project retention-review`↴](#forager-project-retention-review)
 * [`forager project retention-request`↴](#forager-project-retention-request)
 * [`forager project retention-apply`↴](#forager-project-retention-apply)
+* [`forager project retention-promote`↴](#forager-project-retention-promote)
 * [`forager worktree`↴](#forager-worktree)
 * [`forager worktree list`↴](#forager-worktree-list)
 * [`forager worktree info`↴](#forager-worktree-info)
@@ -545,6 +546,7 @@ Initialize and inspect project operation packets
 * `retention-review` — Build a read-only artifact retention review packet
 * `retention-request` — Create an approval-only artifact retention follow-up request
 * `retention-apply` — Consume an approved artifact retention decision into a profile receipt
+* `retention-promote` — Promote a retained artifact into DELIVERABLES.md with snapshot evidence
 
 
 
@@ -702,6 +704,27 @@ Consume an approved artifact retention decision into a profile receipt
 * `--project-key <PROJECT_KEY>` — Stable project key used to validate the approved retention decision
 * `--approval-id <APPROVAL_ID>` — Approved artifact retention approval ID to consume
 * `--receipt-out <RECEIPT_OUT>` — Write the receipt to this path instead of the profile receipt directory
+* `--json` — Output machine-readable JSON
+
+
+
+## `forager project retention-promote`
+
+Promote a retained artifact into DELIVERABLES.md with snapshot evidence
+
+**Usage:** `forager project retention-promote [OPTIONS] --project-key <PROJECT_KEY> [PATH]`
+
+###### **Arguments:**
+
+* `<PATH>` — Project repository/root directory whose DELIVERABLES.md should be updated. Defaults to the current directory
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEY>` — Stable project key used to validate the retention application receipt
+* `--receipt <RECEIPT>` — artifact_retention_application.v1 receipt path to promote from
+* `--approval-id <APPROVAL_ID>` — Find the latest application receipt for this approval ID
+* `--title <TITLE>` — Override the deliverables entry label
+* `--reviewed` — Confirm that the artifact preview/provenance and deliverables mutation were reviewed
 * `--json` — Output machine-readable JSON
 
 
