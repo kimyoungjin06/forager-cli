@@ -272,6 +272,48 @@ fn ondesk_review_surface_summarizes_closeout_receipt_before_paths() -> Result<()
                     "task_id": "completed-task"
                 }
             ],
+            "implementation_packet_coverage": {
+                "packet_count": 1,
+                "completed": 1,
+                "deferred": 0,
+                "missing": 0,
+                "drifted": 0,
+                "detail_items": 2,
+                "detail_items_completed": 1,
+                "detail_items_deferred": 0,
+                "detail_items_missing": 1,
+                "detail_items_drifted": 0,
+                "items": [
+                    {
+                        "packet_id": "packet-closeout-project",
+                        "project_key": "project",
+                        "goal": "Return packet coverage to Ondesk.",
+                        "success_state": "Missing packet evidence remains visible.",
+                        "goal_status": "completed",
+                        "reason": "Execution evidence exists; closeout review still applies.",
+                        "detail_source": "implementation_packet",
+                        "work_slices": [],
+                        "validation_items": [
+                            {
+                                "category": "validation_test",
+                                "label": "missing-validation.txt",
+                                "status": "missing",
+                                "reason": "No closeout artifact matched this item.",
+                                "evidence_refs": []
+                            }
+                        ],
+                        "expected_artifacts": [
+                            {
+                                "category": "expected_artifact",
+                                "label": "result.json",
+                                "status": "completed",
+                                "reason": "Closeout evidence matched this item.",
+                                "evidence_refs": ["task:completed-task:result:result.json"]
+                            }
+                        ]
+                    }
+                ]
+            },
             "artifacts": {
                 "return_package_markdown": return_package_path
             }
@@ -348,6 +390,21 @@ fn ondesk_review_surface_summarizes_closeout_receipt_before_paths() -> Result<()
     assert_eq!(
         surface["closeout"]["review_status"],
         "approved_with_followups"
+    );
+    assert_eq!(
+        surface["closeout"]["implementation_packet_coverage"]["packet_count"],
+        1
+    );
+    assert_eq!(
+        surface["closeout"]["implementation_packet_coverage"]["detail_items_missing"],
+        1
+    );
+    assert!(
+        surface["closeout"]["implementation_packet_coverage"]["items"][0]["validation_items"]
+            .as_array()
+            .expect("coverage validation items")
+            .iter()
+            .any(|item| item["label"] == "missing-validation.txt" && item["status"] == "missing")
     );
     assert!(surface["closeout"]["unresolved_risks"]
         .as_array()
@@ -434,6 +491,48 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
                     "task_id": "task"
                 }
             ],
+            "implementation_packet_coverage": {
+                "packet_count": 1,
+                "completed": 1,
+                "deferred": 0,
+                "missing": 0,
+                "drifted": 0,
+                "detail_items": 2,
+                "detail_items_completed": 1,
+                "detail_items_deferred": 0,
+                "detail_items_missing": 1,
+                "detail_items_drifted": 0,
+                "items": [
+                    {
+                        "packet_id": "packet-twinpaper",
+                        "project_key": "twinpaper",
+                        "goal": "Return closeout packet coverage to Ondesk.",
+                        "success_state": "Ondesk prompt shows missing packet details.",
+                        "goal_status": "completed",
+                        "reason": "Execution evidence exists; closeout review still applies.",
+                        "detail_source": "implementation_packet",
+                        "work_slices": [],
+                        "validation_items": [
+                            {
+                                "category": "validation_test",
+                                "label": "missing-validation.txt",
+                                "status": "missing",
+                                "reason": "No closeout artifact matched this item.",
+                                "evidence_refs": []
+                            }
+                        ],
+                        "expected_artifacts": [
+                            {
+                                "category": "expected_artifact",
+                                "label": "result.json",
+                                "status": "completed",
+                                "reason": "Closeout evidence matched this item.",
+                                "evidence_refs": ["task:task:result:result.json"]
+                            }
+                        ]
+                    }
+                ]
+            },
             "artifacts": {
                 "return_package_markdown": return_package_path
             }
@@ -522,6 +621,10 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
     assert!(content.contains("Morning Review Surface"));
     assert!(content.contains("accepted_truth: pending via closeout_receipt.v1"));
     assert!(content.contains("receipt_acceptance_status: approved_with_followups"));
+    assert!(content.contains("closeout_implementation_packet_coverage:"));
+    assert!(content.contains("detail_items: 1 completed, 0 deferred, 1 missing"));
+    assert!(content.contains("packet packet-twinpaper: completed"));
+    assert!(content.contains("validation_items: [missing] missing-validation.txt"));
     assert!(content.contains("judgment_routes:"));
     assert!(content.contains("decision-council-route: council"));
     assert!(content.contains("Council compared reviewer outputs"));

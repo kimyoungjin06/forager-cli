@@ -1724,6 +1724,7 @@ fn render_review_surface_prompt_section(output: &mut String, surface: &Value) {
         value_text(surface, "/closeout/execution_status").unwrap_or("unknown"),
         value_text(surface, "/closeout/review_status").unwrap_or("unknown")
     ));
+    render_closeout_packet_coverage_prompt_section(output, surface);
     if let Some(packet_id) = value_text(surface, "/implementation_packet/packet_id") {
         let outcome = value_text(surface, "/implementation_packet/outcome").unwrap_or("unknown");
         let safe_to_delegate = surface
@@ -1902,6 +1903,71 @@ fn render_review_surface_prompt_section(output: &mut String, surface: &Value) {
         }
     }
     output.push_str("- artifact_refs: available in `review_surface` JSON, omitted here unless needed for audit.\n");
+}
+
+fn render_closeout_packet_coverage_prompt_section(output: &mut String, surface: &Value) {
+    let Some(coverage) = surface.pointer("/closeout/implementation_packet_coverage") else {
+        return;
+    };
+    output.push_str("- closeout_implementation_packet_coverage:\n");
+    output.push_str(&format!(
+        "  - packets: {} completed, {} deferred, {} missing, {} drifted / {} total\n",
+        value_u64(coverage, "/completed").unwrap_or_default(),
+        value_u64(coverage, "/deferred").unwrap_or_default(),
+        value_u64(coverage, "/missing").unwrap_or_default(),
+        value_u64(coverage, "/drifted").unwrap_or_default(),
+        value_u64(coverage, "/packet_count").unwrap_or_default()
+    ));
+    output.push_str(&format!(
+        "  - detail_items: {} completed, {} deferred, {} missing, {} drifted / {} total\n",
+        value_u64(coverage, "/detail_items_completed").unwrap_or_default(),
+        value_u64(coverage, "/detail_items_deferred").unwrap_or_default(),
+        value_u64(coverage, "/detail_items_missing").unwrap_or_default(),
+        value_u64(coverage, "/detail_items_drifted").unwrap_or_default(),
+        value_u64(coverage, "/detail_items").unwrap_or_default()
+    ));
+    if let Some(items) = coverage.get("items").and_then(Value::as_array) {
+        for item in items.iter().take(3) {
+            let packet_id = value_text(item, "/packet_id").unwrap_or("unknown");
+            let status = value_text(item, "/goal_status").unwrap_or("unknown");
+            output.push_str(&format!(
+                "  - packet {}: {}\n",
+                safe(packet_id),
+                safe(status)
+            ));
+            render_packet_coverage_detail_prompt_group(output, item, "validation_items");
+            render_packet_coverage_detail_prompt_group(output, item, "expected_artifacts");
+        }
+    }
+}
+
+fn render_packet_coverage_detail_prompt_group(output: &mut String, item: &Value, key: &str) {
+    let Some(details) = item.get(key).and_then(Value::as_array) else {
+        return;
+    };
+    let attention = details
+        .iter()
+        .filter(|detail| {
+            value_text(detail, "/status")
+                .map(|status| status != "completed")
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+    let shown = if attention.is_empty() {
+        details.iter().take(2).collect::<Vec<_>>()
+    } else {
+        attention.into_iter().take(2).collect::<Vec<_>>()
+    };
+    if shown.is_empty() {
+        return;
+    }
+    output.push_str(&format!("    - {key}:"));
+    for detail in shown {
+        let status = value_text(detail, "/status").unwrap_or("unknown");
+        let label = value_text(detail, "/label").unwrap_or("unknown");
+        output.push_str(&format!(" [{}] {}", safe(status), safe(label)));
+    }
+    output.push('\n');
 }
 
 fn render_documentation_governance_prompt_section(

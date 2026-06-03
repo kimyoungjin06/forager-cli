@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use clap::Args;
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -20,6 +20,8 @@ use crate::session::get_profile_dir;
 
 const REVIEW_SURFACE_SCHEMA: &str = "review_surface.v1";
 const MAX_RECENT_DECISIONS: usize = 5;
+const MAX_PACKET_COVERAGE_ITEMS: usize = 3;
+const MAX_PACKET_DETAIL_ITEMS: usize = 5;
 
 #[derive(Args)]
 pub struct ReviewSurfaceArgs {
@@ -78,6 +80,8 @@ struct ReviewSurfaceCloseout {
     review_status: String,
     unresolved_risks: Vec<String>,
     summary: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    implementation_packet_coverage: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     generated_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -192,6 +196,7 @@ struct LatestCloseout {
     artifact_dir: PathBuf,
     plan_path: PathBuf,
     return_package_path: Option<PathBuf>,
+    implementation_packet_coverage: Option<Value>,
     review: Option<LatestCloseoutReview>,
 }
 
@@ -542,6 +547,8 @@ fn build_closeout(
     let unresolved_risks = receipt
         .map(closeout_unresolved_risks)
         .unwrap_or_else(|| closeout_summary_risks(summary));
+    let implementation_packet_coverage =
+        latest.and_then(|closeout| closeout.implementation_packet_coverage.clone());
     let review_status = latest
         .and_then(|closeout| closeout.review.as_ref())
         .map(|review| {
@@ -571,6 +578,7 @@ fn build_closeout(
         review_status,
         unresolved_risks,
         summary: serde_json::to_value(&summary.closeout_state).unwrap_or(Value::Null),
+        implementation_packet_coverage,
         generated_at: latest.map(|closeout| closeout.generated_at.to_rfc3339()),
         reviewed_at: latest
             .and_then(|closeout| closeout.review.as_ref())
@@ -913,6 +921,9 @@ fn latest_closeout(
                 let fallback = artifact_dir.join("RETURN_PACKAGE.md");
                 fallback.exists().then_some(fallback)
             });
+        let implementation_packet_coverage = plan
+            .get("implementation_packet_coverage")
+            .map(closeout_packet_coverage_projection);
         let review = latest_closeout_review(&artifact_dir)?;
         let sort_key = review
             .as_ref()
@@ -926,6 +937,7 @@ fn latest_closeout(
                 artifact_dir,
                 plan_path,
                 return_package_path,
+                implementation_packet_coverage,
                 review,
             },
         ));
@@ -1010,6 +1022,98 @@ fn closeout_plan_generated_at(plan: &Value) -> DateTime<Utc> {
         .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
         .map(|value| value.with_timezone(&Utc))
         .unwrap_or(DateTime::<Utc>::UNIX_EPOCH)
+}
+
+fn closeout_packet_coverage_projection(coverage: &Value) -> Value {
+    let items = coverage
+        .get("items")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .take(MAX_PACKET_COVERAGE_ITEMS)
+                .map(closeout_packet_coverage_item_projection)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    json!({
+        "packet_count": value_usize(coverage, "packet_count"),
+        "completed": value_usize(coverage, "completed"),
+        "deferred": value_usize(coverage, "deferred"),
+        "missing": value_usize(coverage, "missing"),
+        "drifted": value_usize(coverage, "drifted"),
+        "detail_items": value_usize(coverage, "detail_items"),
+        "detail_items_completed": value_usize(coverage, "detail_items_completed"),
+        "detail_items_deferred": value_usize(coverage, "detail_items_deferred"),
+        "detail_items_missing": value_usize(coverage, "detail_items_missing"),
+        "detail_items_drifted": value_usize(coverage, "detail_items_drifted"),
+        "items": items,
+    })
+}
+
+fn closeout_packet_coverage_item_projection(item: &Value) -> Value {
+    json!({
+        "packet_id": safe_value_text(item, "packet_id"),
+        "project_key": safe_value_text(item, "project_key"),
+        "goal_status": safe_value_text(item, "goal_status"),
+        "goal": safe_value_text(item, "goal"),
+        "success_state": safe_value_text(item, "success_state"),
+        "reason": safe_value_text(item, "reason"),
+        "detail_source": safe_value_text(item, "detail_source"),
+        "work_slices": closeout_packet_detail_projection(item, "work_slices"),
+        "validation_items": closeout_packet_detail_projection(item, "validation_items"),
+        "expected_artifacts": closeout_packet_detail_projection(item, "expected_artifacts"),
+    })
+}
+
+fn closeout_packet_detail_projection(item: &Value, key: &str) -> Vec<Value> {
+    let Some(details) = item.get(key).and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let attention = details
+        .iter()
+        .filter(|detail| {
+            detail
+                .get("status")
+                .and_then(Value::as_str)
+                .is_some_and(|status| status != "completed")
+        })
+        .collect::<Vec<_>>();
+    let selected = if attention.is_empty() {
+        details
+            .iter()
+            .take(MAX_PACKET_DETAIL_ITEMS)
+            .collect::<Vec<_>>()
+    } else {
+        attention
+            .into_iter()
+            .take(MAX_PACKET_DETAIL_ITEMS)
+            .collect::<Vec<_>>()
+    };
+    selected
+        .into_iter()
+        .map(|detail| {
+            json!({
+                "category": safe_value_text(detail, "category"),
+                "label": safe_value_text(detail, "label"),
+                "status": safe_value_text(detail, "status"),
+                "reason": safe_value_text(detail, "reason"),
+                "evidence_refs": detail
+                    .get("evidence_refs")
+                    .and_then(Value::as_array)
+                    .map(|refs| refs.iter().take(3).filter_map(Value::as_str).map(operator_safe_text).collect::<Vec<_>>())
+                    .unwrap_or_default(),
+            })
+        })
+        .collect()
+}
+
+fn safe_value_text(value: &Value, key: &str) -> String {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(operator_safe_text)
+        .unwrap_or_default()
 }
 
 fn closeout_unresolved_risks(receipt: &Value) -> Vec<String> {

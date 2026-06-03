@@ -158,6 +158,12 @@ match them; otherwise they remain visible as missing detail items. Work slices
 currently inherit the packet-level status because Forager does not yet store
 per-slice execution receipts.
 
+The latest matching `review_surface.v1` projects a compact copy of this
+coverage under `closeout.implementation_packet_coverage`, and
+`forager ondesk prompt-package` renders the packet/detail counts in the morning
+review section. This keeps missing validation or expected-artifact evidence
+visible when a fresh harness resumes from Ondesk.
+
 The return package is intentionally shorter than `closeout_plan.json` and
 `cleanup_manifest.json`. It starts with status, decisions needed, capped first
 reads, a short change summary, grouped evidence, documentation governance
