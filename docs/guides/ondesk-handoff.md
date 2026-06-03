@@ -108,6 +108,17 @@ This records `artifact_retention_application.v1` with
 `mutation_performed=false`. It is the handoff record that a later deliverables,
 archive, or disposal workflow should reference.
 
+For a promote decision, `retention-promote` is the reviewed deliverables bridge:
+
+```bash
+forager project retention-promote /path/to/project --project-key <project> --approval-id <approval-id>
+forager project retention-promote /path/to/project --project-key <project> --approval-id <approval-id> --reviewed
+```
+
+The first command is a dry run. The reviewed command creates a mutation
+snapshot and restore plan for `DELIVERABLES.md` before appending the selected
+artifact entry.
+
 ## Knowledge Policy
 
 - `ondesk note` stores redacted, operator-safe JSONL in `ondesk_notes.jsonl`.

@@ -1171,6 +1171,109 @@ fn project_artifact_index_tracks_human_outputs_and_missing_refs() -> Result<()> 
         deliverables_before
     );
 
+    let promote_plan_output = forager_command(temp.path())
+        .args([
+            "project",
+            "retention-promote",
+            repo.to_str().expect("utf-8 repo path"),
+            "--project-key",
+            "demo-project",
+            "--approval-id",
+            approval_id,
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        promote_plan_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&promote_plan_output.stdout),
+        String::from_utf8_lossy(&promote_plan_output.stderr)
+    );
+    let promote_plan: Value = serde_json::from_slice(&promote_plan_output.stdout)?;
+    assert_eq!(promote_plan["schema"], "artifact_retention_promotion.v1");
+    assert_eq!(promote_plan["status"], "planned_review_required");
+    assert_eq!(promote_plan["mutation_performed"], false);
+    assert_eq!(promote_plan["authority"]["writes_project_state"], false);
+    assert_eq!(
+        promote_plan["deliverables_entry"],
+        "- Unreferenced human-facing output: `outputs/plot.png`"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.join("DELIVERABLES.md"))?,
+        deliverables_before
+    );
+
+    let promote_output = forager_command(temp.path())
+        .args([
+            "project",
+            "retention-promote",
+            repo.to_str().expect("utf-8 repo path"),
+            "--project-key",
+            "demo-project",
+            "--approval-id",
+            approval_id,
+            "--reviewed",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        promote_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&promote_output.stdout),
+        String::from_utf8_lossy(&promote_output.stderr)
+    );
+    let promotion: Value = serde_json::from_slice(&promote_output.stdout)?;
+    assert_eq!(promotion["schema"], "artifact_retention_promotion.v1");
+    assert_eq!(promotion["status"], "promoted");
+    assert_eq!(promotion["mutation_performed"], true);
+    assert_eq!(promotion["reviewed"], true);
+    assert_eq!(promotion["authority"]["writes_project_state"], true);
+    assert_eq!(
+        promotion["snapshot_verification"]["rollback_available"],
+        true
+    );
+    assert_eq!(promotion["restore_plan"]["rollback_available"], true);
+    assert!(promotion["promotion_receipt_path"]
+        .as_str()
+        .map(Path::new)
+        .is_some_and(Path::exists));
+    let snapshot_id = promotion["snapshot_verification"]["mutation_id"]
+        .as_str()
+        .expect("snapshot mutation id");
+    assert!(profile_dir(temp.path())
+        .join("mutation_snapshots")
+        .join(format!("{snapshot_id}.json"))
+        .exists());
+    let promoted_deliverables = fs::read_to_string(repo.join("DELIVERABLES.md"))?;
+    assert!(promoted_deliverables.contains("`outputs/plot.png`"));
+
+    let promote_again_output = forager_command(temp.path())
+        .args([
+            "project",
+            "retention-promote",
+            repo.to_str().expect("utf-8 repo path"),
+            "--project-key",
+            "demo-project",
+            "--approval-id",
+            approval_id,
+            "--reviewed",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        promote_again_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&promote_again_output.stdout),
+        String::from_utf8_lossy(&promote_again_output.stderr)
+    );
+    let promote_again: Value = serde_json::from_slice(&promote_again_output.stdout)?;
+    assert_eq!(promote_again["status"], "already_promoted");
+    assert_eq!(promote_again["mutation_performed"], false);
+    assert_eq!(
+        fs::read_to_string(repo.join("DELIVERABLES.md"))?,
+        promoted_deliverables
+    );
+
     let stored_after_apply: Value = serde_json::from_str(&fs::read_to_string(&approvals_path)?)?;
     assert_eq!(stored_after_apply[0]["approval_id"], approval_id);
     assert_eq!(stored_after_apply[0]["status"], "superseded");
