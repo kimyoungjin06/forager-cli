@@ -41,15 +41,15 @@ use crate::offdesk::{
     AdaptiveWikiRuntimePolicyDecision, AdaptiveWikiRuntimePolicyDecisionStatus, AdaptiveWikiScope,
     AdaptiveWikiScopeSuggestion, AdaptiveWikiSignalKind, AdaptiveWikiStore,
     AdaptiveWikiUsageContext, ApprovalLedger, ApprovalStatus, BackgroundLaunchOutcome,
-    BackgroundLaunchRequest, BackgroundProbe, BackgroundRecoveryDecision, BackgroundRunStore,
-    BackgroundRunnerKind, BackgroundRunnerPhase, CapabilityArtifactRef, CapabilityDescriptor,
-    DecisionLedger, DecisionReceipt, DecisionRecord, DecisionRecordView, DecisionStatus,
-    DecisionTraceRef, DecisionValidationIssue, ExecutionBrief, ExecutionHandoff,
-    ImplementationPacket, ImplementationPacketSummary, LatestImplementationPacket,
-    LocalCommandLaunchSpec, MutationRestoreOperation, MutationRestorePlan, MutationSnapshot,
-    MutationSnapshotStore, MutationSnapshotVerification, OffdeskModeAssessment,
-    OffdeskModeLifecycle, OffdeskNextSafeAction, OffdeskPendingApprovalView, OffdeskTask,
-    OffdeskTaskInput, OffdeskTaskLifecycleReport, OffdeskTaskStatus, OffdeskTaskStore,
+    BackgroundLaunchRequest, BackgroundProbe, BackgroundRecoveryAcknowledgement,
+    BackgroundRecoveryDecision, BackgroundRunStore, BackgroundRunnerKind, BackgroundRunnerPhase,
+    CapabilityArtifactRef, CapabilityDescriptor, DecisionLedger, DecisionReceipt, DecisionRecord,
+    DecisionRecordView, DecisionStatus, DecisionTraceRef, DecisionValidationIssue, ExecutionBrief,
+    ExecutionHandoff, ImplementationPacket, ImplementationPacketSummary,
+    LatestImplementationPacket, LocalCommandLaunchSpec, MutationRestoreOperation,
+    MutationRestorePlan, MutationSnapshot, MutationSnapshotStore, MutationSnapshotVerification,
+    OffdeskModeAssessment, OffdeskModeLifecycle, OffdeskNextSafeAction, OffdeskPendingApprovalView,
+    OffdeskTask, OffdeskTaskInput, OffdeskTaskLifecycleReport, OffdeskTaskStatus, OffdeskTaskStore,
     OffdeskTaskView, OffdeskTickOptions, PendingActionApproval, ProviderCapacityState,
     ProviderCapacityStore, ProviderFallbackRecommendation, ResumeStatus, RiskLevel, SchedulerGate,
     SchedulerGateRequest, SchedulerGateStatus, TaskResumeState, TaskResumeStore,
@@ -125,6 +125,9 @@ pub enum OffdeskCommands {
     /// Show background runner recovery probes
     Background(JsonArgs),
 
+    /// Acknowledge a stale or failed background probe after linked tasks are cancelled
+    BackgroundAck(BackgroundAckArgs),
+
     /// Show Task Team capability metadata
     Capabilities(JsonArgs),
 
@@ -151,6 +154,12 @@ pub enum OffdeskCommands {
 
     /// Record a reviewed closeout verdict without applying file operations
     CloseoutReview(CloseoutReviewArgs),
+
+    /// Resolve a closeout receipt open decision without applying file operations
+    CloseoutDecision(CloseoutDecisionArgs),
+
+    /// Retire an evidence-incomplete historical closeout without accepting truth
+    CloseoutRetire(CloseoutRetireArgs),
 
     /// Inspect adaptive wiki candidates, entries, projections, and lint
     Wiki(WikiArgs),
@@ -456,6 +465,32 @@ pub struct PollArgs {
     /// Record notification cooldown state in minutes
     #[arg(long)]
     notify_cooldown_minutes: Option<i64>,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct BackgroundAckArgs {
+    /// Background ticket ID to acknowledge
+    ticket_id: String,
+
+    /// Operator reason for suppressing further recovery attention
+    #[arg(long)]
+    reason: String,
+
+    /// Operator or surface recording this acknowledgement
+    #[arg(long, default_value = "cli")]
+    by: String,
+
+    /// Source surface recorded on the acknowledgement
+    #[arg(long, default_value = "cli")]
+    source_surface: String,
+
+    /// Permit acknowledgement when no durable task is linked to the background ticket
+    #[arg(long)]
+    allow_unlinked: bool,
 
     /// Output as JSON
     #[arg(long)]
@@ -1045,6 +1080,60 @@ pub struct CloseoutReviewArgs {
     json: bool,
 }
 
+#[derive(Args)]
+pub struct CloseoutDecisionArgs {
+    /// Closeout ID from `forager offdesk closeout`
+    #[arg(long)]
+    closeout_id: Option<String>,
+
+    /// Closeout artifact directory containing closeout_plan.json
+    #[arg(long)]
+    artifact_dir: Option<PathBuf>,
+
+    /// Open decision kind to resolve, for example archive_review
+    #[arg(long)]
+    kind: String,
+
+    /// Resolution to record. This command never moves, archives, or deletes files.
+    #[arg(long, value_enum)]
+    decision: CloseoutDecisionResolution,
+
+    /// Reviewer or operator label
+    #[arg(long, default_value = "operator")]
+    reviewer: String,
+
+    /// Required rationale for the decision. Secrets are redacted before persistence.
+    #[arg(long)]
+    reason: String,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct CloseoutRetireArgs {
+    /// Closeout ID from `forager offdesk closeout`
+    #[arg(long)]
+    closeout_id: Option<String>,
+
+    /// Closeout artifact directory containing closeout_plan.json
+    #[arg(long)]
+    artifact_dir: Option<PathBuf>,
+
+    /// Reviewer or operator label
+    #[arg(long, default_value = "operator")]
+    reviewer: String,
+
+    /// Required rationale for retiring the closeout as evidence-incomplete.
+    #[arg(long)]
+    reason: String,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ValueEnum)]
 #[serde(rename_all = "snake_case")]
 enum CloseoutReviewVerdict {
@@ -1059,6 +1148,20 @@ impl CloseoutReviewVerdict {
             Self::Approved => "approved",
             Self::Revise => "revise",
             Self::Blocked => "blocked",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ValueEnum)]
+#[serde(rename_all = "snake_case")]
+enum CloseoutDecisionResolution {
+    PreserveInPlace,
+}
+
+impl CloseoutDecisionResolution {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::PreserveInPlace => "preserve_in_place",
         }
     }
 }
@@ -1959,6 +2062,14 @@ struct BackgroundProbeStatus {
 }
 
 #[derive(Serialize)]
+struct BackgroundAckReport {
+    ticket_id: String,
+    linked_task_ids: Vec<String>,
+    acknowledgement: BackgroundRecoveryAcknowledgement,
+    status: BackgroundProbeStatus,
+}
+
+#[derive(Serialize)]
 struct RetryTaskLifecycleReport<'a> {
     #[serde(flatten)]
     report: &'a OffdeskTaskLifecycleReport,
@@ -2704,6 +2815,10 @@ struct CloseoutReviewRecord {
     required_first_reads: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     notes: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    decision_resolution: Option<CloseoutDecisionResolutionRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    closeout_retirement: Option<CloseoutRetirementRecord>,
     applies_to_task_ids: Vec<String>,
     applies_to_tasks: Vec<CloseoutReviewTaskRef>,
     read_only_project_state: bool,
@@ -2742,6 +2857,8 @@ struct CloseoutReceipt {
     evidence_status: &'static str,
     verification_status: &'static str,
     open_decisions: Vec<CloseoutReceiptDecision>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    resolved_open_decisions: Vec<CloseoutResolvedDecision>,
     missing_evidence: Vec<String>,
     required_first_reads: Vec<String>,
     unsafe_operations: Vec<String>,
@@ -2749,14 +2866,49 @@ struct CloseoutReceipt {
     wiki_promotion_state: &'static str,
     stale_task_count: usize,
     next_safe_action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    retirement_reason: Option<String>,
     source_artifacts: CloseoutReceiptArtifacts,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct CloseoutReceiptDecision {
     kind: String,
     detail: String,
     suggested_command: String,
+}
+
+#[derive(Clone, Serialize)]
+struct CloseoutResolvedDecision {
+    kind: String,
+    decision: String,
+    reason: String,
+    reviewer: String,
+    resolved_at: DateTime<Utc>,
+    applies_to_decision: CloseoutReceiptDecision,
+    does_not_authorize: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct CloseoutDecisionResolutionRecord {
+    kind: String,
+    decision: String,
+    reason: String,
+    reviewer: String,
+    resolved_at: DateTime<Utc>,
+    source_review_record_json: String,
+    source_receipt_id: Option<String>,
+    does_not_authorize: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct CloseoutRetirementRecord {
+    reason: String,
+    reviewer: String,
+    retired_at: DateTime<Utc>,
+    source_review_record_json: Option<String>,
+    excluded_accepted_tasks: Vec<String>,
+    does_not_authorize: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -2793,6 +2945,7 @@ pub async fn run(profile: &str, command: OffdeskCommands) -> Result<()> {
         OffdeskCommands::Cancel(args) => resolve(profile, args, false).await,
         OffdeskCommands::Resume(args) => resume(profile, args).await,
         OffdeskCommands::Background(args) => background(profile, args).await,
+        OffdeskCommands::BackgroundAck(args) => background_ack(profile, args).await,
         OffdeskCommands::Capabilities(args) => capabilities(args).await,
         OffdeskCommands::Snapshots(args) => snapshots(profile, args).await,
         OffdeskCommands::Snapshot(args) => snapshot(profile, args).await,
@@ -2802,6 +2955,8 @@ pub async fn run(profile: &str, command: OffdeskCommands) -> Result<()> {
         OffdeskCommands::MaintenanceRequest(args) => maintenance_request(profile, args).await,
         OffdeskCommands::Closeout(args) => closeout(profile, args).await,
         OffdeskCommands::CloseoutReview(args) => closeout_review(profile, args).await,
+        OffdeskCommands::CloseoutDecision(args) => closeout_decision(profile, args).await,
+        OffdeskCommands::CloseoutRetire(args) => closeout_retire(profile, args).await,
         OffdeskCommands::Wiki(args) => wiki(profile, args).await,
     }
 }
@@ -6596,6 +6751,7 @@ fn background_mode_lifecycle(
         | BackgroundRunnerPhase::StaleNoAck
         | BackgroundRunnerPhase::StaleLostCallback
         | BackgroundRunnerPhase::Reconstructable => OffdeskModeLifecycle::Blocked,
+        BackgroundRunnerPhase::RecoveryAcknowledged => OffdeskModeLifecycle::Cancelled,
         BackgroundRunnerPhase::Launched
         | BackgroundRunnerPhase::HandoffEmitted
         | BackgroundRunnerPhase::PickupAcknowledged => OffdeskModeLifecycle::Running,
@@ -6658,6 +6814,159 @@ async fn background(profile: &str, args: JsonArgs) -> Result<()> {
         }
     }
     Ok(())
+}
+
+async fn background_ack(profile: &str, args: BackgroundAckArgs) -> Result<()> {
+    let now = Utc::now();
+    let store = background_store(profile)?;
+    let outcomes = poll_background_runs(&store, Some(&args.ticket_id), now, None)?;
+    let outcome = outcomes
+        .first()
+        .with_context(|| format!("background ticket not found: {}", args.ticket_id))?;
+
+    if outcome.decision.phase == BackgroundRunnerPhase::RecoveryAcknowledged {
+        let ack = outcome
+            .probe
+            .operator_recovery_ack
+            .clone()
+            .context("background probe is acknowledged but missing acknowledgement metadata")?;
+        let report = BackgroundAckReport {
+            ticket_id: outcome.probe.ticket_id.clone(),
+            linked_task_ids: ack.linked_task_ids.clone(),
+            acknowledgement: ack,
+            status: BackgroundProbeStatus {
+                probe: outcome.probe.clone(),
+                decision: outcome.decision.clone(),
+                mode_assessment: outcome.mode_assessment.clone(),
+            },
+        };
+        print_background_ack_report(&report, args.json)?;
+        return Ok(());
+    }
+
+    if !is_background_recovery_attention_phase(outcome.decision.phase) {
+        bail!(
+            "background ticket {} is {:?}; acknowledgement is only allowed for stale or failed recovery states",
+            outcome.probe.ticket_id,
+            outcome.decision.phase
+        );
+    }
+
+    let profile_dir = get_profile_dir(profile)?;
+    let linked_tasks = linked_tasks_for_background(&profile_dir, &outcome.probe)?;
+    if linked_tasks.is_empty() && !args.allow_unlinked {
+        bail!(
+            "background ticket {} is not linked to a durable task; pass --allow-unlinked only after separate evidence review",
+            outcome.probe.ticket_id
+        );
+    }
+    let blocking_tasks = linked_tasks
+        .iter()
+        .filter(|task| task.status != OffdeskTaskStatus::Cancelled)
+        .map(|task| format!("{}:{:?}", task.task_id, task.status))
+        .collect::<Vec<_>>();
+    if !blocking_tasks.is_empty() {
+        bail!(
+            "background ticket {} still has non-cancelled linked tasks: {}; use resume-task, retry-task, or abandon-task first",
+            outcome.probe.ticket_id,
+            blocking_tasks.join(", ")
+        );
+    }
+
+    let linked_task_ids = linked_tasks
+        .iter()
+        .map(|task| task.task_id.clone())
+        .collect::<Vec<_>>();
+    let acknowledgement = BackgroundRecoveryAcknowledgement {
+        acknowledged_at: now,
+        acknowledged_by: crate::offdesk::operator_safe_text(&args.by),
+        reason: crate::offdesk::operator_safe_text(&args.reason),
+        previous_phase: outcome.decision.phase,
+        linked_task_ids: linked_task_ids.clone(),
+        source_surface: crate::offdesk::operator_safe_text(&args.source_surface),
+        does_not_authorize: background_ack_does_not_authorize(),
+    };
+
+    let mut probes = store.load()?;
+    let updated_probe = {
+        let probe = probes
+            .iter_mut()
+            .find(|probe| probe.ticket_id == outcome.probe.ticket_id)
+            .context("background ticket disappeared while recording acknowledgement")?;
+        probe.operator_recovery_ack = Some(acknowledgement.clone());
+        probe.phase = BackgroundRunnerPhase::RecoveryAcknowledged;
+        probe.last_observed_at = Some(now);
+        probe.last_recovery_evidence = Some(
+            "operator acknowledged background recovery; no result is accepted from this probe"
+                .to_string(),
+        );
+        probe.last_recovery_terminal = Some(true);
+        probe.clone()
+    };
+    store.save(&probes)?;
+
+    let status = background_probe_status(updated_probe.clone(), now);
+    let report = BackgroundAckReport {
+        ticket_id: updated_probe.ticket_id.clone(),
+        linked_task_ids,
+        acknowledgement,
+        status,
+    };
+    print_background_ack_report(&report, args.json)?;
+    Ok(())
+}
+
+fn print_background_ack_report(report: &BackgroundAckReport, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(report)?);
+        return Ok(());
+    }
+    println!(
+        "Acknowledged background recovery {} -> {:?}",
+        report.ticket_id, report.status.decision.phase
+    );
+    println!("  by:     {}", report.acknowledgement.acknowledged_by);
+    println!("  reason: {}", report.acknowledgement.reason);
+    if !report.linked_task_ids.is_empty() {
+        println!("  tasks:  {}", report.linked_task_ids.join(", "));
+    }
+    println!(
+        "  note:   no retry, resume, closeout, cleanup, or accepted-truth action is authorized by this acknowledgement"
+    );
+    Ok(())
+}
+
+fn is_background_recovery_attention_phase(phase: BackgroundRunnerPhase) -> bool {
+    matches!(
+        phase,
+        BackgroundRunnerPhase::Failed
+            | BackgroundRunnerPhase::StaleNoAck
+            | BackgroundRunnerPhase::StaleLostCallback
+            | BackgroundRunnerPhase::Reconstructable
+    )
+}
+
+fn linked_tasks_for_background(
+    profile_dir: &Path,
+    probe: &BackgroundProbe,
+) -> Result<Vec<OffdeskTask>> {
+    let tasks = OffdeskTaskStore::new(profile_dir).load()?;
+    Ok(tasks
+        .into_iter()
+        .filter(|task| {
+            task.background_ticket_id.as_deref() == Some(probe.ticket_id.as_str())
+                || probe.task_id.as_deref() == Some(task.task_id.as_str())
+        })
+        .collect())
+}
+
+fn background_ack_does_not_authorize() -> Vec<String> {
+    vec![
+        "accepting any Offdesk output as truth".to_string(),
+        "closing out or promoting result artifacts".to_string(),
+        "retrying or resuming runtime work".to_string(),
+        "moving, archiving, or deleting files".to_string(),
+    ]
 }
 
 async fn capabilities(args: JsonArgs) -> Result<()> {
@@ -7182,6 +7491,698 @@ async fn closeout_review(profile: &str, args: CloseoutReviewArgs) -> Result<()> 
     Ok(())
 }
 
+async fn closeout_decision(profile: &str, args: CloseoutDecisionArgs) -> Result<()> {
+    let json = args.json;
+    let record = build_closeout_decision_record(profile, &args)?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&record)?);
+        return Ok(());
+    }
+
+    print_closeout_review_record(&record);
+    Ok(())
+}
+
+async fn closeout_retire(profile: &str, args: CloseoutRetireArgs) -> Result<()> {
+    let json = args.json;
+    let record = build_closeout_retire_record(profile, &args)?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&record)?);
+        return Ok(());
+    }
+
+    print_closeout_review_record(&record);
+    Ok(())
+}
+
+fn build_closeout_decision_record(
+    profile: &str,
+    args: &CloseoutDecisionArgs,
+) -> Result<CloseoutReviewRecord> {
+    let profile_dir = get_profile_dir(profile)?;
+    let profile_name = if profile.is_empty() {
+        DEFAULT_PROFILE
+    } else {
+        profile
+    };
+    let kind = require_non_empty_arg("--kind", args.kind.trim())?;
+    let reason = require_non_empty_arg("--reason", args.reason.trim())?;
+    if args.decision == CloseoutDecisionResolution::PreserveInPlace && kind != "archive_review" {
+        bail!(
+            "preserve-in-place closeout decisions are currently supported only for archive_review"
+        );
+    }
+
+    let artifact_dir = resolve_closeout_artifact_dir_for(
+        &profile_dir,
+        args.closeout_id.as_deref(),
+        args.artifact_dir.as_ref(),
+    )?;
+    let plan_path = artifact_dir.join("closeout_plan.json");
+    let plan: Value = serde_json::from_str(
+        &fs::read_to_string(&plan_path)
+            .with_context(|| format!("read closeout plan {}", plan_path.display()))?,
+    )
+    .with_context(|| format!("parse closeout plan {}", plan_path.display()))?;
+    let closeout_id = closeout_id_from_plan(&plan)?;
+    if let Some(expected) = args.closeout_id.as_deref() {
+        let expected = crate::offdesk::operator_safe_text(expected);
+        if expected != closeout_id {
+            bail!(
+                "closeout id mismatch: requested {}, artifact contains {}",
+                expected,
+                closeout_id
+            );
+        }
+    }
+
+    let (source_review_record_path, _source_reviewed_at, source_review) =
+        latest_closeout_review_value(&artifact_dir)?;
+    let source_receipt = source_review
+        .get("closeout_receipt")
+        .ok_or_else(|| anyhow::anyhow!("latest closeout review has no closeout_receipt"))?;
+    let source_acceptance_status = source_receipt
+        .get("acceptance_status")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    if source_acceptance_status == "accepted" {
+        bail!("closeout receipt is already accepted");
+    }
+    let source_verdict = source_review
+        .get("verdict")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    if source_verdict != "approved" || source_acceptance_status != "approved_with_followups" {
+        bail!("closeout decisions can only resolve approved closeout receipts with follow-ups");
+    }
+
+    let source_open_decisions = receipt_decisions_from_value(source_receipt);
+    let mut matched_decisions = Vec::new();
+    let mut remaining_decisions = Vec::new();
+    for decision in source_open_decisions {
+        if decision.kind == kind {
+            matched_decisions.push(decision);
+        } else {
+            remaining_decisions.push(decision);
+        }
+    }
+    if matched_decisions.is_empty() {
+        bail!("latest closeout receipt has no open decision of kind {kind}");
+    }
+
+    let missing_evidence = receipt_string_list(source_receipt, "missing_evidence");
+    let required_first_reads = receipt_string_list(source_receipt, "required_first_reads");
+    let unsafe_operations = receipt_string_list(source_receipt, "unsafe_operations");
+    let stale_task_count = source_receipt
+        .get("stale_task_count")
+        .and_then(Value::as_u64)
+        .unwrap_or_default() as usize;
+    if stale_task_count > 0 {
+        bail!("closeout decision resolution cannot accept a stale closeout; regenerate closeout first");
+    }
+    if closeout_receipt_evidence_status(source_receipt) == "missing" {
+        bail!("closeout decision resolution cannot bypass missing evidence status");
+    }
+    if !missing_evidence.is_empty()
+        || !required_first_reads.is_empty()
+        || !unsafe_operations.is_empty()
+    {
+        bail!("closeout decision resolution cannot bypass missing evidence, required reads, or unsafe operations");
+    }
+    if matches!(
+        source_receipt
+            .get("wiki_promotion_state")
+            .and_then(Value::as_str),
+        Some("review_required" | "audit_unavailable")
+    ) {
+        bail!("closeout decision resolution cannot bypass wiki promotion follow-ups");
+    }
+
+    let reviewed_at = Utc::now();
+    let review_id = format!("closeout_decision_{}", short_uuid());
+    let review_record_path = allocate_closeout_review_record_path(&artifact_dir, reviewed_at)?;
+    let receipt_path = allocate_closeout_receipt_path(&artifact_dir, reviewed_at)?;
+    let return_package_path = closeout_return_package_path(&artifact_dir, &plan);
+    let artifacts = CloseoutReviewArtifactPaths {
+        closeout_plan_json: plan_path.display().to_string(),
+        review_record_json: review_record_path.display().to_string(),
+        closeout_receipt_json: receipt_path.display().to_string(),
+        return_package_markdown: return_package_path.display().to_string(),
+    };
+    let closeout_generated_at = closeout_generated_at_from_plan(&plan);
+    let applies_to_tasks = closeout_review_task_refs_from_plan(&plan);
+    let applies_to_task_ids = applies_to_tasks
+        .iter()
+        .map(|task| task.task_id.clone())
+        .collect::<Vec<_>>();
+    let executed_scope = closeout_executed_scope(&applies_to_tasks);
+    let accepted_scope = executed_scope.clone();
+    let reviewer = crate::offdesk::operator_safe_text(args.reviewer.trim());
+    let reason = truncate_closeout_text(&crate::offdesk::operator_safe_text(reason), 2000);
+    let does_not_authorize = closeout_decision_does_not_authorize();
+    let source_receipt_id = source_receipt
+        .get("receipt_id")
+        .and_then(Value::as_str)
+        .map(crate::offdesk::operator_safe_text);
+    let resolved_open_decisions = matched_decisions
+        .iter()
+        .cloned()
+        .map(|decision| CloseoutResolvedDecision {
+            kind: kind.to_string(),
+            decision: args.decision.as_str().to_string(),
+            reason: reason.clone(),
+            reviewer: reviewer.clone(),
+            resolved_at: reviewed_at,
+            applies_to_decision: decision,
+            does_not_authorize: does_not_authorize.clone(),
+        })
+        .collect::<Vec<_>>();
+    let decision_resolution = CloseoutDecisionResolutionRecord {
+        kind: kind.to_string(),
+        decision: args.decision.as_str().to_string(),
+        reason: reason.clone(),
+        reviewer: reviewer.clone(),
+        resolved_at: reviewed_at,
+        source_review_record_json: source_review_record_path.display().to_string(),
+        source_receipt_id,
+        does_not_authorize: does_not_authorize.clone(),
+    };
+    let retention_review = closeout_retention_status_after_resolution(
+        source_receipt,
+        args.decision,
+        remaining_decisions.is_empty(),
+    );
+    let has_followups = !remaining_decisions.is_empty()
+        || matches!(retention_review, "required")
+        || matches!(
+            source_receipt
+                .get("wiki_promotion_state")
+                .and_then(Value::as_str),
+            Some("review_required" | "audit_unavailable")
+        );
+    let acceptance_status = if has_followups {
+        "approved_with_followups"
+    } else {
+        "accepted"
+    };
+    let verification_status = if has_followups { "pending" } else { "recorded" };
+    let next_safe_action = if acceptance_status == "accepted" {
+        "Rehydrate Ondesk from the return package and continue under reviewed evidence.".to_string()
+    } else {
+        closeout_receipt_next_safe_action(
+            acceptance_status,
+            stale_task_count,
+            &remaining_decisions,
+            &missing_evidence,
+            &required_first_reads,
+        )
+    };
+    let closeout_receipt = CloseoutReceipt {
+        schema: "closeout_receipt.v1",
+        receipt_id: format!("closeout_receipt_{}", short_uuid()),
+        closeout_id: closeout_id.clone(),
+        review_id: review_id.clone(),
+        generated_at: closeout_generated_at.unwrap_or(reviewed_at),
+        reviewed_at,
+        verdict: CloseoutReviewVerdict::Approved,
+        acceptance_status,
+        accepted_scope,
+        executed_scope,
+        evidence_status: closeout_receipt_evidence_status(source_receipt),
+        verification_status,
+        open_decisions: remaining_decisions,
+        resolved_open_decisions,
+        missing_evidence,
+        required_first_reads,
+        unsafe_operations,
+        retention_review,
+        wiki_promotion_state: closeout_receipt_wiki_state(source_receipt),
+        stale_task_count,
+        next_safe_action,
+        retirement_reason: None,
+        source_artifacts: CloseoutReceiptArtifacts {
+            closeout_plan_json: crate::offdesk::operator_safe_text(&artifacts.closeout_plan_json),
+            closeout_plan_markdown: closeout_plan_artifact(
+                &plan,
+                "/artifacts/closeout_plan_markdown",
+            ),
+            cleanup_manifest_json: closeout_plan_artifact(
+                &plan,
+                "/artifacts/cleanup_manifest_json",
+            ),
+            commercial_review_packet: closeout_plan_artifact(
+                &plan,
+                "/artifacts/commercial_review_packet",
+            ),
+            return_package_markdown: crate::offdesk::operator_safe_text(
+                &artifacts.return_package_markdown,
+            ),
+            review_record_json: crate::offdesk::operator_safe_text(&artifacts.review_record_json),
+            review_file: None,
+        },
+    };
+    let record = CloseoutReviewRecord {
+        reviewed_at,
+        review_id,
+        closeout_id,
+        closeout_generated_at,
+        profile: crate::offdesk::operator_safe_text(profile_name),
+        artifact_dir: artifact_dir.display().to_string(),
+        verdict: CloseoutReviewVerdict::Approved,
+        reviewer,
+        review_provider: Some("operator_decision_resolution".to_string()),
+        review_file: None,
+        unsafe_operations: Vec::new(),
+        missing_evidence: Vec::new(),
+        required_first_reads: Vec::new(),
+        notes: Some(format!(
+            "Resolved closeout decision `{kind}` with `{}`. Reason: {reason}",
+            args.decision.as_str()
+        )),
+        decision_resolution: Some(decision_resolution),
+        closeout_retirement: None,
+        applies_to_task_ids,
+        applies_to_tasks,
+        read_only_project_state: true,
+        applies_file_operations: false,
+        closeout_receipt,
+        artifacts,
+    };
+
+    write_closeout_review_record(&record)?;
+    Ok(record)
+}
+
+fn build_closeout_retire_record(
+    profile: &str,
+    args: &CloseoutRetireArgs,
+) -> Result<CloseoutReviewRecord> {
+    let profile_dir = get_profile_dir(profile)?;
+    let profile_name = if profile.is_empty() {
+        DEFAULT_PROFILE
+    } else {
+        profile
+    };
+    let reason = truncate_closeout_text(
+        &crate::offdesk::operator_safe_text(require_non_empty_arg("--reason", args.reason.trim())?),
+        2000,
+    );
+    let artifact_dir = resolve_closeout_artifact_dir_for(
+        &profile_dir,
+        args.closeout_id.as_deref(),
+        args.artifact_dir.as_ref(),
+    )?;
+    let plan_path = artifact_dir.join("closeout_plan.json");
+    let plan: Value = serde_json::from_str(
+        &fs::read_to_string(&plan_path)
+            .with_context(|| format!("read closeout plan {}", plan_path.display()))?,
+    )
+    .with_context(|| format!("parse closeout plan {}", plan_path.display()))?;
+    let closeout_id = closeout_id_from_plan(&plan)?;
+    if let Some(expected) = args.closeout_id.as_deref() {
+        let expected = crate::offdesk::operator_safe_text(expected);
+        if expected != closeout_id {
+            bail!(
+                "closeout id mismatch: requested {}, artifact contains {}",
+                expected,
+                closeout_id
+            );
+        }
+    }
+    let source_review = latest_closeout_review_value(&artifact_dir).ok();
+    let source_receipt = source_review
+        .as_ref()
+        .and_then(|(_, _, review)| review.get("closeout_receipt"));
+    if source_receipt
+        .and_then(|receipt| receipt.get("acceptance_status"))
+        .and_then(Value::as_str)
+        == Some("accepted")
+    {
+        bail!("accepted closeouts cannot be retired as evidence-incomplete");
+    }
+
+    let current_acceptance = latest_closeout_acceptance_by_task(&profile_dir)?;
+    let mut excluded_accepted_tasks = Vec::new();
+    let applies_to_tasks = closeout_review_task_refs_from_plan(&plan)
+        .into_iter()
+        .filter(|task| {
+            let key = (task.project_key.clone(), task.task_id.clone());
+            if current_acceptance.get(&key).map(String::as_str) == Some("accepted") {
+                excluded_accepted_tasks.push(format!("{}:{}", task.project_key, task.task_id));
+                false
+            } else {
+                true
+            }
+        })
+        .collect::<Vec<_>>();
+    if applies_to_tasks.is_empty() {
+        bail!("no non-accepted tasks remain in this closeout to retire");
+    }
+
+    let reviewed_at = Utc::now();
+    let review_id = format!("closeout_retirement_{}", short_uuid());
+    let review_record_path = allocate_closeout_review_record_path(&artifact_dir, reviewed_at)?;
+    let receipt_path = allocate_closeout_receipt_path(&artifact_dir, reviewed_at)?;
+    let return_package_path = closeout_return_package_path(&artifact_dir, &plan);
+    let artifacts = CloseoutReviewArtifactPaths {
+        closeout_plan_json: plan_path.display().to_string(),
+        review_record_json: review_record_path.display().to_string(),
+        closeout_receipt_json: receipt_path.display().to_string(),
+        return_package_markdown: return_package_path.display().to_string(),
+    };
+    let closeout_generated_at = closeout_generated_at_from_plan(&plan);
+    let applies_to_task_ids = applies_to_tasks
+        .iter()
+        .map(|task| task.task_id.clone())
+        .collect::<Vec<_>>();
+    let executed_scope = closeout_executed_scope(&applies_to_tasks);
+    let accepted_scope =
+        vec!["No accepted scope; historical closeout retired as evidence-incomplete.".to_string()];
+    let reviewer = crate::offdesk::operator_safe_text(args.reviewer.trim());
+    let does_not_authorize = closeout_retirement_does_not_authorize();
+    let source_review_record_json = source_review
+        .as_ref()
+        .map(|(path, _, _)| path.display().to_string());
+    let closeout_retirement = CloseoutRetirementRecord {
+        reason: reason.clone(),
+        reviewer: reviewer.clone(),
+        retired_at: reviewed_at,
+        source_review_record_json,
+        excluded_accepted_tasks,
+        does_not_authorize: does_not_authorize.clone(),
+    };
+    let closeout_receipt = CloseoutReceipt {
+        schema: "closeout_receipt.v1",
+        receipt_id: format!("closeout_receipt_{}", short_uuid()),
+        closeout_id: closeout_id.clone(),
+        review_id: review_id.clone(),
+        generated_at: closeout_generated_at.unwrap_or(reviewed_at),
+        reviewed_at,
+        verdict: CloseoutReviewVerdict::Revise,
+        acceptance_status: "retired_incomplete",
+        accepted_scope,
+        executed_scope,
+        evidence_status: source_receipt
+            .map(closeout_receipt_evidence_status)
+            .unwrap_or("missing"),
+        verification_status: "retired",
+        open_decisions: Vec::new(),
+        resolved_open_decisions: Vec::new(),
+        missing_evidence: Vec::new(),
+        required_first_reads: Vec::new(),
+        unsafe_operations: Vec::new(),
+        retention_review: "retired_incomplete",
+        wiki_promotion_state: "not_required",
+        stale_task_count: 0,
+        next_safe_action:
+            "No accepted truth is recorded for this retired evidence-incomplete closeout."
+                .to_string(),
+        retirement_reason: Some(reason.clone()),
+        source_artifacts: CloseoutReceiptArtifacts {
+            closeout_plan_json: crate::offdesk::operator_safe_text(&artifacts.closeout_plan_json),
+            closeout_plan_markdown: closeout_plan_artifact(
+                &plan,
+                "/artifacts/closeout_plan_markdown",
+            ),
+            cleanup_manifest_json: closeout_plan_artifact(
+                &plan,
+                "/artifacts/cleanup_manifest_json",
+            ),
+            commercial_review_packet: closeout_plan_artifact(
+                &plan,
+                "/artifacts/commercial_review_packet",
+            ),
+            return_package_markdown: crate::offdesk::operator_safe_text(
+                &artifacts.return_package_markdown,
+            ),
+            review_record_json: crate::offdesk::operator_safe_text(&artifacts.review_record_json),
+            review_file: None,
+        },
+    };
+    let record = CloseoutReviewRecord {
+        reviewed_at,
+        review_id,
+        closeout_id,
+        closeout_generated_at,
+        profile: crate::offdesk::operator_safe_text(profile_name),
+        artifact_dir: artifact_dir.display().to_string(),
+        verdict: CloseoutReviewVerdict::Revise,
+        reviewer,
+        review_provider: Some("operator_closeout_retirement".to_string()),
+        review_file: None,
+        unsafe_operations: Vec::new(),
+        missing_evidence: Vec::new(),
+        required_first_reads: Vec::new(),
+        notes: Some(format!(
+            "Retired evidence-incomplete historical closeout. Reason: {reason}"
+        )),
+        decision_resolution: None,
+        closeout_retirement: Some(closeout_retirement),
+        applies_to_task_ids,
+        applies_to_tasks,
+        read_only_project_state: true,
+        applies_file_operations: false,
+        closeout_receipt,
+        artifacts,
+    };
+
+    write_closeout_review_record(&record)?;
+    Ok(record)
+}
+
+fn closeout_decision_does_not_authorize() -> Vec<String> {
+    vec![
+        "file movement, archive creation, deletion, cleanup, wiki promotion, provider retargeting, or accepting unrelated closeouts"
+            .to_string(),
+    ]
+}
+
+fn closeout_retirement_does_not_authorize() -> Vec<String> {
+    vec![
+        "accepted truth, evidence repair, file movement, archive creation, deletion, cleanup, wiki promotion, provider retargeting, or accepting unrelated closeouts"
+            .to_string(),
+    ]
+}
+
+fn closeout_id_from_plan(plan: &Value) -> Result<String> {
+    plan.get("closeout_id")
+        .and_then(Value::as_str)
+        .map(crate::offdesk::operator_safe_text)
+        .ok_or_else(|| anyhow::anyhow!("closeout plan is missing closeout_id"))
+}
+
+fn closeout_generated_at_from_plan(plan: &Value) -> Option<DateTime<Utc>> {
+    plan.get("generated_at")
+        .and_then(Value::as_str)
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.with_timezone(&Utc))
+}
+
+fn closeout_review_task_refs_from_plan(plan: &Value) -> Vec<CloseoutReviewTaskRef> {
+    plan.get("tasks")
+        .and_then(Value::as_array)
+        .map(|tasks| {
+            tasks
+                .iter()
+                .filter_map(|task| {
+                    Some(CloseoutReviewTaskRef {
+                        project_key: crate::offdesk::operator_safe_text(
+                            task.get("project_key")?.as_str()?,
+                        ),
+                        request_id: crate::offdesk::operator_safe_text(
+                            task.get("request_id")?.as_str()?,
+                        ),
+                        task_id: crate::offdesk::operator_safe_text(task.get("task_id")?.as_str()?),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn closeout_executed_scope(applies_to_tasks: &[CloseoutReviewTaskRef]) -> Vec<String> {
+    applies_to_tasks
+        .iter()
+        .map(|task| {
+            format!(
+                "{}:{} request={}",
+                task.project_key, task.task_id, task.request_id
+            )
+        })
+        .collect()
+}
+
+fn latest_closeout_review_value(artifact_dir: &Path) -> Result<(PathBuf, DateTime<Utc>, Value)> {
+    let mut reviews = Vec::new();
+    for entry in fs::read_dir(artifact_dir)
+        .with_context(|| format!("read closeout artifact dir {}", artifact_dir.display()))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        let Some(filename) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !filename.starts_with("closeout_review_") || !filename.ends_with(".json") {
+            continue;
+        }
+        let content = fs::read_to_string(&path)
+            .with_context(|| format!("read closeout review {}", path.display()))?;
+        let value: Value = serde_json::from_str(&content)
+            .with_context(|| format!("parse closeout review {}", path.display()))?;
+        let Some(reviewed_at) = value
+            .get("reviewed_at")
+            .and_then(Value::as_str)
+            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+            .map(|value| value.with_timezone(&Utc))
+        else {
+            continue;
+        };
+        reviews.push((reviewed_at, path, value));
+    }
+    reviews.sort_by_key(|(reviewed_at, _, _)| *reviewed_at);
+    reviews
+        .pop()
+        .map(|(reviewed_at, path, value)| (path, reviewed_at, value))
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "no closeout review record found in {}; run closeout-review first",
+                artifact_dir.display()
+            )
+        })
+}
+
+fn latest_closeout_acceptance_by_task(
+    profile_dir: &Path,
+) -> Result<BTreeMap<(String, String), String>> {
+    let closeouts_dir = profile_dir.join("offdesk_closeouts");
+    let mut latest = BTreeMap::<(String, String), (DateTime<Utc>, String)>::new();
+    let Ok(closeouts) = fs::read_dir(&closeouts_dir) else {
+        return Ok(BTreeMap::new());
+    };
+    for closeout in closeouts {
+        let closeout = closeout?;
+        if !closeout.file_type()?.is_dir() {
+            continue;
+        }
+        for review in fs::read_dir(closeout.path())? {
+            let review = review?;
+            let path = review.path();
+            let Some(filename) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            if !filename.starts_with("closeout_review_") || !filename.ends_with(".json") {
+                continue;
+            }
+            let Ok(content) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(value) = serde_json::from_str::<Value>(&content) else {
+                continue;
+            };
+            let Some(reviewed_at) = value
+                .get("reviewed_at")
+                .and_then(Value::as_str)
+                .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+                .map(|value| value.with_timezone(&Utc))
+            else {
+                continue;
+            };
+            let status = value
+                .pointer("/closeout_receipt/acceptance_status")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown")
+                .to_string();
+            let Some(tasks) = value.get("applies_to_tasks").and_then(Value::as_array) else {
+                continue;
+            };
+            for task in tasks {
+                let Some(project_key) = task.get("project_key").and_then(Value::as_str) else {
+                    continue;
+                };
+                let Some(task_id) = task.get("task_id").and_then(Value::as_str) else {
+                    continue;
+                };
+                let key = (project_key.to_string(), task_id.to_string());
+                latest
+                    .entry(key)
+                    .and_modify(|existing| {
+                        if reviewed_at > existing.0 {
+                            *existing = (reviewed_at, status.clone());
+                        }
+                    })
+                    .or_insert_with(|| (reviewed_at, status.clone()));
+            }
+        }
+    }
+    Ok(latest
+        .into_iter()
+        .map(|(key, (_, status))| (key, status))
+        .collect())
+}
+
+fn receipt_decisions_from_value(receipt: &Value) -> Vec<CloseoutReceiptDecision> {
+    receipt
+        .get("open_decisions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .map(|decision| CloseoutReceiptDecision {
+            kind: closeout_plan_string(decision, "kind", "unknown"),
+            detail: truncate_closeout_text(&closeout_plan_string(decision, "detail", "-"), 500),
+            suggested_command: truncate_closeout_text(
+                &closeout_plan_string(decision, "suggested_command", "-"),
+                500,
+            ),
+        })
+        .collect()
+}
+
+fn receipt_string_list(receipt: &Value, key: &str) -> Vec<String> {
+    receipt
+        .get(key)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(crate::offdesk::operator_safe_text)
+        .collect()
+}
+
+fn closeout_retention_status_after_resolution(
+    receipt: &Value,
+    decision: CloseoutDecisionResolution,
+    all_requested_decisions_resolved: bool,
+) -> &'static str {
+    if all_requested_decisions_resolved && decision == CloseoutDecisionResolution::PreserveInPlace {
+        "resolved_preserve_in_place"
+    } else {
+        match receipt.get("retention_review").and_then(Value::as_str) {
+            Some("not_required") => "not_required",
+            Some("resolved_preserve_in_place") => "resolved_preserve_in_place",
+            _ => "required",
+        }
+    }
+}
+
+fn closeout_receipt_evidence_status(receipt: &Value) -> &'static str {
+    match receipt.get("evidence_status").and_then(Value::as_str) {
+        Some("missing") => "missing",
+        _ => "review_ready",
+    }
+}
+
+fn closeout_receipt_wiki_state(receipt: &Value) -> &'static str {
+    match receipt.get("wiki_promotion_state").and_then(Value::as_str) {
+        Some("review_required") => "review_required",
+        Some("audit_unavailable") => "audit_unavailable",
+        Some("no_candidate") => "no_candidate",
+        Some("not_requested") => "not_requested",
+        _ => "not_required",
+    }
+}
+
 fn build_closeout_report(profile: &str, args: &CloseoutArgs) -> Result<OffdeskCloseoutReport> {
     let profile_dir = get_profile_dir(profile)?;
     let profile_name = if profile.is_empty() {
@@ -7487,6 +8488,8 @@ fn build_closeout_review_record(
             .notes
             .as_deref()
             .map(|value| truncate_closeout_text(&crate::offdesk::operator_safe_text(value), 2000)),
+        decision_resolution: None,
+        closeout_retirement: None,
         applies_to_task_ids,
         applies_to_tasks,
         read_only_project_state: true,
@@ -7507,7 +8510,19 @@ fn closeout_return_package_path(artifact_dir: &Path, plan: &Value) -> PathBuf {
 }
 
 fn resolve_closeout_artifact_dir(profile_dir: &Path, args: &CloseoutReviewArgs) -> Result<PathBuf> {
-    if let Some(artifact_dir) = args.artifact_dir.as_ref() {
+    resolve_closeout_artifact_dir_for(
+        profile_dir,
+        args.closeout_id.as_deref(),
+        args.artifact_dir.as_ref(),
+    )
+}
+
+fn resolve_closeout_artifact_dir_for(
+    profile_dir: &Path,
+    closeout_id: Option<&str>,
+    artifact_dir: Option<&PathBuf>,
+) -> Result<PathBuf> {
+    if let Some(artifact_dir) = artifact_dir {
         return Ok(artifact_dir.clone());
     }
 
@@ -7529,7 +8544,7 @@ fn resolve_closeout_artifact_dir(profile_dir: &Path, args: &CloseoutReviewArgs) 
             continue;
         };
         let plan_closeout_id = plan.get("closeout_id").and_then(Value::as_str);
-        if let Some(expected) = args.closeout_id.as_deref() {
+        if let Some(expected) = closeout_id {
             if plan_closeout_id != Some(expected) {
                 continue;
             }
@@ -7545,7 +8560,7 @@ fn resolve_closeout_artifact_dir(profile_dir: &Path, args: &CloseoutReviewArgs) 
 
     candidates.sort_by_key(|(generated_at, _)| *generated_at);
     candidates.pop().map(|(_, path)| path).ok_or_else(|| {
-        if let Some(closeout_id) = args.closeout_id.as_deref() {
+        if let Some(closeout_id) = closeout_id {
             anyhow::anyhow!(
                 "no closeout artifact found for closeout_id {}",
                 crate::offdesk::operator_safe_text(closeout_id)
@@ -7711,6 +8726,7 @@ fn build_closeout_receipt(input: CloseoutReceiptInput<'_>) -> CloseoutReceipt {
         evidence_status,
         verification_status,
         open_decisions,
+        resolved_open_decisions: Vec::new(),
         missing_evidence,
         required_first_reads,
         unsafe_operations,
@@ -7718,6 +8734,7 @@ fn build_closeout_receipt(input: CloseoutReceiptInput<'_>) -> CloseoutReceipt {
         wiki_promotion_state,
         stale_task_count,
         next_safe_action,
+        retirement_reason: None,
         source_artifacts: CloseoutReceiptArtifacts {
             closeout_plan_json: crate::offdesk::operator_safe_text(&artifacts.closeout_plan_json),
             closeout_plan_markdown: closeout_plan_artifact(
@@ -8869,7 +9886,8 @@ fn closeout_implementation_packet_coverage(
             BackgroundRunnerPhase::Failed
             | BackgroundRunnerPhase::StaleNoAck
             | BackgroundRunnerPhase::StaleLostCallback
-            | BackgroundRunnerPhase::Reconstructable => entry.has_failed_evidence = true,
+            | BackgroundRunnerPhase::Reconstructable
+            | BackgroundRunnerPhase::RecoveryAcknowledged => entry.has_failed_evidence = true,
             BackgroundRunnerPhase::Launched
             | BackgroundRunnerPhase::HandoffEmitted
             | BackgroundRunnerPhase::PickupAcknowledged => entry.has_active_evidence = true,
@@ -9666,6 +10684,7 @@ fn closeout_background_phase_label(phase: BackgroundRunnerPhase) -> &'static str
         BackgroundRunnerPhase::StaleNoAck => "stale_no_ack",
         BackgroundRunnerPhase::StaleLostCallback => "stale_lost_callback",
         BackgroundRunnerPhase::Reconstructable => "reconstructable",
+        BackgroundRunnerPhase::RecoveryAcknowledged => "recovery_acknowledged",
     }
 }
 
@@ -10823,6 +11842,11 @@ fn print_closeout_review_record(record: &CloseoutReviewRecord) {
     println!("  reviewer:     {}", record.reviewer);
     if let Some(provider) = record.review_provider.as_deref() {
         println!("  provider:     {provider}");
+    }
+    if let Some(resolution) = record.decision_resolution.as_ref() {
+        println!("  decision:     {}", resolution.kind);
+        println!("  resolution:   {}", resolution.decision);
+        println!("  reason:       {}", resolution.reason);
     }
     println!("  project file mutations: none");
     println!("Artifacts:");

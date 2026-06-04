@@ -201,6 +201,139 @@ fn ondesk_review_surface_json_agrees_with_status_next_safe_action() -> Result<()
 
 #[test]
 #[serial]
+fn ondesk_review_surface_keeps_accepted_truth_when_latest_closeout_is_retired() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    let task_updated = now - Duration::minutes(10);
+    fs::write(
+        profile_dir.join("offdesk_tasks.json"),
+        serde_json::to_string_pretty(&json!([
+            offdesk_task_fixture("accepted-task", "completed", task_updated),
+            offdesk_task_fixture("retired-task", "completed", task_updated)
+        ]))?,
+    )?;
+
+    let accepted_dir = profile_dir
+        .join("offdesk_closeouts")
+        .join("20260601T000000Z_closeout_accepted");
+    fs::create_dir_all(&accepted_dir)?;
+    fs::write(
+        accepted_dir.join("closeout_plan.json"),
+        serde_json::to_string_pretty(&json!({
+            "closeout_id": "closeout_accepted",
+            "generated_at": now,
+            "filters": {"project_key": "project"},
+            "tasks": [{
+                "project_key": "project",
+                "request_id": "request-accepted-task",
+                "task_id": "accepted-task"
+            }],
+            "artifacts": {
+                "return_package_markdown": accepted_dir.join("RETURN_PACKAGE.md")
+            }
+        }))?,
+    )?;
+    fs::write(
+        accepted_dir.join("closeout_review_20260601T000100Z.json"),
+        serde_json::to_string_pretty(&json!({
+            "reviewed_at": now,
+            "verdict": "approved",
+            "applies_to_tasks": [{
+                "project_key": "project",
+                "request_id": "request-accepted-task",
+                "task_id": "accepted-task"
+            }],
+            "closeout_receipt": {
+                "schema": "closeout_receipt.v1",
+                "receipt_id": "receipt-accepted",
+                "acceptance_status": "accepted",
+                "verification_status": "recorded",
+                "open_decisions": [],
+                "next_safe_action": "Continue with accepted evidence."
+            }
+        }))?,
+    )?;
+
+    let retired_dir = profile_dir
+        .join("offdesk_closeouts")
+        .join("20260601T000200Z_closeout_retired");
+    fs::create_dir_all(&retired_dir)?;
+    fs::write(
+        retired_dir.join("closeout_plan.json"),
+        serde_json::to_string_pretty(&json!({
+            "closeout_id": "closeout_retired",
+            "generated_at": now + Duration::seconds(1),
+            "filters": {"project_key": "project"},
+            "tasks": [{
+                "project_key": "project",
+                "request_id": "request-retired-task",
+                "task_id": "retired-task"
+            }],
+            "artifacts": {
+                "return_package_markdown": retired_dir.join("RETURN_PACKAGE.md")
+            }
+        }))?,
+    )?;
+    fs::write(
+        retired_dir.join("closeout_review_20260601T000300Z.json"),
+        serde_json::to_string_pretty(&json!({
+            "reviewed_at": now + Duration::seconds(2),
+            "verdict": "revise",
+            "applies_to_tasks": [{
+                "project_key": "project",
+                "request_id": "request-retired-task",
+                "task_id": "retired-task"
+            }],
+            "closeout_receipt": {
+                "schema": "closeout_receipt.v1",
+                "receipt_id": "receipt-retired",
+                "acceptance_status": "retired_incomplete",
+                "verification_status": "retired",
+                "open_decisions": [],
+                "next_safe_action": "No accepted truth is recorded for this retired evidence-incomplete closeout."
+            }
+        }))?,
+    )?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "ondesk",
+            "review-surface",
+            "--project-key",
+            "project",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let surface: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(surface["status"]["label"], "clear");
+    assert_eq!(surface["accepted_truth"]["status"], "accepted");
+    assert_eq!(
+        surface["accepted_truth"]["source"],
+        "offdesk_status_summary"
+    );
+    assert_eq!(
+        surface["accepted_truth"]["receipt_acceptance_status"],
+        "accepted"
+    );
+    assert_eq!(
+        surface["closeout"]["execution_status"],
+        "retired_incomplete"
+    );
+    assert_eq!(surface["closeout"]["review_status"], "retired_incomplete");
+    assert_eq!(surface["closeout"]["summary"]["accepted"], 1);
+    assert_eq!(surface["closeout"]["summary"]["retired_incomplete"], 1);
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn ondesk_review_surface_default_output_is_human_summary() -> Result<()> {
     let temp = tempdir()?;
     let profile_dir = profile_dir(temp.path());
@@ -424,6 +557,7 @@ fn ondesk_review_surface_summarizes_closeout_receipt_before_paths() -> Result<()
         surface["closeout"]["review_status"],
         "approved_with_followups"
     );
+    assert_eq!(surface["closeout"]["receipt_open_decisions"], 1);
     assert_eq!(
         surface["closeout"]["implementation_packet_coverage"]["packet_count"],
         1
@@ -635,7 +769,14 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
             "verdict": "approved",
             "closeout_receipt": {
                 "schema": "closeout_receipt.v1",
-                "acceptance_status": "approved_with_followups"
+                "acceptance_status": "approved_with_followups",
+                "open_decisions": [
+                    {
+                        "kind": "archive_review",
+                        "detail": "Confirm whether to archive generated validation artifacts.",
+                        "suggested_command": "forager project retention-review"
+                    }
+                ]
             },
             "artifacts": {
                 "closeout_receipt_json": closeout_dir.join("closeout_receipt_20260521T000000Z.json")
@@ -701,6 +842,10 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
         json["review_surface"]["closeout"]["source_observation"]["status"],
         "observed"
     );
+    assert_eq!(
+        json["review_surface"]["closeout"]["receipt_open_decisions"],
+        1
+    );
     assert_eq!(json["latest_closeout"]["closeout_id"], "closeout_test");
     assert_eq!(json["latest_closeout"]["review_verdict"], "approved");
     assert_eq!(
@@ -715,6 +860,7 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
     assert!(content.contains("Morning Review Surface"));
     assert!(content.contains("accepted_truth: pending via closeout_receipt.v1"));
     assert!(content.contains("receipt_acceptance_status: approved_with_followups"));
+    assert!(content.contains("open_decisions: 0 judgment-route, 1 closeout-receipt"));
     assert!(content.contains("source_observation:"));
     assert!(content.contains("status: observed from git_worktree against HEAD"));
     assert!(content.contains("interpretation: read-only source context"));

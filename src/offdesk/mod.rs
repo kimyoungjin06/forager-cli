@@ -64,8 +64,8 @@ pub use approval::{
     ProviderFallbackApplyScope, ProviderFallbackApprovalMetadata, RiskLevel,
 };
 pub use background::{
-    BackgroundProbe, BackgroundRecoveryDecision, BackgroundRunStore, BackgroundRunnerKind,
-    BackgroundRunnerPhase,
+    BackgroundProbe, BackgroundRecoveryAcknowledgement, BackgroundRecoveryDecision,
+    BackgroundRunStore, BackgroundRunnerKind, BackgroundRunnerPhase,
 };
 pub use capability::{
     default_capability_registry, CapabilityArtifactCheck, CapabilityArtifactContract,

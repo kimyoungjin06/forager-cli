@@ -425,6 +425,7 @@ fn runner_phase_label(phase: BackgroundRunnerPhase) -> &'static str {
         BackgroundRunnerPhase::StaleNoAck => "stale_no_ack",
         BackgroundRunnerPhase::StaleLostCallback => "stale_lost_callback",
         BackgroundRunnerPhase::Reconstructable => "reconstructable",
+        BackgroundRunnerPhase::RecoveryAcknowledged => "recovery_acknowledged",
     }
 }
 
@@ -467,6 +468,7 @@ fn background_mode_lifecycle(
         | BackgroundRunnerPhase::StaleNoAck
         | BackgroundRunnerPhase::StaleLostCallback
         | BackgroundRunnerPhase::Reconstructable => OffdeskModeLifecycle::Blocked,
+        BackgroundRunnerPhase::RecoveryAcknowledged => OffdeskModeLifecycle::Cancelled,
         BackgroundRunnerPhase::Launched
         | BackgroundRunnerPhase::HandoffEmitted
         | BackgroundRunnerPhase::PickupAcknowledged => OffdeskModeLifecycle::Running,

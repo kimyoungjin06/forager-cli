@@ -732,6 +732,494 @@ fn offdesk_closeout_review_receipt_distinguishes_acceptance_from_revision() -> R
 
 #[test]
 #[serial]
+fn offdesk_closeout_decision_resolves_archive_review_without_file_mutation() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let project = temp.path().join("project");
+    fs::create_dir_all(&project)?;
+    fs::write(project.join("README.md"), "# Project\n")?;
+    fs::write(
+        project.join("PROJECT_STATE.md"),
+        format!("# Project State\n\nUpdated: {}\n", Utc::now().date_naive()),
+    )?;
+    fs::write(project.join("DECISIONS.md"), "# Decisions\n")?;
+    fs::write(
+        project.join("DELIVERABLES.md"),
+        "# Deliverables\n\n- `README.md`: project overview.\n",
+    )?;
+    let artifact_dir = temp.path().join("run-artifacts");
+    fs::create_dir_all(&artifact_dir)?;
+    let result_path = artifact_dir.join("result.json");
+    let log_path = artifact_dir.join("offdesk-runner.log");
+    fs::write(&result_path, "{\"status\":\"ok\"}")?;
+    fs::write(&log_path, "runner log")?;
+    let now = Utc::now();
+    fs::write(
+        profile_dir.join("offdesk_tasks.json"),
+        serde_json::to_string_pretty(&json!([
+            {
+                "task_id": "task-archive-followup",
+                "request_id": "request-archive-followup",
+                "project_key": "archive-followup",
+                "status": "completed",
+                "capability_id": "inspect.status",
+                "runner_kind": "local_tmux",
+                "command": "true",
+                "workdir": project.to_str().expect("utf-8 project path"),
+                "attempt_count": 1,
+                "created_at": now,
+                "updated_at": now,
+                "preview": "archive followup closeout",
+                "reason": "closeout decision test",
+                "result_artifact_path": result_path.to_str().expect("utf-8 result path"),
+                "log_artifact_path": log_path.to_str().expect("utf-8 log path")
+            }
+        ]))?,
+    )?;
+
+    let closeout_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "closeout",
+            "--project-key",
+            "archive-followup",
+            "--task-id",
+            "task-archive-followup",
+            "--workdir",
+            project.to_str().expect("utf-8 project path"),
+            "--dry-run",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        closeout_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&closeout_output.stderr)
+    );
+    let closeout: Value = serde_json::from_slice(&closeout_output.stdout)?;
+    assert!(closeout["open_decisions"]
+        .as_array()
+        .expect("open decisions")
+        .iter()
+        .any(|decision| decision["kind"] == "archive_review"));
+
+    let review_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "closeout-review",
+            "--closeout-id",
+            closeout["closeout_id"].as_str().expect("closeout id"),
+            "--verdict",
+            "approved",
+            "--reviewer",
+            "operator",
+            "--notes",
+            "approved but archive decision remains",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        review_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&review_output.stderr)
+    );
+    let review: Value = serde_json::from_slice(&review_output.stdout)?;
+    assert_eq!(
+        review["closeout_receipt"]["acceptance_status"],
+        "approved_with_followups"
+    );
+    assert_eq!(review["closeout_receipt"]["retention_review"], "required");
+    assert_eq!(
+        review["closeout_receipt"]["open_decisions"][0]["kind"],
+        "archive_review"
+    );
+
+    let decision_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "closeout-decision",
+            "--closeout-id",
+            closeout["closeout_id"].as_str().expect("closeout id"),
+            "--kind",
+            "archive_review",
+            "--decision",
+            "preserve-in-place",
+            "--reviewer",
+            "operator",
+            "--reason",
+            "Preserve the log in place as provenance; no archive or deletion is authorized.",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        decision_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&decision_output.stderr)
+    );
+    let decision: Value = serde_json::from_slice(&decision_output.stdout)?;
+    assert_eq!(
+        decision["closeout_receipt"]["acceptance_status"],
+        "accepted"
+    );
+    assert_eq!(
+        decision["closeout_receipt"]["verification_status"],
+        "recorded"
+    );
+    assert_eq!(
+        decision["closeout_receipt"]["retention_review"],
+        "resolved_preserve_in_place"
+    );
+    assert!(decision["closeout_receipt"]["open_decisions"]
+        .as_array()
+        .expect("open decisions")
+        .is_empty());
+    assert_eq!(
+        decision["closeout_receipt"]["resolved_open_decisions"][0]["kind"],
+        "archive_review"
+    );
+    assert_eq!(
+        decision["closeout_receipt"]["resolved_open_decisions"][0]["decision"],
+        "preserve_in_place"
+    );
+    assert_eq!(decision["applies_file_operations"], false);
+    assert!(log_path.exists());
+    let return_package_path = PathBuf::from(
+        closeout["artifacts"]["return_package_markdown"]
+            .as_str()
+            .expect("return package path"),
+    );
+    let return_package = fs::read_to_string(return_package_path)?;
+    assert!(return_package.contains("acceptance_status: `accepted`"));
+
+    let status_output = forager_command(temp.path())
+        .args(["status", "--json"])
+        .output()?;
+    assert!(
+        status_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&status_output.stderr)
+    );
+    let status: Value = serde_json::from_slice(&status_output.stdout)?;
+    assert_eq!(status["closeout_state"]["accepted"], 1);
+    assert_eq!(status["closeout_state"]["approved_with_followups"], 0);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_closeout_decision_rejects_revision_required_receipts() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let project = temp.path().join("project");
+    fs::create_dir_all(&project)?;
+    fs::write(project.join("README.md"), "# Project\n")?;
+    fs::write(
+        project.join("PROJECT_STATE.md"),
+        format!("# Project State\n\nUpdated: {}\n", Utc::now().date_naive()),
+    )?;
+    fs::write(project.join("DECISIONS.md"), "# Decisions\n")?;
+    fs::write(
+        project.join("DELIVERABLES.md"),
+        "# Deliverables\n\n- `README.md`: project overview.\n",
+    )?;
+    let artifact_dir = temp.path().join("run-artifacts");
+    fs::create_dir_all(&artifact_dir)?;
+    let result_path = artifact_dir.join("result.json");
+    let log_path = artifact_dir.join("offdesk-runner.log");
+    fs::write(&result_path, "{\"status\":\"ok\"}")?;
+    fs::write(&log_path, "runner log")?;
+    let now = Utc::now();
+    fs::write(
+        profile_dir.join("offdesk_tasks.json"),
+        serde_json::to_string_pretty(&json!([
+            {
+                "task_id": "task-revise-archive-followup",
+                "request_id": "request-revise-archive-followup",
+                "project_key": "revise-archive-followup",
+                "status": "completed",
+                "capability_id": "inspect.status",
+                "runner_kind": "local_tmux",
+                "command": "true",
+                "workdir": project.to_str().expect("utf-8 project path"),
+                "attempt_count": 1,
+                "created_at": now,
+                "updated_at": now,
+                "preview": "revise archive followup closeout",
+                "reason": "closeout decision rejection test",
+                "result_artifact_path": result_path.to_str().expect("utf-8 result path"),
+                "log_artifact_path": log_path.to_str().expect("utf-8 log path")
+            }
+        ]))?,
+    )?;
+
+    let closeout_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "closeout",
+            "--project-key",
+            "revise-archive-followup",
+            "--task-id",
+            "task-revise-archive-followup",
+            "--workdir",
+            project.to_str().expect("utf-8 project path"),
+            "--dry-run",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        closeout_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&closeout_output.stderr)
+    );
+    let closeout: Value = serde_json::from_slice(&closeout_output.stdout)?;
+    let review_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "closeout-review",
+            "--closeout-id",
+            closeout["closeout_id"].as_str().expect("closeout id"),
+            "--verdict",
+            "revise",
+            "--reviewer",
+            "operator",
+            "--notes",
+            "revise before any decision resolution",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        review_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&review_output.stderr)
+    );
+
+    let decision_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "closeout-decision",
+            "--closeout-id",
+            closeout["closeout_id"].as_str().expect("closeout id"),
+            "--kind",
+            "archive_review",
+            "--decision",
+            "preserve-in-place",
+            "--reason",
+            "This should not bypass revision-required closeout state.",
+            "--json",
+        ])
+        .output()?;
+    assert!(!decision_output.status.success());
+    assert!(String::from_utf8_lossy(&decision_output.stderr)
+        .contains("can only resolve approved closeout receipts with follow-ups"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_closeout_retire_quarantines_historical_revision_without_overwriting_accepted(
+) -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let project = temp.path().join("project");
+    fs::create_dir_all(&project)?;
+    fs::write(project.join("README.md"), "# Project\n")?;
+    fs::write(
+        project.join("PROJECT_STATE.md"),
+        format!("# Project State\n\nUpdated: {}\n", Utc::now().date_naive()),
+    )?;
+    fs::write(project.join("DECISIONS.md"), "# Decisions\n")?;
+    fs::write(
+        project.join("DELIVERABLES.md"),
+        "# Deliverables\n\n- `README.md`: project overview.\n",
+    )?;
+    let artifact_dir = temp.path().join("run-artifacts");
+    fs::create_dir_all(&artifact_dir)?;
+    let result_a = artifact_dir.join("result-a.json");
+    let result_b = artifact_dir.join("result-b.json");
+    fs::write(&result_a, "{\"status\":\"a\"}")?;
+    fs::write(&result_b, "{\"status\":\"b\"}")?;
+    let now = Utc::now();
+    fs::write(
+        profile_dir.join("offdesk_tasks.json"),
+        serde_json::to_string_pretty(&json!([
+            {
+                "task_id": "task-retire-a",
+                "request_id": "request-retire-a",
+                "project_key": "retire",
+                "status": "completed",
+                "capability_id": "inspect.status",
+                "runner_kind": "local_tmux",
+                "command": "true",
+                "workdir": project.to_str().expect("utf-8 project path"),
+                "attempt_count": 1,
+                "created_at": now,
+                "updated_at": now,
+                "preview": "historical closeout a",
+                "reason": "closeout retire test",
+                "result_artifact_path": result_a.to_str().expect("utf-8 result path")
+            },
+            {
+                "task_id": "task-retire-b",
+                "request_id": "request-retire-b",
+                "project_key": "retire",
+                "status": "completed",
+                "capability_id": "inspect.status",
+                "runner_kind": "local_tmux",
+                "command": "true",
+                "workdir": project.to_str().expect("utf-8 project path"),
+                "attempt_count": 1,
+                "created_at": now,
+                "updated_at": now,
+                "preview": "historical closeout b",
+                "reason": "closeout retire test",
+                "result_artifact_path": result_b.to_str().expect("utf-8 result path")
+            }
+        ]))?,
+    )?;
+
+    let historical_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "closeout",
+            "--project-key",
+            "retire",
+            "--workdir",
+            project.to_str().expect("utf-8 project path"),
+            "--dry-run",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        historical_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&historical_output.stderr)
+    );
+    let historical: Value = serde_json::from_slice(&historical_output.stdout)?;
+    let historical_review = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "closeout-review",
+            "--closeout-id",
+            historical["closeout_id"].as_str().expect("closeout id"),
+            "--verdict",
+            "revise",
+            "--reviewer",
+            "operator",
+            "--notes",
+            "historical evidence is incomplete",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        historical_review.status.success(),
+        "{}",
+        String::from_utf8_lossy(&historical_review.stderr)
+    );
+
+    let accepted_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "closeout",
+            "--project-key",
+            "retire",
+            "--task-id",
+            "task-retire-b",
+            "--workdir",
+            project.to_str().expect("utf-8 project path"),
+            "--dry-run",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        accepted_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&accepted_output.stderr)
+    );
+    let accepted_closeout: Value = serde_json::from_slice(&accepted_output.stdout)?;
+    let accepted_review = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "closeout-review",
+            "--closeout-id",
+            accepted_closeout["closeout_id"]
+                .as_str()
+                .expect("closeout id"),
+            "--verdict",
+            "approved",
+            "--reviewer",
+            "operator",
+            "--notes",
+            "accepted current evidence",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        accepted_review.status.success(),
+        "{}",
+        String::from_utf8_lossy(&accepted_review.stderr)
+    );
+
+    let retire_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "closeout-retire",
+            "--closeout-id",
+            historical["closeout_id"].as_str().expect("closeout id"),
+            "--reviewer",
+            "operator",
+            "--reason",
+            "Historical closeout is evidence-incomplete and must not be accepted.",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        retire_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&retire_output.stderr)
+    );
+    let retirement: Value = serde_json::from_slice(&retire_output.stdout)?;
+    assert_eq!(
+        retirement["closeout_receipt"]["acceptance_status"],
+        "retired_incomplete"
+    );
+    assert_eq!(
+        retirement["closeout_receipt"]["verification_status"],
+        "retired"
+    );
+    assert_eq!(
+        retirement["applies_to_task_ids"]
+            .as_array()
+            .expect("applies to task ids")
+            .len(),
+        1
+    );
+    assert_eq!(retirement["applies_to_task_ids"][0], "task-retire-a");
+    assert_eq!(
+        retirement["closeout_retirement"]["excluded_accepted_tasks"][0],
+        "retire:task-retire-b"
+    );
+
+    let status_output = forager_command(temp.path())
+        .args(["status", "--json"])
+        .output()?;
+    assert!(
+        status_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&status_output.stderr)
+    );
+    let status: Value = serde_json::from_slice(&status_output.stdout)?;
+    assert_eq!(status["closeout_required_offdesk_tasks"], 0);
+    assert_eq!(status["closeout_state"]["accepted"], 1);
+    assert_eq!(status["closeout_state"]["retired_incomplete"], 1);
+    assert_eq!(status["closeout_state"]["revision_required"], 0);
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn offdesk_closeout_flags_missing_packet_detail_evidence() -> Result<()> {
     let temp = tempdir()?;
     let profile_dir = profile_dir(temp.path());
@@ -1043,7 +1531,7 @@ fn offdesk_closeout_uses_work_slice_execution_receipts() -> Result<()> {
     fs::write(&alignment_path, "{}")?;
     fs::write(&packet_markdown_path, "# Implementation Packet\n")?;
 
-    let receipts = vec![
+    let receipts = [
         json!({
             "schema": "work_slice_execution_receipt.v1",
             "packet_id": "packet-slice-receipts",

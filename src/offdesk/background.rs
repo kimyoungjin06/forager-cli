@@ -48,6 +48,7 @@ pub enum BackgroundRunnerPhase {
     StaleNoAck,
     StaleLostCallback,
     Reconstructable,
+    RecoveryAcknowledged,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -119,6 +120,8 @@ pub struct BackgroundProbe {
     pub adaptive_wiki_runtime_policy: Option<AdaptiveWikiProjectionPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adaptive_wiki_context: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_recovery_ack: Option<BackgroundRecoveryAcknowledgement>,
 }
 
 impl BackgroundProbe {
@@ -159,10 +162,21 @@ impl BackgroundProbe {
             adaptive_wiki_entry_ids: Vec::new(),
             adaptive_wiki_runtime_policy: None,
             adaptive_wiki_context: None,
+            operator_recovery_ack: None,
         }
     }
 
     pub fn evaluate(&self, now: DateTime<Utc>) -> BackgroundRecoveryDecision {
+        if self.operator_recovery_ack.is_some()
+            && !self.result_artifact_present
+            && !self.external_result_present
+        {
+            return BackgroundRecoveryDecision::recovery_acknowledged(
+                "operator acknowledged background recovery; no result is accepted from this probe",
+                self,
+            );
+        }
+
         match self.runner_kind {
             BackgroundRunnerKind::LocalTmux => self.evaluate_local_tmux(),
             BackgroundRunnerKind::LocalBackground => self.evaluate_local_background(),
@@ -275,6 +289,19 @@ impl BackgroundProbe {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackgroundRecoveryAcknowledgement {
+    pub acknowledged_at: DateTime<Utc>,
+    pub acknowledged_by: String,
+    pub reason: String,
+    pub previous_phase: BackgroundRunnerPhase,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub linked_task_ids: Vec<String>,
+    pub source_surface: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub does_not_authorize: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum NotificationDecision {
     Send {
@@ -308,6 +335,15 @@ impl BackgroundRecoveryDecision {
     fn failed(evidence: &str, probe: &BackgroundProbe) -> Self {
         Self {
             phase: BackgroundRunnerPhase::Failed,
+            terminal: true,
+            evidence: operator_safe_text(evidence),
+            last_log_tail: probe.last_log_tail.as_deref().map(operator_safe_text),
+        }
+    }
+
+    fn recovery_acknowledged(evidence: &str, probe: &BackgroundProbe) -> Self {
+        Self {
+            phase: BackgroundRunnerPhase::RecoveryAcknowledged,
             terminal: true,
             evidence: operator_safe_text(evidence),
             last_log_tail: probe.last_log_tail.as_deref().map(operator_safe_text),
@@ -460,6 +496,27 @@ mod tests {
         assert_eq!(decision.phase, BackgroundRunnerPhase::StaleLostCallback);
         assert!(!decision.terminal);
         assert!(decision.evidence.contains("heartbeat is stale"));
+    }
+
+    #[test]
+    fn operator_recovery_ack_suppresses_stale_without_accepting_result() {
+        let now = Utc::now();
+        let mut probe = BackgroundProbe::new("ticket", BackgroundRunnerKind::LocalBackground);
+        probe.operator_recovery_ack = Some(BackgroundRecoveryAcknowledgement {
+            acknowledged_at: now,
+            acknowledged_by: "operator".to_string(),
+            reason: "superseded by cancelled durable task review".to_string(),
+            previous_phase: BackgroundRunnerPhase::StaleLostCallback,
+            linked_task_ids: vec!["task".to_string()],
+            source_surface: "test".to_string(),
+            does_not_authorize: Vec::new(),
+        });
+
+        let decision = probe.evaluate(now);
+
+        assert_eq!(decision.phase, BackgroundRunnerPhase::RecoveryAcknowledged);
+        assert!(decision.terminal);
+        assert!(decision.evidence.contains("operator acknowledged"));
     }
 
     #[test]

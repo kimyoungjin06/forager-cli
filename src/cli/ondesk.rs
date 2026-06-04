@@ -1780,10 +1780,16 @@ fn render_review_surface_prompt_section(output: &mut String, surface: &Value) {
     if let Some(runtime) = value_text(surface, "/runtime/progress_summary") {
         output.push_str(&format!("- runtime: {runtime}\n"));
     }
-    output.push_str(&format!(
-        "- open_decisions: {}\n",
-        value_u64(surface, "/decisions/open_count").unwrap_or_default()
-    ));
+    let judgment_open_decisions = value_u64(surface, "/decisions/open_count").unwrap_or_default();
+    let closeout_receipt_open_decisions =
+        value_u64(surface, "/closeout/receipt_open_decisions").unwrap_or_default();
+    if closeout_receipt_open_decisions > 0 {
+        output.push_str(&format!(
+            "- open_decisions: {judgment_open_decisions} judgment-route, {closeout_receipt_open_decisions} closeout-receipt\n"
+        ));
+    } else {
+        output.push_str(&format!("- open_decisions: {judgment_open_decisions}\n"));
+    }
     if let Some(decisions) = surface
         .pointer("/decisions/recent")
         .and_then(Value::as_array)
