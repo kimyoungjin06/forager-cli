@@ -1767,6 +1767,8 @@ def render_review_surface_section(brief: dict[str, Any]) -> str:
         line = f"Accepted truth: {accepted_truth.get('status')}"
         if accepted_truth.get("receipt_acceptance_status"):
             line += f" / receipt {accepted_truth.get('receipt_acceptance_status')}"
+        if accepted_truth.get("accepted_receipt_id"):
+            line += f" / {accepted_truth.get('accepted_receipt_id')}"
         if reason:
             line += f" - {reason}"
         lines.append(line)

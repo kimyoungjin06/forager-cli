@@ -219,6 +219,7 @@ fn ondesk_review_surface_keeps_accepted_truth_when_latest_closeout_is_retired() 
         .join("offdesk_closeouts")
         .join("20260601T000000Z_closeout_accepted");
     fs::create_dir_all(&accepted_dir)?;
+    let accepted_receipt_path = accepted_dir.join("closeout_receipt_20260601T000100Z.json");
     fs::write(
         accepted_dir.join("closeout_plan.json"),
         serde_json::to_string_pretty(&json!({
@@ -235,6 +236,19 @@ fn ondesk_review_surface_keeps_accepted_truth_when_latest_closeout_is_retired() 
             }
         }))?,
     )?;
+    let accepted_receipt = json!({
+        "schema": "closeout_receipt.v1",
+        "receipt_id": "receipt-accepted",
+        "acceptance_status": "accepted",
+        "verification_status": "recorded",
+        "accepted_scope": ["project:accepted-task"],
+        "open_decisions": [],
+        "next_safe_action": "Continue with accepted evidence."
+    });
+    fs::write(
+        &accepted_receipt_path,
+        serde_json::to_string_pretty(&accepted_receipt)?,
+    )?;
     fs::write(
         accepted_dir.join("closeout_review_20260601T000100Z.json"),
         serde_json::to_string_pretty(&json!({
@@ -245,13 +259,9 @@ fn ondesk_review_surface_keeps_accepted_truth_when_latest_closeout_is_retired() 
                 "request_id": "request-accepted-task",
                 "task_id": "accepted-task"
             }],
-            "closeout_receipt": {
-                "schema": "closeout_receipt.v1",
-                "receipt_id": "receipt-accepted",
-                "acceptance_status": "accepted",
-                "verification_status": "recorded",
-                "open_decisions": [],
-                "next_safe_action": "Continue with accepted evidence."
+            "closeout_receipt": accepted_receipt,
+            "artifacts": {
+                "closeout_receipt_json": accepted_receipt_path
             }
         }))?,
     )?;
@@ -314,13 +324,26 @@ fn ondesk_review_surface_keeps_accepted_truth_when_latest_closeout_is_retired() 
     let surface: Value = serde_json::from_slice(&output.stdout)?;
     assert_eq!(surface["status"]["label"], "clear");
     assert_eq!(surface["accepted_truth"]["status"], "accepted");
-    assert_eq!(
-        surface["accepted_truth"]["source"],
-        "offdesk_status_summary"
-    );
+    assert_eq!(surface["accepted_truth"]["source"], "closeout_receipt.v1");
     assert_eq!(
         surface["accepted_truth"]["receipt_acceptance_status"],
         "accepted"
+    );
+    assert_eq!(
+        surface["accepted_truth"]["accepted_closeout_id"],
+        "closeout_accepted"
+    );
+    assert_eq!(
+        surface["accepted_truth"]["accepted_receipt_id"],
+        "receipt-accepted"
+    );
+    assert_eq!(
+        surface["accepted_truth"]["accepted_receipt_path"],
+        accepted_receipt_path.to_string_lossy().as_ref()
+    );
+    assert_eq!(
+        surface["accepted_truth"]["accepted_scope"][0],
+        "project:accepted-task"
     );
     assert_eq!(
         surface["closeout"]["execution_status"],

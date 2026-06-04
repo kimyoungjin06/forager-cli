@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use clap::Args;
 use serde::Serialize;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -14,7 +15,8 @@ use crate::offdesk::{
     latest_implementation_packet_for_project, load_offdesk_status_summary, operator_safe_text,
     AdaptiveWikiStore, BackgroundProbe, BackgroundRunStore, DecisionLedger, DecisionRecord,
     DecisionStatus, ImplementationPacketSummary, LatestImplementationPacket, OffdeskStatusSummary,
-    IMPLEMENTATION_PACKET_FILE, IMPLEMENTATION_PACKET_MD_FILE, RECURSIVE_ALIGNMENT_REVIEW_FILE,
+    OffdeskTaskStatus, OffdeskTaskStore, IMPLEMENTATION_PACKET_FILE, IMPLEMENTATION_PACKET_MD_FILE,
+    RECURSIVE_ALIGNMENT_REVIEW_FILE,
 };
 use crate::session::get_profile_dir;
 
@@ -70,6 +72,14 @@ struct ReviewSurfaceAcceptedTruth {
     reason: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     receipt_acceptance_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    accepted_closeout_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    accepted_receipt_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    accepted_receipt_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    accepted_scope: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -214,6 +224,15 @@ struct LatestCloseoutReview {
     receipt: Option<Value>,
 }
 
+struct AcceptedTruthReceipt {
+    closeout_id: String,
+    receipt_id: String,
+    reviewed_at: DateTime<Utc>,
+    receipt_path: Option<PathBuf>,
+    accepted_scope: Vec<String>,
+    next_safe_action: Option<String>,
+}
+
 pub async fn run(profile: &str, args: ReviewSurfaceArgs) -> Result<()> {
     let surface = build_review_surface(profile, &args)?;
     if args.json {
@@ -252,6 +271,12 @@ pub(crate) fn human_summary_from_value(surface: &Value) -> String {
     output.push_str(&format!(
         "  accepted truth: {truth_status} via {truth_source}\n"
     ));
+    if let Some(receipt_id) = text_at(surface, "/accepted_truth/accepted_receipt_id") {
+        output.push_str(&format!("  accepted receipt: {receipt_id}\n"));
+    }
+    if let Some(closeout_id) = text_at(surface, "/accepted_truth/accepted_closeout_id") {
+        output.push_str(&format!("  accepted closeout: {closeout_id}\n"));
+    }
     if let Some(reason) = text_at(surface, "/accepted_truth/reason") {
         output.push_str(&format!("  reason: {reason}\n"));
     }
@@ -397,6 +422,8 @@ fn build_review_surface(profile: &str, args: &ReviewSurfaceArgs) -> Result<Revie
         .map(operator_safe_text)
         .unwrap_or_else(|| "all".to_string());
     let latest_closeout = latest_closeout(&profile_dir, args.project_key.as_deref())?;
+    let accepted_truth_receipt =
+        latest_accepted_truth_receipt(&profile_dir, args.project_key.as_deref())?;
     let latest_implementation_packet =
         latest_implementation_packet_for_project(&profile_dir, args.project_key.as_deref())?;
     let artifact_index =
@@ -419,7 +446,11 @@ fn build_review_surface(profile: &str, args: &ReviewSurfaceArgs) -> Result<Revie
         project_key,
         status: build_surface_status(&status_json, &next_safe_actions),
         next_safe_actions,
-        accepted_truth: build_accepted_truth(&offdesk_summary, latest_closeout.as_ref()),
+        accepted_truth: build_accepted_truth(
+            &offdesk_summary,
+            latest_closeout.as_ref(),
+            accepted_truth_receipt.as_ref(),
+        ),
         closeout: build_closeout(&offdesk_summary, latest_closeout.as_ref()),
         runtime: build_runtime(&profile_dir, &status_json, args.project_key.as_deref()),
         decisions: build_decisions(&profile_dir, args.project_key.as_deref()),
@@ -490,6 +521,7 @@ fn build_surface_status(status_json: &Value, next_safe_actions: &[Value]) -> Rev
 fn build_accepted_truth(
     summary: &OffdeskStatusSummary,
     latest: Option<&LatestCloseout>,
+    accepted_receipt: Option<&AcceptedTruthReceipt>,
 ) -> ReviewSurfaceAcceptedTruth {
     let receipt = latest.and_then(|closeout| closeout.review.as_ref()?.receipt.as_ref());
     let receipt_status = receipt
@@ -502,17 +534,25 @@ fn build_accepted_truth(
         .map(operator_safe_text);
 
     if receipt_status.as_deref() == Some("retired_incomplete")
+        && accepted_receipt.is_some()
         && summary.closeout_state.accepted > 0
     {
         return ReviewSurfaceAcceptedTruth {
             status: "accepted".to_string(),
-            source: "offdesk_status_summary".to_string(),
-            reason: "At least one closeout receipt is recorded as accepted truth; latest retired closeout remains evidence-incomplete history.".to_string(),
+            source: "closeout_receipt.v1".to_string(),
+            reason: "An accepted closeout receipt is recorded as accepted truth; latest retired closeout remains evidence-incomplete history.".to_string(),
             receipt_acceptance_status: Some("accepted".to_string()),
+            accepted_closeout_id: accepted_receipt.map(|receipt| receipt.closeout_id.clone()),
+            accepted_receipt_id: accepted_receipt.map(|receipt| receipt.receipt_id.clone()),
+            accepted_receipt_path: accepted_receipt
+                .and_then(|receipt| receipt.receipt_path.as_ref())
+                .map(|path| operator_safe_text(path.to_string_lossy().as_ref())),
+            accepted_scope: accepted_scope_for_surface(accepted_receipt),
         };
     }
 
     if let Some(status) = receipt_status.clone() {
+        let accepted_receipt = (status == "accepted").then_some(accepted_receipt).flatten();
         return ReviewSurfaceAcceptedTruth {
             status: if status == "accepted" {
                 "accepted".to_string()
@@ -522,6 +562,12 @@ fn build_accepted_truth(
             source: "closeout_receipt.v1".to_string(),
             reason: next_safe_action.unwrap_or_else(|| closeout_acceptance_reason(&status)),
             receipt_acceptance_status: Some(status),
+            accepted_closeout_id: accepted_receipt.map(|receipt| receipt.closeout_id.clone()),
+            accepted_receipt_id: accepted_receipt.map(|receipt| receipt.receipt_id.clone()),
+            accepted_receipt_path: accepted_receipt
+                .and_then(|receipt| receipt.receipt_path.as_ref())
+                .map(|path| operator_safe_text(path.to_string_lossy().as_ref())),
+            accepted_scope: accepted_scope_for_surface(accepted_receipt),
         };
     }
 
@@ -532,6 +578,31 @@ fn build_accepted_truth(
             reason: "Completed Offdesk output still needs closeout or closeout receipt review."
                 .to_string(),
             receipt_acceptance_status: None,
+            accepted_closeout_id: None,
+            accepted_receipt_id: None,
+            accepted_receipt_path: None,
+            accepted_scope: None,
+        }
+    } else if let Some(accepted_receipt) =
+        accepted_receipt.filter(|_| summary.closeout_state.accepted > 0)
+    {
+        ReviewSurfaceAcceptedTruth {
+            status: "accepted".to_string(),
+            source: "closeout_receipt.v1".to_string(),
+            reason: accepted_receipt
+                .next_safe_action
+                .clone()
+                .unwrap_or_else(|| {
+                    "A closeout receipt accepted the executed scope as accepted truth.".to_string()
+                }),
+            receipt_acceptance_status: Some("accepted".to_string()),
+            accepted_closeout_id: Some(accepted_receipt.closeout_id.clone()),
+            accepted_receipt_id: Some(accepted_receipt.receipt_id.clone()),
+            accepted_receipt_path: accepted_receipt
+                .receipt_path
+                .as_ref()
+                .map(|path| operator_safe_text(path.to_string_lossy().as_ref())),
+            accepted_scope: accepted_scope_for_surface(Some(accepted_receipt)),
         }
     } else if summary.closeout_state.accepted > 0 {
         ReviewSurfaceAcceptedTruth {
@@ -539,6 +610,10 @@ fn build_accepted_truth(
             source: "offdesk_status_summary".to_string(),
             reason: "At least one closeout receipt is recorded as accepted truth.".to_string(),
             receipt_acceptance_status: Some("accepted".to_string()),
+            accepted_closeout_id: None,
+            accepted_receipt_id: None,
+            accepted_receipt_path: None,
+            accepted_scope: None,
         }
     } else {
         ReviewSurfaceAcceptedTruth {
@@ -547,8 +622,18 @@ fn build_accepted_truth(
             reason: "No completed Offdesk closeout currently requires accepted-truth review."
                 .to_string(),
             receipt_acceptance_status: None,
+            accepted_closeout_id: None,
+            accepted_receipt_id: None,
+            accepted_receipt_path: None,
+            accepted_scope: None,
         }
     }
+}
+
+fn accepted_scope_for_surface(receipt: Option<&AcceptedTruthReceipt>) -> Option<Vec<String>> {
+    receipt
+        .map(|receipt| receipt.accepted_scope.clone())
+        .filter(|scope| !scope.is_empty())
 }
 
 fn build_closeout(
@@ -983,6 +1068,177 @@ fn latest_closeout(
 
     candidates.sort_by_key(|(sort_key, _)| *sort_key);
     Ok(candidates.pop().map(|(_, closeout)| closeout))
+}
+
+fn latest_accepted_truth_receipt(
+    profile_dir: &Path,
+    project_key: Option<&str>,
+) -> Result<Option<AcceptedTruthReceipt>> {
+    let current_completed_tasks = OffdeskTaskStore::new(profile_dir)
+        .load()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|task| task.status == OffdeskTaskStatus::Completed)
+        .filter(|task| option_matches(project_key, Some(task.project_key.as_str())))
+        .map(|task| ((task.project_key, task.task_id), task.updated_at))
+        .collect::<HashMap<_, _>>();
+    if current_completed_tasks.is_empty() {
+        return Ok(None);
+    }
+
+    let closeouts_dir = profile_dir.join("offdesk_closeouts");
+    if !closeouts_dir.exists() {
+        return Ok(None);
+    }
+
+    let mut candidates = Vec::new();
+    for entry in fs::read_dir(&closeouts_dir)
+        .with_context(|| format!("read closeout directory {}", closeouts_dir.display()))?
+    {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let artifact_dir = entry.path();
+        let plan_path = artifact_dir.join("closeout_plan.json");
+        let Ok(plan_content) = fs::read_to_string(&plan_path) else {
+            continue;
+        };
+        let Ok(plan) = serde_json::from_str::<Value>(&plan_content) else {
+            continue;
+        };
+        if !closeout_plan_matches_project(&plan, project_key) {
+            continue;
+        }
+        let closeout_id = plan
+            .get("closeout_id")
+            .and_then(Value::as_str)
+            .map(operator_safe_text)
+            .unwrap_or_else(|| "unknown".to_string());
+        candidates.extend(accepted_truth_receipts_in_dir(
+            &artifact_dir,
+            &closeout_id,
+            &current_completed_tasks,
+        )?);
+    }
+
+    candidates.sort_by_key(|receipt| receipt.reviewed_at);
+    Ok(candidates.pop())
+}
+
+fn accepted_truth_receipts_in_dir(
+    artifact_dir: &Path,
+    closeout_id: &str,
+    current_completed_tasks: &HashMap<(String, String), DateTime<Utc>>,
+) -> Result<Vec<AcceptedTruthReceipt>> {
+    let mut receipts = Vec::new();
+    for entry in fs::read_dir(artifact_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let Some(filename) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !filename.starts_with("closeout_review_") || !filename.ends_with(".json") {
+            continue;
+        }
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(&content) else {
+            continue;
+        };
+        let Some(reviewed_at) = value
+            .get("reviewed_at")
+            .and_then(Value::as_str)
+            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+            .map(|value| value.with_timezone(&Utc))
+        else {
+            continue;
+        };
+        let Some(receipt) = value.get("closeout_receipt") else {
+            continue;
+        };
+        if receipt.get("acceptance_status").and_then(Value::as_str) != Some("accepted") {
+            continue;
+        }
+        if !review_applies_to_current_completed_task(&value, reviewed_at, current_completed_tasks) {
+            continue;
+        }
+        let receipt_id = receipt
+            .get("receipt_id")
+            .and_then(Value::as_str)
+            .map(operator_safe_text)
+            .unwrap_or_else(|| "unknown".to_string());
+        let receipt_path = value
+            .pointer("/artifacts/closeout_receipt_json")
+            .and_then(Value::as_str)
+            .map(PathBuf::from);
+        let mut accepted_scope = string_array(receipt, "accepted_scope");
+        if accepted_scope.is_empty() {
+            accepted_scope = review_task_refs(&value);
+        }
+        let next_safe_action = receipt
+            .get("next_safe_action")
+            .and_then(Value::as_str)
+            .map(operator_safe_text);
+        receipts.push(AcceptedTruthReceipt {
+            closeout_id: closeout_id.to_string(),
+            receipt_id,
+            reviewed_at,
+            receipt_path,
+            accepted_scope,
+            next_safe_action,
+        });
+    }
+    Ok(receipts)
+}
+
+fn review_applies_to_current_completed_task(
+    review: &Value,
+    reviewed_at: DateTime<Utc>,
+    current_completed_tasks: &HashMap<(String, String), DateTime<Utc>>,
+) -> bool {
+    review
+        .get("applies_to_tasks")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .any(|task| {
+            let Some(project_key) = task.get("project_key").and_then(Value::as_str) else {
+                return false;
+            };
+            let Some(task_id) = task.get("task_id").and_then(Value::as_str) else {
+                return false;
+            };
+            current_completed_tasks
+                .get(&(project_key.to_string(), task_id.to_string()))
+                .is_some_and(|updated_at| reviewed_at > *updated_at)
+        })
+}
+
+fn string_array(value: &Value, key: &str) -> Vec<String> {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(operator_safe_text)
+        .collect()
+}
+
+fn review_task_refs(review: &Value) -> Vec<String> {
+    review
+        .get("applies_to_tasks")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|task| {
+            let project_key = task.get("project_key")?.as_str()?;
+            let task_id = task.get("task_id")?.as_str()?;
+            Some(operator_safe_text(&format!("{project_key}:{task_id}")))
+        })
+        .collect()
 }
 
 fn latest_closeout_review(artifact_dir: &Path) -> Result<Option<LatestCloseoutReview>> {
