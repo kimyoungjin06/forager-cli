@@ -22,6 +22,8 @@ const REVIEW_SURFACE_SCHEMA: &str = "review_surface.v1";
 const MAX_RECENT_DECISIONS: usize = 5;
 const MAX_PACKET_COVERAGE_ITEMS: usize = 3;
 const MAX_PACKET_DETAIL_ITEMS: usize = 5;
+const MAX_SOURCE_OBSERVATION_CHANGED_FILES: usize = 5;
+const MAX_SOURCE_OBSERVATION_REFS: usize = 5;
 
 #[derive(Args)]
 pub struct ReviewSurfaceArgs {
@@ -80,6 +82,8 @@ struct ReviewSurfaceCloseout {
     review_status: String,
     unresolved_risks: Vec<String>,
     summary: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_observation: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     implementation_packet_coverage: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -196,6 +200,7 @@ struct LatestCloseout {
     artifact_dir: PathBuf,
     plan_path: PathBuf,
     return_package_path: Option<PathBuf>,
+    source_observation: Option<Value>,
     implementation_packet_coverage: Option<Value>,
     review: Option<LatestCloseoutReview>,
 }
@@ -254,6 +259,13 @@ pub(crate) fn human_summary_from_value(surface: &Value) -> String {
     output.push_str(&format!(
         "  closeout: execution={execution}, review={review}\n"
     ));
+    if let Some(source_status) = text_at(surface, "/closeout/source_observation/status") {
+        let changed = number_at(surface, "/closeout/source_observation/changed_file_count")
+            .unwrap_or_default();
+        output.push_str(&format!(
+            "  source observation: {source_status}, changed_files={changed}\n"
+        ));
+    }
     if let Some(packet_id) = text_at(surface, "/implementation_packet/packet_id") {
         let outcome = text_at(surface, "/implementation_packet/outcome").unwrap_or("unknown");
         let safe_to_delegate = surface
@@ -549,6 +561,7 @@ fn build_closeout(
         .unwrap_or_else(|| closeout_summary_risks(summary));
     let implementation_packet_coverage =
         latest.and_then(|closeout| closeout.implementation_packet_coverage.clone());
+    let source_observation = latest.and_then(|closeout| closeout.source_observation.clone());
     let review_status = latest
         .and_then(|closeout| closeout.review.as_ref())
         .map(|review| {
@@ -578,6 +591,7 @@ fn build_closeout(
         review_status,
         unresolved_risks,
         summary: serde_json::to_value(&summary.closeout_state).unwrap_or(Value::Null),
+        source_observation,
         implementation_packet_coverage,
         generated_at: latest.map(|closeout| closeout.generated_at.to_rfc3339()),
         reviewed_at: latest
@@ -924,6 +938,9 @@ fn latest_closeout(
         let implementation_packet_coverage = plan
             .get("implementation_packet_coverage")
             .map(closeout_packet_coverage_projection);
+        let source_observation = plan
+            .get("source_observation")
+            .map(closeout_source_observation_projection);
         let review = latest_closeout_review(&artifact_dir)?;
         let sort_key = review
             .as_ref()
@@ -937,6 +954,7 @@ fn latest_closeout(
                 artifact_dir,
                 plan_path,
                 return_package_path,
+                source_observation,
                 implementation_packet_coverage,
                 review,
             },
@@ -1051,6 +1069,69 @@ fn closeout_packet_coverage_projection(coverage: &Value) -> Value {
     })
 }
 
+fn closeout_source_observation_projection(observation: &Value) -> Value {
+    let changed_files = observation
+        .get("changed_files")
+        .and_then(Value::as_array)
+        .map(|files| {
+            files
+                .iter()
+                .take(MAX_SOURCE_OBSERVATION_CHANGED_FILES)
+                .map(|file| {
+                    json!({
+                        "path": safe_value_text(file, "path"),
+                        "old_path": safe_value_text(file, "old_path"),
+                        "status": safe_value_text(file, "status"),
+                        "additions": value_usize(file, "additions"),
+                        "deletions": value_usize(file, "deletions"),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let artifact_refs = observation
+        .get("artifact_refs")
+        .and_then(Value::as_array)
+        .map(|refs| {
+            refs.iter()
+                .take(MAX_SOURCE_OBSERVATION_REFS)
+                .filter_map(Value::as_str)
+                .map(operator_safe_text)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let warnings = observation
+        .get("warnings")
+        .and_then(Value::as_array)
+        .map(|warnings| {
+            warnings
+                .iter()
+                .take(3)
+                .filter_map(Value::as_str)
+                .map(operator_safe_text)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    json!({
+        "schema": safe_value_text(observation, "schema"),
+        "status": safe_value_text(observation, "status"),
+        "source_kind": safe_value_text(observation, "source_kind"),
+        "enabled": observation.get("enabled").and_then(Value::as_bool).unwrap_or(false),
+        "available": observation.get("available").and_then(Value::as_bool).unwrap_or(false),
+        "workdir": safe_value_text(observation, "workdir"),
+        "base_ref": safe_value_text(observation, "base_ref"),
+        "changed_file_count": value_usize(observation, "changed_file_count"),
+        "changed_files_truncated": observation
+            .get("changed_files_truncated")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        "changed_files": changed_files,
+        "artifact_refs": artifact_refs,
+        "warnings": warnings,
+        "interpretation": "source observation is read-only evidence context, not accepted truth or slice verification",
+    })
+}
+
 fn closeout_packet_coverage_item_projection(item: &Value) -> Value {
     json!({
         "packet_id": safe_value_text(item, "packet_id"),
@@ -1100,6 +1181,12 @@ fn closeout_packet_detail_projection(item: &Value, key: &str) -> Vec<Value> {
                 "reason": safe_value_text(detail, "reason"),
                 "summary": safe_value_text(detail, "summary"),
                 "next_safe_action": safe_value_text(detail, "next_safe_action"),
+                "source_observation_status": safe_value_text(detail, "source_observation_status"),
+                "source_refs": detail
+                    .get("source_refs")
+                    .and_then(Value::as_array)
+                    .map(|refs| refs.iter().take(3).filter_map(Value::as_str).map(operator_safe_text).collect::<Vec<_>>())
+                    .unwrap_or_default(),
                 "drift_signals": detail
                     .get("drift_signals")
                     .and_then(Value::as_array)

@@ -564,6 +564,11 @@ Minimum `review_surface.v1` Shape:
     "latest_receipt_id": "receipt-id",
     "execution_status": "completed",
     "review_status": "pending",
+    "source_observation": {
+      "status": "observed",
+      "changed_file_count": 3,
+      "interpretation": "source observation is read-only evidence context, not accepted truth or slice verification"
+    },
     "unresolved_risks": []
   },
   "runtime": {
@@ -600,6 +605,8 @@ Implementation Rule:
 - The first implementation may be JSON-only.
 - WebUI, TUI detail panels, Telegram detail replies, and Ondesk packets should
   project from this packet rather than each querying unrelated state.
+- `closeout.source_observation` should preserve source-state context for worker
+  claim reconciliation without presenting it as accepted truth.
 - Raw paths are allowed in `artifacts.refs`, but user-facing summaries should
   explain the artifact's meaning before exposing its location.
 

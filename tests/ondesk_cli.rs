@@ -272,6 +272,27 @@ fn ondesk_review_surface_summarizes_closeout_receipt_before_paths() -> Result<()
                     "task_id": "completed-task"
                 }
             ],
+            "source_observation": {
+                "schema": "source_observation.v1",
+                "status": "observed",
+                "source_kind": "git_worktree",
+                "enabled": true,
+                "available": true,
+                "workdir": temp.path().join("project"),
+                "base_ref": "HEAD",
+                "changed_file_count": 1,
+                "changed_files_truncated": false,
+                "changed_files": [
+                    {
+                        "path": "README.md",
+                        "status": "modified",
+                        "additions": 2,
+                        "deletions": 0
+                    }
+                ],
+                "artifact_refs": [return_package_path],
+                "warnings": []
+            },
             "implementation_packet_coverage": {
                 "packet_count": 1,
                 "completed": 1,
@@ -299,6 +320,8 @@ fn ondesk_review_surface_summarizes_closeout_receipt_before_paths() -> Result<()
                                 "status": "drifted",
                                 "reason": "Work-slice execution receipt reports drifted.",
                                 "evidence_refs": ["slice-drift-log.txt"],
+                                "source_observation_status": "observed",
+                                "source_refs": ["source:git:modified:README.md"],
                                 "summary": "The worker changed the slice boundary.",
                                 "next_safe_action": "Revise the packet before accepting truth."
                             }
@@ -409,12 +432,30 @@ fn ondesk_review_surface_summarizes_closeout_receipt_before_paths() -> Result<()
         surface["closeout"]["implementation_packet_coverage"]["detail_items_missing"],
         1
     );
+    assert_eq!(
+        surface["closeout"]["source_observation"]["status"],
+        "observed"
+    );
+    assert_eq!(
+        surface["closeout"]["source_observation"]["interpretation"],
+        "source observation is read-only evidence context, not accepted truth or slice verification"
+    );
+    assert!(surface["closeout"]["source_observation"]["changed_files"]
+        .as_array()
+        .expect("source changed files")
+        .iter()
+        .any(|file| file["path"] == "README.md" && file["status"] == "modified"));
     assert!(
         surface["closeout"]["implementation_packet_coverage"]["items"][0]["validation_items"]
             .as_array()
             .expect("coverage validation items")
             .iter()
             .any(|item| item["label"] == "missing-validation.txt" && item["status"] == "missing")
+    );
+    assert_eq!(
+        surface["closeout"]["implementation_packet_coverage"]["items"][0]["work_slices"][0]
+            ["source_observation_status"],
+        "observed"
     );
     assert!(surface["closeout"]["unresolved_risks"]
         .as_array()
@@ -501,6 +542,33 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
                     "task_id": "task"
                 }
             ],
+            "source_observation": {
+                "schema": "source_observation.v1",
+                "status": "observed",
+                "source_kind": "git_worktree",
+                "enabled": true,
+                "available": true,
+                "workdir": temp.path().join("twinpaper"),
+                "base_ref": "HEAD",
+                "changed_file_count": 2,
+                "changed_files_truncated": false,
+                "changed_files": [
+                    {
+                        "path": "src/module03.rs",
+                        "status": "modified",
+                        "additions": 8,
+                        "deletions": 1
+                    },
+                    {
+                        "path": "docs/module03.md",
+                        "status": "modified",
+                        "additions": 3,
+                        "deletions": 0
+                    }
+                ],
+                "artifact_refs": [return_package_path],
+                "warnings": []
+            },
             "implementation_packet_coverage": {
                 "packet_count": 1,
                 "completed": 1,
@@ -528,6 +596,8 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
                                 "status": "drifted",
                                 "reason": "Work-slice execution receipt reports drifted.",
                                 "evidence_refs": ["slice-drift-log.txt"],
+                                "source_observation_status": "observed",
+                                "source_refs": ["source:git:modified:src/module03.rs"],
                                 "summary": "The worker changed the slice boundary.",
                                 "next_safe_action": "Revise the packet before accepting truth."
                             }
@@ -627,6 +697,10 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
         json["review_surface"]["accepted_truth"]["receipt_acceptance_status"],
         "approved_with_followups"
     );
+    assert_eq!(
+        json["review_surface"]["closeout"]["source_observation"]["status"],
+        "observed"
+    );
     assert_eq!(json["latest_closeout"]["closeout_id"], "closeout_test");
     assert_eq!(json["latest_closeout"]["review_verdict"], "approved");
     assert_eq!(
@@ -641,11 +715,15 @@ fn ondesk_prompt_package_includes_latest_offdesk_return_package() -> Result<()> 
     assert!(content.contains("Morning Review Surface"));
     assert!(content.contains("accepted_truth: pending via closeout_receipt.v1"));
     assert!(content.contains("receipt_acceptance_status: approved_with_followups"));
+    assert!(content.contains("source_observation:"));
+    assert!(content.contains("status: observed from git_worktree against HEAD"));
+    assert!(content.contains("interpretation: read-only source context"));
+    assert!(content.contains("[modified] src/module03.rs (+8 -1)"));
     assert!(content.contains("closeout_implementation_packet_coverage:"));
     assert!(content.contains("detail_items: 1 completed, 0 deferred, 1 missing, 1 drifted"));
     assert!(content.contains("packet packet-twinpaper: completed"));
     assert!(content.contains(
-        "work_slices: [drifted] receipt drifted slice (next: Revise the packet before accepting truth.)"
+        "work_slices: [drifted] receipt drifted slice (source: observed) (next: Revise the packet before accepting truth.)"
     ));
     assert!(content.contains("validation_items: [missing] missing-validation.txt"));
     assert!(content.contains("judgment_routes:"));

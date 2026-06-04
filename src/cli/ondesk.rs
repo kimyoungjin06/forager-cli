@@ -1724,6 +1724,7 @@ fn render_review_surface_prompt_section(output: &mut String, surface: &Value) {
         value_text(surface, "/closeout/execution_status").unwrap_or("unknown"),
         value_text(surface, "/closeout/review_status").unwrap_or("unknown")
     ));
+    render_source_observation_prompt_section(output, surface);
     render_closeout_packet_coverage_prompt_section(output, surface);
     if let Some(packet_id) = value_text(surface, "/implementation_packet/packet_id") {
         let outcome = value_text(surface, "/implementation_packet/outcome").unwrap_or("unknown");
@@ -1905,6 +1906,56 @@ fn render_review_surface_prompt_section(output: &mut String, surface: &Value) {
     output.push_str("- artifact_refs: available in `review_surface` JSON, omitted here unless needed for audit.\n");
 }
 
+fn render_source_observation_prompt_section(output: &mut String, surface: &Value) {
+    let Some(observation) = surface.pointer("/closeout/source_observation") else {
+        return;
+    };
+    let status = value_text(observation, "/status").unwrap_or("unknown");
+    let source_kind = value_text(observation, "/source_kind").unwrap_or("unknown");
+    let base_ref = value_text(observation, "/base_ref").unwrap_or("unknown");
+    output.push_str("- source_observation:\n");
+    output.push_str(&format!(
+        "  - status: {} from {} against {}\n",
+        safe(status),
+        safe(source_kind),
+        safe(base_ref)
+    ));
+    output.push_str(
+        "  - interpretation: read-only source context, not accepted truth or slice verification\n",
+    );
+    output.push_str(&format!(
+        "  - changed_files: {}\n",
+        value_u64(observation, "/changed_file_count").unwrap_or_default()
+    ));
+    if let Some(files) = observation
+        .pointer("/changed_files")
+        .and_then(Value::as_array)
+        .filter(|files| !files.is_empty())
+    {
+        for file in files.iter().take(3) {
+            let file_status = value_text(file, "/status").unwrap_or("unknown");
+            let path = value_text(file, "/path").unwrap_or("unknown");
+            output.push_str(&format!(
+                "    - [{}] {} (+{} -{})\n",
+                safe(file_status),
+                safe(path),
+                value_u64(file, "/additions").unwrap_or_default(),
+                value_u64(file, "/deletions").unwrap_or_default()
+            ));
+        }
+    }
+    if let Some(warnings) = observation
+        .pointer("/warnings")
+        .and_then(Value::as_array)
+        .filter(|warnings| !warnings.is_empty())
+    {
+        output.push_str("  - warnings:\n");
+        for warning in warnings.iter().take(3).filter_map(Value::as_str) {
+            output.push_str(&format!("    - {}\n", safe(warning)));
+        }
+    }
+}
+
 fn render_closeout_packet_coverage_prompt_section(output: &mut String, surface: &Value) {
     let Some(coverage) = surface.pointer("/closeout/implementation_packet_coverage") else {
         return;
@@ -1967,6 +2018,11 @@ fn render_packet_coverage_detail_prompt_group(output: &mut String, item: &Value,
         let status = value_text(detail, "/status").unwrap_or("unknown");
         let label = value_text(detail, "/label").unwrap_or("unknown");
         output.push_str(&format!(" [{}] {}", safe(status), safe(label)));
+        if let Some(source_status) =
+            value_text(detail, "/source_observation_status").filter(|status| !status.is_empty())
+        {
+            output.push_str(&format!(" (source: {})", safe(source_status)));
+        }
         if status != "completed" {
             if let Some(next) = value_text(detail, "/next_safe_action") {
                 if !next.is_empty() {

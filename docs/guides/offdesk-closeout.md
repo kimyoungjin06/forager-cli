@@ -179,12 +179,12 @@ reconcile worker prose against actual source state before accepting completion.
 See [Implementation Packet And Recursive Alignment Review](../implementation-packet.md)
 for the receipt schema and the runner-versus-worker evidence boundary.
 
-The latest matching `review_surface.v1` projects a compact copy of this
-coverage under `closeout.implementation_packet_coverage`, and
-`forager ondesk prompt-package` renders the packet/detail counts in the morning
-review section. This keeps deferred or drifted work slices, missing validation,
-and missing expected-artifact evidence visible when a fresh harness resumes from
-Ondesk.
+The latest matching `review_surface.v1` projects compact copies of
+`source_observation.v1` and the packet coverage under `closeout`, and
+`forager ondesk prompt-package` renders source status plus packet/detail counts
+in the morning review section. This keeps source-state context, deferred or
+drifted work slices, missing validation, and missing expected-artifact evidence
+visible when a fresh harness resumes from Ondesk.
 
 The return package is intentionally shorter than `closeout_plan.json` and
 `cleanup_manifest.json`. It starts with status, source observation, decisions
