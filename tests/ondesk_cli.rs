@@ -248,6 +248,7 @@ fn ondesk_review_surface_keeps_accepted_truth_when_latest_closeout_is_retired() 
         "receipt_id": "receipt-accepted",
         "acceptance_status": "accepted",
         "verification_status": "recorded",
+        "retention_review": "resolved_preserve_in_place",
         "accepted_scope": ["project:accepted-task"],
         "open_decisions": [],
         "next_safe_action": "Continue with accepted evidence."
@@ -366,7 +367,13 @@ fn ondesk_review_surface_keeps_accepted_truth_when_latest_closeout_is_retired() 
     let retention_summary = &surface["artifacts"]["retention_review"]["summary"];
     assert_eq!(
         retention_summary["by_scope"]["active_accepted"]["action_required_entries"],
-        1
+        0
+    );
+    assert!(
+        retention_summary["by_scope"]["active_accepted"]["keep_entries"]
+            .as_u64()
+            .unwrap_or_default()
+            >= 1
     );
     assert_eq!(
         retention_summary["by_scope"]["retired_historical"]["action_required_entries"],
@@ -375,7 +382,7 @@ fn ondesk_review_surface_keeps_accepted_truth_when_latest_closeout_is_retired() 
     let retention_actions = surface["artifacts"]["retention_review"]["action_required"]
         .as_array()
         .expect("retention action projection");
-    assert!(retention_actions
+    assert!(!retention_actions
         .iter()
         .any(|item| item["retention_scope"] == "active_accepted"));
     assert!(retention_actions

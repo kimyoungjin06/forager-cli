@@ -2093,7 +2093,7 @@ fn build_retention_review(index: &ArtifactIndex) -> ArtifactRetentionReview {
             .entry(item.retention_scope.clone())
             .or_default();
         scope_counts.total_entries += 1;
-        if item.recommended_action == "preserve" {
+        if retention_review_action_is_keep(&item.recommended_action) {
             summary.keep_entries += 1;
             scope_counts.keep_entries += 1;
             if keep_sample.len() < MAX_RETENTION_REVIEW_KEEP_SAMPLE {
@@ -2165,6 +2165,10 @@ fn retention_review_item(entry: &ArtifactIndexEntry) -> ArtifactRetentionReviewI
     }
 }
 
+fn retention_review_action_is_keep(action: &str) -> bool {
+    matches!(action, "preserve" | "preserve_in_place_recorded")
+}
+
 fn retention_scope_and_reason(entry: &ArtifactIndexEntry) -> (&'static str, &'static str) {
     let closeout_statuses = entry
         .refs
@@ -2224,6 +2228,12 @@ fn retention_action_and_reason(entry: &ArtifactIndexEntry) -> (&'static str, &'s
             "The index points to an artifact that is not present.",
         );
     }
+    if archive_preserve_in_place_is_recorded(entry) {
+        return (
+            "preserve_in_place_recorded",
+            "An accepted closeout receipt already resolved this archive review as preserve-in-place.",
+        );
+    }
     match entry.retention_class.as_str() {
         "disposal_candidate" => {
             return (
@@ -2255,6 +2265,18 @@ fn retention_action_and_reason(entry: &ArtifactIndexEntry) -> (&'static str, &'s
         "preserve",
         "The artifact is referenced and currently has no retention action.",
     )
+}
+
+fn archive_preserve_in_place_is_recorded(entry: &ArtifactIndexEntry) -> bool {
+    entry.retention_class == "archive_candidate"
+        && entry
+            .refs
+            .iter()
+            .any(|reference| reference == "closeout_status:accepted")
+        && entry
+            .refs
+            .iter()
+            .any(|reference| reference == "closeout_retention_review:resolved_preserve_in_place")
 }
 
 fn retention_recommendations(
