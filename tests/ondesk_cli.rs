@@ -220,6 +220,12 @@ fn ondesk_review_surface_keeps_accepted_truth_when_latest_closeout_is_retired() 
         .join("20260601T000000Z_closeout_accepted");
     fs::create_dir_all(&accepted_dir)?;
     let accepted_receipt_path = accepted_dir.join("closeout_receipt_20260601T000100Z.json");
+    let accepted_log_path = accepted_dir.join("accepted-task.log");
+    fs::write(
+        accepted_dir.join("RETURN_PACKAGE.md"),
+        "# Accepted return\n",
+    )?;
+    fs::write(&accepted_log_path, "accepted log\n")?;
     fs::write(
         accepted_dir.join("closeout_plan.json"),
         serde_json::to_string_pretty(&json!({
@@ -229,7 +235,8 @@ fn ondesk_review_surface_keeps_accepted_truth_when_latest_closeout_is_retired() 
             "tasks": [{
                 "project_key": "project",
                 "request_id": "request-accepted-task",
-                "task_id": "accepted-task"
+                "task_id": "accepted-task",
+                "log_artifact_path": accepted_log_path
             }],
             "artifacts": {
                 "return_package_markdown": accepted_dir.join("RETURN_PACKAGE.md")
@@ -270,6 +277,9 @@ fn ondesk_review_surface_keeps_accepted_truth_when_latest_closeout_is_retired() 
         .join("offdesk_closeouts")
         .join("20260601T000200Z_closeout_retired");
     fs::create_dir_all(&retired_dir)?;
+    let retired_log_path = retired_dir.join("retired-task.log");
+    fs::write(retired_dir.join("RETURN_PACKAGE.md"), "# Retired return\n")?;
+    fs::write(&retired_log_path, "retired log\n")?;
     fs::write(
         retired_dir.join("closeout_plan.json"),
         serde_json::to_string_pretty(&json!({
@@ -279,7 +289,8 @@ fn ondesk_review_surface_keeps_accepted_truth_when_latest_closeout_is_retired() 
             "tasks": [{
                 "project_key": "project",
                 "request_id": "request-retired-task",
-                "task_id": "retired-task"
+                "task_id": "retired-task",
+                "log_artifact_path": retired_log_path
             }],
             "artifacts": {
                 "return_package_markdown": retired_dir.join("RETURN_PACKAGE.md")
@@ -352,6 +363,24 @@ fn ondesk_review_surface_keeps_accepted_truth_when_latest_closeout_is_retired() 
     assert_eq!(surface["closeout"]["review_status"], "retired_incomplete");
     assert_eq!(surface["closeout"]["summary"]["accepted"], 1);
     assert_eq!(surface["closeout"]["summary"]["retired_incomplete"], 1);
+    let retention_summary = &surface["artifacts"]["retention_review"]["summary"];
+    assert_eq!(
+        retention_summary["by_scope"]["active_accepted"]["action_required_entries"],
+        1
+    );
+    assert_eq!(
+        retention_summary["by_scope"]["retired_historical"]["action_required_entries"],
+        1
+    );
+    let retention_actions = surface["artifacts"]["retention_review"]["action_required"]
+        .as_array()
+        .expect("retention action projection");
+    assert!(retention_actions
+        .iter()
+        .any(|item| item["retention_scope"] == "active_accepted"));
+    assert!(retention_actions
+        .iter()
+        .any(|item| item["retention_scope"] == "retired_historical"));
     Ok(())
 }
 

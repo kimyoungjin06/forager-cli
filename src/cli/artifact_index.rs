@@ -299,6 +299,14 @@ struct ArtifactRetentionReviewSummary {
     unreferenced_human_facing_entries: usize,
     queue_items: usize,
     truncated_queue_items: usize,
+    by_scope: BTreeMap<String, ArtifactRetentionScopeSummary>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+struct ArtifactRetentionScopeSummary {
+    total_entries: usize,
+    action_required_entries: usize,
+    keep_entries: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -321,6 +329,8 @@ struct ArtifactRetentionReviewItem {
     bytes: Option<u64>,
     retention_class: String,
     review_status: String,
+    retention_scope: String,
+    scope_reason: String,
     recommended_action: String,
     reason: String,
     why_it_matters: String,
@@ -1970,6 +1980,8 @@ pub(crate) fn retention_review_projection(review: &Value) -> Value {
                         "present": item.get("present").cloned().unwrap_or(Value::Null),
                         "retention_class": item.get("retention_class").cloned().unwrap_or(Value::Null),
                         "review_status": item.get("review_status").cloned().unwrap_or(Value::Null),
+                        "retention_scope": item.get("retention_scope").cloned().unwrap_or(Value::Null),
+                        "scope_reason": item.get("scope_reason").cloned().unwrap_or(Value::Null),
                         "recommended_action": item.get("recommended_action").cloned().unwrap_or(Value::Null),
                         "reason": item.get("reason").cloned().unwrap_or(Value::Null),
                         "why_it_matters": item.get("why_it_matters").cloned().unwrap_or(Value::Null)
@@ -2076,19 +2088,27 @@ fn build_retention_review(index: &ArtifactIndex) -> ArtifactRetentionReview {
 
     for entry in &index.entries {
         let item = retention_review_item(entry);
+        let scope_counts = summary
+            .by_scope
+            .entry(item.retention_scope.clone())
+            .or_default();
+        scope_counts.total_entries += 1;
         if item.recommended_action == "preserve" {
             summary.keep_entries += 1;
+            scope_counts.keep_entries += 1;
             if keep_sample.len() < MAX_RETENTION_REVIEW_KEEP_SAMPLE {
                 keep_sample.push(item);
             }
         } else {
             summary.action_required_entries += 1;
+            scope_counts.action_required_entries += 1;
             action_required.push(item);
         }
     }
 
     let queue_items = action_required.len();
     let truncated_queue_items = queue_items.saturating_sub(MAX_RETENTION_REVIEW_ITEMS);
+    action_required.sort_by_key(|item| retention_scope_sort_key(&item.retention_scope));
     action_required.truncate(MAX_RETENTION_REVIEW_ITEMS);
     summary.queue_items = action_required.len();
     summary.truncated_queue_items = truncated_queue_items;
@@ -2124,6 +2144,7 @@ fn build_retention_review(index: &ArtifactIndex) -> ArtifactRetentionReview {
 
 fn retention_review_item(entry: &ArtifactIndexEntry) -> ArtifactRetentionReviewItem {
     let (recommended_action, reason) = retention_action_and_reason(entry);
+    let (retention_scope, scope_reason) = retention_scope_and_reason(entry);
     ArtifactRetentionReviewItem {
         id: entry.id.clone(),
         label: entry.label.clone(),
@@ -2135,10 +2156,64 @@ fn retention_review_item(entry: &ArtifactIndexEntry) -> ArtifactRetentionReviewI
         bytes: entry.bytes,
         retention_class: entry.retention_class.clone(),
         review_status: entry.review_status.clone(),
+        retention_scope: retention_scope.to_string(),
+        scope_reason: scope_reason.to_string(),
         recommended_action: recommended_action.to_string(),
         reason: reason.to_string(),
         why_it_matters: entry.why_it_matters.clone(),
         refs: entry.refs.clone(),
+    }
+}
+
+fn retention_scope_and_reason(entry: &ArtifactIndexEntry) -> (&'static str, &'static str) {
+    let closeout_statuses = entry
+        .refs
+        .iter()
+        .filter_map(|reference| reference.strip_prefix("closeout_status:"))
+        .collect::<BTreeSet<_>>();
+    if closeout_statuses.contains("accepted") {
+        return (
+            "active_accepted",
+            "Referenced by an accepted closeout receipt.",
+        );
+    }
+    if closeout_statuses.contains("retired_incomplete") {
+        return (
+            "retired_historical",
+            "Referenced by retired historical closeout evidence and no accepted receipt.",
+        );
+    }
+    if !closeout_statuses.is_empty()
+        || entry
+            .refs
+            .iter()
+            .any(|reference| reference.starts_with("closeout:"))
+    {
+        return (
+            "unresolved_closeout",
+            "Referenced by a closeout that still needs review or has no accepted-truth receipt.",
+        );
+    }
+    if entry.source.starts_with("project_") {
+        return (
+            "project_surface",
+            "Discovered from project-local documentation or output scans.",
+        );
+    }
+    (
+        "profile_artifact",
+        "Discovered from profile-local Forager artifacts outside closeout scope.",
+    )
+}
+
+fn retention_scope_sort_key(scope: &str) -> u8 {
+    match scope {
+        "active_accepted" => 0,
+        "unresolved_closeout" => 1,
+        "project_surface" => 2,
+        "profile_artifact" => 3,
+        "retired_historical" => 4,
+        _ => 5,
     }
 }
 
@@ -2229,6 +2304,21 @@ fn retention_recommendations(
                 "Review the artifact meaning and evidence status before treating it as reusable."
                     .to_string(),
         });
+    }
+    if let Some(retired) = summary.by_scope.get("retired_historical") {
+        if retired.action_required_entries > 0 {
+            recommendations.push(ArtifactRetentionRecommendation {
+                kind: "separate_retired_historical_artifacts".to_string(),
+                priority: "low".to_string(),
+                count: retired.action_required_entries,
+                summary:
+                    "Some retention actions belong only to retired evidence-incomplete history."
+                        .to_string(),
+                next_action:
+                    "Review these separately from active accepted or unresolved closeout artifacts."
+                        .to_string(),
+            });
+        }
     }
     if recommendations.is_empty() {
         recommendations.push(ArtifactRetentionRecommendation {
@@ -2395,6 +2485,7 @@ fn collect_closeout_artifacts(
         }
         let closeout_id =
             json_text(&plan, "/closeout_id").unwrap_or_else(|| artifact_dir_name(&artifact_dir));
+        let closeout_refs = closeout_scope_refs(&artifact_dir);
         add_path_entry(
             entries,
             PathEntryInput {
@@ -2406,7 +2497,7 @@ fn collect_closeout_artifacts(
                 review_status: "referenced",
                 why_it_matters:
                     "Explains what Offdesk produced and what must be reviewed before acceptance.",
-                refs: vec![format!("closeout:{closeout_id}")],
+                refs: closeout_refs_for(&closeout_id, &closeout_refs),
             },
         );
 
@@ -2428,15 +2519,15 @@ fn collect_closeout_artifacts(
                         retention_class: retention_class.to_string(),
                         review_status: review_status.to_string(),
                         why_it_matters: why.to_string(),
-                        refs: vec![format!("closeout:{closeout_id}")],
+                        refs: closeout_refs_for(&closeout_id, &closeout_refs),
                     },
                 );
             }
         }
 
-        collect_closeout_task_artifacts(&plan, &closeout_id, entries);
-        collect_closeout_file_operations(&plan, &closeout_id, entries);
-        collect_closeout_review_files(&artifact_dir, &closeout_id, entries)?;
+        collect_closeout_task_artifacts(&plan, &closeout_id, &closeout_refs, entries);
+        collect_closeout_file_operations(&plan, &closeout_id, &closeout_refs, entries);
+        collect_closeout_review_files(&artifact_dir, &closeout_id, &closeout_refs, entries)?;
     }
     Ok(())
 }
@@ -2444,6 +2535,7 @@ fn collect_closeout_artifacts(
 fn collect_closeout_task_artifacts(
     plan: &Value,
     closeout_id: &str,
+    closeout_refs: &[String],
     entries: &mut BTreeMap<String, ArtifactIndexEntry>,
 ) {
     for task in plan
@@ -2482,7 +2574,10 @@ fn collect_closeout_task_artifacts(
                         retention_class: retention.to_string(),
                         review_status: review.to_string(),
                         why_it_matters: why.to_string(),
-                        refs: vec![format!("closeout:{closeout_id}"), format!("task:{task_id}")],
+                        refs: closeout_refs_for(closeout_id, closeout_refs)
+                            .into_iter()
+                            .chain([format!("task:{task_id}")])
+                            .collect(),
                     },
                 );
             }
@@ -2517,7 +2612,10 @@ fn collect_closeout_task_artifacts(
                         format!("closeout:{closeout_id}"),
                         format!("task:{task_id}"),
                         format!("artifact:{artifact_id}"),
-                    ],
+                    ]
+                    .into_iter()
+                    .chain(closeout_refs.iter().cloned())
+                    .collect(),
                 },
             );
         }
@@ -2564,7 +2662,10 @@ fn collect_closeout_task_artifacts(
                         refs: vec![
                             format!("closeout:{closeout_id}"),
                             format!("background:{ticket_id}"),
-                        ],
+                        ]
+                        .into_iter()
+                        .chain(closeout_refs.iter().cloned())
+                        .collect(),
                     },
                 );
             }
@@ -2575,6 +2676,7 @@ fn collect_closeout_task_artifacts(
 fn collect_closeout_file_operations(
     plan: &Value,
     closeout_id: &str,
+    closeout_refs: &[String],
     entries: &mut BTreeMap<String, ArtifactIndexEntry>,
 ) {
     for operation in plan
@@ -2625,7 +2727,7 @@ fn collect_closeout_file_operations(
                     .unwrap_or_else(|| {
                         "Closeout proposed this file operation for operator review.".to_string()
                     }),
-                refs: vec![format!("closeout:{closeout_id}")],
+                refs: closeout_refs_for(closeout_id, closeout_refs),
             },
         );
     }
@@ -2634,6 +2736,7 @@ fn collect_closeout_file_operations(
 fn collect_closeout_review_files(
     artifact_dir: &Path,
     closeout_id: &str,
+    closeout_refs: &[String],
     entries: &mut BTreeMap<String, ArtifactIndexEntry>,
 ) -> Result<()> {
     for entry in
@@ -2656,7 +2759,7 @@ fn collect_closeout_review_files(
                     review_status: "referenced",
                     why_it_matters:
                         "Records the review verdict used before Ondesk accepts or revises work.",
-                    refs: vec![format!("closeout:{closeout_id}")],
+                    refs: closeout_refs_for(closeout_id, closeout_refs),
                 },
             );
         } else if name.starts_with("closeout_receipt_") && name.ends_with(".json") {
@@ -2670,7 +2773,7 @@ fn collect_closeout_review_files(
                     retention_class: "acceptance",
                     review_status: "referenced",
                     why_it_matters: "Records accepted-truth status and remaining follow-ups.",
-                    refs: vec![format!("closeout:{closeout_id}")],
+                    refs: closeout_refs_for(closeout_id, closeout_refs),
                 },
             );
         }
@@ -3027,6 +3130,22 @@ fn retention_review_human_summary(review: &Value) -> String {
         json_u64(summary, "disposal_candidate_entries"),
         json_u64(summary, "unreferenced_human_facing_entries")
     ));
+    if let Some(by_scope) = summary.get("by_scope").and_then(Value::as_object) {
+        let scopes = by_scope
+            .iter()
+            .map(|(scope, counts)| {
+                format!(
+                    "{scope}={} action/{} total",
+                    json_u64(counts, "action_required_entries"),
+                    json_u64(counts, "total_entries")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        if !scopes.is_empty() {
+            output.push_str(&format!("  scope: {scopes}\n"));
+        }
+    }
     if let Some(recommendations) = review.get("recommendations").and_then(Value::as_array) {
         output.push_str("  recommendations:\n");
         for recommendation in recommendations.iter().take(5) {
@@ -3249,6 +3368,68 @@ fn artifact_dir_name(path: &Path) -> String {
         .and_then(|value| value.to_str())
         .map(operator_safe_text)
         .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn closeout_refs_for(closeout_id: &str, closeout_refs: &[String]) -> Vec<String> {
+    std::iter::once(format!("closeout:{closeout_id}"))
+        .chain(closeout_refs.iter().cloned())
+        .collect()
+}
+
+fn closeout_scope_refs(artifact_dir: &Path) -> Vec<String> {
+    let latest_review = latest_closeout_review_value(artifact_dir);
+    let receipt = latest_review
+        .as_ref()
+        .and_then(|review| review.get("closeout_receipt"));
+    let status = receipt
+        .and_then(|receipt| receipt.get("acceptance_status"))
+        .and_then(Value::as_str)
+        .map(operator_safe_text)
+        .unwrap_or_else(|| "pending_review".to_string());
+    let mut refs = vec![format!("closeout_status:{status}")];
+    if let Some(receipt_id) = receipt
+        .and_then(|receipt| receipt.get("receipt_id"))
+        .and_then(Value::as_str)
+        .map(operator_safe_text)
+    {
+        refs.push(format!("closeout_receipt:{receipt_id}"));
+    }
+    if let Some(retention_review) = receipt
+        .and_then(|receipt| receipt.get("retention_review"))
+        .and_then(Value::as_str)
+        .map(operator_safe_text)
+    {
+        refs.push(format!("closeout_retention_review:{retention_review}"));
+    }
+    refs
+}
+
+fn latest_closeout_review_value(artifact_dir: &Path) -> Option<Value> {
+    let mut reviews = Vec::new();
+    for entry in fs::read_dir(artifact_dir).ok()? {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let path = entry.path();
+        let Some(filename) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !filename.starts_with("closeout_review_") || !filename.ends_with(".json") {
+            continue;
+        }
+        let value = read_json_object(&path);
+        let Some(reviewed_at) = value
+            .get("reviewed_at")
+            .and_then(Value::as_str)
+            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+            .map(|value| value.with_timezone(&Utc))
+        else {
+            continue;
+        };
+        reviews.push((reviewed_at, value));
+    }
+    reviews.sort_by_key(|(reviewed_at, _)| *reviewed_at);
+    reviews.pop().map(|(_, review)| review)
 }
 
 fn json_text(value: &Value, pointer: &str) -> Option<String> {
