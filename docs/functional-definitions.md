@@ -977,6 +977,8 @@ Outputs:
 - `work_slice_execution_receipt.v1` when slice-level execution evidence exists.
 - Design review outcome: `pass`, `revise`, or `block`.
 - Worker-ready execution summary when approved.
+- Review-level distinction between plan review, worker claim review, source
+  verification, validation review, and acceptance review.
 - Closeout comparison between intended outcomes and actual results.
 
 Authorization Boundary:
@@ -996,6 +998,11 @@ Acceptance Criteria:
 - Work slices with explicit receipts use slice-level status and evidence;
   unreceipted slices remain visible as manual-review items instead of silently
   disappearing into packet-level status.
+- Worker-authored completed claims remain visibly separate from independently
+  verified completed slices.
+- Code and artifact results are reconciled against source evidence such as git
+  diff, changed files, test output, logs, generated artifacts, or transform
+  records before acceptance.
 - Morning Ondesk review can tell whether execution served the original purpose
   rather than only completing a narrow implementation slice.
 
@@ -1016,6 +1023,8 @@ Open Design Questions:
   runner-generated deferred receipts?
 - What evidence threshold promotes a slice from `deferred` into `completed`,
   `missing`, or `drifted`?
+- Which result categories need mandatory reconciliation adapters: code, docs,
+  data, generated media, or release artifacts?
 
 ## Cross-Capability Invariants
 

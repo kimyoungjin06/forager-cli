@@ -947,7 +947,7 @@ fn offdesk_closeout_uses_work_slice_execution_receipts() -> Result<()> {
         "source_intent": {
             "user_goal": "Closeout should judge each work slice from execution receipts.",
             "why_now": "Packet-level completion hides slice-level drift.",
-            "success_state": "Ondesk can see which slice drifted before accepting the run."
+            "success_state": "Ondesk can see which slice drifted or only has a worker claim before accepting the run."
         },
         "alignment": {
             "north_star_fit": "Slice receipts keep evidence, choices, and continuity itemized.",
@@ -968,7 +968,7 @@ fn offdesk_closeout_uses_work_slice_execution_receipts() -> Result<()> {
         }],
         "design": {
             "approach": "Use slice receipts before packet-level inherited status.",
-            "work_slices": ["receipt completed slice", "receipt drifted slice"],
+            "work_slices": ["receipt completed slice", "receipt drifted slice", "receipt worker claim slice"],
             "interfaces": [],
             "data_contracts": ["work_slice_execution_receipt.v1"],
             "compatibility_notes": []
@@ -1021,10 +1021,14 @@ fn offdesk_closeout_uses_work_slice_execution_receipts() -> Result<()> {
             "project_key": "project",
             "task_id": "task-slice-receipts",
             "generated_at": now,
-            "producer": "runner",
+            "producer": "deterministic_gate",
+            "producer_role": "deterministic_verification",
             "slice_index": 0,
             "slice_label": "receipt completed slice",
             "status": "completed",
+            "verification_status": "validation_passed",
+            "verification_summary": "A deterministic validation log confirms this slice.",
+            "verification_refs": ["slice-complete-validation.log"],
             "summary": "The completed slice produced the expected state.",
             "evidence_refs": ["slice-complete-result.json"],
             "validation_refs": [],
@@ -1039,10 +1043,12 @@ fn offdesk_closeout_uses_work_slice_execution_receipts() -> Result<()> {
             "project_key": "project",
             "task_id": "task-slice-receipts",
             "generated_at": now,
-            "producer": "runner",
+            "producer": "worker",
+            "producer_role": "worker_claim",
             "slice_index": 1,
             "slice_label": "receipt drifted slice",
             "status": "drifted",
+            "claim_status": "drifted",
             "summary": "The worker changed the slice boundary before collecting evidence.",
             "evidence_refs": ["slice-drift-log.txt"],
             "validation_refs": [],
@@ -1050,6 +1056,27 @@ fn offdesk_closeout_uses_work_slice_execution_receipts() -> Result<()> {
             "open_questions": ["Confirm whether the new slice boundary is acceptable."],
             "drift_signals": ["slice_boundary_changed_without_packet_update"],
             "next_safe_action": "Revise the packet or rerun this slice before accepting truth."
+        }),
+        json!({
+            "schema": "work_slice_execution_receipt.v1",
+            "packet_id": "packet-slice-receipts",
+            "project_key": "project",
+            "task_id": "task-slice-receipts",
+            "generated_at": now,
+            "producer": "worker",
+            "producer_role": "worker_claim",
+            "slice_index": 2,
+            "slice_label": "receipt worker claim slice",
+            "status": "completed",
+            "claim_status": "completed",
+            "verification_status": "unverified",
+            "summary": "The worker says this slice is complete, but no independent verification is attached.",
+            "evidence_refs": ["worker-report.md"],
+            "validation_refs": [],
+            "artifact_refs": [],
+            "open_questions": ["Reconcile the worker report against diff, tests, and artifacts."],
+            "drift_signals": [],
+            "next_safe_action": "Verify source diff, tests, and artifacts before accepting this completed claim."
         }),
     ];
     fs::write(
@@ -1071,14 +1098,14 @@ fn offdesk_closeout_uses_work_slice_execution_receipts() -> Result<()> {
         "alignment_review_path": alignment_path.to_str().expect("utf-8 alignment path"),
         "markdown_path": packet_markdown_path.to_str().expect("utf-8 packet markdown path"),
         "goal": "Closeout should judge each work slice from execution receipts.",
-        "success_state": "Ondesk can see which slice drifted before accepting the run.",
+        "success_state": "Ondesk can see which slice drifted or only has a worker claim before accepting the run.",
         "preferred_worker": "hosted_harness",
         "safe_to_delegate": true,
         "outcome": "pass",
         "required_revisions": [],
         "drift_signals": [],
         "missing_decisions": [],
-        "work_slice_count": 2,
+        "work_slice_count": 3,
         "capability_mapping_count": 1,
         "validation_item_count": 0,
         "stop_condition_count": 1,
@@ -1126,8 +1153,9 @@ fn offdesk_closeout_uses_work_slice_execution_receipts() -> Result<()> {
     );
     let report: Value = serde_json::from_slice(&output.stdout)?;
     assert_eq!(report["summary"]["packet_goals_completed"], 1);
-    assert_eq!(report["summary"]["packet_detail_items"], 2);
+    assert_eq!(report["summary"]["packet_detail_items"], 3);
     assert_eq!(report["summary"]["packet_detail_items_completed"], 1);
+    assert_eq!(report["summary"]["packet_detail_items_deferred"], 1);
     assert_eq!(report["summary"]["packet_detail_items_drifted"], 1);
     assert!(report["open_decisions"]
         .as_array()
@@ -1144,6 +1172,8 @@ fn offdesk_closeout_uses_work_slice_execution_receipts() -> Result<()> {
     assert!(work_slices.iter().any(|item| {
         item["label"] == "receipt completed slice"
             && item["status"] == "completed"
+            && item["trust_tier"] == "source_verified"
+            && item["verification_status"] == "validation_passed"
             && item["receipt_source"]
                 .as_str()
                 .unwrap_or_default()
@@ -1160,6 +1190,17 @@ fn offdesk_closeout_uses_work_slice_execution_receipts() -> Result<()> {
                 .iter()
                 .any(|signal| signal == "slice_boundary_changed_without_packet_update")
     }));
+    assert!(work_slices.iter().any(|item| {
+        item["label"] == "receipt worker claim slice"
+            && item["status"] == "deferred"
+            && item["reported_status"] == "completed"
+            && item["claim_status"] == "completed"
+            && item["trust_tier"] == "worker_claim"
+            && item["reason"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("independent source or review verification")
+    }));
 
     let return_package_path = PathBuf::from(
         report["artifacts"]["return_package_markdown"]
@@ -1169,6 +1210,9 @@ fn offdesk_closeout_uses_work_slice_execution_receipts() -> Result<()> {
     let return_package = fs::read_to_string(return_package_path)?;
     assert!(return_package.contains("work_slices:"));
     assert!(return_package.contains("[drifted] receipt drifted slice"));
+    assert!(return_package.contains("[deferred] receipt worker claim slice"));
+    assert!(return_package.contains("claim: completed"));
+    assert!(return_package.contains("trust: worker_claim"));
     assert!(
         return_package.contains("Revise the packet or rerun this slice before accepting truth.")
     );

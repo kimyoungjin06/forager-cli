@@ -53,7 +53,8 @@ use crate::offdesk::{
     OffdeskTaskView, OffdeskTickOptions, PendingActionApproval, ProviderCapacityState,
     ProviderCapacityStore, ProviderFallbackRecommendation, ResumeStatus, RiskLevel, SchedulerGate,
     SchedulerGateRequest, SchedulerGateStatus, TaskResumeState, TaskResumeStore,
-    WorkSliceExecutionReceipt, WORK_SLICE_EXECUTION_RECEIPTS_FILE,
+    WorkSliceExecutionReceipt, WorkSliceExecutionStatus, WorkSliceReceiptProducerRole,
+    WorkSliceVerificationStatus, WORK_SLICE_EXECUTION_RECEIPTS_FILE,
 };
 use crate::session::{get_profile_dir, resolved_app_dir_path, DEFAULT_PROFILE};
 
@@ -2448,6 +2449,20 @@ struct CloseoutPacketCoverageDetail {
     evidence_refs: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     receipt_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    receipt_role: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trust_tier: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reported_status: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    claim_status: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    verification_status: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    verification_summary: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    verification_refs: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     summary: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -8811,6 +8826,13 @@ fn closeout_work_slice_details(
                 reason: "Work-slice execution evidence is not itemized yet; this item inherits the packet-level closeout status and needs manual review.".to_string(),
                 evidence_refs: Vec::new(),
                 receipt_source: None,
+                receipt_role: None,
+                trust_tier: None,
+                reported_status: None,
+                claim_status: None,
+                verification_status: None,
+                verification_summary: None,
+                verification_refs: Vec::new(),
                 summary: None,
                 validation_refs: Vec::new(),
                 artifact_refs: Vec::new(),
@@ -8939,13 +8961,26 @@ fn closeout_work_slice_detail_from_receipt(
     loaded: &LoadedWorkSliceExecutionReceipt,
 ) -> CloseoutPacketCoverageDetail {
     let receipt = &loaded.receipt;
-    let status = receipt.status.as_str();
+    let role = receipt.resolved_producer_role();
+    let reported_status = receipt.status.as_str();
+    let status = closeout_effective_work_slice_status(receipt, role);
+    let trust_tier = closeout_receipt_trust_tier(role, receipt.verification_status);
     let summary = crate::offdesk::operator_safe_text(&receipt.summary);
-    let reason = if summary.is_empty() {
-        format!("Work-slice execution receipt reports `{status}`.")
+    let mut reason = if summary.is_empty() {
+        format!(
+            "{} reports `{reported_status}`.",
+            closeout_receipt_role_label(role)
+        )
     } else {
-        format!("Work-slice execution receipt reports `{status}`: {summary}")
+        format!(
+            "{} reports `{reported_status}`: {summary}",
+            closeout_receipt_role_label(role)
+        )
     };
+    if status != reported_status {
+        reason.push_str(" Closeout keeps this slice deferred until independent source or review verification reconciles the claim.");
+    }
+    let verification_summary = crate::offdesk::operator_safe_text(&receipt.verification_summary);
     CloseoutPacketCoverageDetail {
         category: "work_slice",
         label: crate::offdesk::operator_safe_text(packet_slice_label),
@@ -8957,6 +8992,23 @@ fn closeout_work_slice_detail_from_receipt(
             .map(|value| crate::offdesk::operator_safe_text(value))
             .collect(),
         receipt_source: Some(loaded.source.clone()),
+        receipt_role: Some(role.as_str()),
+        trust_tier: Some(trust_tier),
+        reported_status: (status != reported_status).then_some(reported_status),
+        claim_status: receipt
+            .resolved_claim_status()
+            .map(WorkSliceExecutionStatus::as_str),
+        verification_status: Some(receipt.verification_status.as_str()),
+        verification_summary: if verification_summary.is_empty() {
+            None
+        } else {
+            Some(verification_summary)
+        },
+        verification_refs: receipt
+            .verification_refs
+            .iter()
+            .map(|value| crate::offdesk::operator_safe_text(value))
+            .collect(),
         summary: if summary.is_empty() {
             None
         } else {
@@ -8989,6 +9041,56 @@ fn closeout_work_slice_detail_from_receipt(
                 &receipt.next_safe_action,
             ))
         },
+    }
+}
+
+fn closeout_effective_work_slice_status(
+    receipt: &WorkSliceExecutionReceipt,
+    role: WorkSliceReceiptProducerRole,
+) -> &'static str {
+    let reported_status = receipt.status.as_str();
+    if reported_status != "completed" {
+        return reported_status;
+    }
+    match role {
+        WorkSliceReceiptProducerRole::DeterministicVerification
+        | WorkSliceReceiptProducerRole::ReviewJudgment => "completed",
+        WorkSliceReceiptProducerRole::CloseoutCollector
+            if receipt.verification_status.is_independently_verified() =>
+        {
+            "completed"
+        }
+        _ => "deferred",
+    }
+}
+
+fn closeout_receipt_trust_tier(
+    role: WorkSliceReceiptProducerRole,
+    verification_status: WorkSliceVerificationStatus,
+) -> &'static str {
+    match role {
+        WorkSliceReceiptProducerRole::RunnerObservation => "runtime_observation",
+        WorkSliceReceiptProducerRole::WorkerClaim => "worker_claim",
+        WorkSliceReceiptProducerRole::DeterministicVerification => "source_verified",
+        WorkSliceReceiptProducerRole::ReviewJudgment => "review_judgment",
+        WorkSliceReceiptProducerRole::CloseoutCollector
+            if verification_status.is_independently_verified() =>
+        {
+            "closeout_verified"
+        }
+        WorkSliceReceiptProducerRole::CloseoutCollector => "closeout_observation",
+        WorkSliceReceiptProducerRole::LegacyReceipt => "legacy_receipt",
+    }
+}
+
+fn closeout_receipt_role_label(role: WorkSliceReceiptProducerRole) -> &'static str {
+    match role {
+        WorkSliceReceiptProducerRole::RunnerObservation => "Runner observation",
+        WorkSliceReceiptProducerRole::WorkerClaim => "Worker claim",
+        WorkSliceReceiptProducerRole::CloseoutCollector => "Closeout observation",
+        WorkSliceReceiptProducerRole::DeterministicVerification => "Deterministic verification",
+        WorkSliceReceiptProducerRole::ReviewJudgment => "Review judgment",
+        WorkSliceReceiptProducerRole::LegacyReceipt => "Legacy receipt",
     }
 }
 
@@ -9047,6 +9149,13 @@ fn closeout_push_validation_details(
             reason,
             evidence_refs,
             receipt_source: None,
+            receipt_role: None,
+            trust_tier: None,
+            reported_status: None,
+            claim_status: None,
+            verification_status: None,
+            verification_summary: None,
+            verification_refs: Vec::new(),
             summary: None,
             validation_refs: Vec::new(),
             artifact_refs: Vec::new(),
@@ -9075,6 +9184,13 @@ fn closeout_expected_artifact_details(
                 reason,
                 evidence_refs,
                 receipt_source: None,
+                receipt_role: None,
+                trust_tier: None,
+                reported_status: None,
+                claim_status: None,
+                verification_status: None,
+                verification_summary: None,
+                verification_refs: Vec::new(),
                 summary: None,
                 validation_refs: Vec::new(),
                 artifact_refs: Vec::new(),
@@ -9123,6 +9239,13 @@ fn closeout_summary_only_details(
                 .to_string(),
             evidence_refs: Vec::new(),
             receipt_source: None,
+            receipt_role: None,
+            trust_tier: None,
+            reported_status: None,
+            claim_status: None,
+            verification_status: None,
+            verification_summary: None,
+            verification_refs: Vec::new(),
             summary: None,
             validation_refs: Vec::new(),
             artifact_refs: Vec::new(),
@@ -9969,6 +10092,14 @@ fn render_packet_detail_group(
             detail.status,
             truncate_closeout_text(&detail.label, 80)
         ));
+        if let Some(claim_status) = detail.claim_status {
+            output.push_str(&format!(" (claim: {claim_status})"));
+        } else if let Some(reported_status) = detail.reported_status {
+            output.push_str(&format!(" (reported: {reported_status})"));
+        }
+        if let Some(trust_tier) = detail.trust_tier {
+            output.push_str(&format!(" (trust: {trust_tier})"));
+        }
         if detail.status != "completed" {
             if let Some(next) = detail.next_safe_action.as_deref() {
                 output.push_str(&format!(" (next: {})", truncate_closeout_text(next, 100)));
