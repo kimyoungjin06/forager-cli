@@ -33,6 +33,20 @@ fn profile_dir(home: &Path) -> PathBuf {
     }
 }
 
+fn initialize_git_repo_with_initial_commit(repo_path: &Path, paths: &[&str]) -> Result<()> {
+    let repo = git2::Repository::init(repo_path)?;
+    let sig = git2::Signature::now("Test", "test@example.com")?;
+    let mut index = repo.index()?;
+    for path in paths {
+        index.add_path(Path::new(path))?;
+    }
+    index.write()?;
+    let tree_id = index.write_tree()?;
+    let tree = repo.find_tree(tree_id)?;
+    repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])?;
+    Ok(())
+}
+
 #[test]
 #[serial]
 fn offdesk_closeout_writes_dry_run_review_packet_and_return_package() -> Result<()> {
@@ -924,6 +938,21 @@ fn offdesk_closeout_uses_work_slice_execution_receipts() -> Result<()> {
         temp.path().join("DELIVERABLES.md"),
         "# Deliverables\n\n- `README.md`: project overview.\n",
     )?;
+    fs::write(temp.path().join(".gitignore"), ".config/\nrun-artifacts/\n")?;
+    initialize_git_repo_with_initial_commit(
+        temp.path(),
+        &[
+            ".gitignore",
+            "README.md",
+            "PROJECT_STATE.md",
+            "DECISIONS.md",
+            "DELIVERABLES.md",
+        ],
+    )?;
+    fs::write(
+        temp.path().join("README.md"),
+        "# Project\n\nSource observation changed this file.\n",
+    )?;
 
     let artifact_dir = temp.path().join("run-artifacts");
     fs::create_dir_all(&artifact_dir)?;
@@ -1143,6 +1172,7 @@ fn offdesk_closeout_uses_work_slice_execution_receipts() -> Result<()> {
             "--task-id",
             "task-slice-receipts",
             "--dry-run",
+            "--include-git",
             "--json",
         ])
         .output()?;
@@ -1162,6 +1192,16 @@ fn offdesk_closeout_uses_work_slice_execution_receipts() -> Result<()> {
         .expect("open decisions")
         .iter()
         .any(|decision| decision["kind"] == "implementation_packet_coverage_review"));
+    assert_eq!(
+        report["source_observation"]["schema"],
+        "source_observation.v1"
+    );
+    assert_eq!(report["source_observation"]["status"], "observed");
+    assert!(report["source_observation"]["changed_files"]
+        .as_array()
+        .expect("changed files")
+        .iter()
+        .any(|file| file["path"] == "README.md" && file["status"] == "modified"));
     assert_eq!(
         report["implementation_packet_coverage"]["items"][0]["detail_source"],
         "implementation_packet_and_work_slice_receipts"
@@ -1196,6 +1236,12 @@ fn offdesk_closeout_uses_work_slice_execution_receipts() -> Result<()> {
             && item["reported_status"] == "completed"
             && item["claim_status"] == "completed"
             && item["trust_tier"] == "worker_claim"
+            && item["source_observation_status"] == "observed"
+            && item["source_refs"]
+                .as_array()
+                .expect("source refs")
+                .iter()
+                .any(|source_ref| source_ref == "source:git:modified:README.md")
             && item["reason"]
                 .as_str()
                 .unwrap_or_default()
@@ -1213,6 +1259,9 @@ fn offdesk_closeout_uses_work_slice_execution_receipts() -> Result<()> {
     assert!(return_package.contains("[deferred] receipt worker claim slice"));
     assert!(return_package.contains("claim: completed"));
     assert!(return_package.contains("trust: worker_claim"));
+    assert!(return_package.contains("Source Observation"));
+    assert!(return_package.contains("[modified] `README.md`"));
+    assert!(return_package.contains("source: observed"));
     assert!(
         return_package.contains("Revise the packet or rerun this slice before accepting truth.")
     );

@@ -267,6 +267,14 @@ but it should not project a completed slice as independently completed until
 source verification, validation review, routed review judgment, or closeout
 collector evidence reconciles it.
 
+`source_observation.v1` is the first read-only source-state input for that
+reconciliation path. When closeout runs with `--include-git`, it records the
+observed workdir, base ref, changed files, linked artifact refs, and warnings.
+This is not accepted truth and it is not enough to promote a worker claim by
+itself. It lets Ondesk and review surfaces see whether a worker claim is at least
+being compared against current source state before tests, artifacts, and review
+judgment are checked.
+
 Recommended minimum shape:
 
 ```json
@@ -303,6 +311,9 @@ Closeout should apply these rules:
   producer role, claim status, verification status, and refs;
 - if a worker claim reports `completed` but independent verification is still
   `unverified`, project the slice as `deferred` with `claim_status=completed`;
+- if source observation is available, show its status and changed-file refs
+  beside the slice claim so the next reviewer can reconcile the claim against
+  source state;
 - if a runner observation reports execution evidence, project the slice as
   runtime evidence, not semantic completion;
 - only deterministic verification, review judgment, or closeout collector
@@ -331,6 +342,8 @@ Projection rules:
 
 - CLI JSON preserves packet ids, slice ids, status, refs, and raw drift
   signals.
+- Closeout JSON also preserves `source_observation.v1`; Markdown surfaces show
+  only the source status and a capped changed-file summary.
 - CLI text and Ondesk prompt packages show counts first, then attention slices.
 - `review_surface.v1` exposes a compact, grouped projection for WebUI and
   morning review.

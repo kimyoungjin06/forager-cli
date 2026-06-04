@@ -169,6 +169,13 @@ result. These receipts mark each planned slice `deferred`: the runner can prove
 that a result artifact exists, but a worker-authored receipt or human review is
 still needed before a slice is treated as semantically complete.
 
+When closeout runs with `--include-git`, it also writes `source_observation.v1`
+into `closeout_plan.json`. This is a read-only source-state observation, not a
+truth verdict. It records whether the worktree was observed, the base ref,
+changed files, artifact refs, and warnings. Work-slice detail rows show the
+source observation status beside worker claims so a returning Ondesk harness can
+reconcile worker prose against actual source state before accepting completion.
+
 See [Implementation Packet And Recursive Alignment Review](../implementation-packet.md)
 for the receipt schema and the runner-versus-worker evidence boundary.
 
@@ -180,10 +187,10 @@ and missing expected-artifact evidence visible when a fresh harness resumes from
 Ondesk.
 
 The return package is intentionally shorter than `closeout_plan.json` and
-`cleanup_manifest.json`. It starts with status, decisions needed, capped first
-reads, a short change summary, grouped evidence, documentation governance
-recommendations, and the next safe action. Large evidence inventories stay in
-the machine-readable closeout artifacts.
+`cleanup_manifest.json`. It starts with status, source observation, decisions
+needed, capped first reads, a short change summary, grouped evidence,
+documentation governance recommendations, and the next safe action. Large
+evidence inventories stay in the machine-readable closeout artifacts.
 
 `forager ondesk prompt-package --project-key <project>` now includes the latest
 matching closeout return package and the latest recorded closeout-review

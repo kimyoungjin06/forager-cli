@@ -146,6 +146,7 @@ new UI should project these contracts instead of inventing a separate model.
 | `implementation_packet.v1` | FD-016 | Design-first packet for substantial delegated work. | Human surfaces show goal, alignment, scope, and readiness; JSON preserves commands, refs, stop conditions, and validation plan. |
 | `recursive_alignment_review.v1` | FD-016 | Self-review that checks original goal coverage, north-star fit, brand fit, scope balance, and completion definition. | Surfaces show pass/revise/block and missing goals before worker launch or closeout acceptance. |
 | `work_slice_execution_receipt.v1` | FD-016 | Slice-level execution receipt for work delegated from an implementation packet. | Human surfaces show attention slices and counts; JSON preserves packet ids, slice ids, status, evidence refs, drift signals, and next safe action. |
+| `source_observation.v1` | FD-007 | Read-only closeout observation of source state, changed files, and linked artifact refs. | Human surfaces show status and changed-file summary; JSON preserves the workdir, base ref, changed files, artifact refs, and warnings. |
 
 ## FD-001 Local Profile State
 
@@ -975,6 +976,7 @@ Outputs:
 - `implementation_packet.v1`.
 - `recursive_alignment_review.v1`.
 - `work_slice_execution_receipt.v1` when slice-level execution evidence exists.
+- `source_observation.v1` when closeout is run with read-only git observation.
 - Design review outcome: `pass`, `revise`, or `block`.
 - Worker-ready execution summary when approved.
 - Review-level distinction between plan review, worker claim review, source
@@ -1146,6 +1148,9 @@ Completed P1 operator workflow slice:
 17. Add typed `work_slice_execution_receipt.v1` sidecars, closeout projection,
     Ondesk/review-surface rendering, and runner-generated deferred receipts for
     packet-bound terminal local runs.
+18. Add `source_observation.v1` to closeout so worker claims can be shown beside
+    read-only source-state evidence without converting observation into accepted
+    truth.
 
 Remaining P1 operator workflow slice:
 1. Standardize retention-class names across project templates.
