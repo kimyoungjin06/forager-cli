@@ -221,11 +221,15 @@ fn ondesk_review_surface_keeps_accepted_truth_when_latest_closeout_is_retired() 
     fs::create_dir_all(&accepted_dir)?;
     let accepted_receipt_path = accepted_dir.join("closeout_receipt_20260601T000100Z.json");
     let accepted_log_path = accepted_dir.join("accepted-task.log");
+    let accepted_commercial_review_path = accepted_dir.join("COMMERCIAL_REVIEW_PACKET.md");
+    let accepted_cleanup_manifest_path = accepted_dir.join("cleanup_manifest.json");
     fs::write(
         accepted_dir.join("RETURN_PACKAGE.md"),
         "# Accepted return\n",
     )?;
     fs::write(&accepted_log_path, "accepted log\n")?;
+    fs::write(&accepted_commercial_review_path, "# Commercial review\n")?;
+    fs::write(&accepted_cleanup_manifest_path, "{}\n")?;
     fs::write(
         accepted_dir.join("closeout_plan.json"),
         serde_json::to_string_pretty(&json!({
@@ -239,7 +243,9 @@ fn ondesk_review_surface_keeps_accepted_truth_when_latest_closeout_is_retired() 
                 "log_artifact_path": accepted_log_path
             }],
             "artifacts": {
-                "return_package_markdown": accepted_dir.join("RETURN_PACKAGE.md")
+                "return_package_markdown": accepted_dir.join("RETURN_PACKAGE.md"),
+                "commercial_review_packet": accepted_commercial_review_path,
+                "cleanup_manifest_json": accepted_cleanup_manifest_path
             }
         }))?,
     )?;

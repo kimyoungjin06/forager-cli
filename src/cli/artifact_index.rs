@@ -2166,7 +2166,10 @@ fn retention_review_item(entry: &ArtifactIndexEntry) -> ArtifactRetentionReviewI
 }
 
 fn retention_review_action_is_keep(action: &str) -> bool {
-    matches!(action, "preserve" | "preserve_in_place_recorded")
+    matches!(
+        action,
+        "preserve" | "preserve_in_place_recorded" | "retention_review_resolved"
+    )
 }
 
 fn retention_scope_and_reason(entry: &ArtifactIndexEntry) -> (&'static str, &'static str) {
@@ -2234,6 +2237,12 @@ fn retention_action_and_reason(entry: &ArtifactIndexEntry) -> (&'static str, &'s
             "An accepted closeout receipt already resolved this archive review as preserve-in-place.",
         );
     }
+    if closeout_retention_support_review_is_resolved(entry) {
+        return (
+            "retention_review_resolved",
+            "An accepted closeout receipt already resolved this retention review; preserve this support artifact as provenance.",
+        );
+    }
     match entry.retention_class.as_str() {
         "disposal_candidate" => {
             return (
@@ -2268,11 +2277,23 @@ fn retention_action_and_reason(entry: &ArtifactIndexEntry) -> (&'static str, &'s
 }
 
 fn archive_preserve_in_place_is_recorded(entry: &ArtifactIndexEntry) -> bool {
-    entry.retention_class == "archive_candidate"
-        && entry
-            .refs
-            .iter()
-            .any(|reference| reference == "closeout_status:accepted")
+    entry.retention_class == "archive_candidate" && accepted_retention_review_is_resolved(entry)
+}
+
+fn closeout_retention_support_review_is_resolved(entry: &ArtifactIndexEntry) -> bool {
+    entry.source == "profile_closeout"
+        && matches!(
+            entry.kind.as_str(),
+            "commercial_review_packet" | "cleanup_manifest_json"
+        )
+        && accepted_retention_review_is_resolved(entry)
+}
+
+fn accepted_retention_review_is_resolved(entry: &ArtifactIndexEntry) -> bool {
+    entry
+        .refs
+        .iter()
+        .any(|reference| reference == "closeout_status:accepted")
         && entry
             .refs
             .iter()
