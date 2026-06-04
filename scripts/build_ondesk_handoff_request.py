@@ -263,6 +263,10 @@ def review_surface_projection(surface: dict[str, Any]) -> dict[str, Any]:
             "source": str(accepted_truth.get("source") or "").strip(),
             "reason": str(accepted_truth.get("reason") or "").strip(),
             "receipt_acceptance_status": str(accepted_truth.get("receipt_acceptance_status") or "").strip(),
+            "accepted_closeout_id": str(accepted_truth.get("accepted_closeout_id") or "").strip(),
+            "accepted_receipt_id": str(accepted_truth.get("accepted_receipt_id") or "").strip(),
+            "accepted_receipt_path": str(accepted_truth.get("accepted_receipt_path") or "").strip(),
+            "accepted_scope": review_surface_string_list(accepted_truth.get("accepted_scope"), limit=5),
         },
         "closeout": {
             "execution_status": str(closeout.get("execution_status") or "").strip(),
@@ -311,6 +315,12 @@ def review_surface_evidence_lines(projection: dict[str, Any]) -> list[str]:
     truth_reason = str(accepted_truth.get("reason") or "").strip()
     if truth_status:
         lines.append(f"Accepted truth: {truth_status}. {truth_reason}".strip())
+    if accepted_truth.get("accepted_receipt_id"):
+        lines.append(
+            "Accepted receipt: "
+            f"{accepted_truth.get('accepted_receipt_id')}"
+            f" / closeout {accepted_truth.get('accepted_closeout_id') or 'unknown'}."
+        )
     if closeout.get("review_status"):
         lines.append(
             f"Closeout review: {closeout.get('review_status')}, execution {closeout.get('execution_status') or 'unknown'}."

@@ -1716,6 +1716,12 @@ fn render_review_surface_prompt_section(output: &mut String, surface: &Value) {
     if let Some(status) = value_text(surface, "/accepted_truth/receipt_acceptance_status") {
         output.push_str(&format!("- receipt_acceptance_status: {status}\n"));
     }
+    if let Some(receipt_id) = value_text(surface, "/accepted_truth/accepted_receipt_id") {
+        output.push_str(&format!("- accepted_receipt_id: {receipt_id}\n"));
+    }
+    if let Some(closeout_id) = value_text(surface, "/accepted_truth/accepted_closeout_id") {
+        output.push_str(&format!("- accepted_closeout_id: {closeout_id}\n"));
+    }
     if let Some(reason) = value_text(surface, "/accepted_truth/reason") {
         output.push_str(&format!("- accepted_truth_reason: {reason}\n"));
     }
