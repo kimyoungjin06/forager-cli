@@ -76,6 +76,50 @@ forager offdesk background --json
 forager offdesk resume --json
 ```
 
+When a stale or failed background probe is already linked only to cancelled
+durable tasks, record an audit acknowledgement instead of editing
+`background_runs.json` by hand:
+
+```bash
+forager offdesk background-ack <ticket-id> --reason "<operator-safe reason>" --json
+```
+
+This acknowledgement suppresses further runtime-recovery attention for that
+probe only. It does not authorize retry/resume, closeout, file movement, or
+treating any Offdesk output as accepted truth.
+
+When a reviewed closeout receipt has only an `archive_review` follow-up and the
+operator decides the referenced artifacts should remain in place as provenance,
+record that decision without moving files:
+
+```bash
+forager offdesk closeout-decision \
+  --closeout-id <closeout-id> \
+  --kind archive_review \
+  --decision preserve-in-place \
+  --reason "<operator-safe reason>" \
+  --json
+```
+
+This writes a new closeout review/receipt pair with
+`resolved_open_decisions`; it does not create archives, move logs, delete
+files, promote wiki entries, or accept unrelated closeouts.
+
+When a historical closeout is evidence-incomplete and must not be treated as
+accepted truth, retire it explicitly instead of repeatedly surfacing it as a
+current blocker:
+
+```bash
+forager offdesk closeout-retire \
+  --closeout-id <closeout-id> \
+  --reason "<why this historical closeout is evidence-incomplete>" \
+  --json
+```
+
+Retirement records `retired_incomplete`, excludes tasks that already have a
+newer accepted receipt, and does not repair missing evidence or accept the
+retired closeout as truth.
+
 Inspect provider capacity and fallback:
 
 ```bash

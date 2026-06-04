@@ -35,12 +35,27 @@ CANONICAL_BLOCKING_REASON_CODES = {
     "insufficient_pq_evidence",
     "insufficient_validated_candidate",
 }
+PRIMARY_OBJECTIVE_GATE_ALIASES = (
+    "primary_objective_gate",
+    "primary objective gate",
+    "primary objective gates",
+    "primary gate",
+    "primary gates",
+)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--result", type=pathlib.Path, required=True)
     parser.add_argument("--out", type=pathlib.Path, help="Write review JSON here.")
+    parser.add_argument(
+        "--allow-legacy-reportability-contract",
+        action="store_true",
+        help=(
+            "Treat pre-reportability_contract.v1 outputs as legacy review warnings "
+            "when human-readable primary gate evidence is present."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -256,7 +271,12 @@ def review_command_case(record: dict[str, Any], response: str, findings: list[di
         )
 
 
-def review_json_case(record: dict[str, Any], findings: list[dict[str, Any]]) -> None:
+def review_json_case(
+    record: dict[str, Any],
+    findings: list[dict[str, Any]],
+    *,
+    allow_legacy_reportability_contract: bool = False,
+) -> None:
     parsed = record.get("json")
     response_path = record.get("response_path")
     if not isinstance(parsed, dict):
@@ -281,16 +301,35 @@ def review_json_case(record: dict[str, Any], findings: list[dict[str, Any]]) -> 
             response_path=response_path,
         )
     if record.get("case") == "research_reportability_status_json":
-        review_reportability_blocking_anchors(record, parsed, findings)
+        review_reportability_blocking_anchors(
+            record,
+            parsed,
+            findings,
+            allow_legacy_reportability_contract=allow_legacy_reportability_contract,
+        )
 
 
 def review_reportability_blocking_anchors(
     record: dict[str, Any],
     parsed: dict[str, Any],
     findings: list[dict[str, Any]],
+    *,
+    allow_legacy_reportability_contract: bool = False,
 ) -> None:
     anchors = parsed.get("blocking_anchors")
     response_path = record.get("response_path")
+    if allow_legacy_reportability_contract and is_legacy_reportability_contract(parsed):
+        add_finding(
+            findings,
+            severity="warning",
+            category="reportability_legacy_contract_without_blocking_anchors",
+            message="Reportability JSON predates reportability_contract.v1 and lacks typed blocking_anchors.",
+            iteration=record.get("iteration"),
+            case=record.get("case"),
+            response_path=response_path,
+            suggested_action="Keep as legacy evidence only; require reportability_contract.v1 for new runs.",
+        )
+        return
     if parsed.get("reportability_contract_schema") != "reportability_contract.v1":
         add_finding(
             findings,
@@ -370,6 +409,37 @@ def review_reportability_blocking_anchors(
             case=record.get("case"),
             response_path=response_path,
         )
+
+
+def is_legacy_reportability_contract(parsed: dict[str, Any]) -> bool:
+    return (
+        parsed.get("reportability_contract_schema") is None
+        and parsed.get("blocking_anchors") is None
+        and parsed.get("baseline_evidence_status") == "executed_primary_gate_failed"
+        and parsed.get("claim_status") == "pending_not_reportable"
+        and isinstance(parsed.get("blocking_evidence"), list)
+        and isinstance(parsed.get("evidence_refs"), list)
+    )
+
+
+def mentions_primary_objective_gate(text: str) -> bool:
+    lowered = text.lower().replace("-", " ").replace("_", " ")
+    return any(alias.replace("_", " ") in lowered for alias in PRIMARY_OBJECTIVE_GATE_ALIASES)
+
+
+def legacy_anchor_false_negative(record: dict[str, Any], response: str) -> bool:
+    parsed = record.get("json")
+    if not isinstance(parsed, dict):
+        return False
+    return (
+        record.get("case") == "research_reportability_status_json"
+        and record.get("failure_category") == "contract_anchor_failure"
+        and record.get("must_missing") == ["primary_objective_gate"]
+        and not record.get("json_failures")
+        and not record.get("forbidden_hits")
+        and is_legacy_reportability_contract(parsed)
+        and mentions_primary_objective_gate(response)
+    )
 
 
 def review_research_or_critique(
@@ -491,7 +561,12 @@ def learning_candidates(findings: list[dict[str, Any]], result_path: pathlib.Pat
     return candidates
 
 
-def evaluate_result(result_path: pathlib.Path, result: dict[str, Any]) -> dict[str, Any]:
+def evaluate_result(
+    result_path: pathlib.Path,
+    result: dict[str, Any],
+    *,
+    allow_legacy_reportability_contract: bool = False,
+) -> dict[str, Any]:
     findings: list[dict[str, Any]] = []
     summary = result.get("summary", {})
     if not isinstance(summary, dict):
@@ -533,27 +608,51 @@ def evaluate_result(result_path: pathlib.Path, result: dict[str, Any]) -> dict[s
     for record in records:
         if not isinstance(record, dict):
             continue
-        if record.get("passed") is not True:
-            add_finding(
-                findings,
-                severity="blocker",
-                category="workload_case_failed",
-                message="A workload case failed before post-run review.",
-                iteration=record.get("iteration"),
-                case=record.get("case"),
-                response_path=record.get("response_path"),
-                evidence=json.dumps(
-                    {
-                        "failure_category": record.get("failure_category"),
-                        "must_missing": record.get("must_missing"),
-                        "json_failures": record.get("json_failures"),
-                    },
-                    ensure_ascii=False,
-                ),
-            )
         response = response_for_record(record, findings)
+        if record.get("passed") is not True:
+            if allow_legacy_reportability_contract and legacy_anchor_false_negative(record, response):
+                add_finding(
+                    findings,
+                    severity="warning",
+                    category="workload_case_legacy_anchor_false_negative",
+                    message="Legacy workload marked the case failed, but current review recognizes the primary gate anchor alias.",
+                    iteration=record.get("iteration"),
+                    case=record.get("case"),
+                    response_path=record.get("response_path"),
+                    evidence=json.dumps(
+                        {
+                            "failure_category": record.get("failure_category"),
+                            "must_missing": record.get("must_missing"),
+                            "legacy_contract": True,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    suggested_action="Treat this as legacy harness evidence; rerun new workloads with reportability_contract.v1.",
+                )
+            else:
+                add_finding(
+                    findings,
+                    severity="blocker",
+                    category="workload_case_failed",
+                    message="A workload case failed before post-run review.",
+                    iteration=record.get("iteration"),
+                    case=record.get("case"),
+                    response_path=record.get("response_path"),
+                    evidence=json.dumps(
+                        {
+                            "failure_category": record.get("failure_category"),
+                            "must_missing": record.get("must_missing"),
+                            "json_failures": record.get("json_failures"),
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
         if record.get("format_json") is True:
-            review_json_case(record, findings)
+            review_json_case(
+                record,
+                findings,
+                allow_legacy_reportability_contract=allow_legacy_reportability_contract,
+            )
         if record.get("case") == "module03_root_entrypoint":
             review_command_case(record, response, findings)
         if record.get("case") in CASE_REQUIRING_REFS:
@@ -651,7 +750,11 @@ def main() -> int:
         result = load_json(result_path)
         if not isinstance(result, dict):
             raise ValueError("result is not a JSON object")
-        review = evaluate_result(result_path, result)
+        review = evaluate_result(
+            result_path,
+            result,
+            allow_legacy_reportability_contract=args.allow_legacy_reportability_contract,
+        )
     except (OSError, json.JSONDecodeError, ValueError) as error:
         review = {
             "created_at": utc_now(),

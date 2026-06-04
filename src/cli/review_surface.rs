@@ -80,6 +80,7 @@ struct ReviewSurfaceCloseout {
     latest_receipt_id: Option<String>,
     execution_status: String,
     review_status: String,
+    receipt_open_decisions: usize,
     unresolved_risks: Vec<String>,
     summary: Value,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -500,6 +501,17 @@ fn build_accepted_truth(
         .and_then(Value::as_str)
         .map(operator_safe_text);
 
+    if receipt_status.as_deref() == Some("retired_incomplete")
+        && summary.closeout_state.accepted > 0
+    {
+        return ReviewSurfaceAcceptedTruth {
+            status: "accepted".to_string(),
+            source: "offdesk_status_summary".to_string(),
+            reason: "At least one closeout receipt is recorded as accepted truth; latest retired closeout remains evidence-incomplete history.".to_string(),
+            receipt_acceptance_status: Some("accepted".to_string()),
+        };
+    }
+
     if let Some(status) = receipt_status.clone() {
         return ReviewSurfaceAcceptedTruth {
             status: if status == "accepted" {
@@ -556,6 +568,11 @@ fn build_closeout(
         .and_then(|receipt| receipt.get("receipt_id"))
         .and_then(Value::as_str)
         .map(operator_safe_text);
+    let receipt_open_decisions = receipt
+        .and_then(|receipt| receipt.get("open_decisions"))
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or_default();
     let unresolved_risks = receipt
         .map(closeout_unresolved_risks)
         .unwrap_or_else(|| closeout_summary_risks(summary));
@@ -578,6 +595,8 @@ fn build_closeout(
         });
     let execution_status = if receipt_status.as_deref() == Some("accepted") {
         "accepted".to_string()
+    } else if receipt_status.as_deref() == Some("retired_incomplete") {
+        "retired_incomplete".to_string()
     } else if summary.closeout_required > 0 || latest.is_some() {
         "completed_needs_review".to_string()
     } else {
@@ -589,6 +608,7 @@ fn build_closeout(
         latest_receipt_id,
         execution_status,
         review_status,
+        receipt_open_decisions,
         unresolved_risks,
         summary: serde_json::to_value(&summary.closeout_state).unwrap_or(Value::Null),
         source_observation,

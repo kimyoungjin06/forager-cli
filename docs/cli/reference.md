@@ -71,6 +71,7 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk cancel`↴](#forager-offdesk-cancel)
 * [`forager offdesk resume`↴](#forager-offdesk-resume)
 * [`forager offdesk background`↴](#forager-offdesk-background)
+* [`forager offdesk background-ack`↴](#forager-offdesk-background-ack)
 * [`forager offdesk capabilities`↴](#forager-offdesk-capabilities)
 * [`forager offdesk snapshots`↴](#forager-offdesk-snapshots)
 * [`forager offdesk snapshot`↴](#forager-offdesk-snapshot)
@@ -80,6 +81,8 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk maintenance-request`↴](#forager-offdesk-maintenance-request)
 * [`forager offdesk closeout`↴](#forager-offdesk-closeout)
 * [`forager offdesk closeout-review`↴](#forager-offdesk-closeout-review)
+* [`forager offdesk closeout-decision`↴](#forager-offdesk-closeout-decision)
+* [`forager offdesk closeout-retire`↴](#forager-offdesk-closeout-retire)
 * [`forager offdesk wiki`↴](#forager-offdesk-wiki)
 * [`forager offdesk wiki corrections`↴](#forager-offdesk-wiki-corrections)
 * [`forager offdesk wiki proposal-events`↴](#forager-offdesk-wiki-proposal-events)
@@ -867,6 +870,8 @@ Manage offdesk approvals and recovery artifacts
 * `maintenance-request` — Create or reuse an approval request for a maintenance action
 * `closeout` — Generate a mandatory closeout plan and commercial review packet
 * `closeout-review` — Record a reviewed closeout verdict without applying file operations
+* `closeout-decision` — Resolve a closeout receipt open decision without applying file operations
+* `closeout-retire` — Retire an evidence-incomplete historical closeout without accepting truth
 * `wiki` — Inspect adaptive wiki candidates, entries, projections, and lint
 
 
@@ -1374,6 +1379,26 @@ Show background runner recovery probes
 
 
 
+## `forager offdesk background-ack`
+
+Acknowledge a stale or failed background probe after linked tasks are cancelled
+
+**Usage:** `forager offdesk background-ack [OPTIONS] --reason <REASON> <TICKET_ID>`
+
+###### **Arguments:**
+
+* `<TICKET_ID>` — Background ticket ID to acknowledge
+
+###### **Options:**
+
+* `--reason <REASON>` — Operator reason for suppressing further recovery attention
+* `--by <BY>` — Operator or surface recording this acknowledgement [default: cli]
+* `--source-surface <SOURCE_SURFACE>` — Source surface recorded on the acknowledgement [default: cli]
+* `--allow-unlinked` — Permit acknowledgement when no durable task is linked to the background ticket
+* `--json` — Output as JSON
+
+
+
 ## `forager offdesk capabilities`
 
 Show Task Team capability metadata
@@ -1533,6 +1558,47 @@ Record a reviewed closeout verdict without applying file operations
 * `--missing-evidence <MISSING_EVIDENCE>` — Missing evidence reported by review; may be passed multiple times
 * `--required-first-read <REQUIRED_FIRST_READ>` — Required first-read path reported by review; may be passed multiple times
 * `--notes <NOTES>` — Short review note. Secrets are redacted before persistence
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk closeout-decision`
+
+Resolve a closeout receipt open decision without applying file operations
+
+**Usage:** `forager offdesk closeout-decision [OPTIONS] --kind <KIND> --decision <DECISION> --reason <REASON>`
+
+###### **Options:**
+
+* `--closeout-id <CLOSEOUT_ID>` — Closeout ID from `forager offdesk closeout`
+* `--artifact-dir <ARTIFACT_DIR>` — Closeout artifact directory containing closeout_plan.json
+* `--kind <KIND>` — Open decision kind to resolve, for example archive_review
+* `--decision <DECISION>` — Resolution to record. This command never moves, archives, or deletes files
+
+  Possible values: `preserve-in-place`
+
+* `--reviewer <REVIEWER>` — Reviewer or operator label
+
+  Default value: `operator`
+* `--reason <REASON>` — Required rationale for the decision. Secrets are redacted before persistence
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk closeout-retire`
+
+Retire an evidence-incomplete historical closeout without accepting truth
+
+**Usage:** `forager offdesk closeout-retire [OPTIONS] --reason <REASON>`
+
+###### **Options:**
+
+* `--closeout-id <CLOSEOUT_ID>` — Closeout ID from `forager offdesk closeout`
+* `--artifact-dir <ARTIFACT_DIR>` — Closeout artifact directory containing closeout_plan.json
+* `--reviewer <REVIEWER>` — Reviewer or operator label
+
+  Default value: `operator`
+* `--reason <REASON>` — Required rationale for retiring the closeout as evidence-incomplete
 * `--json` — Output as JSON
 
 

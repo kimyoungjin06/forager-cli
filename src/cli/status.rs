@@ -352,7 +352,7 @@ fn print_offdesk_summary(
     }
     if summary.closeout_required > 0 {
         println!(
-            "Closeout state: {} missing, {} pending review, {} revise/blocked, {} approved with follow-ups, {} stale package, {} stale review, {} accepted, {} approved.",
+            "Closeout state: {} missing, {} pending review, {} revise/blocked, {} approved with follow-ups, {} stale package, {} stale review, {} accepted, {} approved, {} retired incomplete.",
             summary.closeout_state.missing_closeout,
             summary.closeout_state.pending_review,
             summary.closeout_state.revision_required,
@@ -360,7 +360,8 @@ fn print_offdesk_summary(
             summary.closeout_state.stale_closeout,
             summary.closeout_state.stale_review,
             summary.closeout_state.accepted,
-            summary.closeout_state.approved
+            summary.closeout_state.approved,
+            summary.closeout_state.retired_incomplete
         );
         if summary.closeout_state.missing_closeout
             + summary.closeout_state.stale_closeout

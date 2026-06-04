@@ -7978,6 +7978,154 @@ fn offdesk_tick_stale_background_creates_resume_state() -> Result<()> {
 
 #[test]
 #[serial]
+fn offdesk_background_ack_clears_stale_attention_for_cancelled_linked_task() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    fs::write(
+        profile_dir.join("offdesk_tasks.json"),
+        serde_json::to_string_pretty(&json!([durable_task_with(
+            "task",
+            "dispatch.runtime",
+            "cancelled",
+            now,
+            "true",
+            temp.path()
+        )]))?,
+    )?;
+    fs::write(
+        profile_dir.join("background_runs.json"),
+        serde_json::to_string_pretty(&json!([
+            {
+                "ticket_id": "ticket",
+                "task_id": "task",
+                "request_id": "request",
+                "project_key": "project",
+                "runner_kind": "local_background",
+                "phase": "stale_lost_callback",
+                "runtime_handle_alive": false
+            }
+        ]))?,
+    )?;
+
+    let status_before_output = forager_command(temp.path())
+        .args(["status", "--json"])
+        .output()?;
+    assert!(status_before_output.status.success());
+    let status_before: serde_json::Value = serde_json::from_slice(&status_before_output.stdout)?;
+    assert_eq!(status_before["stale_background_runs"], 1);
+    assert!(status_before["offdesk_next_safe_actions"]
+        .as_array()
+        .expect("next safe actions")
+        .iter()
+        .any(|action| action["kind"] == "recovery_required"));
+
+    let ack_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "background-ack",
+            "ticket",
+            "--reason",
+            "cancelled stale local-background probe was superseded",
+            "--by",
+            "codex",
+            "--json",
+        ])
+        .output()?;
+    assert!(ack_output.status.success());
+    let ack: serde_json::Value = serde_json::from_slice(&ack_output.stdout)?;
+    assert_eq!(ack["ticket_id"], "ticket");
+    assert_eq!(ack["linked_task_ids"], json!(["task"]));
+    assert_eq!(
+        ack["acknowledgement"]["previous_phase"],
+        "stale_lost_callback"
+    );
+    assert_eq!(ack["acknowledgement"]["acknowledged_by"], "codex");
+    assert_eq!(ack["status"]["decision"]["phase"], "recovery_acknowledged");
+
+    let runs: serde_json::Value = serde_json::from_str(&fs::read_to_string(
+        profile_dir.join("background_runs.json"),
+    )?)?;
+    assert_eq!(runs[0]["phase"], "recovery_acknowledged");
+    assert_eq!(
+        runs[0]["operator_recovery_ack"]["reason"],
+        "cancelled stale local-background probe was superseded"
+    );
+    assert!(runs[0]["operator_recovery_ack"]["does_not_authorize"]
+        .as_array()
+        .expect("does not authorize")
+        .iter()
+        .any(|value| value == "accepting any Offdesk output as truth"));
+
+    let status_after_output = forager_command(temp.path())
+        .args(["status", "--json"])
+        .output()?;
+    assert!(status_after_output.status.success());
+    let status_after: serde_json::Value = serde_json::from_slice(&status_after_output.stdout)?;
+    assert_eq!(status_after["stale_background_runs"], 0);
+    assert!(!status_after["offdesk_next_safe_actions"]
+        .as_array()
+        .expect("next safe actions")
+        .iter()
+        .any(|action| action["kind"] == "recovery_required"));
+    assert!(!profile_dir.join("task_resume_state.json").exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_background_ack_rejects_non_cancelled_linked_task() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    fs::write(
+        profile_dir.join("offdesk_tasks.json"),
+        serde_json::to_string_pretty(&json!([durable_task_with(
+            "task",
+            "dispatch.runtime",
+            "running",
+            now,
+            "true",
+            temp.path()
+        )]))?,
+    )?;
+    fs::write(
+        profile_dir.join("background_runs.json"),
+        serde_json::to_string_pretty(&json!([
+            {
+                "ticket_id": "ticket",
+                "task_id": "task",
+                "request_id": "request",
+                "project_key": "project",
+                "runner_kind": "local_background",
+                "phase": "stale_lost_callback",
+                "runtime_handle_alive": false
+            }
+        ]))?,
+    )?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "background-ack",
+            "ticket",
+            "--reason",
+            "unsafe shortcut",
+            "--json",
+        ])
+        .output()?;
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("non-cancelled linked tasks"));
+    assert!(stderr.contains("task:Running"));
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn offdesk_poll_reconciles_completed_background_task() -> Result<()> {
     let temp = tempdir()?;
     let profile_dir = profile_dir(temp.path());

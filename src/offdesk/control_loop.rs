@@ -250,7 +250,9 @@ pub fn load_offdesk_status_summary(
             BackgroundRunnerPhase::StaleNoAck
             | BackgroundRunnerPhase::StaleLostCallback
             | BackgroundRunnerPhase::Reconstructable => summary.background_stale += 1,
-            BackgroundRunnerPhase::Completed | BackgroundRunnerPhase::ResultReceived => {}
+            BackgroundRunnerPhase::Completed
+            | BackgroundRunnerPhase::ResultReceived
+            | BackgroundRunnerPhase::RecoveryAcknowledged => {}
             BackgroundRunnerPhase::Launched
             | BackgroundRunnerPhase::HandoffEmitted
             | BackgroundRunnerPhase::PickupAcknowledged => summary.background_active += 1,
@@ -315,6 +317,9 @@ fn apply_closeout_review_snapshot(
         }
         Some("revision_required" | "blocked") => {
             summary.revision_required += 1;
+        }
+        Some("retired_incomplete") => {
+            summary.retired_incomplete += 1;
         }
         Some(_) => {
             summary.revision_required += 1;
@@ -494,6 +499,7 @@ fn apply_background_outcome(
                 report.updated_task_ids.push(task.task_id.clone());
             }
         }
+        BackgroundRunnerPhase::RecoveryAcknowledged => {}
         BackgroundRunnerPhase::Launched
         | BackgroundRunnerPhase::HandoffEmitted
         | BackgroundRunnerPhase::PickupAcknowledged => {

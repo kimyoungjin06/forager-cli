@@ -2303,6 +2303,35 @@ review.review_json_case(
     findings,
 )
 assert any(finding["category"] == "reportability_contract_schema_missing" for finding in findings), findings
+assert any(finding["severity"] == "blocker" for finding in findings), findings
+
+legacy = dict(valid)
+legacy.pop("reportability_contract_schema")
+legacy.pop("blocking_anchors")
+findings = []
+review.review_json_case(
+    {"case": "research_reportability_status_json", "iteration": 1, "json": legacy},
+    findings,
+    allow_legacy_reportability_contract=True,
+)
+assert any(
+    finding["category"] == "reportability_legacy_contract_without_blocking_anchors"
+    for finding in findings
+), findings
+assert not [finding for finding in findings if finding["severity"] == "blocker"], findings
+
+legacy_record = {
+    "case": "research_reportability_status_json",
+    "failure_category": "contract_anchor_failure",
+    "must_missing": ["primary_objective_gate"],
+    "json_failures": [],
+    "forbidden_hits": [],
+    "json": legacy,
+}
+assert review.legacy_anchor_false_negative(
+    legacy_record,
+    "No-option evidence fails the primary objective gate despite execution.",
+)
 
 missing_structured = dict(valid)
 missing_structured.pop("blocking_anchors")
