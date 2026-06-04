@@ -20,7 +20,8 @@ use super::background::{
 use super::implementation_packet::{
     implementation_packet_record_from_path, operator_safe_implementation_packet_summary,
     work_slice_execution_receipts_from_path, ImplementationPacketSummary,
-    WorkSliceExecutionReceipt, WorkSliceExecutionStatus, WORK_SLICE_EXECUTION_RECEIPTS_FILE,
+    WorkSliceExecutionReceipt, WorkSliceExecutionStatus, WorkSliceReceiptProducerRole,
+    WorkSliceVerificationStatus, WORK_SLICE_EXECUTION_RECEIPTS_FILE,
     WORK_SLICE_EXECUTION_RECEIPT_SCHEMA,
 };
 use super::mode_contract::{assess_offdesk_mode, OffdeskModeAssessment, OffdeskModeLifecycle};
@@ -342,10 +343,15 @@ fn emit_runner_work_slice_receipts(
             background_ticket_id: Some(probe.ticket_id.clone()),
             generated_at: now.to_rfc3339(),
             producer: "runner_poll".to_string(),
+            producer_role: Some(WorkSliceReceiptProducerRole::RunnerObservation),
             slice_id: Some(format!("slice-{index}")),
             slice_index: Some(index),
             slice_label: slice.clone(),
             status: WorkSliceExecutionStatus::Deferred,
+            claim_status: None,
+            verification_status: WorkSliceVerificationStatus::EvidenceObserved,
+            verification_summary: "Runner observed terminal background state and a result artifact; it did not verify semantic slice completion.".to_string(),
+            verification_refs: runner_receipt_evidence_refs(probe, decision),
             summary: "Runner observed a terminal result artifact, but no worker-authored slice receipt was available for this planned work slice.".to_string(),
             evidence_refs: runner_receipt_evidence_refs(probe, decision),
             validation_refs: Vec::new(),

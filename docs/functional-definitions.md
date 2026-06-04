@@ -146,6 +146,7 @@ new UI should project these contracts instead of inventing a separate model.
 | `implementation_packet.v1` | FD-016 | Design-first packet for substantial delegated work. | Human surfaces show goal, alignment, scope, and readiness; JSON preserves commands, refs, stop conditions, and validation plan. |
 | `recursive_alignment_review.v1` | FD-016 | Self-review that checks original goal coverage, north-star fit, brand fit, scope balance, and completion definition. | Surfaces show pass/revise/block and missing goals before worker launch or closeout acceptance. |
 | `work_slice_execution_receipt.v1` | FD-016 | Slice-level execution receipt for work delegated from an implementation packet. | Human surfaces show attention slices and counts; JSON preserves packet ids, slice ids, status, evidence refs, drift signals, and next safe action. |
+| `source_observation.v1` | FD-007 | Read-only closeout observation of source state, changed files, and linked artifact refs. | Human surfaces show status and changed-file summary; JSON preserves the workdir, base ref, changed files, artifact refs, and warnings. |
 
 ## FD-001 Local Profile State
 
@@ -563,6 +564,11 @@ Minimum `review_surface.v1` Shape:
     "latest_receipt_id": "receipt-id",
     "execution_status": "completed",
     "review_status": "pending",
+    "source_observation": {
+      "status": "observed",
+      "changed_file_count": 3,
+      "interpretation": "source observation is read-only evidence context, not accepted truth or slice verification"
+    },
     "unresolved_risks": []
   },
   "runtime": {
@@ -599,6 +605,8 @@ Implementation Rule:
 - The first implementation may be JSON-only.
 - WebUI, TUI detail panels, Telegram detail replies, and Ondesk packets should
   project from this packet rather than each querying unrelated state.
+- `closeout.source_observation` should preserve source-state context for worker
+  claim reconciliation without presenting it as accepted truth.
 - Raw paths are allowed in `artifacts.refs`, but user-facing summaries should
   explain the artifact's meaning before exposing its location.
 
@@ -975,8 +983,11 @@ Outputs:
 - `implementation_packet.v1`.
 - `recursive_alignment_review.v1`.
 - `work_slice_execution_receipt.v1` when slice-level execution evidence exists.
+- `source_observation.v1` when closeout is run with read-only git observation.
 - Design review outcome: `pass`, `revise`, or `block`.
 - Worker-ready execution summary when approved.
+- Review-level distinction between plan review, worker claim review, source
+  verification, validation review, and acceptance review.
 - Closeout comparison between intended outcomes and actual results.
 
 Authorization Boundary:
@@ -996,6 +1007,11 @@ Acceptance Criteria:
 - Work slices with explicit receipts use slice-level status and evidence;
   unreceipted slices remain visible as manual-review items instead of silently
   disappearing into packet-level status.
+- Worker-authored completed claims remain visibly separate from independently
+  verified completed slices.
+- Code and artifact results are reconciled against source evidence such as git
+  diff, changed files, test output, logs, generated artifacts, or transform
+  records before acceptance.
 - Morning Ondesk review can tell whether execution served the original purpose
   rather than only completing a narrow implementation slice.
 
@@ -1016,6 +1032,8 @@ Open Design Questions:
   runner-generated deferred receipts?
 - What evidence threshold promotes a slice from `deferred` into `completed`,
   `missing`, or `drifted`?
+- Which result categories need mandatory reconciliation adapters: code, docs,
+  data, generated media, or release artifacts?
 
 ## Cross-Capability Invariants
 
@@ -1137,6 +1155,9 @@ Completed P1 operator workflow slice:
 17. Add typed `work_slice_execution_receipt.v1` sidecars, closeout projection,
     Ondesk/review-surface rendering, and runner-generated deferred receipts for
     packet-bound terminal local runs.
+18. Add `source_observation.v1` to closeout so worker claims can be shown beside
+    read-only source-state evidence without converting observation into accepted
+    truth.
 
 Remaining P1 operator workflow slice:
 1. Standardize retention-class names across project templates.

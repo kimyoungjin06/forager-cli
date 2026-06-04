@@ -91,8 +91,9 @@ pub use implementation_packet::{
     ImplementationPacketDraftInput, ImplementationPacketSummary, ImplementationScope,
     ImplementationSourceIntent, ImplementationValidation, LatestImplementationPacket,
     RecursiveAlignmentChecks, RecursiveAlignmentReview, WorkSliceExecutionReceipt,
-    WorkSliceExecutionStatus, IMPLEMENTATION_PACKETS_DIR, IMPLEMENTATION_PACKET_FILE,
-    IMPLEMENTATION_PACKET_MD_FILE, IMPLEMENTATION_PACKET_SCHEMA, RECURSIVE_ALIGNMENT_REVIEW_FILE,
+    WorkSliceExecutionStatus, WorkSliceReceiptProducerRole, WorkSliceVerificationStatus,
+    IMPLEMENTATION_PACKETS_DIR, IMPLEMENTATION_PACKET_FILE, IMPLEMENTATION_PACKET_MD_FILE,
+    IMPLEMENTATION_PACKET_SCHEMA, RECURSIVE_ALIGNMENT_REVIEW_FILE,
     RECURSIVE_ALIGNMENT_REVIEW_SCHEMA, WORK_SLICE_EXECUTION_RECEIPTS_FILE,
     WORK_SLICE_EXECUTION_RECEIPT_SCHEMA,
 };

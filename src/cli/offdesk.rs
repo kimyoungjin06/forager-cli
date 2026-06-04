@@ -53,7 +53,8 @@ use crate::offdesk::{
     OffdeskTaskView, OffdeskTickOptions, PendingActionApproval, ProviderCapacityState,
     ProviderCapacityStore, ProviderFallbackRecommendation, ResumeStatus, RiskLevel, SchedulerGate,
     SchedulerGateRequest, SchedulerGateStatus, TaskResumeState, TaskResumeStore,
-    WorkSliceExecutionReceipt, WORK_SLICE_EXECUTION_RECEIPTS_FILE,
+    WorkSliceExecutionReceipt, WorkSliceExecutionStatus, WorkSliceReceiptProducerRole,
+    WorkSliceVerificationStatus, WORK_SLICE_EXECUTION_RECEIPTS_FILE,
 };
 use crate::session::{get_profile_dir, resolved_app_dir_path, DEFAULT_PROFILE};
 
@@ -2344,6 +2345,7 @@ struct OffdeskCloseoutReport {
     read_only_project_state: bool,
     filters: CloseoutFilters,
     summary: CloseoutSummary,
+    source_observation: CloseoutSourceObservation,
     implementation_packet_coverage: CloseoutImplementationPacketCoverage,
     tasks: Vec<CloseoutTask>,
     background_runs: Vec<CloseoutBackgroundRun>,
@@ -2449,6 +2451,24 @@ struct CloseoutPacketCoverageDetail {
     #[serde(skip_serializing_if = "Option::is_none")]
     receipt_source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    receipt_role: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trust_tier: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reported_status: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    claim_status: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    verification_status: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    verification_summary: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    verification_refs: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_observation_status: Option<&'static str>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    source_refs: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     summary: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     validation_refs: Vec<String>,
@@ -2466,6 +2486,8 @@ struct CloseoutPacketAggregate {
     summary: ImplementationPacketSummary,
     evidence_refs: BTreeSet<String>,
     match_refs: BTreeMap<String, String>,
+    source_observation_status: &'static str,
+    source_refs: Vec<String>,
     receipt_search_dirs: BTreeSet<String>,
     task_ids: BTreeSet<String>,
     background_ticket_ids: BTreeSet<String>,
@@ -2618,6 +2640,34 @@ struct CloseoutGitSnapshot {
 }
 
 #[derive(Serialize)]
+struct CloseoutSourceObservation {
+    schema: &'static str,
+    generated_at: DateTime<Utc>,
+    source_kind: &'static str,
+    enabled: bool,
+    available: bool,
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    workdir: Option<String>,
+    base_ref: &'static str,
+    changed_file_count: usize,
+    changed_files_truncated: bool,
+    changed_files: Vec<CloseoutSourceChangedFile>,
+    artifact_refs: Vec<String>,
+    warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct CloseoutSourceChangedFile {
+    path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    old_path: Option<String>,
+    status: &'static str,
+    additions: usize,
+    deletions: usize,
+}
+
+#[derive(Serialize)]
 struct CloseoutArtifactPaths {
     closeout_plan_json: String,
     closeout_plan_markdown: String,
@@ -2630,6 +2680,9 @@ const CLOSEOUT_RETURN_DECISION_LIMIT: usize = 5;
 const CLOSEOUT_RETURN_FIRST_READ_LIMIT: usize = 5;
 const CLOSEOUT_RETURN_EVIDENCE_LIMIT: usize = 5;
 const CLOSEOUT_RETURN_GOVERNANCE_PATH_LIMIT: usize = 3;
+const CLOSEOUT_SOURCE_OBSERVATION_BASE_REF: &str = "HEAD";
+const CLOSEOUT_SOURCE_OBSERVATION_CHANGED_FILE_LIMIT: usize = 100;
+const CLOSEOUT_SOURCE_OBSERVATION_REF_LIMIT: usize = 5;
 
 #[derive(Serialize)]
 struct CloseoutReviewRecord {
@@ -7176,8 +7229,17 @@ fn build_closeout_report(profile: &str, args: &CloseoutArgs) -> Result<OffdeskCl
         .iter()
         .map(closeout_background_summary)
         .collect::<Vec<_>>();
-    let implementation_packet_coverage =
-        closeout_implementation_packet_coverage(&closeout_tasks, &closeout_background_runs);
+    let source_observation = closeout_source_observation(
+        args,
+        &closeout_tasks,
+        &closeout_background_runs,
+        generated_at,
+    );
+    let implementation_packet_coverage = closeout_implementation_packet_coverage(
+        &closeout_tasks,
+        &closeout_background_runs,
+        &source_observation,
+    );
     let decision_records = closeout_decision_records(&profile_dir, &tasks, &background_runs, args)?;
 
     let mut file_operations = closeout_file_operations(&tasks, &background_runs);
@@ -7285,6 +7347,7 @@ fn build_closeout_report(profile: &str, args: &CloseoutArgs) -> Result<OffdeskCl
         read_only_project_state: true,
         filters,
         summary,
+        source_observation,
         implementation_packet_coverage,
         tasks: closeout_tasks,
         background_runs: closeout_background_runs,
@@ -8332,6 +8395,193 @@ fn closeout_git_snapshot(
     }))
 }
 
+fn closeout_source_observation(
+    args: &CloseoutArgs,
+    tasks: &[CloseoutTask],
+    background_runs: &[CloseoutBackgroundRun],
+    generated_at: DateTime<Utc>,
+) -> CloseoutSourceObservation {
+    let artifact_refs = closeout_source_observation_artifact_refs(tasks, background_runs);
+    if !args.include_git {
+        return CloseoutSourceObservation {
+            schema: "source_observation.v1",
+            generated_at,
+            source_kind: "git_worktree",
+            enabled: false,
+            available: false,
+            status: "not_requested",
+            workdir: None,
+            base_ref: CLOSEOUT_SOURCE_OBSERVATION_BASE_REF,
+            changed_file_count: 0,
+            changed_files_truncated: false,
+            changed_files: Vec::new(),
+            artifact_refs,
+            warnings: vec![
+                "Run closeout with --include-git to attach read-only source observation."
+                    .to_string(),
+            ],
+        };
+    }
+
+    let workdir = args
+        .workdir
+        .clone()
+        .or_else(|| closeout_project_workdir_from_closeout_task_artifacts(tasks))
+        .or_else(|| tasks.first().map(|task| PathBuf::from(&task.workdir)));
+    let Some(workdir) = workdir else {
+        return CloseoutSourceObservation {
+            schema: "source_observation.v1",
+            generated_at,
+            source_kind: "git_worktree",
+            enabled: true,
+            available: false,
+            status: "unavailable",
+            workdir: None,
+            base_ref: CLOSEOUT_SOURCE_OBSERVATION_BASE_REF,
+            changed_file_count: 0,
+            changed_files_truncated: false,
+            changed_files: Vec::new(),
+            artifact_refs,
+            warnings: vec![
+                "No workdir was supplied and no matched task workdir could be inferred."
+                    .to_string(),
+            ],
+        };
+    };
+    let workdir_label = crate::offdesk::operator_safe_text(workdir.to_string_lossy().as_ref());
+    if !workdir.exists() {
+        return CloseoutSourceObservation {
+            schema: "source_observation.v1",
+            generated_at,
+            source_kind: "git_worktree",
+            enabled: true,
+            available: false,
+            status: "unavailable",
+            workdir: Some(workdir_label),
+            base_ref: CLOSEOUT_SOURCE_OBSERVATION_BASE_REF,
+            changed_file_count: 0,
+            changed_files_truncated: false,
+            changed_files: Vec::new(),
+            artifact_refs,
+            warnings: vec!["Workdir does not exist.".to_string()],
+        };
+    }
+
+    let mut warnings = Vec::new();
+    let changed_files = match crate::git::diff::compute_changed_files(
+        &workdir,
+        CLOSEOUT_SOURCE_OBSERVATION_BASE_REF,
+    ) {
+        Ok(files) => files,
+        Err(error) => {
+            warnings.push(format!(
+                "Changed-file observation failed: {}",
+                crate::offdesk::operator_safe_text(&error.to_string())
+            ));
+            Vec::new()
+        }
+    };
+    let available = warnings.is_empty();
+    let changed_file_count = changed_files.len();
+    let changed_files_truncated =
+        changed_file_count > CLOSEOUT_SOURCE_OBSERVATION_CHANGED_FILE_LIMIT;
+    let changed_files = changed_files
+        .into_iter()
+        .take(CLOSEOUT_SOURCE_OBSERVATION_CHANGED_FILE_LIMIT)
+        .map(|file| CloseoutSourceChangedFile {
+            path: crate::offdesk::operator_safe_text(file.path.to_string_lossy().as_ref()),
+            old_path: file
+                .old_path
+                .as_ref()
+                .map(|path| crate::offdesk::operator_safe_text(path.to_string_lossy().as_ref())),
+            status: file.status.label(),
+            additions: file.additions,
+            deletions: file.deletions,
+        })
+        .collect::<Vec<_>>();
+    let status = if !available {
+        "unavailable"
+    } else if changed_file_count > 0 {
+        "observed"
+    } else {
+        "clean"
+    };
+
+    CloseoutSourceObservation {
+        schema: "source_observation.v1",
+        generated_at,
+        source_kind: "git_worktree",
+        enabled: true,
+        available,
+        status,
+        workdir: Some(workdir_label),
+        base_ref: CLOSEOUT_SOURCE_OBSERVATION_BASE_REF,
+        changed_file_count,
+        changed_files_truncated,
+        changed_files,
+        artifact_refs,
+        warnings,
+    }
+}
+
+fn closeout_source_observation_artifact_refs(
+    tasks: &[CloseoutTask],
+    background_runs: &[CloseoutBackgroundRun],
+) -> Vec<String> {
+    let mut refs = BTreeSet::new();
+    for task in tasks {
+        closeout_source_add_artifact_ref(&mut refs, task.result_artifact_path.as_deref());
+        closeout_source_add_artifact_ref(&mut refs, task.log_artifact_path.as_deref());
+        for artifact in &task.artifact_refs {
+            closeout_source_add_artifact_ref(&mut refs, artifact.path.as_deref());
+        }
+    }
+    for run in background_runs {
+        closeout_source_add_artifact_ref(&mut refs, run.result_artifact_path.as_deref());
+        closeout_source_add_artifact_ref(&mut refs, run.log_artifact_path.as_deref());
+    }
+    refs.into_iter().take(20).collect()
+}
+
+fn closeout_project_workdir_from_closeout_task_artifacts(
+    tasks: &[CloseoutTask],
+) -> Option<PathBuf> {
+    tasks.iter().find_map(|task| {
+        task.result_artifact_path
+            .as_deref()
+            .and_then(closeout_project_workdir_from_artifact_path)
+            .or_else(|| {
+                task.log_artifact_path
+                    .as_deref()
+                    .and_then(closeout_project_workdir_from_artifact_path)
+            })
+            .or_else(|| {
+                task.artifact_refs.iter().find_map(|artifact| {
+                    artifact
+                        .path
+                        .as_deref()
+                        .and_then(closeout_project_workdir_from_artifact_path)
+                })
+            })
+    })
+}
+
+fn closeout_source_add_artifact_ref(refs: &mut BTreeSet<String>, path: Option<&str>) {
+    let Some(path) = path.map(str::trim).filter(|path| !path.is_empty()) else {
+        return;
+    };
+    refs.insert(crate::offdesk::operator_safe_text(path));
+}
+
+fn closeout_source_observation_refs(observation: &CloseoutSourceObservation) -> Vec<String> {
+    observation
+        .changed_files
+        .iter()
+        .take(CLOSEOUT_SOURCE_OBSERVATION_REF_LIMIT)
+        .map(|file| format!("source:git:{}:{}", file.status, file.path))
+        .collect()
+}
+
 fn closeout_git_output(workdir: &Path, args: &[&str]) -> Result<Option<String>> {
     let output = Command::new("git")
         .args(args)
@@ -8485,14 +8735,21 @@ fn closeout_decision_record_subject(record: &DecisionRecord) -> &str {
 fn closeout_implementation_packet_coverage(
     tasks: &[CloseoutTask],
     background_runs: &[CloseoutBackgroundRun],
+    source_observation: &CloseoutSourceObservation,
 ) -> CloseoutImplementationPacketCoverage {
     let mut packets = BTreeMap::<String, CloseoutPacketAggregate>::new();
+    let source_refs = closeout_source_observation_refs(source_observation);
     for task in tasks {
         let Some(summary) = task.implementation_packet.as_ref() else {
             continue;
         };
         let task_id = crate::offdesk::operator_safe_text(&task.task_id);
-        let entry = closeout_packet_entry(&mut packets, summary);
+        let entry = closeout_packet_entry(
+            &mut packets,
+            summary,
+            source_observation.status,
+            &source_refs,
+        );
         entry.task_ids.insert(task.task_id.clone());
         if let Some(ticket_id) = task.background_ticket_id.as_deref() {
             entry.background_ticket_ids.insert(ticket_id.to_string());
@@ -8564,7 +8821,12 @@ fn closeout_implementation_packet_coverage(
             continue;
         };
         let ticket_id = crate::offdesk::operator_safe_text(&run.ticket_id);
-        let entry = closeout_packet_entry(&mut packets, summary);
+        let entry = closeout_packet_entry(
+            &mut packets,
+            summary,
+            source_observation.status,
+            &source_refs,
+        );
         entry.background_ticket_ids.insert(run.ticket_id.clone());
         if let Some(task_id) = run.task_id.as_deref() {
             entry.task_ids.insert(task_id.to_string());
@@ -8661,6 +8923,8 @@ fn closeout_implementation_packet_coverage(
 fn closeout_packet_entry<'a>(
     packets: &'a mut BTreeMap<String, CloseoutPacketAggregate>,
     summary: &ImplementationPacketSummary,
+    source_observation_status: &'static str,
+    source_refs: &[String],
 ) -> &'a mut CloseoutPacketAggregate {
     let summary = crate::offdesk::operator_safe_implementation_packet_summary(summary);
     let key = closeout_packet_key(&summary);
@@ -8671,6 +8935,8 @@ fn closeout_packet_entry<'a>(
             summary,
             evidence_refs: BTreeSet::new(),
             match_refs: BTreeMap::new(),
+            source_observation_status,
+            source_refs: source_refs.to_vec(),
             task_ids: BTreeSet::new(),
             background_ticket_ids: BTreeSet::new(),
             has_completed_evidence: false,
@@ -8728,16 +8994,19 @@ fn closeout_packet_detail_coverage(
                 "work_slice",
                 aggregate.summary.work_slice_count,
                 packet_status,
+                aggregate,
             ),
             validation_items: closeout_summary_only_details(
                 "validation",
                 aggregate.summary.validation_item_count,
                 packet_status,
+                aggregate,
             ),
             expected_artifacts: closeout_summary_only_details(
                 "expected_artifact",
                 aggregate.summary.expected_artifact_count,
                 packet_status,
+                aggregate,
             ),
         };
     }
@@ -8757,6 +9026,7 @@ fn closeout_packet_detail_coverage(
                     &packet.design.work_slices,
                     packet_status,
                     &work_slice_receipts,
+                    aggregate,
                 ),
                 validation_items: closeout_validation_item_details(
                     &packet,
@@ -8777,16 +9047,19 @@ fn closeout_packet_detail_coverage(
                 "work_slice",
                 aggregate.summary.work_slice_count,
                 packet_status,
+                aggregate,
             ),
             validation_items: closeout_summary_only_details(
                 "validation",
                 aggregate.summary.validation_item_count,
                 packet_status,
+                aggregate,
             ),
             expected_artifacts: closeout_summary_only_details(
                 "expected_artifact",
                 aggregate.summary.expected_artifact_count,
                 packet_status,
+                aggregate,
             ),
         },
     }
@@ -8796,13 +9069,14 @@ fn closeout_work_slice_details(
     work_slices: &[String],
     packet_status: &'static str,
     receipts: &[LoadedWorkSliceExecutionReceipt],
+    aggregate: &CloseoutPacketAggregate,
 ) -> Vec<CloseoutPacketCoverageDetail> {
     work_slices
         .iter()
         .enumerate()
         .map(|(index, slice)| {
             if let Some(receipt) = closeout_work_slice_receipt_for(receipts, index, slice) {
-                return closeout_work_slice_detail_from_receipt(slice, receipt);
+                return closeout_work_slice_detail_from_receipt(slice, receipt, aggregate);
             }
             CloseoutPacketCoverageDetail {
                 category: "work_slice",
@@ -8811,6 +9085,15 @@ fn closeout_work_slice_details(
                 reason: "Work-slice execution evidence is not itemized yet; this item inherits the packet-level closeout status and needs manual review.".to_string(),
                 evidence_refs: Vec::new(),
                 receipt_source: None,
+                receipt_role: None,
+                trust_tier: None,
+                reported_status: None,
+                claim_status: None,
+                verification_status: None,
+                verification_summary: None,
+                verification_refs: Vec::new(),
+                source_observation_status: Some(aggregate.source_observation_status),
+                source_refs: aggregate.source_refs.clone(),
                 summary: None,
                 validation_refs: Vec::new(),
                 artifact_refs: Vec::new(),
@@ -8937,15 +9220,29 @@ fn closeout_work_slice_receipt_for<'a>(
 fn closeout_work_slice_detail_from_receipt(
     packet_slice_label: &str,
     loaded: &LoadedWorkSliceExecutionReceipt,
+    aggregate: &CloseoutPacketAggregate,
 ) -> CloseoutPacketCoverageDetail {
     let receipt = &loaded.receipt;
-    let status = receipt.status.as_str();
+    let role = receipt.resolved_producer_role();
+    let reported_status = receipt.status.as_str();
+    let status = closeout_effective_work_slice_status(receipt, role);
+    let trust_tier = closeout_receipt_trust_tier(role, receipt.verification_status);
     let summary = crate::offdesk::operator_safe_text(&receipt.summary);
-    let reason = if summary.is_empty() {
-        format!("Work-slice execution receipt reports `{status}`.")
+    let mut reason = if summary.is_empty() {
+        format!(
+            "{} reports `{reported_status}`.",
+            closeout_receipt_role_label(role)
+        )
     } else {
-        format!("Work-slice execution receipt reports `{status}`: {summary}")
+        format!(
+            "{} reports `{reported_status}`: {summary}",
+            closeout_receipt_role_label(role)
+        )
     };
+    if status != reported_status {
+        reason.push_str(" Closeout keeps this slice deferred until independent source or review verification reconciles the claim.");
+    }
+    let verification_summary = crate::offdesk::operator_safe_text(&receipt.verification_summary);
     CloseoutPacketCoverageDetail {
         category: "work_slice",
         label: crate::offdesk::operator_safe_text(packet_slice_label),
@@ -8957,6 +9254,25 @@ fn closeout_work_slice_detail_from_receipt(
             .map(|value| crate::offdesk::operator_safe_text(value))
             .collect(),
         receipt_source: Some(loaded.source.clone()),
+        receipt_role: Some(role.as_str()),
+        trust_tier: Some(trust_tier),
+        reported_status: (status != reported_status).then_some(reported_status),
+        claim_status: receipt
+            .resolved_claim_status()
+            .map(WorkSliceExecutionStatus::as_str),
+        verification_status: Some(receipt.verification_status.as_str()),
+        verification_summary: if verification_summary.is_empty() {
+            None
+        } else {
+            Some(verification_summary)
+        },
+        verification_refs: receipt
+            .verification_refs
+            .iter()
+            .map(|value| crate::offdesk::operator_safe_text(value))
+            .collect(),
+        source_observation_status: Some(aggregate.source_observation_status),
+        source_refs: aggregate.source_refs.clone(),
         summary: if summary.is_empty() {
             None
         } else {
@@ -8989,6 +9305,56 @@ fn closeout_work_slice_detail_from_receipt(
                 &receipt.next_safe_action,
             ))
         },
+    }
+}
+
+fn closeout_effective_work_slice_status(
+    receipt: &WorkSliceExecutionReceipt,
+    role: WorkSliceReceiptProducerRole,
+) -> &'static str {
+    let reported_status = receipt.status.as_str();
+    if reported_status != "completed" {
+        return reported_status;
+    }
+    match role {
+        WorkSliceReceiptProducerRole::DeterministicVerification
+        | WorkSliceReceiptProducerRole::ReviewJudgment => "completed",
+        WorkSliceReceiptProducerRole::CloseoutCollector
+            if receipt.verification_status.is_independently_verified() =>
+        {
+            "completed"
+        }
+        _ => "deferred",
+    }
+}
+
+fn closeout_receipt_trust_tier(
+    role: WorkSliceReceiptProducerRole,
+    verification_status: WorkSliceVerificationStatus,
+) -> &'static str {
+    match role {
+        WorkSliceReceiptProducerRole::RunnerObservation => "runtime_observation",
+        WorkSliceReceiptProducerRole::WorkerClaim => "worker_claim",
+        WorkSliceReceiptProducerRole::DeterministicVerification => "source_verified",
+        WorkSliceReceiptProducerRole::ReviewJudgment => "review_judgment",
+        WorkSliceReceiptProducerRole::CloseoutCollector
+            if verification_status.is_independently_verified() =>
+        {
+            "closeout_verified"
+        }
+        WorkSliceReceiptProducerRole::CloseoutCollector => "closeout_observation",
+        WorkSliceReceiptProducerRole::LegacyReceipt => "legacy_receipt",
+    }
+}
+
+fn closeout_receipt_role_label(role: WorkSliceReceiptProducerRole) -> &'static str {
+    match role {
+        WorkSliceReceiptProducerRole::RunnerObservation => "Runner observation",
+        WorkSliceReceiptProducerRole::WorkerClaim => "Worker claim",
+        WorkSliceReceiptProducerRole::CloseoutCollector => "Closeout observation",
+        WorkSliceReceiptProducerRole::DeterministicVerification => "Deterministic verification",
+        WorkSliceReceiptProducerRole::ReviewJudgment => "Review judgment",
+        WorkSliceReceiptProducerRole::LegacyReceipt => "Legacy receipt",
     }
 }
 
@@ -9047,6 +9413,15 @@ fn closeout_push_validation_details(
             reason,
             evidence_refs,
             receipt_source: None,
+            receipt_role: None,
+            trust_tier: None,
+            reported_status: None,
+            claim_status: None,
+            verification_status: None,
+            verification_summary: None,
+            verification_refs: Vec::new(),
+            source_observation_status: None,
+            source_refs: Vec::new(),
             summary: None,
             validation_refs: Vec::new(),
             artifact_refs: Vec::new(),
@@ -9075,6 +9450,15 @@ fn closeout_expected_artifact_details(
                 reason,
                 evidence_refs,
                 receipt_source: None,
+                receipt_role: None,
+                trust_tier: None,
+                reported_status: None,
+                claim_status: None,
+                verification_status: None,
+                verification_summary: None,
+                verification_refs: Vec::new(),
+                source_observation_status: None,
+                source_refs: Vec::new(),
                 summary: None,
                 validation_refs: Vec::new(),
                 artifact_refs: Vec::new(),
@@ -9113,6 +9497,7 @@ fn closeout_summary_only_details(
     category: &'static str,
     count: usize,
     packet_status: &'static str,
+    aggregate: &CloseoutPacketAggregate,
 ) -> Vec<CloseoutPacketCoverageDetail> {
     (0..count)
         .map(|index| CloseoutPacketCoverageDetail {
@@ -9123,6 +9508,20 @@ fn closeout_summary_only_details(
                 .to_string(),
             evidence_refs: Vec::new(),
             receipt_source: None,
+            receipt_role: None,
+            trust_tier: None,
+            reported_status: None,
+            claim_status: None,
+            verification_status: None,
+            verification_summary: None,
+            verification_refs: Vec::new(),
+            source_observation_status: (category == "work_slice")
+                .then_some(aggregate.source_observation_status),
+            source_refs: if category == "work_slice" {
+                aggregate.source_refs.clone()
+            } else {
+                Vec::new()
+            },
             summary: None,
             validation_refs: Vec::new(),
             artifact_refs: Vec::new(),
@@ -9434,6 +9833,9 @@ fn closeout_verification_commands(
             crate::offdesk::operator_safe_text(project_key)
         ));
     }
+    if args.include_git {
+        commands.push("git status --short && git diff --stat".to_string());
+    }
     commands
 }
 
@@ -9725,6 +10127,7 @@ fn render_closeout_return_package(report: &OffdeskCloseoutReport) -> String {
     output.push_str("# Ondesk Return Package\n\n");
     output.push_str("Use this package to rehydrate a fresh Ondesk harness after Offdesk work.\n\n");
     render_return_status(&mut output, report);
+    render_return_source_observation(&mut output, report);
     render_implementation_packet_coverage_markdown(
         &mut output,
         &report.implementation_packet_coverage,
@@ -9824,6 +10227,63 @@ fn render_return_status(output: &mut String, report: &OffdeskCloseoutReport) {
                 governance.recommendation_count
             ));
         }
+    }
+    output.push_str(&format!(
+        "- source observation: `{}`; {} changed file(s)\n",
+        report.source_observation.status, report.source_observation.changed_file_count
+    ));
+    output.push('\n');
+}
+
+fn render_return_source_observation(output: &mut String, report: &OffdeskCloseoutReport) {
+    let observation = &report.source_observation;
+    output.push_str("## Source Observation\n");
+    output.push_str(&format!(
+        "- status: `{}` from `{}` against `{}`\n",
+        observation.status, observation.source_kind, observation.base_ref
+    ));
+    if let Some(workdir) = observation.workdir.as_deref() {
+        output.push_str(&format!("- workdir: `{workdir}`\n"));
+    }
+    if !observation.available {
+        if !observation.warnings.is_empty() {
+            for warning in observation.warnings.iter().take(3) {
+                output.push_str(&format!(
+                    "- warning: {}\n",
+                    truncate_closeout_text(warning, 180)
+                ));
+            }
+        }
+        output.push('\n');
+        return;
+    }
+    if observation.changed_files.is_empty() {
+        output.push_str("- changed files: none observed in the worktree.\n\n");
+        return;
+    }
+    output.push_str(&format!(
+        "- changed files: {} observed",
+        observation.changed_file_count
+    ));
+    if observation.changed_files_truncated {
+        output.push_str(" (truncated in closeout_plan.json)");
+    }
+    output.push('\n');
+    for file in observation
+        .changed_files
+        .iter()
+        .take(CLOSEOUT_RETURN_EVIDENCE_LIMIT)
+    {
+        output.push_str(&format!(
+            "  - [{}] `{}` (+{} -{})\n",
+            file.status, file.path, file.additions, file.deletions
+        ));
+    }
+    if observation.changed_files.len() > CLOSEOUT_RETURN_EVIDENCE_LIMIT {
+        output.push_str(&format!(
+            "  - ... {} more changed file(s) are listed in `closeout_plan.json`.\n",
+            observation.changed_files.len() - CLOSEOUT_RETURN_EVIDENCE_LIMIT
+        ));
     }
     output.push('\n');
 }
@@ -9969,6 +10429,17 @@ fn render_packet_detail_group(
             detail.status,
             truncate_closeout_text(&detail.label, 80)
         ));
+        if let Some(claim_status) = detail.claim_status {
+            output.push_str(&format!(" (claim: {claim_status})"));
+        } else if let Some(reported_status) = detail.reported_status {
+            output.push_str(&format!(" (reported: {reported_status})"));
+        }
+        if let Some(trust_tier) = detail.trust_tier {
+            output.push_str(&format!(" (trust: {trust_tier})"));
+        }
+        if let Some(source_status) = detail.source_observation_status {
+            output.push_str(&format!(" (source: {source_status})"));
+        }
         if detail.status != "completed" {
             if let Some(next) = detail.next_safe_action.as_deref() {
                 output.push_str(&format!(" (next: {})", truncate_closeout_text(next, 100)));
@@ -9983,6 +10454,13 @@ fn render_packet_detail_group(
             output.push_str(" (evidence:");
             for evidence in detail.evidence_refs.iter().take(2) {
                 output.push_str(&format!(" `{evidence}`"));
+            }
+            output.push(')');
+        }
+        if !detail.source_refs.is_empty() {
+            output.push_str(" (source_refs:");
+            for source_ref in detail.source_refs.iter().take(2) {
+                output.push_str(&format!(" `{source_ref}`"));
             }
             output.push(')');
         }

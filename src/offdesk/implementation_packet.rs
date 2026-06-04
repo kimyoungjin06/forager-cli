@@ -214,11 +214,24 @@ pub struct WorkSliceExecutionReceipt {
     pub generated_at: String,
     pub producer: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub producer_role: Option<WorkSliceReceiptProducerRole>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slice_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slice_index: Option<usize>,
     pub slice_label: String,
     pub status: WorkSliceExecutionStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claim_status: Option<WorkSliceExecutionStatus>,
+    #[serde(
+        default,
+        skip_serializing_if = "WorkSliceVerificationStatus::is_unverified"
+    )]
+    pub verification_status: WorkSliceVerificationStatus,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub verification_summary: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub verification_refs: Vec<String>,
     #[serde(default)]
     pub summary: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -233,6 +246,30 @@ pub struct WorkSliceExecutionReceipt {
     pub drift_signals: Vec<String>,
     #[serde(default)]
     pub next_safe_action: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkSliceReceiptProducerRole {
+    RunnerObservation,
+    WorkerClaim,
+    CloseoutCollector,
+    DeterministicVerification,
+    ReviewJudgment,
+    LegacyReceipt,
+}
+
+impl WorkSliceReceiptProducerRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::RunnerObservation => "runner_observation",
+            Self::WorkerClaim => "worker_claim",
+            Self::CloseoutCollector => "closeout_collector",
+            Self::DeterministicVerification => "deterministic_verification",
+            Self::ReviewJudgment => "review_judgment",
+            Self::LegacyReceipt => "legacy_receipt",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -252,6 +289,70 @@ impl WorkSliceExecutionStatus {
             Self::Missing => "missing",
             Self::Drifted => "drifted",
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkSliceVerificationStatus {
+    #[default]
+    Unverified,
+    EvidenceObserved,
+    ValidationPassed,
+    ReviewAccepted,
+}
+
+impl WorkSliceVerificationStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unverified => "unverified",
+            Self::EvidenceObserved => "evidence_observed",
+            Self::ValidationPassed => "validation_passed",
+            Self::ReviewAccepted => "review_accepted",
+        }
+    }
+
+    pub fn is_unverified(&self) -> bool {
+        matches!(self, Self::Unverified)
+    }
+
+    pub fn is_independently_verified(&self) -> bool {
+        matches!(
+            self,
+            Self::EvidenceObserved | Self::ValidationPassed | Self::ReviewAccepted
+        )
+    }
+}
+
+impl WorkSliceExecutionReceipt {
+    pub fn resolved_producer_role(&self) -> WorkSliceReceiptProducerRole {
+        if let Some(role) = self.producer_role {
+            return role;
+        }
+        let normalized = self.producer.trim().to_ascii_lowercase();
+        if normalized.contains("runner") {
+            WorkSliceReceiptProducerRole::RunnerObservation
+        } else if normalized.contains("worker") || normalized.contains("agent") {
+            WorkSliceReceiptProducerRole::WorkerClaim
+        } else if normalized.contains("deterministic") || normalized.contains("gate") {
+            WorkSliceReceiptProducerRole::DeterministicVerification
+        } else if normalized.contains("review") || normalized.contains("council") {
+            WorkSliceReceiptProducerRole::ReviewJudgment
+        } else if normalized.contains("closeout") || normalized.contains("collector") {
+            WorkSliceReceiptProducerRole::CloseoutCollector
+        } else {
+            WorkSliceReceiptProducerRole::LegacyReceipt
+        }
+    }
+
+    pub fn resolved_claim_status(&self) -> Option<WorkSliceExecutionStatus> {
+        self.claim_status.or_else(|| {
+            matches!(
+                self.resolved_producer_role(),
+                WorkSliceReceiptProducerRole::WorkerClaim
+            )
+            .then_some(self.status)
+        })
     }
 }
 
@@ -748,11 +849,16 @@ mod tests {
                     task_id: Some("task-one".to_string()),
                     background_ticket_id: None,
                     generated_at: Utc::now().to_rfc3339(),
-                    producer: "runner".to_string(),
+                    producer: "deterministic_gate".to_string(),
+                    producer_role: Some(WorkSliceReceiptProducerRole::DeterministicVerification),
                     slice_id: Some("slice-0".to_string()),
                     slice_index: Some(0),
                     slice_label: "state".to_string(),
                     status: WorkSliceExecutionStatus::Completed,
+                    claim_status: None,
+                    verification_status: WorkSliceVerificationStatus::ValidationPassed,
+                    verification_summary: "cargo test passed for this slice.".to_string(),
+                    verification_refs: vec!["cargo-test.log".to_string()],
                     summary: "State slice completed.".to_string(),
                     evidence_refs: vec!["result.json".to_string()],
                     validation_refs: Vec::new(),
@@ -768,6 +874,14 @@ mod tests {
         assert_eq!(receipts.len(), 1);
         assert_eq!(receipts[0].packet_id, "packet-one");
         assert_eq!(receipts[0].status, WorkSliceExecutionStatus::Completed);
+        assert_eq!(
+            receipts[0].resolved_producer_role(),
+            WorkSliceReceiptProducerRole::DeterministicVerification
+        );
+        assert_eq!(
+            receipts[0].verification_status,
+            WorkSliceVerificationStatus::ValidationPassed
+        );
         assert_eq!(receipts[0].slice_label, "state");
         Ok(())
     }

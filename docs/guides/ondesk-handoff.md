@@ -82,6 +82,12 @@ accepted truth, even if the packet-level goal is marked completed.
 Runner-generated deferred work-slice receipts are handoff prompts, not proof
 that a slice was semantically completed.
 
+When closeout was run with `--include-git`, the same review surface also carries
+the compact `source_observation.v1` projection. The prompt package shows source
+status, changed-file count, and a capped changed-file list. Treat this as
+read-only source context for reconciling worker claims, not as accepted truth or
+slice verification.
+
 `prompt-package` also renders the compact `artifact_index.v1` and
 `artifact_retention_review.v1` projections from the shared review surface. The
 prompt shows artifact counts, retention action counts, and meaning first; paths
@@ -216,10 +222,10 @@ review receipt exists. `accepted` means the output can move into Ondesk review;
 review-required states rather than accepted truth. When a `review_surface.v1`
 packet is provided, Telegram detail replies render the same review summary used
 by `forager ondesk prompt-package`, including accepted-truth state, closeout
-risks, review queue counts, artifact-index counts, and artifact meanings before
-any paths. The rendered message hides raw paths and ids. Those remain in the
-request, state, and result JSON for audit/debugging. The relay writes the state
-beside the result as
+risks, source observation status, review queue counts, artifact-index counts,
+and artifact meanings before any paths. The rendered message hides raw paths and
+ids. Those remain in the request, state, and result JSON for audit/debugging.
+The relay writes the state beside the result as
 `<result-stem>.telegram_decision_state.json`, so simultaneous handoff and
 council prompts in the same directory do not overwrite each other's state
 artifacts.
