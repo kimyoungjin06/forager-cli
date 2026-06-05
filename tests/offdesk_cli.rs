@@ -9041,6 +9041,113 @@ fn offdesk_plan_dry_run_accepts_planner_council_without_writing() -> Result<()> 
 
 #[test]
 #[serial]
+fn offdesk_plans_list_and_plan_show_registered_artifact() -> Result<()> {
+    let temp = tempdir()?;
+    let input_path = temp.path().join("OVERNIGHT_PLAN.json");
+    let plan = json!({
+        "schema": "offdesk_multiturn_plan.v1",
+        "profile_key": "generic",
+        "decision": {
+            "ready_for_operator_review": true,
+            "ready_for_launch_preparation": false,
+            "ready_for_enqueue": false
+        },
+        "execution_sequence": [
+            {
+                "id": "phase_1",
+                "objective": "Register and inspect this plan."
+            }
+        ],
+        "authority": {
+            "read_only_plan": true,
+            "does_not_authorize": [
+                "enqueue",
+                "launch",
+                "approval",
+                "file movement",
+                "archive",
+                "delete",
+                "wiki promotion",
+                "accepted truth"
+            ]
+        }
+    });
+    let input_bytes = serde_json::to_vec_pretty(&plan)?;
+    fs::write(&input_path, &input_bytes)?;
+
+    let register_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plan",
+            input_path.to_str().expect("utf-8 plan path"),
+            "--project-key",
+            "project",
+            "--task-id",
+            "task",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        register_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&register_output.stderr)
+    );
+
+    let list_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plans",
+            "--project-key",
+            "project",
+            "--latest",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        list_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&list_output.stderr)
+    );
+    let plans: serde_json::Value = serde_json::from_slice(&list_output.stdout)?;
+    let plans = plans.as_array().expect("plans array");
+    assert_eq!(plans.len(), 1);
+    let plan_id = plans[0]["plan_id"].as_str().expect("plan id");
+    assert_eq!(plans[0]["registration"]["project_key"], "project");
+    assert_eq!(plans[0]["registration"]["task_id"], "task");
+    assert_eq!(
+        plans[0]["registration"]["source_sha256"],
+        sha256_hex(&input_bytes)
+    );
+    assert_eq!(plans[0]["registration"]["ready_for_enqueue"], false);
+
+    let show_output = forager_command(temp.path())
+        .args(["offdesk", "plan-show", plan_id, "--json"])
+        .output()?;
+    assert!(
+        show_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&show_output.stderr)
+    );
+    let shown: serde_json::Value = serde_json::from_slice(&show_output.stdout)?;
+    assert_eq!(shown["plan_id"], plan_id);
+    assert_eq!(
+        shown["registration"]["artifact_kind"],
+        "offdesk_multiturn_plan"
+    );
+    assert_eq!(
+        shown["registration"]["source_sha256"],
+        sha256_hex(&input_bytes)
+    );
+    assert!(shown["registration"]["does_not_authorize"]
+        .as_array()
+        .expect("denials array")
+        .iter()
+        .any(|item| item == "launch"));
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn status_json_reports_legacy_profile_dir_when_compat_storage_is_active() -> Result<()> {
     let temp = tempdir()?;
     fs::create_dir_all(legacy_app_dir(temp.path()).join("profiles").join("default"))?;

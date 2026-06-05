@@ -3,7 +3,7 @@
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Duration, Utc};
 use clap::{Args, Subcommand, ValueEnum};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -68,6 +68,12 @@ pub enum OffdeskCommands {
 
     /// Validate and register a read-only Offdesk planning artifact
     Plan(PlanArgs),
+
+    /// List registered read-only Offdesk planning artifacts
+    Plans(PlansArgs),
+
+    /// Show one registered read-only Offdesk planning artifact
+    PlanShow(PlanShowArgs),
 
     /// List pending action approvals
     Pending(PendingArgs),
@@ -738,6 +744,43 @@ pub struct PlanArgs {
     json: bool,
 }
 
+#[derive(Args)]
+pub struct PlansArgs {
+    /// Filter by project key
+    #[arg(long)]
+    project_key: Option<String>,
+
+    /// Filter by task ID
+    #[arg(long)]
+    task_id: Option<String>,
+
+    /// Filter by planning profile key
+    #[arg(long)]
+    profile_key: Option<String>,
+
+    /// Filter by artifact kind, such as offdesk_multiturn_plan or offdesk_planner_council
+    #[arg(long)]
+    artifact_kind: Option<String>,
+
+    /// Return only the newest matching registration
+    #[arg(long)]
+    latest: bool,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct PlanShowArgs {
+    /// Plan ID from `forager offdesk plans`, or a registration/source path
+    plan_ref: String,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
 #[derive(Serialize)]
 struct HostedHarnessPromptPacket {
     harness_id: String,
@@ -767,7 +810,7 @@ struct HostedHarnessFirstRead {
     over_file_budget: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 struct OffdeskPlanRegistration {
     schema: String,
     registered_at: DateTime<Utc>,
@@ -793,11 +836,18 @@ struct OffdeskPlanRegistration {
     does_not_authorize: Vec<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 struct OffdeskPlanRegistrationArtifacts {
     registry_dir: Option<String>,
     registration_json: Option<String>,
     copied_source_json: Option<String>,
+}
+
+#[derive(Serialize)]
+struct OffdeskPlanRegistryItem {
+    plan_id: String,
+    registration_path: String,
+    registration: OffdeskPlanRegistration,
 }
 
 struct OffdeskPlanInputSummary {
@@ -3002,6 +3052,8 @@ pub async fn run(profile: &str, command: OffdeskCommands) -> Result<()> {
         OffdeskCommands::Harnesses(args) => harnesses(args).await,
         OffdeskCommands::HarnessPrompt(args) => harness_prompt(args).await,
         OffdeskCommands::Plan(args) => plan(profile, args).await,
+        OffdeskCommands::Plans(args) => plans(profile, args).await,
+        OffdeskCommands::PlanShow(args) => plan_show(profile, args).await,
         OffdeskCommands::Pending(args) => pending(profile, args).await,
         OffdeskCommands::Gate(args) => gate(profile, args).await,
         OffdeskCommands::Launch(args) => launch(profile, args).await,
@@ -7150,6 +7202,45 @@ async fn plan(profile: &str, args: PlanArgs) -> Result<()> {
     print_offdesk_plan_registration(&registration, args.json)
 }
 
+async fn plans(profile: &str, args: PlansArgs) -> Result<()> {
+    let mut items = load_offdesk_plan_registry_items(profile)?;
+    items.retain(|item| offdesk_plan_matches_filter(item, &args));
+    items.sort_by_key(|item| item.registration.registered_at);
+    if args.latest {
+        if let Some(latest) = items.pop() {
+            items = vec![latest];
+        }
+    }
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&items)?);
+        return Ok(());
+    }
+
+    if items.is_empty() {
+        println!("No registered Offdesk plans found.");
+        return Ok(());
+    }
+
+    print_offdesk_plan_registry_items(&items);
+    Ok(())
+}
+
+async fn plan_show(profile: &str, args: PlanShowArgs) -> Result<()> {
+    let items = load_offdesk_plan_registry_items(profile)?;
+    let Some(item) = find_offdesk_plan_registry_item(items, &args.plan_ref) else {
+        bail!("Registered Offdesk plan not found: {}", args.plan_ref);
+    };
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&item)?);
+        return Ok(());
+    }
+
+    print_offdesk_plan_registry_item(&item);
+    Ok(())
+}
+
 fn build_offdesk_plan_registration(
     profile: &str,
     args: &PlanArgs,
@@ -7220,6 +7311,122 @@ fn build_offdesk_plan_registration(
     }
 
     Ok(registration)
+}
+
+fn load_offdesk_plan_registry_items(profile: &str) -> Result<Vec<OffdeskPlanRegistryItem>> {
+    let registry_dir = read_only_profile_dir(profile)?.join("offdesk_plans");
+    if !registry_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut items = Vec::new();
+    for entry in fs::read_dir(&registry_dir)
+        .with_context(|| format!("read Offdesk plan registry {}", registry_dir.display()))?
+    {
+        let entry = entry.with_context(|| {
+            format!(
+                "read Offdesk plan registry entry {}",
+                registry_dir.display()
+            )
+        })?;
+        let file_type = entry.file_type().with_context(|| {
+            format!(
+                "read Offdesk plan registry entry type {}",
+                entry.path().display()
+            )
+        })?;
+        if !file_type.is_dir() {
+            continue;
+        }
+        let registration_path = entry.path().join("registration.json");
+        if !registration_path.exists() {
+            continue;
+        }
+        let registration_bytes = fs::read(&registration_path).with_context(|| {
+            format!(
+                "read Offdesk plan registration {}",
+                registration_path.display()
+            )
+        })?;
+        let registration: OffdeskPlanRegistration = serde_json::from_slice(&registration_bytes)
+            .with_context(|| {
+                format!(
+                    "parse Offdesk plan registration {}",
+                    registration_path.display()
+                )
+            })?;
+        let plan_id = entry.file_name().to_string_lossy().to_string();
+        items.push(OffdeskPlanRegistryItem {
+            plan_id,
+            registration_path: registration_path.display().to_string(),
+            registration,
+        });
+    }
+
+    Ok(items)
+}
+
+fn offdesk_plan_matches_filter(item: &OffdeskPlanRegistryItem, args: &PlansArgs) -> bool {
+    if let Some(project_key) = args.project_key.as_deref() {
+        if item.registration.project_key.as_deref() != Some(project_key) {
+            return false;
+        }
+    }
+    if let Some(task_id) = args.task_id.as_deref() {
+        if item.registration.task_id.as_deref() != Some(task_id) {
+            return false;
+        }
+    }
+    if let Some(profile_key) = args.profile_key.as_deref() {
+        if item.registration.profile_key.as_deref() != Some(profile_key) {
+            return false;
+        }
+    }
+    if let Some(artifact_kind) = args.artifact_kind.as_deref() {
+        if item.registration.artifact_kind != artifact_kind {
+            return false;
+        }
+    }
+    true
+}
+
+fn find_offdesk_plan_registry_item(
+    items: Vec<OffdeskPlanRegistryItem>,
+    plan_ref: &str,
+) -> Option<OffdeskPlanRegistryItem> {
+    let normalized_ref = normalize_offdesk_plan_ref_path(plan_ref);
+    items.into_iter().find(|item| {
+        if item.plan_id == plan_ref {
+            return true;
+        }
+        if normalize_offdesk_plan_ref_path(&item.registration_path) == normalized_ref {
+            return true;
+        }
+        for path in [
+            item.registration.artifacts.registry_dir.as_deref(),
+            item.registration.artifacts.registration_json.as_deref(),
+            item.registration.artifacts.copied_source_json.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if normalize_offdesk_plan_ref_path(path) == normalized_ref {
+                return true;
+            }
+        }
+        false
+    })
+}
+
+fn normalize_offdesk_plan_ref_path(path: &str) -> String {
+    #[cfg(target_os = "macos")]
+    {
+        path.strip_prefix("/private").unwrap_or(path).to_owned()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        path.to_owned()
+    }
 }
 
 fn allocate_offdesk_plan_registry_dir(
@@ -7472,6 +7679,67 @@ fn print_offdesk_plan_registration(
         "  note: registration does not authorize enqueue, launch, approval, file movement, cleanup, or accepted truth"
     );
     Ok(())
+}
+
+fn print_offdesk_plan_registry_items(items: &[OffdeskPlanRegistryItem]) {
+    println!("Registered Offdesk plans");
+    for item in items {
+        let registration = &item.registration;
+        println!(
+            "- {} [{}] review={} launch_prep={} enqueue={}",
+            item.plan_id,
+            registration.artifact_kind,
+            registration.ready_for_operator_review,
+            registration.ready_for_launch_preparation,
+            registration.ready_for_enqueue
+        );
+        if let Some(project_key) = registration.project_key.as_deref() {
+            println!("  project: {project_key}");
+        }
+        if let Some(task_id) = registration.task_id.as_deref() {
+            println!("  task:    {task_id}");
+        }
+        println!("  source:  {}", registration.source_path);
+    }
+}
+
+fn print_offdesk_plan_registry_item(item: &OffdeskPlanRegistryItem) {
+    let registration = &item.registration;
+    println!("Registered Offdesk plan: {}", item.plan_id);
+    println!("  kind:       {}", registration.artifact_kind);
+    println!("  schema:     {}", registration.plan_schema);
+    println!("  registered: {}", registration.registered_at);
+    println!("  source:     {}", registration.source_path);
+    println!("  sha256:     {}", registration.source_sha256);
+    if let Some(profile_key) = registration.profile_key.as_deref() {
+        println!("  profile:    {profile_key}");
+    }
+    if let Some(project_key) = registration.project_key.as_deref() {
+        println!("  project:    {project_key}");
+    }
+    if let Some(request_id) = registration.request_id.as_deref() {
+        println!("  request:    {request_id}");
+    }
+    if let Some(task_id) = registration.task_id.as_deref() {
+        println!("  task:       {task_id}");
+    }
+    println!(
+        "  ready_for_operator_review: {}",
+        registration.ready_for_operator_review
+    );
+    println!(
+        "  ready_for_launch_preparation: {}",
+        registration.ready_for_launch_preparation
+    );
+    println!("  ready_for_enqueue: {}", registration.ready_for_enqueue);
+    if let Some(path) = registration.selected_plan_path.as_deref() {
+        println!("  selected_plan: {path}");
+    }
+    println!("  registration: {}", item.registration_path);
+    println!(
+        "  does_not_authorize: {}",
+        registration.does_not_authorize.join(", ")
+    );
 }
 
 fn hosted_harness_profile(id: &str) -> Option<&'static HostedHarnessProfileView> {

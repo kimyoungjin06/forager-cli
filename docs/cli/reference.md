@@ -49,6 +49,8 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk harnesses`↴](#forager-offdesk-harnesses)
 * [`forager offdesk harness-prompt`↴](#forager-offdesk-harness-prompt)
 * [`forager offdesk plan`↴](#forager-offdesk-plan)
+* [`forager offdesk plans`↴](#forager-offdesk-plans)
+* [`forager offdesk plan-show`↴](#forager-offdesk-plan-show)
 * [`forager offdesk pending`↴](#forager-offdesk-pending)
 * [`forager offdesk gate`↴](#forager-offdesk-gate)
 * [`forager offdesk launch`↴](#forager-offdesk-launch)
@@ -844,6 +846,8 @@ Manage offdesk approvals and recovery artifacts
 * `harnesses` — List hosted harness agent profile contracts
 * `harness-prompt` — Build a compact hosted harness start prompt from first-read artifacts
 * `plan` — Validate and register a read-only Offdesk planning artifact
+* `plans` — List registered read-only Offdesk planning artifacts
+* `plan-show` — Show one registered read-only Offdesk planning artifact
 * `pending` — List pending action approvals
 * `gate` — Evaluate whether an offdesk capability may execute now
 * `launch` — Gate and record a background runner launch
@@ -930,6 +934,39 @@ Validate and register a read-only Offdesk planning artifact
 * `--request-id <REQUEST_ID>` — Optional request ID for correlation
 * `--task-id <TASK_ID>` — Optional task ID for correlation
 * `--dry-run` — Validate without writing profile-local registry artifacts
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk plans`
+
+List registered read-only Offdesk planning artifacts
+
+**Usage:** `forager offdesk plans [OPTIONS]`
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEY>` — Filter by project key
+* `--task-id <TASK_ID>` — Filter by task ID
+* `--profile-key <PROFILE_KEY>` — Filter by planning profile key
+* `--artifact-kind <ARTIFACT_KIND>` — Filter by artifact kind, such as offdesk_multiturn_plan or offdesk_planner_council
+* `--latest` — Return only the newest matching registration
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk plan-show`
+
+Show one registered read-only Offdesk planning artifact
+
+**Usage:** `forager offdesk plan-show [OPTIONS] <PLAN_REF>`
+
+###### **Arguments:**
+
+* `<PLAN_REF>` — Plan ID from `forager offdesk plans`, or a registration/source path
+
+###### **Options:**
+
 * `--json` — Output as JSON
 
 
