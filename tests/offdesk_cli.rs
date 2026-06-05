@@ -8836,6 +8836,211 @@ fn offdesk_harness_prompt_warns_and_strict_fails_on_budget() -> Result<()> {
 
 #[test]
 #[serial]
+fn offdesk_plan_registers_multiturn_plan_without_runtime_authority() -> Result<()> {
+    let temp = tempdir()?;
+    let input_path = temp.path().join("OVERNIGHT_PLAN.json");
+    let plan = json!({
+        "schema": "offdesk_multiturn_plan.v1",
+        "profile_key": "generic",
+        "profile_name": "Generic Offdesk Planning",
+        "decision": {
+            "ready_for_operator_review": true,
+            "ready_for_launch_preparation": false,
+            "ready_for_enqueue": false,
+            "reason": "Operator review is required before any launch preparation."
+        },
+        "execution_sequence": [
+            {
+                "id": "phase_1",
+                "objective": "Review evidence before any runtime work.",
+                "stop_condition": "Stop at a human-readable plan artifact."
+            }
+        ],
+        "authority": {
+            "read_only_plan": true,
+            "does_not_authorize": [
+                "enqueue",
+                "launch",
+                "approval",
+                "file movement",
+                "archive",
+                "delete",
+                "wiki promotion",
+                "accepted truth"
+            ]
+        }
+    });
+    let input_bytes = serde_json::to_vec_pretty(&plan)?;
+    fs::write(&input_path, &input_bytes)?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plan",
+            input_path.to_str().expect("utf-8 plan path"),
+            "--project-key",
+            "project",
+            "--request-id",
+            "request",
+            "--task-id",
+            "task",
+            "--json",
+        ])
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let registration: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(registration["schema"], "offdesk_plan_registration.v1");
+    assert_eq!(registration["artifact_kind"], "offdesk_multiturn_plan");
+    assert_eq!(registration["plan_schema"], "offdesk_multiturn_plan.v1");
+    assert_eq!(registration["profile_key"], "generic");
+    assert_eq!(registration["project_key"], "project");
+    assert_eq!(registration["request_id"], "request");
+    assert_eq!(registration["task_id"], "task");
+    assert_eq!(registration["ready_for_operator_review"], true);
+    assert_eq!(registration["ready_for_launch_preparation"], false);
+    assert_eq!(registration["ready_for_enqueue"], false);
+    assert_eq!(registration["source_sha256"], sha256_hex(&input_bytes));
+    assert!(registration["does_not_authorize"]
+        .as_array()
+        .expect("denials array")
+        .iter()
+        .any(|item| item == "enqueue"));
+
+    let registration_path = registration["artifacts"]["registration_json"]
+        .as_str()
+        .expect("registration path");
+    let copied_source_path = registration["artifacts"]["copied_source_json"]
+        .as_str()
+        .expect("source copy path");
+    let saved_registration: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(registration_path)?)?;
+    assert_eq!(
+        saved_registration["source_sha256"],
+        registration["source_sha256"]
+    );
+    let copied_source: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(copied_source_path)?)?;
+    assert_eq!(copied_source["schema"], "offdesk_multiturn_plan.v1");
+    assert!(profile_dir(temp.path()).join("offdesk_plans").exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_plan_rejects_enqueue_ready_multiturn_plan() -> Result<()> {
+    let temp = tempdir()?;
+    let input_path = temp.path().join("OVERNIGHT_PLAN.json");
+    fs::write(
+        &input_path,
+        serde_json::to_vec_pretty(&json!({
+            "schema": "offdesk_multiturn_plan.v1",
+            "profile_key": "generic",
+            "decision": {
+                "ready_for_operator_review": true,
+                "ready_for_launch_preparation": false,
+                "ready_for_enqueue": true
+            },
+            "execution_sequence": [
+                {
+                    "id": "phase_1",
+                    "objective": "This should remain a plan only."
+                }
+            ],
+            "authority": {
+                "read_only_plan": true,
+                "does_not_authorize": [
+                    "enqueue",
+                    "launch",
+                    "approval",
+                    "file movement",
+                    "archive",
+                    "delete",
+                    "wiki promotion",
+                    "accepted truth"
+                ]
+            }
+        }))?,
+    )?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plan",
+            input_path.to_str().expect("utf-8 plan path"),
+            "--json",
+        ])
+        .output()?;
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("decision.ready_for_enqueue_must_be_false"));
+    assert!(!profile_dir(temp.path()).join("offdesk_plans").exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_plan_dry_run_accepts_planner_council_without_writing() -> Result<()> {
+    let temp = tempdir()?;
+    let input_path = temp.path().join("planner_council_result.json");
+    fs::write(
+        &input_path,
+        serde_json::to_vec_pretty(&json!({
+            "schema": "offdesk_planner_council.v1",
+            "profile_key": "generic",
+            "profile_name": "Generic Offdesk Planning",
+            "consensus": {
+                "decision": "ready_for_operator_review",
+                "agreement": true,
+                "ready_for_operator_review": true,
+                "ready_for_launch_preparation": false,
+                "ready_for_enqueue": false,
+                "selected_planner": "planner_a"
+            },
+            "validation_failures": [],
+            "synthesized_plan_path": temp.path().join("SYNTHESIZED_PLAN.json").display().to_string()
+        }))?,
+    )?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plan",
+            input_path.to_str().expect("utf-8 council path"),
+            "--dry-run",
+            "--json",
+        ])
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let registration: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(registration["artifact_kind"], "offdesk_planner_council");
+    assert_eq!(registration["plan_schema"], "offdesk_planner_council.v1");
+    assert_eq!(registration["dry_run"], true);
+    assert_eq!(registration["ready_for_operator_review"], true);
+    assert_eq!(registration["ready_for_launch_preparation"], false);
+    assert_eq!(registration["ready_for_enqueue"], false);
+    assert_eq!(registration["consensus"]["selected_planner"], "planner_a");
+    assert!(registration["selected_plan_path"]
+        .as_str()
+        .expect("selected plan path")
+        .ends_with("SYNTHESIZED_PLAN.json"));
+    assert!(registration["artifacts"]["registration_json"].is_null());
+    assert!(!profile_dir(temp.path()).join("offdesk_plans").exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn status_json_reports_legacy_profile_dir_when_compat_storage_is_active() -> Result<()> {
     let temp = tempdir()?;
     fs::create_dir_all(legacy_app_dir(temp.path()).join("profiles").join("default"))?;

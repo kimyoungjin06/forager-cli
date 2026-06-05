@@ -48,6 +48,7 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk`↴](#forager-offdesk)
 * [`forager offdesk harnesses`↴](#forager-offdesk-harnesses)
 * [`forager offdesk harness-prompt`↴](#forager-offdesk-harness-prompt)
+* [`forager offdesk plan`↴](#forager-offdesk-plan)
 * [`forager offdesk pending`↴](#forager-offdesk-pending)
 * [`forager offdesk gate`↴](#forager-offdesk-gate)
 * [`forager offdesk launch`↴](#forager-offdesk-launch)
@@ -842,6 +843,7 @@ Manage offdesk approvals and recovery artifacts
 
 * `harnesses` — List hosted harness agent profile contracts
 * `harness-prompt` — Build a compact hosted harness start prompt from first-read artifacts
+* `plan` — Validate and register a read-only Offdesk planning artifact
 * `pending` — List pending action approvals
 * `gate` — Evaluate whether an offdesk capability may execute now
 * `launch` — Gate and record a background runner launch
@@ -861,6 +863,7 @@ Manage offdesk approvals and recovery artifacts
 * `cancel` — Deny the oldest or targeted pending action
 * `resume` — Show task resume artifacts
 * `background` — Show background runner recovery probes
+* `background-ack` — Acknowledge a stale or failed background probe after linked tasks are cancelled
 * `capabilities` — Show Task Team capability metadata
 * `snapshots` — List pre-mutation checkpoint snapshots
 * `snapshot` — Show and verify a pre-mutation checkpoint snapshot
@@ -908,6 +911,26 @@ Build a compact hosted harness start prompt from first-read artifacts
 * `--max-first-read-total-bytes <MAX_FIRST_READ_TOTAL_BYTES>` — Override the total first-read artifact budget in bytes
 * `--strict-first-read-budget` — Fail when first-read artifacts are missing or exceed the budget
 * `--json` — Output packet metadata as JSON
+
+
+
+## `forager offdesk plan`
+
+Validate and register a read-only Offdesk planning artifact
+
+**Usage:** `forager offdesk plan [OPTIONS] <INPUT>`
+
+###### **Arguments:**
+
+* `<INPUT>` — `offdesk_multiturn_plan.v1` or `offdesk_planner_council.v1` JSON to register
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEY>` — Optional project key for correlation
+* `--request-id <REQUEST_ID>` — Optional request ID for correlation
+* `--task-id <TASK_ID>` — Optional task ID for correlation
+* `--dry-run` — Validate without writing profile-local registry artifacts
+* `--json` — Output as JSON
 
 
 
@@ -1392,8 +1415,12 @@ Acknowledge a stale or failed background probe after linked tasks are cancelled
 ###### **Options:**
 
 * `--reason <REASON>` — Operator reason for suppressing further recovery attention
-* `--by <BY>` — Operator or surface recording this acknowledgement [default: cli]
-* `--source-surface <SOURCE_SURFACE>` — Source surface recorded on the acknowledgement [default: cli]
+* `--by <BY>` — Operator or surface recording this acknowledgement
+
+  Default value: `cli`
+* `--source-surface <SOURCE_SURFACE>` — Source surface recorded on the acknowledgement
+
+  Default value: `cli`
 * `--allow-unlinked` — Permit acknowledgement when no durable task is linked to the background ticket
 * `--json` — Output as JSON
 

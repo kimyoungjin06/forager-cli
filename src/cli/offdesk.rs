@@ -66,6 +66,9 @@ pub enum OffdeskCommands {
     /// Build a compact hosted harness start prompt from first-read artifacts
     HarnessPrompt(HarnessPromptArgs),
 
+    /// Validate and register a read-only Offdesk planning artifact
+    Plan(PlanArgs),
+
     /// List pending action approvals
     Pending(PendingArgs),
 
@@ -709,6 +712,32 @@ pub struct HarnessPromptArgs {
     json: bool,
 }
 
+#[derive(Args)]
+pub struct PlanArgs {
+    /// `offdesk_multiturn_plan.v1` or `offdesk_planner_council.v1` JSON to register
+    input: PathBuf,
+
+    /// Optional project key for correlation
+    #[arg(long)]
+    project_key: Option<String>,
+
+    /// Optional request ID for correlation
+    #[arg(long)]
+    request_id: Option<String>,
+
+    /// Optional task ID for correlation
+    #[arg(long)]
+    task_id: Option<String>,
+
+    /// Validate without writing profile-local registry artifacts
+    #[arg(long)]
+    dry_run: bool,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
 #[derive(Serialize)]
 struct HostedHarnessPromptPacket {
     harness_id: String,
@@ -736,6 +765,52 @@ struct HostedHarnessFirstRead {
     present: bool,
     size_bytes: Option<u64>,
     over_file_budget: bool,
+}
+
+#[derive(Serialize)]
+struct OffdeskPlanRegistration {
+    schema: String,
+    registered_at: DateTime<Utc>,
+    forager_profile: String,
+    source_path: String,
+    source_sha256: String,
+    artifact_kind: String,
+    plan_schema: String,
+    profile_key: Option<String>,
+    profile_name: Option<String>,
+    project_key: Option<String>,
+    request_id: Option<String>,
+    task_id: Option<String>,
+    ready_for_operator_review: bool,
+    ready_for_launch_preparation: bool,
+    ready_for_enqueue: bool,
+    validation_failures: Vec<String>,
+    decision: Option<Value>,
+    consensus: Option<Value>,
+    selected_plan_path: Option<String>,
+    dry_run: bool,
+    artifacts: OffdeskPlanRegistrationArtifacts,
+    does_not_authorize: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct OffdeskPlanRegistrationArtifacts {
+    registry_dir: Option<String>,
+    registration_json: Option<String>,
+    copied_source_json: Option<String>,
+}
+
+struct OffdeskPlanInputSummary {
+    artifact_kind: &'static str,
+    plan_schema: String,
+    profile_key: Option<String>,
+    profile_name: Option<String>,
+    ready_for_operator_review: bool,
+    ready_for_launch_preparation: bool,
+    ready_for_enqueue: bool,
+    decision: Option<Value>,
+    consensus: Option<Value>,
+    selected_plan_path: Option<String>,
 }
 
 #[derive(Args)]
@@ -2926,6 +3001,7 @@ pub async fn run(profile: &str, command: OffdeskCommands) -> Result<()> {
     match command {
         OffdeskCommands::Harnesses(args) => harnesses(args).await,
         OffdeskCommands::HarnessPrompt(args) => harness_prompt(args).await,
+        OffdeskCommands::Plan(args) => plan(profile, args).await,
         OffdeskCommands::Pending(args) => pending(profile, args).await,
         OffdeskCommands::Gate(args) => gate(profile, args).await,
         OffdeskCommands::Launch(args) => launch(profile, args).await,
@@ -7054,6 +7130,347 @@ async fn harness_prompt(args: HarnessPromptArgs) -> Result<()> {
     for warning in &packet.warnings {
         println!("warning: {warning}");
     }
+    Ok(())
+}
+
+const OFFDESK_PLAN_REGISTRATION_SCHEMA: &str = "offdesk_plan_registration.v1";
+const OFFDESK_PLAN_REQUIRED_DENIALS: [&str; 8] = [
+    "enqueue",
+    "launch",
+    "approval",
+    "file movement",
+    "archive",
+    "delete",
+    "wiki promotion",
+    "accepted truth",
+];
+
+async fn plan(profile: &str, args: PlanArgs) -> Result<()> {
+    let registration = build_offdesk_plan_registration(profile, &args)?;
+    print_offdesk_plan_registration(&registration, args.json)
+}
+
+fn build_offdesk_plan_registration(
+    profile: &str,
+    args: &PlanArgs,
+) -> Result<OffdeskPlanRegistration> {
+    let source_bytes = fs::read(&args.input)
+        .with_context(|| format!("read Offdesk plan artifact {}", args.input.display()))?;
+    let source_value: Value = serde_json::from_slice(&source_bytes)
+        .with_context(|| format!("parse Offdesk plan artifact {}", args.input.display()))?;
+    let summary = validate_offdesk_plan_input(&source_value)?;
+    let source_path = fs::canonicalize(&args.input).unwrap_or_else(|_| args.input.clone());
+    let registered_at = Utc::now();
+    let source_sha256 = {
+        let mut hasher = Sha256::new();
+        hasher.update(&source_bytes);
+        format!("{:x}", hasher.finalize())
+    };
+
+    let artifacts = if args.dry_run {
+        OffdeskPlanRegistrationArtifacts {
+            registry_dir: None,
+            registration_json: None,
+            copied_source_json: None,
+        }
+    } else {
+        let profile_dir = get_profile_dir(profile)?;
+        let registry_dir =
+            allocate_offdesk_plan_registry_dir(&profile_dir, registered_at, summary.artifact_kind)?;
+        let copied_source = registry_dir.join("source.json");
+        write_new_file(&copied_source, &source_bytes).with_context(|| {
+            format!("write Offdesk plan source copy {}", copied_source.display())
+        })?;
+        OffdeskPlanRegistrationArtifacts {
+            registry_dir: Some(registry_dir.display().to_string()),
+            registration_json: Some(registry_dir.join("registration.json").display().to_string()),
+            copied_source_json: Some(copied_source.display().to_string()),
+        }
+    };
+
+    let registration = OffdeskPlanRegistration {
+        schema: OFFDESK_PLAN_REGISTRATION_SCHEMA.to_string(),
+        registered_at,
+        forager_profile: profile.to_string(),
+        source_path: source_path.display().to_string(),
+        source_sha256,
+        artifact_kind: summary.artifact_kind.to_string(),
+        plan_schema: summary.plan_schema,
+        profile_key: summary.profile_key,
+        profile_name: summary.profile_name,
+        project_key: args.project_key.clone(),
+        request_id: args.request_id.clone(),
+        task_id: args.task_id.clone(),
+        ready_for_operator_review: summary.ready_for_operator_review,
+        ready_for_launch_preparation: summary.ready_for_launch_preparation,
+        ready_for_enqueue: summary.ready_for_enqueue,
+        validation_failures: Vec::new(),
+        decision: summary.decision,
+        consensus: summary.consensus,
+        selected_plan_path: summary.selected_plan_path,
+        dry_run: args.dry_run,
+        artifacts,
+        does_not_authorize: offdesk_plan_registration_denials(),
+    };
+
+    if let Some(registration_path) = registration.artifacts.registration_json.as_deref() {
+        let bytes = serde_json::to_vec_pretty(&registration)?;
+        write_new_file(Path::new(registration_path), &bytes)
+            .with_context(|| format!("write Offdesk plan registration {}", registration_path))?;
+    }
+
+    Ok(registration)
+}
+
+fn allocate_offdesk_plan_registry_dir(
+    profile_dir: &Path,
+    registered_at: DateTime<Utc>,
+    artifact_kind: &str,
+) -> Result<PathBuf> {
+    let base_dir = profile_dir.join("offdesk_plans");
+    fs::create_dir_all(&base_dir)
+        .with_context(|| format!("create Offdesk plan registry {}", base_dir.display()))?;
+    let timestamp = registered_at.format("%Y%m%dT%H%M%SZ");
+    for attempt in 0..1000 {
+        let name = if attempt == 0 {
+            format!("{timestamp}_{artifact_kind}")
+        } else {
+            format!("{timestamp}_{artifact_kind}_{attempt:03}")
+        };
+        let path = base_dir.join(name);
+        match fs::create_dir(&path) {
+            Ok(()) => return Ok(path),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("create Offdesk plan registry {}", path.display()))
+            }
+        }
+    }
+
+    bail!(
+        "could not allocate Offdesk plan registry path in {}",
+        base_dir.display()
+    )
+}
+
+fn validate_offdesk_plan_input(value: &Value) -> Result<OffdeskPlanInputSummary> {
+    let plan_schema = value_string_field(value, "schema").unwrap_or_default();
+    match plan_schema.as_str() {
+        "offdesk_multiturn_plan.v1" => validate_multiturn_plan_input(value, plan_schema),
+        "offdesk_planner_council.v1" => validate_planner_council_input(value, plan_schema),
+        "" => bail!("Offdesk plan registration guard failed: schema_missing"),
+        other => bail!("Offdesk plan registration guard failed: unsupported_schema:{other}"),
+    }
+}
+
+fn validate_multiturn_plan_input(
+    value: &Value,
+    plan_schema: String,
+) -> Result<OffdeskPlanInputSummary> {
+    let mut failures = Vec::new();
+    let decision = value.get("decision").filter(|entry| entry.is_object());
+    if decision.is_none() {
+        failures.push("decision_missing".to_string());
+    }
+    let ready_for_operator_review = require_bool_field(
+        &mut failures,
+        decision,
+        "decision",
+        "ready_for_operator_review",
+        true,
+    );
+    let ready_for_launch_preparation = require_bool_field(
+        &mut failures,
+        decision,
+        "decision",
+        "ready_for_launch_preparation",
+        false,
+    );
+    let ready_for_enqueue = require_bool_field(
+        &mut failures,
+        decision,
+        "decision",
+        "ready_for_enqueue",
+        false,
+    );
+    match value.get("execution_sequence").and_then(Value::as_array) {
+        Some(items) if !items.is_empty() => {}
+        _ => failures.push("execution_sequence_missing".to_string()),
+    }
+    validate_plan_authority(value, &mut failures);
+    fail_plan_registration_if_needed(failures)?;
+
+    Ok(OffdeskPlanInputSummary {
+        artifact_kind: "offdesk_multiturn_plan",
+        plan_schema,
+        profile_key: value_string_field(value, "profile_key"),
+        profile_name: value_string_field(value, "profile_name"),
+        ready_for_operator_review,
+        ready_for_launch_preparation,
+        ready_for_enqueue,
+        decision: decision.cloned(),
+        consensus: None,
+        selected_plan_path: None,
+    })
+}
+
+fn validate_planner_council_input(
+    value: &Value,
+    plan_schema: String,
+) -> Result<OffdeskPlanInputSummary> {
+    let mut failures = Vec::new();
+    let consensus = value.get("consensus").filter(|entry| entry.is_object());
+    if consensus.is_none() {
+        failures.push("consensus_missing".to_string());
+    }
+    let ready_for_operator_review = require_bool_field(
+        &mut failures,
+        consensus,
+        "consensus",
+        "ready_for_operator_review",
+        true,
+    );
+    let ready_for_launch_preparation = require_bool_field(
+        &mut failures,
+        consensus,
+        "consensus",
+        "ready_for_launch_preparation",
+        false,
+    );
+    let ready_for_enqueue = require_bool_field(
+        &mut failures,
+        consensus,
+        "consensus",
+        "ready_for_enqueue",
+        false,
+    );
+    match value.get("validation_failures").and_then(Value::as_array) {
+        Some(items) if items.is_empty() => {}
+        Some(items) => failures.push(format!("validation_failures_present:{}", items.len())),
+        None => failures.push("validation_failures_missing".to_string()),
+    }
+    fail_plan_registration_if_needed(failures)?;
+
+    Ok(OffdeskPlanInputSummary {
+        artifact_kind: "offdesk_planner_council",
+        plan_schema,
+        profile_key: value_string_field(value, "profile_key"),
+        profile_name: value_string_field(value, "profile_name"),
+        ready_for_operator_review,
+        ready_for_launch_preparation,
+        ready_for_enqueue,
+        decision: None,
+        consensus: consensus.cloned(),
+        selected_plan_path: value_string_field(value, "synthesized_plan_path"),
+    })
+}
+
+fn validate_plan_authority(value: &Value, failures: &mut Vec<String>) {
+    let authority = value.get("authority").filter(|entry| entry.is_object());
+    if authority.is_none() {
+        failures.push("authority_missing".to_string());
+    }
+    require_bool_field(failures, authority, "authority", "read_only_plan", true);
+    let denials = authority
+        .and_then(|entry| entry.get("does_not_authorize"))
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToOwned::to_owned)
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default();
+    for required in OFFDESK_PLAN_REQUIRED_DENIALS {
+        if !denials.contains(required) {
+            failures.push(format!("authority_missing:{required}"));
+        }
+    }
+}
+
+fn require_bool_field(
+    failures: &mut Vec<String>,
+    parent: Option<&Value>,
+    parent_name: &str,
+    field: &str,
+    expected: bool,
+) -> bool {
+    match parent
+        .and_then(|entry| entry.get(field))
+        .and_then(Value::as_bool)
+    {
+        Some(actual) if actual == expected => actual,
+        Some(actual) => {
+            failures.push(format!("{parent_name}.{field}_must_be_{expected}"));
+            actual
+        }
+        None => {
+            failures.push(format!("{parent_name}.{field}_missing"));
+            false
+        }
+    }
+}
+
+fn fail_plan_registration_if_needed(failures: Vec<String>) -> Result<()> {
+    if !failures.is_empty() {
+        bail!(
+            "Offdesk plan registration guard failed: {}",
+            failures.join(", ")
+        );
+    }
+    Ok(())
+}
+
+fn value_string_field(value: &Value, field: &str) -> Option<String> {
+    value
+        .get(field)
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
+fn offdesk_plan_registration_denials() -> Vec<String> {
+    OFFDESK_PLAN_REQUIRED_DENIALS
+        .into_iter()
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn print_offdesk_plan_registration(
+    registration: &OffdeskPlanRegistration,
+    json: bool,
+) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(registration)?);
+        return Ok(());
+    }
+
+    let verb = if registration.dry_run {
+        "Validated"
+    } else {
+        "Registered"
+    };
+    println!(
+        "{verb} Offdesk plan artifact: {} ({})",
+        registration.artifact_kind, registration.plan_schema
+    );
+    println!("  source: {}", registration.source_path);
+    println!(
+        "  ready_for_operator_review: {}",
+        registration.ready_for_operator_review
+    );
+    println!(
+        "  ready_for_launch_preparation: {}",
+        registration.ready_for_launch_preparation
+    );
+    println!("  ready_for_enqueue: {}", registration.ready_for_enqueue);
+    if let Some(path) = registration.artifacts.registration_json.as_deref() {
+        println!("  registration: {path}");
+    }
+    println!(
+        "  note: registration does not authorize enqueue, launch, approval, file movement, cleanup, or accepted truth"
+    );
     Ok(())
 }
 
