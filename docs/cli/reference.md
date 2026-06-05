@@ -52,6 +52,7 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk plans`↴](#forager-offdesk-plans)
 * [`forager offdesk plan-show`↴](#forager-offdesk-plan-show)
 * [`forager offdesk plan-review`↴](#forager-offdesk-plan-review)
+* [`forager offdesk plan-launch-prep`↴](#forager-offdesk-plan-launch-prep)
 * [`forager offdesk pending`↴](#forager-offdesk-pending)
 * [`forager offdesk gate`↴](#forager-offdesk-gate)
 * [`forager offdesk launch`↴](#forager-offdesk-launch)
@@ -850,6 +851,7 @@ Manage offdesk approvals and recovery artifacts
 * `plans` — List registered read-only Offdesk planning artifacts
 * `plan-show` — Show one registered read-only Offdesk planning artifact
 * `plan-review` — Record an operator review for a registered Offdesk planning artifact
+* `plan-launch-prep` — Build a read-only launch-preparation packet from an approved plan review
 * `pending` — List pending action approvals
 * `gate` — Evaluate whether an offdesk capability may execute now
 * `launch` — Gate and record a background runner launch
@@ -997,6 +999,27 @@ Record an operator review for a registered Offdesk planning artifact
 * `--reason <REASON>` — Required review rationale. Secrets are redacted before persistence
 * `--blocker <BLOCKERS>` — Blocking issue reported by review; may be passed multiple times
 * `--follow-up <FOLLOWUPS>` — Follow-up requested by review; may be passed multiple times
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk plan-launch-prep`
+
+Build a read-only launch-preparation packet from an approved plan review
+
+**Usage:** `forager offdesk plan-launch-prep [OPTIONS] <PLAN_REF>`
+
+###### **Arguments:**
+
+* `<PLAN_REF>` — Plan ID from `forager offdesk plans`, or a registration/source path
+
+###### **Options:**
+
+* `--review-id <REVIEW_ID>` — Use a specific approved review ID instead of the latest review
+* `--prepared-by <PREPARED_BY>` — Operator or surface preparing the packet
+
+  Default value: `operator`
+* `--notes <NOTES>` — Optional preparation note. Secrets are redacted before persistence
 * `--json` — Output as JSON
 
 

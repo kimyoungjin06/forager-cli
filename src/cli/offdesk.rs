@@ -78,6 +78,9 @@ pub enum OffdeskCommands {
     /// Record an operator review for a registered Offdesk planning artifact
     PlanReview(PlanReviewArgs),
 
+    /// Build a read-only launch-preparation packet from an approved plan review
+    PlanLaunchPrep(PlanLaunchPrepArgs),
+
     /// List pending action approvals
     Pending(PendingArgs),
 
@@ -822,6 +825,28 @@ pub struct PlanReviewArgs {
     json: bool,
 }
 
+#[derive(Args)]
+pub struct PlanLaunchPrepArgs {
+    /// Plan ID from `forager offdesk plans`, or a registration/source path
+    plan_ref: String,
+
+    /// Use a specific approved review ID instead of the latest review
+    #[arg(long)]
+    review_id: Option<String>,
+
+    /// Operator or surface preparing the packet
+    #[arg(long, default_value = "operator")]
+    prepared_by: String,
+
+    /// Optional preparation note. Secrets are redacted before persistence.
+    #[arg(long)]
+    notes: Option<String>,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ValueEnum)]
 #[serde(rename_all = "snake_case")]
 enum OffdeskPlanReviewDecision {
@@ -910,6 +935,8 @@ struct OffdeskPlanRegistryItem {
     review_state: OffdeskPlanReviewState,
     review_count: usize,
     latest_review: Option<OffdeskPlanReviewRecord>,
+    launch_prep_count: usize,
+    latest_launch_prep: Option<OffdeskPlanLaunchPrepPacket>,
 }
 
 #[derive(Serialize)]
@@ -921,6 +948,9 @@ struct OffdeskPlanRegistryDetail {
     review_count: usize,
     latest_review: Option<OffdeskPlanReviewRecord>,
     reviews: Vec<OffdeskPlanReviewRecord>,
+    launch_prep_count: usize,
+    latest_launch_prep: Option<OffdeskPlanLaunchPrepPacket>,
+    launch_preps: Vec<OffdeskPlanLaunchPrepPacket>,
 }
 
 #[derive(Clone, Serialize)]
@@ -962,6 +992,48 @@ struct OffdeskPlanReviewArtifacts {
     registration_json: String,
     copied_source_json: Option<String>,
     review_record_json: String,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct OffdeskPlanLaunchPrepPacket {
+    schema: String,
+    prepared_at: DateTime<Utc>,
+    prep_id: String,
+    plan_id: String,
+    forager_profile: String,
+    prepared_by: String,
+    registration_path: String,
+    source_path: String,
+    source_sha256: String,
+    review_id: String,
+    review_decision: OffdeskPlanReviewDecision,
+    review_record_json: String,
+    artifact_kind: String,
+    plan_schema: String,
+    profile_key: Option<String>,
+    project_key: Option<String>,
+    request_id: Option<String>,
+    task_id: Option<String>,
+    selected_plan_path: Option<String>,
+    required_first_reads: Vec<String>,
+    launch_preparation_candidate: bool,
+    ready_for_launch: bool,
+    ready_for_enqueue: bool,
+    next_safe_action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    notes: Option<String>,
+    read_only_project_state: bool,
+    applies_file_operations: bool,
+    artifacts: OffdeskPlanLaunchPrepArtifacts,
+    does_not_authorize: Vec<String>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct OffdeskPlanLaunchPrepArtifacts {
+    registration_json: String,
+    copied_source_json: Option<String>,
+    review_record_json: String,
+    launch_prep_json: String,
 }
 
 struct OffdeskPlanInputSummary {
@@ -3169,6 +3241,7 @@ pub async fn run(profile: &str, command: OffdeskCommands) -> Result<()> {
         OffdeskCommands::Plans(args) => plans(profile, args).await,
         OffdeskCommands::PlanShow(args) => plan_show(profile, args).await,
         OffdeskCommands::PlanReview(args) => plan_review(profile, args).await,
+        OffdeskCommands::PlanLaunchPrep(args) => plan_launch_prep(profile, args).await,
         OffdeskCommands::Pending(args) => pending(profile, args).await,
         OffdeskCommands::Gate(args) => gate(profile, args).await,
         OffdeskCommands::Launch(args) => launch(profile, args).await,
@@ -7374,6 +7447,23 @@ async fn plan_review(profile: &str, args: PlanReviewArgs) -> Result<()> {
     Ok(())
 }
 
+async fn plan_launch_prep(profile: &str, args: PlanLaunchPrepArgs) -> Result<()> {
+    let items = load_offdesk_plan_registry_items(profile)?;
+    let Some(item) = find_offdesk_plan_registry_item(items, &args.plan_ref) else {
+        bail!("Registered Offdesk plan not found: {}", args.plan_ref);
+    };
+    let packet = build_offdesk_plan_launch_prep_packet(profile, &item, &args)?;
+    write_offdesk_plan_launch_prep_packet(&packet)?;
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&packet)?);
+        return Ok(());
+    }
+
+    print_offdesk_plan_launch_prep_packet(&packet);
+    Ok(())
+}
+
 fn build_offdesk_plan_registration(
     profile: &str,
     args: &PlanArgs,
@@ -7517,6 +7607,102 @@ fn write_offdesk_plan_review_record(record: &OffdeskPlanReviewRecord) -> Result<
     Ok(())
 }
 
+fn build_offdesk_plan_launch_prep_packet(
+    profile: &str,
+    item: &OffdeskPlanRegistryItem,
+    args: &PlanLaunchPrepArgs,
+) -> Result<OffdeskPlanLaunchPrepPacket> {
+    let registry_dir = offdesk_plan_registry_dir(item)?;
+    let reviews = load_offdesk_plan_reviews(&registry_dir)?;
+    let review = select_offdesk_plan_review(&reviews, args.review_id.as_deref())?;
+    if review.decision != OffdeskPlanReviewDecision::Approved {
+        bail!(
+            "Offdesk plan launch-prep requires an approved review; latest review {} is {}",
+            review.review_id,
+            review.decision.as_str()
+        );
+    }
+    if !review.ready_for_launch_preparation_candidate {
+        bail!(
+            "Offdesk plan review {} is not a launch-preparation candidate",
+            review.review_id
+        );
+    }
+    if review.source_sha256 != item.registration.source_sha256 {
+        bail!(
+            "Offdesk plan review {} source hash does not match registration",
+            review.review_id
+        );
+    }
+
+    let prepared_at = Utc::now();
+    let launch_prep_path = allocate_offdesk_plan_launch_prep_path(&registry_dir, prepared_at)?;
+    let mut required_first_reads = vec![
+        item.registration_path.clone(),
+        review.artifacts.review_record_json.clone(),
+    ];
+    if let Some(path) = item.registration.artifacts.copied_source_json.as_ref() {
+        required_first_reads.push(path.clone());
+    }
+    if let Some(path) = item.registration.selected_plan_path.as_ref() {
+        if !required_first_reads.contains(path) {
+            required_first_reads.push(path.clone());
+        }
+    }
+    let profile_name = if profile.is_empty() {
+        DEFAULT_PROFILE
+    } else {
+        profile
+    };
+
+    Ok(OffdeskPlanLaunchPrepPacket {
+        schema: "offdesk_plan_launch_prep.v1".to_string(),
+        prepared_at,
+        prep_id: format!("plan_launch_prep_{}", short_uuid()),
+        plan_id: item.plan_id.clone(),
+        forager_profile: crate::offdesk::operator_safe_text(profile_name),
+        prepared_by: crate::offdesk::operator_safe_text(args.prepared_by.trim()),
+        registration_path: item.registration_path.clone(),
+        source_path: item.registration.source_path.clone(),
+        source_sha256: item.registration.source_sha256.clone(),
+        review_id: review.review_id.clone(),
+        review_decision: review.decision,
+        review_record_json: review.artifacts.review_record_json.clone(),
+        artifact_kind: item.registration.artifact_kind.clone(),
+        plan_schema: item.registration.plan_schema.clone(),
+        profile_key: item.registration.profile_key.clone(),
+        project_key: item.registration.project_key.clone(),
+        request_id: item.registration.request_id.clone(),
+        task_id: item.registration.task_id.clone(),
+        selected_plan_path: item.registration.selected_plan_path.clone(),
+        required_first_reads,
+        launch_preparation_candidate: true,
+        ready_for_launch: false,
+        ready_for_enqueue: false,
+        next_safe_action: "build_execution_brief_then_use_existing_offdesk_gate".to_string(),
+        notes: args
+            .notes
+            .as_deref()
+            .map(|value| truncate_closeout_text(&crate::offdesk::operator_safe_text(value), 2000)),
+        read_only_project_state: true,
+        applies_file_operations: false,
+        artifacts: OffdeskPlanLaunchPrepArtifacts {
+            registration_json: item.registration_path.clone(),
+            copied_source_json: item.registration.artifacts.copied_source_json.clone(),
+            review_record_json: review.artifacts.review_record_json.clone(),
+            launch_prep_json: launch_prep_path.display().to_string(),
+        },
+        does_not_authorize: offdesk_plan_launch_prep_denials(),
+    })
+}
+
+fn write_offdesk_plan_launch_prep_packet(packet: &OffdeskPlanLaunchPrepPacket) -> Result<()> {
+    let bytes = serde_json::to_vec_pretty(packet)?;
+    write_new_file(Path::new(&packet.artifacts.launch_prep_json), &bytes)
+        .with_context(|| format!("write {}", packet.artifacts.launch_prep_json))?;
+    Ok(())
+}
+
 fn load_offdesk_plan_registry_items(profile: &str) -> Result<Vec<OffdeskPlanRegistryItem>> {
     let registry_dir = read_only_profile_dir(profile)?.join("offdesk_plans");
     if !registry_dir.exists() {
@@ -7563,6 +7749,8 @@ fn load_offdesk_plan_registry_items(profile: &str) -> Result<Vec<OffdeskPlanRegi
         let reviews = load_offdesk_plan_reviews(&entry.path())?;
         let latest_review = reviews.last().cloned();
         let review_state = offdesk_plan_review_state(latest_review.as_ref());
+        let launch_preps = load_offdesk_plan_launch_preps(&entry.path())?;
+        let latest_launch_prep = launch_preps.last().cloned();
         items.push(OffdeskPlanRegistryItem {
             plan_id,
             registration_path: registration_path.display().to_string(),
@@ -7570,6 +7758,8 @@ fn load_offdesk_plan_registry_items(profile: &str) -> Result<Vec<OffdeskPlanRegi
             review_state,
             review_count: reviews.len(),
             latest_review,
+            launch_prep_count: launch_preps.len(),
+            latest_launch_prep,
         });
     }
 
@@ -7583,6 +7773,8 @@ fn offdesk_plan_registry_detail(
     let reviews = load_offdesk_plan_reviews(&registry_dir)?;
     let latest_review = reviews.last().cloned();
     let review_state = offdesk_plan_review_state(latest_review.as_ref());
+    let launch_preps = load_offdesk_plan_launch_preps(&registry_dir)?;
+    let latest_launch_prep = launch_preps.last().cloned();
     Ok(OffdeskPlanRegistryDetail {
         plan_id: item.plan_id,
         registration_path: item.registration_path,
@@ -7591,6 +7783,9 @@ fn offdesk_plan_registry_detail(
         review_count: reviews.len(),
         latest_review,
         reviews,
+        launch_prep_count: launch_preps.len(),
+        latest_launch_prep,
+        launch_preps,
     })
 }
 
@@ -7619,6 +7814,48 @@ fn load_offdesk_plan_reviews(registry_dir: &Path) -> Result<Vec<OffdeskPlanRevie
     }
     reviews.sort_by_key(|review| review.reviewed_at);
     Ok(reviews)
+}
+
+fn load_offdesk_plan_launch_preps(registry_dir: &Path) -> Result<Vec<OffdeskPlanLaunchPrepPacket>> {
+    let mut packets = Vec::new();
+    if !registry_dir.exists() {
+        return Ok(packets);
+    }
+    for entry in fs::read_dir(registry_dir)
+        .with_context(|| format!("read Offdesk plan registry {}", registry_dir.display()))?
+    {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let filename = entry.file_name().to_string_lossy().to_string();
+        if !filename.starts_with("launch_prep_") || !filename.ends_with(".json") {
+            continue;
+        }
+        let path = entry.path();
+        let packet_bytes = fs::read(&path)
+            .with_context(|| format!("read Offdesk plan launch-prep {}", path.display()))?;
+        let packet: OffdeskPlanLaunchPrepPacket = serde_json::from_slice(&packet_bytes)
+            .with_context(|| format!("parse Offdesk plan launch-prep {}", path.display()))?;
+        packets.push(packet);
+    }
+    packets.sort_by_key(|packet| packet.prepared_at);
+    Ok(packets)
+}
+
+fn select_offdesk_plan_review<'a>(
+    reviews: &'a [OffdeskPlanReviewRecord],
+    review_id: Option<&str>,
+) -> Result<&'a OffdeskPlanReviewRecord> {
+    if let Some(review_id) = review_id {
+        return reviews
+            .iter()
+            .find(|review| review.review_id == review_id)
+            .ok_or_else(|| anyhow::anyhow!("Offdesk plan review not found: {}", review_id));
+    }
+    reviews
+        .last()
+        .ok_or_else(|| anyhow::anyhow!("Offdesk plan launch-prep requires an approved review"))
 }
 
 fn offdesk_plan_registry_dir(item: &OffdeskPlanRegistryItem) -> Result<PathBuf> {
@@ -7746,6 +7983,31 @@ fn allocate_offdesk_plan_review_record_path(
 
     bail!(
         "could not allocate Offdesk plan review path in {}",
+        registry_dir.display()
+    )
+}
+
+fn allocate_offdesk_plan_launch_prep_path(
+    registry_dir: &Path,
+    prepared_at: DateTime<Utc>,
+) -> Result<PathBuf> {
+    fs::create_dir_all(registry_dir)
+        .with_context(|| format!("create Offdesk plan registry {}", registry_dir.display()))?;
+    let timestamp = prepared_at.format("%Y%m%dT%H%M%SZ");
+    for attempt in 0..1000 {
+        let filename = if attempt == 0 {
+            format!("launch_prep_{timestamp}.json")
+        } else {
+            format!("launch_prep_{timestamp}_{attempt:03}.json")
+        };
+        let path = registry_dir.join(filename);
+        if !path.exists() {
+            return Ok(path);
+        }
+    }
+
+    bail!(
+        "could not allocate Offdesk plan launch-prep path in {}",
         registry_dir.display()
     )
 }
@@ -7971,6 +8233,12 @@ fn offdesk_plan_review_denials() -> Vec<String> {
     denials
 }
 
+fn offdesk_plan_launch_prep_denials() -> Vec<String> {
+    let mut denials = offdesk_plan_review_denials();
+    denials.push("dispatch".to_string());
+    denials
+}
+
 fn print_offdesk_plan_registration(
     registration: &OffdeskPlanRegistration,
     json: bool,
@@ -8021,6 +8289,9 @@ fn print_offdesk_plan_registry_items(items: &[OffdeskPlanRegistryItem]) {
             registration.ready_for_enqueue
         );
         println!("  next:    {}", item.review_state.next_safe_action);
+        if let Some(packet) = item.latest_launch_prep.as_ref() {
+            println!("  prep:    {}", packet.prep_id);
+        }
         if let Some(project_key) = registration.project_key.as_deref() {
             println!("  project: {project_key}");
         }
@@ -8074,6 +8345,13 @@ fn print_offdesk_plan_registry_detail(detail: &OffdeskPlanRegistryDetail) {
         println!("  reviewer:   {}", review.reviewer);
         println!("  reason:     {}", review.reason);
     }
+    if let Some(packet) = detail.latest_launch_prep.as_ref() {
+        println!("  latest_launch_prep: {}", packet.prep_id);
+        println!(
+            "  launch_prep_file:   {}",
+            packet.artifacts.launch_prep_json
+        );
+    }
     println!("  registration: {}", detail.registration_path);
     println!(
         "  does_not_authorize: {}",
@@ -8115,6 +8393,35 @@ fn print_offdesk_plan_review_record(record: &OffdeskPlanReviewRecord) {
     }
     println!(
         "  note: review does not authorize enqueue, launch, approval, file movement, cleanup, or accepted truth"
+    );
+}
+
+fn print_offdesk_plan_launch_prep_packet(packet: &OffdeskPlanLaunchPrepPacket) {
+    println!("Offdesk plan launch-prep packet");
+    println!("  prepared_at:  {}", packet.prepared_at);
+    println!("  prep_id:      {}", packet.prep_id);
+    println!("  plan_id:      {}", packet.plan_id);
+    println!("  review_id:    {}", packet.review_id);
+    println!("  prepared_by:  {}", packet.prepared_by);
+    println!(
+        "  launch_candidate: {}",
+        packet.launch_preparation_candidate
+    );
+    println!("  ready_for_launch: {}", packet.ready_for_launch);
+    println!("  ready_for_enqueue: {}", packet.ready_for_enqueue);
+    println!("  next:         {}", packet.next_safe_action);
+    println!("Artifacts:");
+    println!("  registration: {}", packet.artifacts.registration_json);
+    println!("  review:       {}", packet.artifacts.review_record_json);
+    println!("  launch_prep:  {}", packet.artifacts.launch_prep_json);
+    if !packet.required_first_reads.is_empty() {
+        println!("Required first reads:");
+        for path in &packet.required_first_reads {
+            println!("  - {path}");
+        }
+    }
+    println!(
+        "  note: launch-prep packet does not authorize enqueue, launch, approval, file movement, cleanup, or accepted truth"
     );
 }
 
