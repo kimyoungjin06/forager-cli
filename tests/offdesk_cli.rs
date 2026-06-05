@@ -9148,6 +9148,167 @@ fn offdesk_plans_list_and_plan_show_registered_artifact() -> Result<()> {
 
 #[test]
 #[serial]
+fn offdesk_plan_review_records_decision_without_runtime_authority() -> Result<()> {
+    let temp = tempdir()?;
+    let input_path = temp.path().join("OVERNIGHT_PLAN.json");
+    let plan = json!({
+        "schema": "offdesk_multiturn_plan.v1",
+        "profile_key": "generic",
+        "decision": {
+            "ready_for_operator_review": true,
+            "ready_for_launch_preparation": false,
+            "ready_for_enqueue": false
+        },
+        "execution_sequence": [
+            {
+                "id": "phase_1",
+                "objective": "Record an operator review."
+            }
+        ],
+        "authority": {
+            "read_only_plan": true,
+            "does_not_authorize": [
+                "enqueue",
+                "launch",
+                "approval",
+                "file movement",
+                "archive",
+                "delete",
+                "wiki promotion",
+                "accepted truth"
+            ]
+        }
+    });
+    fs::write(&input_path, serde_json::to_vec_pretty(&plan)?)?;
+
+    let register_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plan",
+            input_path.to_str().expect("utf-8 plan path"),
+            "--project-key",
+            "project",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        register_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&register_output.stderr)
+    );
+    let registration: serde_json::Value = serde_json::from_slice(&register_output.stdout)?;
+    let registry_dir = registration["artifacts"]["registry_dir"]
+        .as_str()
+        .expect("registry dir");
+    let plan_id = Path::new(registry_dir)
+        .file_name()
+        .expect("registry dir name")
+        .to_string_lossy()
+        .to_string();
+
+    let review_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plan-review",
+            &plan_id,
+            "--decision",
+            "approved",
+            "--reviewer",
+            "operator",
+            "--reason",
+            "The plan is ready for a separate launch-preparation packet.",
+            "--follow-up",
+            "Prepare launch packet in a separate command.",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        review_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&review_output.stderr)
+    );
+    let review: serde_json::Value = serde_json::from_slice(&review_output.stdout)?;
+    assert_eq!(review["schema"], "offdesk_plan_review.v1");
+    assert_eq!(review["plan_id"], plan_id);
+    assert_eq!(review["decision"], "approved");
+    assert_eq!(review["ready_for_launch_preparation_candidate"], true);
+    assert_eq!(review["ready_for_enqueue"], false);
+    assert_eq!(review["applies_file_operations"], false);
+    assert!(review["does_not_authorize"]
+        .as_array()
+        .expect("review denials")
+        .iter()
+        .any(|item| item == "launch"));
+    let review_record_path = review["artifacts"]["review_record_json"]
+        .as_str()
+        .expect("review record path");
+    assert!(Path::new(review_record_path).exists());
+
+    let list_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plans",
+            "--project-key",
+            "project",
+            "--latest",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        list_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&list_output.stderr)
+    );
+    let plans: serde_json::Value = serde_json::from_slice(&list_output.stdout)?;
+    assert_eq!(plans[0]["review_state"]["status"], "approved");
+    assert_eq!(
+        plans[0]["review_state"]["ready_for_launch_preparation_candidate"],
+        true
+    );
+    assert_eq!(
+        plans[0]["review_state"]["next_safe_action"],
+        "prepare_launch_packet"
+    );
+    assert_eq!(plans[0]["review_count"], 1);
+    assert_eq!(plans[0]["latest_review"]["review_id"], review["review_id"]);
+
+    let show_output = forager_command(temp.path())
+        .args(["offdesk", "plan-show", &plan_id, "--json"])
+        .output()?;
+    assert!(
+        show_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&show_output.stderr)
+    );
+    let shown: serde_json::Value = serde_json::from_slice(&show_output.stdout)?;
+    assert_eq!(shown["reviews"].as_array().expect("reviews").len(), 1);
+    assert_eq!(shown["reviews"][0]["review_id"], review["review_id"]);
+    assert_eq!(shown["registration"]["ready_for_enqueue"], false);
+
+    let blocked_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plan-review",
+            &plan_id,
+            "--decision",
+            "approved",
+            "--reviewer",
+            "operator",
+            "--reason",
+            "This should fail because approved reviews cannot carry blockers.",
+            "--blocker",
+            "missing launch packet",
+            "--json",
+        ])
+        .output()?;
+    assert!(!blocked_output.status.success());
+    assert!(String::from_utf8_lossy(&blocked_output.stderr)
+        .contains("approved Offdesk plan review cannot include blockers"));
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn status_json_reports_legacy_profile_dir_when_compat_storage_is_active() -> Result<()> {
     let temp = tempdir()?;
     fs::create_dir_all(legacy_app_dir(temp.path()).join("profiles").join("default"))?;

@@ -75,6 +75,9 @@ pub enum OffdeskCommands {
     /// Show one registered read-only Offdesk planning artifact
     PlanShow(PlanShowArgs),
 
+    /// Record an operator review for a registered Offdesk planning artifact
+    PlanReview(PlanReviewArgs),
+
     /// List pending action approvals
     Pending(PendingArgs),
 
@@ -781,6 +784,62 @@ pub struct PlanShowArgs {
     json: bool,
 }
 
+#[derive(Args)]
+pub struct PlanReviewArgs {
+    /// Plan ID from `forager offdesk plans`, or a registration/source path
+    plan_ref: String,
+
+    /// Operator review decision. This command never enqueues or launches work.
+    #[arg(long, value_enum)]
+    decision: OffdeskPlanReviewDecision,
+
+    /// Reviewer or reviewing model label
+    #[arg(long, default_value = "operator")]
+    reviewer: String,
+
+    /// Model/provider label used for review
+    #[arg(long)]
+    review_provider: Option<String>,
+
+    /// Optional path to the raw review output
+    #[arg(long)]
+    review_file: Option<PathBuf>,
+
+    /// Required review rationale. Secrets are redacted before persistence.
+    #[arg(long)]
+    reason: String,
+
+    /// Blocking issue reported by review; may be passed multiple times
+    #[arg(long = "blocker")]
+    blockers: Vec<String>,
+
+    /// Follow-up requested by review; may be passed multiple times
+    #[arg(long = "follow-up")]
+    followups: Vec<String>,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ValueEnum)]
+#[serde(rename_all = "snake_case")]
+enum OffdeskPlanReviewDecision {
+    Approved,
+    RevisionRequired,
+    Rejected,
+}
+
+impl OffdeskPlanReviewDecision {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Approved => "approved",
+            Self::RevisionRequired => "revision_required",
+            Self::Rejected => "rejected",
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct HostedHarnessPromptPacket {
     harness_id: String,
@@ -848,6 +907,61 @@ struct OffdeskPlanRegistryItem {
     plan_id: String,
     registration_path: String,
     registration: OffdeskPlanRegistration,
+    review_state: OffdeskPlanReviewState,
+    review_count: usize,
+    latest_review: Option<OffdeskPlanReviewRecord>,
+}
+
+#[derive(Serialize)]
+struct OffdeskPlanRegistryDetail {
+    plan_id: String,
+    registration_path: String,
+    registration: OffdeskPlanRegistration,
+    review_state: OffdeskPlanReviewState,
+    review_count: usize,
+    latest_review: Option<OffdeskPlanReviewRecord>,
+    reviews: Vec<OffdeskPlanReviewRecord>,
+}
+
+#[derive(Clone, Serialize)]
+struct OffdeskPlanReviewState {
+    status: String,
+    ready_for_launch_preparation_candidate: bool,
+    next_safe_action: String,
+    latest_review_id: Option<String>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct OffdeskPlanReviewRecord {
+    schema: String,
+    reviewed_at: DateTime<Utc>,
+    review_id: String,
+    plan_id: String,
+    forager_profile: String,
+    registration_path: String,
+    source_sha256: String,
+    decision: OffdeskPlanReviewDecision,
+    reviewer: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    review_provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    review_file: Option<String>,
+    reason: String,
+    blockers: Vec<String>,
+    followups: Vec<String>,
+    ready_for_launch_preparation_candidate: bool,
+    ready_for_enqueue: bool,
+    read_only_project_state: bool,
+    applies_file_operations: bool,
+    artifacts: OffdeskPlanReviewArtifacts,
+    does_not_authorize: Vec<String>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct OffdeskPlanReviewArtifacts {
+    registration_json: String,
+    copied_source_json: Option<String>,
+    review_record_json: String,
 }
 
 struct OffdeskPlanInputSummary {
@@ -3054,6 +3168,7 @@ pub async fn run(profile: &str, command: OffdeskCommands) -> Result<()> {
         OffdeskCommands::Plan(args) => plan(profile, args).await,
         OffdeskCommands::Plans(args) => plans(profile, args).await,
         OffdeskCommands::PlanShow(args) => plan_show(profile, args).await,
+        OffdeskCommands::PlanReview(args) => plan_review(profile, args).await,
         OffdeskCommands::Pending(args) => pending(profile, args).await,
         OffdeskCommands::Gate(args) => gate(profile, args).await,
         OffdeskCommands::Launch(args) => launch(profile, args).await,
@@ -7231,13 +7346,31 @@ async fn plan_show(profile: &str, args: PlanShowArgs) -> Result<()> {
     let Some(item) = find_offdesk_plan_registry_item(items, &args.plan_ref) else {
         bail!("Registered Offdesk plan not found: {}", args.plan_ref);
     };
+    let detail = offdesk_plan_registry_detail(item)?;
 
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&item)?);
+        println!("{}", serde_json::to_string_pretty(&detail)?);
         return Ok(());
     }
 
-    print_offdesk_plan_registry_item(&item);
+    print_offdesk_plan_registry_detail(&detail);
+    Ok(())
+}
+
+async fn plan_review(profile: &str, args: PlanReviewArgs) -> Result<()> {
+    let items = load_offdesk_plan_registry_items(profile)?;
+    let Some(item) = find_offdesk_plan_registry_item(items, &args.plan_ref) else {
+        bail!("Registered Offdesk plan not found: {}", args.plan_ref);
+    };
+    let record = build_offdesk_plan_review_record(profile, &item, &args)?;
+    write_offdesk_plan_review_record(&record)?;
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&record)?);
+        return Ok(());
+    }
+
+    print_offdesk_plan_review_record(&record);
     Ok(())
 }
 
@@ -7313,6 +7446,77 @@ fn build_offdesk_plan_registration(
     Ok(registration)
 }
 
+fn build_offdesk_plan_review_record(
+    profile: &str,
+    item: &OffdeskPlanRegistryItem,
+    args: &PlanReviewArgs,
+) -> Result<OffdeskPlanReviewRecord> {
+    if args.reason.trim().is_empty() {
+        bail!("Offdesk plan review reason is required");
+    }
+    if args.decision == OffdeskPlanReviewDecision::Approved && !args.blockers.is_empty() {
+        bail!("approved Offdesk plan review cannot include blockers");
+    }
+
+    let reviewed_at = Utc::now();
+    let registry_dir = offdesk_plan_registry_dir(item)?;
+    let review_record_path = allocate_offdesk_plan_review_record_path(&registry_dir, reviewed_at)?;
+    let ready_for_launch_preparation_candidate = args.decision
+        == OffdeskPlanReviewDecision::Approved
+        && item.registration.ready_for_operator_review
+        && !item.registration.ready_for_launch_preparation
+        && !item.registration.ready_for_enqueue
+        && item.registration.validation_failures.is_empty();
+    let profile_name = if profile.is_empty() {
+        DEFAULT_PROFILE
+    } else {
+        profile
+    };
+
+    Ok(OffdeskPlanReviewRecord {
+        schema: "offdesk_plan_review.v1".to_string(),
+        reviewed_at,
+        review_id: format!("plan_review_{}", short_uuid()),
+        plan_id: item.plan_id.clone(),
+        forager_profile: crate::offdesk::operator_safe_text(profile_name),
+        registration_path: item.registration_path.clone(),
+        source_sha256: item.registration.source_sha256.clone(),
+        decision: args.decision,
+        reviewer: crate::offdesk::operator_safe_text(args.reviewer.trim()),
+        review_provider: args
+            .review_provider
+            .as_deref()
+            .map(|value| crate::offdesk::operator_safe_text(value.trim())),
+        review_file: args
+            .review_file
+            .as_ref()
+            .map(|path| crate::offdesk::operator_safe_text(path.to_string_lossy().as_ref())),
+        reason: truncate_closeout_text(
+            &crate::offdesk::operator_safe_text(args.reason.trim()),
+            2000,
+        ),
+        blockers: safe_text_list(&args.blockers),
+        followups: safe_text_list(&args.followups),
+        ready_for_launch_preparation_candidate,
+        ready_for_enqueue: false,
+        read_only_project_state: true,
+        applies_file_operations: false,
+        artifacts: OffdeskPlanReviewArtifacts {
+            registration_json: item.registration_path.clone(),
+            copied_source_json: item.registration.artifacts.copied_source_json.clone(),
+            review_record_json: review_record_path.display().to_string(),
+        },
+        does_not_authorize: offdesk_plan_review_denials(),
+    })
+}
+
+fn write_offdesk_plan_review_record(record: &OffdeskPlanReviewRecord) -> Result<()> {
+    let bytes = serde_json::to_vec_pretty(record)?;
+    write_new_file(Path::new(&record.artifacts.review_record_json), &bytes)
+        .with_context(|| format!("write {}", record.artifacts.review_record_json))?;
+    Ok(())
+}
+
 fn load_offdesk_plan_registry_items(profile: &str) -> Result<Vec<OffdeskPlanRegistryItem>> {
     let registry_dir = read_only_profile_dir(profile)?.join("offdesk_plans");
     if !registry_dir.exists() {
@@ -7356,14 +7560,106 @@ fn load_offdesk_plan_registry_items(profile: &str) -> Result<Vec<OffdeskPlanRegi
                 )
             })?;
         let plan_id = entry.file_name().to_string_lossy().to_string();
+        let reviews = load_offdesk_plan_reviews(&entry.path())?;
+        let latest_review = reviews.last().cloned();
+        let review_state = offdesk_plan_review_state(latest_review.as_ref());
         items.push(OffdeskPlanRegistryItem {
             plan_id,
             registration_path: registration_path.display().to_string(),
             registration,
+            review_state,
+            review_count: reviews.len(),
+            latest_review,
         });
     }
 
     Ok(items)
+}
+
+fn offdesk_plan_registry_detail(
+    item: OffdeskPlanRegistryItem,
+) -> Result<OffdeskPlanRegistryDetail> {
+    let registry_dir = offdesk_plan_registry_dir(&item)?;
+    let reviews = load_offdesk_plan_reviews(&registry_dir)?;
+    let latest_review = reviews.last().cloned();
+    let review_state = offdesk_plan_review_state(latest_review.as_ref());
+    Ok(OffdeskPlanRegistryDetail {
+        plan_id: item.plan_id,
+        registration_path: item.registration_path,
+        registration: item.registration,
+        review_state,
+        review_count: reviews.len(),
+        latest_review,
+        reviews,
+    })
+}
+
+fn load_offdesk_plan_reviews(registry_dir: &Path) -> Result<Vec<OffdeskPlanReviewRecord>> {
+    let mut reviews = Vec::new();
+    if !registry_dir.exists() {
+        return Ok(reviews);
+    }
+    for entry in fs::read_dir(registry_dir)
+        .with_context(|| format!("read Offdesk plan registry {}", registry_dir.display()))?
+    {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let filename = entry.file_name().to_string_lossy().to_string();
+        if !filename.starts_with("plan_review_") || !filename.ends_with(".json") {
+            continue;
+        }
+        let path = entry.path();
+        let review_bytes = fs::read(&path)
+            .with_context(|| format!("read Offdesk plan review {}", path.display()))?;
+        let review: OffdeskPlanReviewRecord = serde_json::from_slice(&review_bytes)
+            .with_context(|| format!("parse Offdesk plan review {}", path.display()))?;
+        reviews.push(review);
+    }
+    reviews.sort_by_key(|review| review.reviewed_at);
+    Ok(reviews)
+}
+
+fn offdesk_plan_registry_dir(item: &OffdeskPlanRegistryItem) -> Result<PathBuf> {
+    if let Some(registry_dir) = item.registration.artifacts.registry_dir.as_deref() {
+        return Ok(PathBuf::from(registry_dir));
+    }
+    Path::new(&item.registration_path)
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| anyhow::anyhow!("registered Offdesk plan is missing registry directory"))
+}
+
+fn offdesk_plan_review_state(
+    latest_review: Option<&OffdeskPlanReviewRecord>,
+) -> OffdeskPlanReviewState {
+    let Some(review) = latest_review else {
+        return OffdeskPlanReviewState {
+            status: "unreviewed".to_string(),
+            ready_for_launch_preparation_candidate: false,
+            next_safe_action: "record_operator_review".to_string(),
+            latest_review_id: None,
+        };
+    };
+    let (status, next_safe_action) = match review.decision {
+        OffdeskPlanReviewDecision::Approved => (
+            "approved",
+            if review.ready_for_launch_preparation_candidate {
+                "prepare_launch_packet"
+            } else {
+                "inspect_review_blockers"
+            },
+        ),
+        OffdeskPlanReviewDecision::RevisionRequired => ("revision_required", "revise_plan"),
+        OffdeskPlanReviewDecision::Rejected => ("rejected", "discard_or_replace_plan"),
+    };
+    OffdeskPlanReviewState {
+        status: status.to_string(),
+        ready_for_launch_preparation_candidate: review.ready_for_launch_preparation_candidate,
+        next_safe_action: next_safe_action.to_string(),
+        latest_review_id: Some(review.review_id.clone()),
+    }
 }
 
 fn offdesk_plan_matches_filter(item: &OffdeskPlanRegistryItem, args: &PlansArgs) -> bool {
@@ -7427,6 +7723,31 @@ fn normalize_offdesk_plan_ref_path(path: &str) -> String {
     {
         path.to_owned()
     }
+}
+
+fn allocate_offdesk_plan_review_record_path(
+    registry_dir: &Path,
+    reviewed_at: DateTime<Utc>,
+) -> Result<PathBuf> {
+    fs::create_dir_all(registry_dir)
+        .with_context(|| format!("create Offdesk plan registry {}", registry_dir.display()))?;
+    let timestamp = reviewed_at.format("%Y%m%dT%H%M%SZ");
+    for attempt in 0..1000 {
+        let filename = if attempt == 0 {
+            format!("plan_review_{timestamp}.json")
+        } else {
+            format!("plan_review_{timestamp}_{attempt:03}.json")
+        };
+        let path = registry_dir.join(filename);
+        if !path.exists() {
+            return Ok(path);
+        }
+    }
+
+    bail!(
+        "could not allocate Offdesk plan review path in {}",
+        registry_dir.display()
+    )
 }
 
 fn allocate_offdesk_plan_registry_dir(
@@ -7644,6 +7965,12 @@ fn offdesk_plan_registration_denials() -> Vec<String> {
         .collect()
 }
 
+fn offdesk_plan_review_denials() -> Vec<String> {
+    let mut denials = offdesk_plan_registration_denials();
+    denials.push("launch preparation without a separate command".to_string());
+    denials
+}
+
 fn print_offdesk_plan_registration(
     registration: &OffdeskPlanRegistration,
     json: bool,
@@ -7686,13 +8013,14 @@ fn print_offdesk_plan_registry_items(items: &[OffdeskPlanRegistryItem]) {
     for item in items {
         let registration = &item.registration;
         println!(
-            "- {} [{}] review={} launch_prep={} enqueue={}",
+            "- {} [{}] plan_review={} launch_candidate={} enqueue={}",
             item.plan_id,
             registration.artifact_kind,
-            registration.ready_for_operator_review,
-            registration.ready_for_launch_preparation,
+            item.review_state.status,
+            item.review_state.ready_for_launch_preparation_candidate,
             registration.ready_for_enqueue
         );
+        println!("  next:    {}", item.review_state.next_safe_action);
         if let Some(project_key) = registration.project_key.as_deref() {
             println!("  project: {project_key}");
         }
@@ -7703,9 +8031,9 @@ fn print_offdesk_plan_registry_items(items: &[OffdeskPlanRegistryItem]) {
     }
 }
 
-fn print_offdesk_plan_registry_item(item: &OffdeskPlanRegistryItem) {
-    let registration = &item.registration;
-    println!("Registered Offdesk plan: {}", item.plan_id);
+fn print_offdesk_plan_registry_detail(detail: &OffdeskPlanRegistryDetail) {
+    let registration = &detail.registration;
+    println!("Registered Offdesk plan: {}", detail.plan_id);
     println!("  kind:       {}", registration.artifact_kind);
     println!("  schema:     {}", registration.plan_schema);
     println!("  registered: {}", registration.registered_at);
@@ -7735,10 +8063,58 @@ fn print_offdesk_plan_registry_item(item: &OffdeskPlanRegistryItem) {
     if let Some(path) = registration.selected_plan_path.as_deref() {
         println!("  selected_plan: {path}");
     }
-    println!("  registration: {}", item.registration_path);
+    println!("  review_state: {}", detail.review_state.status);
+    println!(
+        "  launch_candidate: {}",
+        detail.review_state.ready_for_launch_preparation_candidate
+    );
+    println!("  next:       {}", detail.review_state.next_safe_action);
+    if let Some(review) = detail.latest_review.as_ref() {
+        println!("  latest_review: {}", review.review_id);
+        println!("  reviewer:   {}", review.reviewer);
+        println!("  reason:     {}", review.reason);
+    }
+    println!("  registration: {}", detail.registration_path);
     println!(
         "  does_not_authorize: {}",
         registration.does_not_authorize.join(", ")
+    );
+}
+
+fn print_offdesk_plan_review_record(record: &OffdeskPlanReviewRecord) {
+    println!("Offdesk plan review");
+    println!("  reviewed_at:  {}", record.reviewed_at);
+    println!("  review_id:    {}", record.review_id);
+    println!("  plan_id:      {}", record.plan_id);
+    println!("  decision:     {}", record.decision.as_str());
+    println!("  reviewer:     {}", record.reviewer);
+    if let Some(provider) = record.review_provider.as_deref() {
+        println!("  provider:     {provider}");
+    }
+    println!("  reason:       {}", record.reason);
+    println!(
+        "  launch_candidate: {}",
+        record.ready_for_launch_preparation_candidate
+    );
+    println!("  ready_for_enqueue: {}", record.ready_for_enqueue);
+    println!("  project file mutations: none");
+    println!("Artifacts:");
+    println!("  registration: {}", record.artifacts.registration_json);
+    println!("  review:       {}", record.artifacts.review_record_json);
+    if !record.blockers.is_empty() {
+        println!("Blockers:");
+        for blocker in &record.blockers {
+            println!("  - {blocker}");
+        }
+    }
+    if !record.followups.is_empty() {
+        println!("Follow-ups:");
+        for followup in &record.followups {
+            println!("  - {followup}");
+        }
+    }
+    println!(
+        "  note: review does not authorize enqueue, launch, approval, file movement, cleanup, or accepted truth"
     );
 }
 

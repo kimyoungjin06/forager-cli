@@ -51,6 +51,7 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk plan`↴](#forager-offdesk-plan)
 * [`forager offdesk plans`↴](#forager-offdesk-plans)
 * [`forager offdesk plan-show`↴](#forager-offdesk-plan-show)
+* [`forager offdesk plan-review`↴](#forager-offdesk-plan-review)
 * [`forager offdesk pending`↴](#forager-offdesk-pending)
 * [`forager offdesk gate`↴](#forager-offdesk-gate)
 * [`forager offdesk launch`↴](#forager-offdesk-launch)
@@ -848,6 +849,7 @@ Manage offdesk approvals and recovery artifacts
 * `plan` — Validate and register a read-only Offdesk planning artifact
 * `plans` — List registered read-only Offdesk planning artifacts
 * `plan-show` — Show one registered read-only Offdesk planning artifact
+* `plan-review` — Record an operator review for a registered Offdesk planning artifact
 * `pending` — List pending action approvals
 * `gate` — Evaluate whether an offdesk capability may execute now
 * `launch` — Gate and record a background runner launch
@@ -967,6 +969,34 @@ Show one registered read-only Offdesk planning artifact
 
 ###### **Options:**
 
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk plan-review`
+
+Record an operator review for a registered Offdesk planning artifact
+
+**Usage:** `forager offdesk plan-review [OPTIONS] --decision <DECISION> --reason <REASON> <PLAN_REF>`
+
+###### **Arguments:**
+
+* `<PLAN_REF>` — Plan ID from `forager offdesk plans`, or a registration/source path
+
+###### **Options:**
+
+* `--decision <DECISION>` — Operator review decision. This command never enqueues or launches work
+
+  Possible values: `approved`, `revision-required`, `rejected`
+
+* `--reviewer <REVIEWER>` — Reviewer or reviewing model label
+
+  Default value: `operator`
+* `--review-provider <REVIEW_PROVIDER>` — Model/provider label used for review
+* `--review-file <REVIEW_FILE>` — Optional path to the raw review output
+* `--reason <REASON>` — Required review rationale. Secrets are redacted before persistence
+* `--blocker <BLOCKERS>` — Blocking issue reported by review; may be passed multiple times
+* `--follow-up <FOLLOWUPS>` — Follow-up requested by review; may be passed multiple times
 * `--json` — Output as JSON
 
 
