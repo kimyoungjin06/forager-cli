@@ -53,6 +53,11 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk plan-show`↴](#forager-offdesk-plan-show)
 * [`forager offdesk plan-review`↴](#forager-offdesk-plan-review)
 * [`forager offdesk plan-launch-prep`↴](#forager-offdesk-plan-launch-prep)
+* [`forager offdesk remote-operator`↴](#forager-offdesk-remote-operator)
+* [`forager offdesk remote-operator status`↴](#forager-offdesk-remote-operator-status)
+* [`forager offdesk remote-operator pending`↴](#forager-offdesk-remote-operator-pending)
+* [`forager offdesk remote-operator plans`↴](#forager-offdesk-remote-operator-plans)
+* [`forager offdesk remote-operator show`↴](#forager-offdesk-remote-operator-show)
 * [`forager offdesk pending`↴](#forager-offdesk-pending)
 * [`forager offdesk gate`↴](#forager-offdesk-gate)
 * [`forager offdesk launch`↴](#forager-offdesk-launch)
@@ -852,6 +857,7 @@ Manage offdesk approvals and recovery artifacts
 * `plan-show` — Show one registered read-only Offdesk planning artifact
 * `plan-review` — Record an operator review for a registered Offdesk planning artifact
 * `plan-launch-prep` — Build a read-only launch-preparation packet from an approved plan review
+* `remote-operator` — Render read-only Remote Operator projections for mobile/chat transports
 * `pending` — List pending action approvals
 * `gate` — Evaluate whether an offdesk capability may execute now
 * `launch` — Gate and record a background runner launch
@@ -1020,6 +1026,91 @@ Build a read-only launch-preparation packet from an approved plan review
 
   Default value: `operator`
 * `--notes <NOTES>` — Optional preparation note. Secrets are redacted before persistence
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk remote-operator`
+
+Render read-only Remote Operator projections for mobile/chat transports
+
+**Usage:** `forager offdesk remote-operator <COMMAND>`
+
+###### **Subcommands:**
+
+* `status` — Render a read-only status projection for a remote operator surface
+* `pending` — Render read-only pending approval summaries without resolving or expiring them
+* `plans` — Render read-only Offdesk plan summaries for a remote operator surface
+* `show` — Render one read-only Offdesk plan detail projection
+
+
+
+## `forager offdesk remote-operator status`
+
+Render a read-only status projection for a remote operator surface
+
+**Usage:** `forager offdesk remote-operator status [OPTIONS]`
+
+###### **Options:**
+
+* `--transport <TRANSPORT>` — Remote transport label used for projection metadata
+
+  Default value: `telegram`
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk remote-operator pending`
+
+Render read-only pending approval summaries without resolving or expiring them
+
+**Usage:** `forager offdesk remote-operator pending [OPTIONS]`
+
+###### **Options:**
+
+* `--transport <TRANSPORT>` — Remote transport label used for projection metadata
+
+  Default value: `telegram`
+* `--all` — Include resolved approvals in addition to pending approval rows
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk remote-operator plans`
+
+Render read-only Offdesk plan summaries for a remote operator surface
+
+**Usage:** `forager offdesk remote-operator plans [OPTIONS]`
+
+###### **Options:**
+
+* `--transport <TRANSPORT>` — Remote transport label used for projection metadata
+
+  Default value: `telegram`
+* `--project-key <PROJECT_KEY>` — Filter by project key
+* `--task-id <TASK_ID>` — Filter by task ID
+* `--profile-key <PROFILE_KEY>` — Filter by planning profile key
+* `--artifact-kind <ARTIFACT_KIND>` — Filter by artifact kind, such as offdesk_multiturn_plan or offdesk_planner_council
+* `--latest` — Return only the newest matching registration
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk remote-operator show`
+
+Render one read-only Offdesk plan detail projection
+
+**Usage:** `forager offdesk remote-operator show [OPTIONS] <PLAN_REF>`
+
+###### **Arguments:**
+
+* `<PLAN_REF>` — Plan ID from `forager offdesk plans`, or a registration/source path
+
+###### **Options:**
+
+* `--transport <TRANSPORT>` — Remote transport label used for projection metadata
+
+  Default value: `telegram`
 * `--json` — Output as JSON
 
 

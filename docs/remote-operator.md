@@ -460,6 +460,21 @@ implicit mutation.
 - Return operator-safe summaries only.
 - No remote approval, launch, enqueue, or mutation.
 
+Current CLI projection surface:
+
+```bash
+forager offdesk remote-operator status --json
+forager offdesk remote-operator pending --json
+forager offdesk remote-operator plans --json
+forager offdesk remote-operator show <plan-id> --json
+```
+
+These commands emit `remote_operator_readonly_projection.v1` with
+`read_only=true`, `mutation_authorized=false`, and
+`approval_authorized=false`. They are intended for Telegram or another
+transport adapter to render. The `pending` projection reads approval rows
+without resolving or expiring them.
+
 ### Phase 2: Remote Envelope And Receipts
 
 - Add `remote_command_envelope.v1`.

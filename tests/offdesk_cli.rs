@@ -9484,6 +9484,240 @@ fn offdesk_plan_launch_prep_requires_approved_review_and_stays_read_only() -> Re
 
 #[test]
 #[serial]
+fn offdesk_remote_operator_plans_and_show_are_read_only() -> Result<()> {
+    let temp = tempdir()?;
+    let input_path = temp.path().join("OVERNIGHT_PLAN.json");
+    fs::write(
+        &input_path,
+        serde_json::to_vec_pretty(&json!({
+            "schema": "offdesk_multiturn_plan.v1",
+            "profile_key": "generic",
+            "decision": {
+                "ready_for_operator_review": true,
+                "ready_for_launch_preparation": false,
+                "ready_for_enqueue": false
+            },
+            "execution_sequence": [
+                {
+                    "id": "phase_1",
+                    "objective": "Expose this plan to a read-only remote operator surface."
+                }
+            ],
+            "authority": {
+                "read_only_plan": true,
+                "does_not_authorize": [
+                    "enqueue",
+                    "launch",
+                    "approval",
+                    "file movement",
+                    "archive",
+                    "delete",
+                    "wiki promotion",
+                    "accepted truth"
+                ]
+            }
+        }))?,
+    )?;
+
+    let register_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plan",
+            input_path.to_str().expect("utf-8 plan path"),
+            "--project-key",
+            "project",
+            "--request-id",
+            "request",
+            "--task-id",
+            "task",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        register_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&register_output.stderr)
+    );
+    let registration: serde_json::Value = serde_json::from_slice(&register_output.stdout)?;
+    let registry_dir = registration["artifacts"]["registry_dir"]
+        .as_str()
+        .expect("registry dir");
+    let plan_id = Path::new(registry_dir)
+        .file_name()
+        .expect("registry dir name")
+        .to_string_lossy()
+        .to_string();
+
+    let review_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plan-review",
+            &plan_id,
+            "--decision",
+            "approved",
+            "--reason",
+            "Ready for read-only remote inspection.",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        review_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&review_output.stderr)
+    );
+
+    let plans_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "remote-operator",
+            "plans",
+            "--project-key",
+            "project",
+            "--latest",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        plans_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&plans_output.stderr)
+    );
+    let plans: serde_json::Value = serde_json::from_slice(&plans_output.stdout)?;
+    assert_eq!(plans["schema"], "remote_operator_readonly_projection.v1");
+    assert_eq!(plans["command"], "plans");
+    assert_eq!(plans["transport"], "telegram");
+    assert_eq!(plans["read_only"], true);
+    assert_eq!(plans["mutation_authorized"], false);
+    assert_eq!(plans["approval_authorized"], false);
+    assert!(plans["forbidden_remote_intents"]
+        .as_array()
+        .expect("forbidden intents")
+        .iter()
+        .any(|item| item == "approve_plan"));
+    assert_eq!(plans["payload"]["plan_count"], 1);
+    assert_eq!(plans["payload"]["plans"][0]["plan_id"], plan_id);
+    assert_eq!(plans["payload"]["plans"][0]["review_status"], "approved");
+    assert_eq!(plans["payload"]["plans"][0]["ready_for_enqueue"], false);
+    assert!(plans["payload"]["plans"][0]["observed_hash"]
+        .as_str()
+        .expect("plan observed hash")
+        .starts_with("sha256:"));
+    assert!(plans["payload"]["plans"][0]["remote_actions"]
+        .as_array()
+        .expect("remote actions")
+        .iter()
+        .any(|item| item == "inspect_plan"));
+
+    let show_output = forager_command(temp.path())
+        .args(["offdesk", "remote-operator", "show", &plan_id, "--json"])
+        .output()?;
+    assert!(
+        show_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&show_output.stderr)
+    );
+    let shown: serde_json::Value = serde_json::from_slice(&show_output.stdout)?;
+    assert_eq!(shown["schema"], "remote_operator_readonly_projection.v1");
+    assert_eq!(shown["command"], "show");
+    assert_eq!(shown["payload"]["plan"]["plan_id"], plan_id);
+    assert_eq!(
+        shown["payload"]["reviews"]
+            .as_array()
+            .expect("review summaries")
+            .len(),
+        1
+    );
+    assert_eq!(
+        shown["payload"]["launch_preps"].as_array().unwrap().len(),
+        0
+    );
+    assert!(shown["payload"]["does_not_authorize"]
+        .as_array()
+        .expect("denials")
+        .iter()
+        .any(|item| item == "launch"));
+    assert!(shown["card"]["disabled_remote_actions"]
+        .as_array()
+        .expect("disabled actions")
+        .iter()
+        .any(|item| item == "dispatch"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_remote_operator_pending_is_read_only_and_does_not_expire() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    fs::write(
+        profile_dir.join("pending_action_approvals.json"),
+        serde_json::to_string_pretty(&json!([
+            {
+                "approval_id": "approval_stale",
+                "status": "pending",
+                "scope": "once",
+                "project_key": "project",
+                "request_id": "request",
+                "task_id": "task",
+                "action": "dispatch.runtime",
+                "risk_level": "runtime_mutation",
+                "approval_mode": "operator_required",
+                "preview": "safe preview",
+                "reason": "outside envelope",
+                "created_at": now - Duration::minutes(20),
+                "expires_at": now - Duration::minutes(10),
+                "source_surface": "test"
+            }
+        ]))?,
+    )?;
+
+    let pending_output = forager_command(temp.path())
+        .args(["offdesk", "remote-operator", "pending", "--json"])
+        .output()?;
+    assert!(
+        pending_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&pending_output.stderr)
+    );
+    let pending: serde_json::Value = serde_json::from_slice(&pending_output.stdout)?;
+    assert_eq!(pending["schema"], "remote_operator_readonly_projection.v1");
+    assert_eq!(pending["command"], "pending");
+    assert_eq!(pending["read_only"], true);
+    assert_eq!(pending["mutation_authorized"], false);
+    assert_eq!(pending["approval_authorized"], false);
+    assert_eq!(pending["payload"]["approval_count"], 1);
+    assert_eq!(
+        pending["payload"]["approvals"][0]["approval_id"],
+        "approval_stale"
+    );
+    assert_eq!(pending["payload"]["approvals"][0]["status"], "pending");
+    assert_eq!(pending["payload"]["approvals"][0]["expired"], true);
+    assert_eq!(
+        pending["payload"]["approvals"][0]["next_safe_action"]["kind"],
+        "approval_expired"
+    );
+    assert!(pending["payload"]["approvals"][0]["remote_actions"]
+        .as_array()
+        .expect("remote actions")
+        .iter()
+        .any(|item| item == "inspect_approval"));
+    assert!(pending["forbidden_remote_intents"]
+        .as_array()
+        .expect("forbidden intents")
+        .iter()
+        .any(|item| item == "approve_launch"));
+
+    let stored: serde_json::Value = serde_json::from_str(&fs::read_to_string(
+        profile_dir.join("pending_action_approvals.json"),
+    )?)?;
+    assert_eq!(stored[0]["status"], "pending");
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn status_json_reports_legacy_profile_dir_when_compat_storage_is_active() -> Result<()> {
     let temp = tempdir()?;
     fs::create_dir_all(legacy_app_dir(temp.path()).join("profiles").join("default"))?;

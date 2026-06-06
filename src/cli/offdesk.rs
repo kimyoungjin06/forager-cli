@@ -20,7 +20,7 @@ use crate::offdesk::{
     assess_offdesk_mode, build_graph_export_files, build_usage_records_with_policy,
     default_capability_registry, implementation_packet_from_path,
     implementation_packet_record_from_path, latest_implementation_packet_for_project,
-    launch_background_command, launch_background_run, operator_safe_report,
+    launch_background_command, launch_background_run, operator_safe_report, operator_safe_text,
     pending_approval_operator_views, poll_background_runs, recommend_provider_fallback,
     reconcile_tasks_with_background_outcomes, run_offdesk_tick,
     work_slice_execution_receipts_from_path, ActionApprovalRequest, AdaptiveWikiActivationMode,
@@ -80,6 +80,12 @@ pub enum OffdeskCommands {
 
     /// Build a read-only launch-preparation packet from an approved plan review
     PlanLaunchPrep(PlanLaunchPrepArgs),
+
+    /// Render read-only Remote Operator projections for mobile/chat transports
+    RemoteOperator {
+        #[command(subcommand)]
+        command: RemoteOperatorCommands,
+    },
 
     /// List pending action approvals
     Pending(PendingArgs),
@@ -847,6 +853,92 @@ pub struct PlanLaunchPrepArgs {
     json: bool,
 }
 
+#[derive(Subcommand)]
+pub enum RemoteOperatorCommands {
+    /// Render a read-only status projection for a remote operator surface
+    Status(RemoteOperatorStatusArgs),
+
+    /// Render read-only pending approval summaries without resolving or expiring them
+    Pending(RemoteOperatorPendingArgs),
+
+    /// Render read-only Offdesk plan summaries for a remote operator surface
+    Plans(RemoteOperatorPlansArgs),
+
+    /// Render one read-only Offdesk plan detail projection
+    Show(RemoteOperatorShowArgs),
+}
+
+#[derive(Args)]
+pub struct RemoteOperatorStatusArgs {
+    /// Remote transport label used for projection metadata
+    #[arg(long, default_value = "telegram")]
+    transport: String,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct RemoteOperatorPendingArgs {
+    /// Remote transport label used for projection metadata
+    #[arg(long, default_value = "telegram")]
+    transport: String,
+
+    /// Include resolved approvals in addition to pending approval rows
+    #[arg(long)]
+    all: bool,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct RemoteOperatorPlansArgs {
+    /// Remote transport label used for projection metadata
+    #[arg(long, default_value = "telegram")]
+    transport: String,
+
+    /// Filter by project key
+    #[arg(long)]
+    project_key: Option<String>,
+
+    /// Filter by task ID
+    #[arg(long)]
+    task_id: Option<String>,
+
+    /// Filter by planning profile key
+    #[arg(long)]
+    profile_key: Option<String>,
+
+    /// Filter by artifact kind, such as offdesk_multiturn_plan or offdesk_planner_council
+    #[arg(long)]
+    artifact_kind: Option<String>,
+
+    /// Return only the newest matching registration
+    #[arg(long)]
+    latest: bool,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct RemoteOperatorShowArgs {
+    /// Remote transport label used for projection metadata
+    #[arg(long, default_value = "telegram")]
+    transport: String,
+
+    /// Plan ID from `forager offdesk plans`, or a registration/source path
+    plan_ref: String,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ValueEnum)]
 #[serde(rename_all = "snake_case")]
 enum OffdeskPlanReviewDecision {
@@ -1034,6 +1126,178 @@ struct OffdeskPlanLaunchPrepArtifacts {
     copied_source_json: Option<String>,
     review_record_json: String,
     launch_prep_json: String,
+}
+
+#[derive(Serialize)]
+struct RemoteOperatorProjection<T>
+where
+    T: Serialize,
+{
+    schema: String,
+    generated_at: DateTime<Utc>,
+    forager_profile: String,
+    transport: String,
+    source_surface: String,
+    command: String,
+    phase: String,
+    read_only: bool,
+    mutation_authorized: bool,
+    approval_authorized: bool,
+    allowed_remote_intents: Vec<String>,
+    forbidden_remote_intents: Vec<String>,
+    card: RemoteOperatorCard,
+    payload: T,
+}
+
+#[derive(Clone, Serialize)]
+struct RemoteOperatorCard {
+    title: String,
+    summary_lines: Vec<String>,
+    detail_lines: Vec<String>,
+    observed_hash: String,
+    remote_actions: Vec<String>,
+    disabled_remote_actions: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct RemoteOperatorStatusPayload {
+    profile: String,
+    waiting: usize,
+    running: usize,
+    idle: usize,
+    stopped: usize,
+    error: usize,
+    total: usize,
+    resume_pending_fresh: usize,
+    resume_pending_stale: usize,
+    pending_approvals: usize,
+    queued_offdesk_tasks: usize,
+    active_offdesk_tasks: usize,
+    offdesk_tasks_pending_approval: usize,
+    failed_offdesk_tasks: usize,
+    resume_pending_offdesk_tasks: usize,
+    cancelled_offdesk_tasks: usize,
+    stale_background_runs: usize,
+    failed_background_runs: usize,
+    closeout_required_offdesk_tasks: usize,
+    next_safe_actions: Vec<RemoteOperatorNextSafeActionSummary>,
+}
+
+#[derive(Clone, Serialize)]
+struct RemoteOperatorNextSafeActionSummary {
+    kind: String,
+    detail: String,
+    requires_operator_review: bool,
+}
+
+#[derive(Serialize)]
+struct RemoteOperatorPendingPayload {
+    include_all: bool,
+    approval_count: usize,
+    approvals: Vec<RemoteOperatorApprovalSummary>,
+}
+
+#[derive(Clone, Serialize)]
+struct RemoteOperatorApprovalSummaryCore {
+    approval_id: String,
+    action_id: String,
+    status: ApprovalStatus,
+    expired: bool,
+    action: String,
+    project_key: String,
+    request_id: String,
+    task_id: String,
+    risk_level: RiskLevel,
+    preview: String,
+    reason: String,
+    created_at: DateTime<Utc>,
+    expires_at: DateTime<Utc>,
+    next_safe_action: RemoteOperatorNextSafeActionSummary,
+    remote_actions: Vec<String>,
+}
+
+#[derive(Clone, Serialize)]
+struct RemoteOperatorApprovalSummary {
+    #[serde(flatten)]
+    core: RemoteOperatorApprovalSummaryCore,
+    observed_hash: String,
+}
+
+#[derive(Serialize)]
+struct RemoteOperatorPlansPayload {
+    filters: RemoteOperatorPlanFilters,
+    plan_count: usize,
+    plans: Vec<RemoteOperatorPlanSummary>,
+}
+
+#[derive(Clone, Serialize)]
+struct RemoteOperatorPlanFilters {
+    project_key: Option<String>,
+    task_id: Option<String>,
+    profile_key: Option<String>,
+    artifact_kind: Option<String>,
+    latest: bool,
+}
+
+#[derive(Clone, Serialize)]
+struct RemoteOperatorPlanSummaryCore {
+    plan_id: String,
+    artifact_kind: String,
+    plan_schema: String,
+    profile_key: Option<String>,
+    project_key: Option<String>,
+    request_id: Option<String>,
+    task_id: Option<String>,
+    registered_at: DateTime<Utc>,
+    source_sha256: String,
+    review_status: String,
+    review_count: usize,
+    latest_review_id: Option<String>,
+    launch_prep_count: usize,
+    latest_launch_prep_id: Option<String>,
+    ready_for_operator_review: bool,
+    launch_preparation_candidate: bool,
+    ready_for_enqueue: bool,
+    next_safe_action: String,
+    remote_actions: Vec<String>,
+}
+
+#[derive(Clone, Serialize)]
+struct RemoteOperatorPlanSummary {
+    #[serde(flatten)]
+    core: RemoteOperatorPlanSummaryCore,
+    observed_hash: String,
+}
+
+#[derive(Serialize)]
+struct RemoteOperatorPlanDetailPayload {
+    plan: RemoteOperatorPlanSummary,
+    reviews: Vec<RemoteOperatorPlanReviewSummary>,
+    launch_preps: Vec<RemoteOperatorLaunchPrepSummary>,
+    does_not_authorize: Vec<String>,
+}
+
+#[derive(Clone, Serialize)]
+struct RemoteOperatorPlanReviewSummary {
+    review_id: String,
+    reviewed_at: DateTime<Utc>,
+    decision: OffdeskPlanReviewDecision,
+    reviewer: String,
+    ready_for_launch_preparation_candidate: bool,
+    ready_for_enqueue: bool,
+    blockers: Vec<String>,
+    followups: Vec<String>,
+}
+
+#[derive(Clone, Serialize)]
+struct RemoteOperatorLaunchPrepSummary {
+    prep_id: String,
+    prepared_at: DateTime<Utc>,
+    review_id: String,
+    launch_preparation_candidate: bool,
+    ready_for_launch: bool,
+    ready_for_enqueue: bool,
+    next_safe_action: String,
 }
 
 struct OffdeskPlanInputSummary {
@@ -3242,6 +3506,7 @@ pub async fn run(profile: &str, command: OffdeskCommands) -> Result<()> {
         OffdeskCommands::PlanShow(args) => plan_show(profile, args).await,
         OffdeskCommands::PlanReview(args) => plan_review(profile, args).await,
         OffdeskCommands::PlanLaunchPrep(args) => plan_launch_prep(profile, args).await,
+        OffdeskCommands::RemoteOperator { command } => remote_operator(profile, command).await,
         OffdeskCommands::Pending(args) => pending(profile, args).await,
         OffdeskCommands::Gate(args) => gate(profile, args).await,
         OffdeskCommands::Launch(args) => launch(profile, args).await,
@@ -7464,6 +7729,121 @@ async fn plan_launch_prep(profile: &str, args: PlanLaunchPrepArgs) -> Result<()>
     Ok(())
 }
 
+async fn remote_operator(profile: &str, command: RemoteOperatorCommands) -> Result<()> {
+    match command {
+        RemoteOperatorCommands::Status(args) => remote_operator_status(profile, args).await,
+        RemoteOperatorCommands::Pending(args) => remote_operator_pending(profile, args).await,
+        RemoteOperatorCommands::Plans(args) => remote_operator_plans(profile, args).await,
+        RemoteOperatorCommands::Show(args) => remote_operator_show(profile, args).await,
+    }
+}
+
+async fn remote_operator_status(profile: &str, args: RemoteOperatorStatusArgs) -> Result<()> {
+    let status = super::status::current_status_json_value(profile)?;
+    let payload = remote_operator_status_payload(status);
+    let observed_hash = observed_hash_for(&payload)?;
+    let card = remote_operator_status_card(&payload, observed_hash);
+    let projection = remote_operator_projection(profile, &args.transport, "status", card, payload);
+    print_remote_operator_projection(&projection, args.json)
+}
+
+async fn remote_operator_pending(profile: &str, args: RemoteOperatorPendingArgs) -> Result<()> {
+    let now = Utc::now();
+    let mut approvals = approval_ledger(profile)?.load()?;
+    if !args.all {
+        approvals.retain(|approval| approval.status == ApprovalStatus::Pending);
+    }
+    approvals.sort_by_key(|approval| approval.created_at);
+    let approval_views = pending_approval_operator_views(approvals, now);
+    let approvals = approval_views
+        .iter()
+        .map(remote_operator_approval_summary)
+        .collect::<Result<Vec<_>>>()?;
+    let payload = RemoteOperatorPendingPayload {
+        include_all: args.all,
+        approval_count: approvals.len(),
+        approvals,
+    };
+    let observed_hash = observed_hash_for(&payload)?;
+    let card = remote_operator_pending_card(&payload, observed_hash);
+    let projection = remote_operator_projection(profile, &args.transport, "pending", card, payload);
+    print_remote_operator_projection(&projection, args.json)
+}
+
+async fn remote_operator_plans(profile: &str, args: RemoteOperatorPlansArgs) -> Result<()> {
+    let filters = RemoteOperatorPlanFilters {
+        project_key: args
+            .project_key
+            .clone()
+            .map(|value| operator_safe_text(&value)),
+        task_id: args.task_id.clone().map(|value| operator_safe_text(&value)),
+        profile_key: args
+            .profile_key
+            .clone()
+            .map(|value| operator_safe_text(&value)),
+        artifact_kind: args
+            .artifact_kind
+            .clone()
+            .map(|value| operator_safe_text(&value)),
+        latest: args.latest,
+    };
+    let mut items = load_offdesk_plan_registry_items(profile)?;
+    items.retain(|item| remote_operator_plan_matches_filter(item, &args));
+    items.sort_by_key(|item| item.registration.registered_at);
+    if args.latest {
+        if let Some(latest) = items.pop() {
+            items = vec![latest];
+        }
+    }
+    let plans = items
+        .iter()
+        .map(remote_operator_plan_summary_from_item)
+        .collect::<Result<Vec<_>>>()?;
+    let payload = RemoteOperatorPlansPayload {
+        filters,
+        plan_count: plans.len(),
+        plans,
+    };
+    let observed_hash = observed_hash_for(&payload)?;
+    let card = remote_operator_plans_card(&payload, observed_hash);
+    let projection = remote_operator_projection(profile, &args.transport, "plans", card, payload);
+    print_remote_operator_projection(&projection, args.json)
+}
+
+async fn remote_operator_show(profile: &str, args: RemoteOperatorShowArgs) -> Result<()> {
+    let items = load_offdesk_plan_registry_items(profile)?;
+    let Some(item) = find_offdesk_plan_registry_item(items, &args.plan_ref) else {
+        bail!("Registered Offdesk plan not found: {}", args.plan_ref);
+    };
+    let detail = offdesk_plan_registry_detail(item)?;
+    let plan = remote_operator_plan_summary_from_detail(&detail)?;
+    let reviews = detail
+        .reviews
+        .iter()
+        .map(remote_operator_plan_review_summary)
+        .collect();
+    let launch_preps = detail
+        .launch_preps
+        .iter()
+        .map(remote_operator_launch_prep_summary)
+        .collect();
+    let payload = RemoteOperatorPlanDetailPayload {
+        plan,
+        reviews,
+        launch_preps,
+        does_not_authorize: detail
+            .registration
+            .does_not_authorize
+            .iter()
+            .map(|value| operator_safe_text(value))
+            .collect(),
+    };
+    let observed_hash = observed_hash_for(&payload)?;
+    let card = remote_operator_show_card(&payload, observed_hash);
+    let projection = remote_operator_projection(profile, &args.transport, "show", card, payload);
+    print_remote_operator_projection(&projection, args.json)
+}
+
 fn build_offdesk_plan_registration(
     profile: &str,
     args: &PlanArgs,
@@ -8237,6 +8617,467 @@ fn offdesk_plan_launch_prep_denials() -> Vec<String> {
     let mut denials = offdesk_plan_review_denials();
     denials.push("dispatch".to_string());
     denials
+}
+
+fn remote_operator_projection<T>(
+    profile: &str,
+    transport: &str,
+    command: &str,
+    card: RemoteOperatorCard,
+    payload: T,
+) -> RemoteOperatorProjection<T>
+where
+    T: Serialize,
+{
+    RemoteOperatorProjection {
+        schema: "remote_operator_readonly_projection.v1".to_string(),
+        generated_at: Utc::now(),
+        forager_profile: operator_safe_text(profile),
+        transport: operator_safe_text(transport),
+        source_surface: format!("remote_operator.{}", operator_safe_text(transport)),
+        command: command.to_string(),
+        phase: "read_only_surface".to_string(),
+        read_only: true,
+        mutation_authorized: false,
+        approval_authorized: false,
+        allowed_remote_intents: vec![
+            "inspect_status".to_string(),
+            "inspect_pending".to_string(),
+            "inspect_plans".to_string(),
+            "inspect_plan".to_string(),
+        ],
+        forbidden_remote_intents: vec![
+            "approve_plan".to_string(),
+            "approve_launch".to_string(),
+            "deny_launch".to_string(),
+            "enqueue".to_string(),
+            "launch".to_string(),
+            "dispatch".to_string(),
+            "shell".to_string(),
+            "git_push".to_string(),
+            "delete".to_string(),
+            "provider_retarget".to_string(),
+        ],
+        card,
+        payload,
+    }
+}
+
+fn remote_operator_status_payload(status: Value) -> RemoteOperatorStatusPayload {
+    RemoteOperatorStatusPayload {
+        profile: json_string_field(&status, "profile").unwrap_or_else(|| "default".to_string()),
+        waiting: json_usize_field(&status, "waiting"),
+        running: json_usize_field(&status, "running"),
+        idle: json_usize_field(&status, "idle"),
+        stopped: json_usize_field(&status, "stopped"),
+        error: json_usize_field(&status, "error"),
+        total: json_usize_field(&status, "total"),
+        resume_pending_fresh: json_usize_field(&status, "resume_pending_fresh"),
+        resume_pending_stale: json_usize_field(&status, "resume_pending_stale"),
+        pending_approvals: json_usize_field(&status, "pending_approvals"),
+        queued_offdesk_tasks: json_usize_field(&status, "queued_offdesk_tasks"),
+        active_offdesk_tasks: json_usize_field(&status, "active_offdesk_tasks"),
+        offdesk_tasks_pending_approval: json_usize_field(&status, "offdesk_tasks_pending_approval"),
+        failed_offdesk_tasks: json_usize_field(&status, "failed_offdesk_tasks"),
+        resume_pending_offdesk_tasks: json_usize_field(&status, "resume_pending_offdesk_tasks"),
+        cancelled_offdesk_tasks: json_usize_field(&status, "cancelled_offdesk_tasks"),
+        stale_background_runs: json_usize_field(&status, "stale_background_runs"),
+        failed_background_runs: json_usize_field(&status, "failed_background_runs"),
+        closeout_required_offdesk_tasks: json_usize_field(
+            &status,
+            "closeout_required_offdesk_tasks",
+        ),
+        next_safe_actions: status
+            .get("offdesk_next_safe_actions")
+            .and_then(Value::as_array)
+            .map(|actions| {
+                actions
+                    .iter()
+                    .map(remote_operator_next_safe_action_from_value)
+                    .collect()
+            })
+            .unwrap_or_default(),
+    }
+}
+
+fn remote_operator_next_safe_action_from_value(
+    value: &Value,
+) -> RemoteOperatorNextSafeActionSummary {
+    RemoteOperatorNextSafeActionSummary {
+        kind: json_string_field(value, "kind").unwrap_or_else(|| "unknown".to_string()),
+        detail: json_string_field(value, "detail")
+            .map(|value| operator_safe_text(&value))
+            .unwrap_or_else(|| "No detail provided.".to_string()),
+        requires_operator_review: value
+            .get("requires_operator_review")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    }
+}
+
+fn remote_operator_approval_summary(
+    view: &OffdeskPendingApprovalView,
+) -> Result<RemoteOperatorApprovalSummary> {
+    let approval = &view.approval;
+    let core = RemoteOperatorApprovalSummaryCore {
+        approval_id: operator_safe_text(&approval.approval_id),
+        action_id: operator_safe_text(approval.action_id()),
+        status: approval.status,
+        expired: approval.status == ApprovalStatus::Pending && approval.expires_at < Utc::now(),
+        action: operator_safe_text(&approval.action),
+        project_key: operator_safe_text(&approval.project_key),
+        request_id: operator_safe_text(&approval.request_id),
+        task_id: operator_safe_text(&approval.task_id),
+        risk_level: approval.risk_level,
+        preview: operator_safe_text(&approval.preview),
+        reason: operator_safe_text(&approval.reason),
+        created_at: approval.created_at,
+        expires_at: approval.expires_at,
+        next_safe_action: remote_operator_next_safe_action_from_offdesk(&view.next_safe_action),
+        remote_actions: vec!["inspect_approval".to_string()],
+    };
+    let observed_hash = observed_hash_for(&core)?;
+    Ok(RemoteOperatorApprovalSummary {
+        core,
+        observed_hash,
+    })
+}
+
+fn remote_operator_next_safe_action_from_offdesk(
+    action: &OffdeskNextSafeAction,
+) -> RemoteOperatorNextSafeActionSummary {
+    RemoteOperatorNextSafeActionSummary {
+        kind: operator_safe_text(&action.kind),
+        detail: operator_safe_text(&action.detail),
+        requires_operator_review: action.requires_operator_review,
+    }
+}
+
+fn remote_operator_plan_matches_filter(
+    item: &OffdeskPlanRegistryItem,
+    args: &RemoteOperatorPlansArgs,
+) -> bool {
+    args.project_key.as_ref().map_or(true, |expected| {
+        item.registration.project_key.as_deref() == Some(expected.as_str())
+    }) && args.task_id.as_ref().map_or(true, |expected| {
+        item.registration.task_id.as_deref() == Some(expected.as_str())
+    }) && args.profile_key.as_ref().map_or(true, |expected| {
+        item.registration.profile_key.as_deref() == Some(expected.as_str())
+    }) && args.artifact_kind.as_ref().map_or(true, |expected| {
+        item.registration.artifact_kind == *expected
+    })
+}
+
+fn remote_operator_plan_summary_from_item(
+    item: &OffdeskPlanRegistryItem,
+) -> Result<RemoteOperatorPlanSummary> {
+    let core = remote_operator_plan_summary_core(
+        &item.plan_id,
+        &item.registration,
+        &item.review_state,
+        item.review_count,
+        item.latest_review.as_ref(),
+        item.launch_prep_count,
+        item.latest_launch_prep.as_ref(),
+    );
+    let observed_hash = observed_hash_for(&core)?;
+    Ok(RemoteOperatorPlanSummary {
+        core,
+        observed_hash,
+    })
+}
+
+fn remote_operator_plan_summary_from_detail(
+    detail: &OffdeskPlanRegistryDetail,
+) -> Result<RemoteOperatorPlanSummary> {
+    let core = remote_operator_plan_summary_core(
+        &detail.plan_id,
+        &detail.registration,
+        &detail.review_state,
+        detail.review_count,
+        detail.latest_review.as_ref(),
+        detail.launch_prep_count,
+        detail.latest_launch_prep.as_ref(),
+    );
+    let observed_hash = observed_hash_for(&core)?;
+    Ok(RemoteOperatorPlanSummary {
+        core,
+        observed_hash,
+    })
+}
+
+fn remote_operator_plan_summary_core(
+    plan_id: &str,
+    registration: &OffdeskPlanRegistration,
+    review_state: &OffdeskPlanReviewState,
+    review_count: usize,
+    latest_review: Option<&OffdeskPlanReviewRecord>,
+    launch_prep_count: usize,
+    latest_launch_prep: Option<&OffdeskPlanLaunchPrepPacket>,
+) -> RemoteOperatorPlanSummaryCore {
+    RemoteOperatorPlanSummaryCore {
+        plan_id: operator_safe_text(plan_id),
+        artifact_kind: operator_safe_text(&registration.artifact_kind),
+        plan_schema: operator_safe_text(&registration.plan_schema),
+        profile_key: registration.profile_key.as_deref().map(operator_safe_text),
+        project_key: registration.project_key.as_deref().map(operator_safe_text),
+        request_id: registration.request_id.as_deref().map(operator_safe_text),
+        task_id: registration.task_id.as_deref().map(operator_safe_text),
+        registered_at: registration.registered_at,
+        source_sha256: registration.source_sha256.clone(),
+        review_status: operator_safe_text(&review_state.status),
+        review_count,
+        latest_review_id: latest_review
+            .map(|review| operator_safe_text(&review.review_id))
+            .or_else(|| {
+                review_state
+                    .latest_review_id
+                    .as_deref()
+                    .map(operator_safe_text)
+            }),
+        launch_prep_count,
+        latest_launch_prep_id: latest_launch_prep.map(|packet| operator_safe_text(&packet.prep_id)),
+        ready_for_operator_review: registration.ready_for_operator_review,
+        launch_preparation_candidate: review_state.ready_for_launch_preparation_candidate,
+        ready_for_enqueue: registration.ready_for_enqueue,
+        next_safe_action: operator_safe_text(&review_state.next_safe_action),
+        remote_actions: vec!["inspect_plan".to_string()],
+    }
+}
+
+fn remote_operator_plan_review_summary(
+    review: &OffdeskPlanReviewRecord,
+) -> RemoteOperatorPlanReviewSummary {
+    RemoteOperatorPlanReviewSummary {
+        review_id: operator_safe_text(&review.review_id),
+        reviewed_at: review.reviewed_at,
+        decision: review.decision,
+        reviewer: operator_safe_text(&review.reviewer),
+        ready_for_launch_preparation_candidate: review.ready_for_launch_preparation_candidate,
+        ready_for_enqueue: review.ready_for_enqueue,
+        blockers: review
+            .blockers
+            .iter()
+            .map(|value| operator_safe_text(value))
+            .collect(),
+        followups: review
+            .followups
+            .iter()
+            .map(|value| operator_safe_text(value))
+            .collect(),
+    }
+}
+
+fn remote_operator_launch_prep_summary(
+    packet: &OffdeskPlanLaunchPrepPacket,
+) -> RemoteOperatorLaunchPrepSummary {
+    RemoteOperatorLaunchPrepSummary {
+        prep_id: operator_safe_text(&packet.prep_id),
+        prepared_at: packet.prepared_at,
+        review_id: operator_safe_text(&packet.review_id),
+        launch_preparation_candidate: packet.launch_preparation_candidate,
+        ready_for_launch: packet.ready_for_launch,
+        ready_for_enqueue: packet.ready_for_enqueue,
+        next_safe_action: operator_safe_text(&packet.next_safe_action),
+    }
+}
+
+fn remote_operator_status_card(
+    payload: &RemoteOperatorStatusPayload,
+    observed_hash: String,
+) -> RemoteOperatorCard {
+    let mut detail_lines = Vec::new();
+    for action in payload.next_safe_actions.iter().take(3) {
+        detail_lines.push(format!("next: {} ({})", action.detail, action.kind));
+    }
+    remote_operator_card(
+        "Forager Remote Status",
+        vec![
+            format!(
+                "sessions: {} waiting / {} running / {} total",
+                payload.waiting, payload.running, payload.total
+            ),
+            format!(
+                "offdesk: {} pending approvals / {} queued / {} active / {} failed",
+                payload.pending_approvals,
+                payload.queued_offdesk_tasks,
+                payload.active_offdesk_tasks + payload.offdesk_tasks_pending_approval,
+                payload.failed_offdesk_tasks
+            ),
+            format!(
+                "closeout required: {}",
+                payload.closeout_required_offdesk_tasks
+            ),
+        ],
+        detail_lines,
+        observed_hash,
+        vec!["inspect_status".to_string()],
+    )
+}
+
+fn remote_operator_pending_card(
+    payload: &RemoteOperatorPendingPayload,
+    observed_hash: String,
+) -> RemoteOperatorCard {
+    let expired = payload
+        .approvals
+        .iter()
+        .filter(|approval| approval.core.expired)
+        .count();
+    let mut detail_lines = Vec::new();
+    for approval in payload.approvals.iter().take(3) {
+        detail_lines.push(format!(
+            "{}: {} {}",
+            approval.core.approval_id,
+            approval.core.action,
+            approval_status_label(approval.core.status)
+        ));
+    }
+    remote_operator_card(
+        "Forager Remote Pending",
+        vec![
+            format!("approvals: {}", payload.approval_count),
+            format!("expired pending approvals: {expired}"),
+            "remote approval is disabled in Phase 1".to_string(),
+        ],
+        detail_lines,
+        observed_hash,
+        vec!["inspect_pending".to_string()],
+    )
+}
+
+fn remote_operator_plans_card(
+    payload: &RemoteOperatorPlansPayload,
+    observed_hash: String,
+) -> RemoteOperatorCard {
+    let mut detail_lines = Vec::new();
+    for plan in payload.plans.iter().take(3) {
+        detail_lines.push(format!(
+            "{}: {} review={}",
+            plan.core.plan_id, plan.core.artifact_kind, plan.core.review_status
+        ));
+    }
+    remote_operator_card(
+        "Forager Remote Plans",
+        vec![
+            format!("plans: {}", payload.plan_count),
+            format!(
+                "filter project: {}",
+                payload.filters.project_key.as_deref().unwrap_or("any")
+            ),
+            "remote plan approval is disabled in Phase 1".to_string(),
+        ],
+        detail_lines,
+        observed_hash,
+        vec!["inspect_plans".to_string()],
+    )
+}
+
+fn remote_operator_show_card(
+    payload: &RemoteOperatorPlanDetailPayload,
+    observed_hash: String,
+) -> RemoteOperatorCard {
+    remote_operator_card(
+        "Forager Remote Plan Detail",
+        vec![
+            format!("plan: {}", payload.plan.core.plan_id),
+            format!(
+                "review: {} / launch-preps: {}",
+                payload.plan.core.review_status,
+                payload.launch_preps.len()
+            ),
+            format!("next: {}", payload.plan.core.next_safe_action),
+        ],
+        vec![
+            format!("reviews: {}", payload.reviews.len()),
+            "remote approval and launch are disabled in Phase 1".to_string(),
+        ],
+        observed_hash,
+        vec!["inspect_plan".to_string()],
+    )
+}
+
+fn remote_operator_card(
+    title: impl Into<String>,
+    summary_lines: Vec<String>,
+    detail_lines: Vec<String>,
+    observed_hash: String,
+    remote_actions: Vec<String>,
+) -> RemoteOperatorCard {
+    RemoteOperatorCard {
+        title: title.into(),
+        summary_lines,
+        detail_lines,
+        observed_hash,
+        remote_actions,
+        disabled_remote_actions: vec![
+            "approve_plan".to_string(),
+            "approve_launch".to_string(),
+            "deny_launch".to_string(),
+            "enqueue".to_string(),
+            "launch".to_string(),
+            "dispatch".to_string(),
+            "shell".to_string(),
+        ],
+    }
+}
+
+fn print_remote_operator_projection<T>(
+    projection: &RemoteOperatorProjection<T>,
+    json: bool,
+) -> Result<()>
+where
+    T: Serialize,
+{
+    if json {
+        println!("{}", serde_json::to_string_pretty(projection)?);
+        return Ok(());
+    }
+
+    println!("{}", projection.card.title);
+    println!("  transport: {}", projection.transport);
+    println!("  surface:   {}", projection.source_surface);
+    println!("  mode:      read-only");
+    println!("  hash:      {}", projection.card.observed_hash);
+    for line in &projection.card.summary_lines {
+        println!("  - {line}");
+    }
+    if !projection.card.detail_lines.is_empty() {
+        println!("Details:");
+        for line in &projection.card.detail_lines {
+            println!("  - {line}");
+        }
+    }
+    println!("  note: remote approval, launch, dispatch, and shell execution are disabled");
+    Ok(())
+}
+
+fn observed_hash_for<T>(value: &T) -> Result<String>
+where
+    T: Serialize,
+{
+    let bytes = serde_json::to_vec(value)?;
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    Ok(format!("sha256:{:x}", hasher.finalize()))
+}
+
+fn approval_status_label(status: ApprovalStatus) -> &'static str {
+    match status {
+        ApprovalStatus::Pending => "pending",
+        ApprovalStatus::Approved => "approved",
+        ApprovalStatus::Denied => "denied",
+        ApprovalStatus::Expired => "expired",
+        ApprovalStatus::Superseded => "superseded",
+    }
+}
+
+fn json_usize_field(value: &Value, field: &str) -> usize {
+    value
+        .get(field)
+        .and_then(Value::as_u64)
+        .map(|value| value as usize)
+        .unwrap_or_default()
 }
 
 fn print_offdesk_plan_registration(
