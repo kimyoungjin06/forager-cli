@@ -40,7 +40,7 @@ fn remote_operator_telegram_dry_run_status_renders_read_only_projection() -> Res
 
     let output = remote_operator_command(temp.path())
         .arg("--dry-run")
-        .arg("--command-text")
+        .arg("--send-command-text")
         .arg("/status")
         .arg("--forager-bin")
         .arg(env!("CARGO_BIN_EXE_forager"))

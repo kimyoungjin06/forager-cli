@@ -71,6 +71,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--state-file", type=pathlib.Path, default=DEFAULT_STATE_FILE)
     parser.add_argument("--out", type=pathlib.Path, help="Optional JSON result path.")
     parser.add_argument("--command-text", help="Deterministic command text, for tests or manual dry-runs.")
+    parser.add_argument("--send-command-text", help="Render a read-only command and send it to the configured target chat.")
     parser.add_argument("--dry-run", action="store_true", help="Do not call the Telegram API.")
     parser.add_argument("--once", action="store_true", help="Poll Telegram once and answer at most one update.")
     parser.add_argument("--poll-timeout-sec", type=int, default=5)
@@ -541,6 +542,27 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
     return result
 
 
+def send_command_text(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]:
+    target_chat_id = str(config.get("target_chat_id") or "").strip()
+    if not target_chat_id:
+        raise RemoteOperatorTelegramError("target chat id is missing")
+    rendered = render_command_result(
+        args,
+        config,
+        args.send_command_text or "/status",
+        mode="live_send",
+    )
+    if rendered.get("status") != "rendered":
+        return rendered
+    rendered["sent_message_id"] = send_message(
+        config,
+        target_chat_id,
+        rendered["message_preview"],
+        args,
+    )
+    return rendered
+
+
 def emit_result(args: argparse.Namespace, result: dict[str, Any]) -> None:
     if args.out:
         write_json(args.out, result)
@@ -552,8 +574,13 @@ def main() -> int:
     try:
         if args.dry_run:
             config = resolve_telegram_config(args.env_file, required=False)
-            command_text = args.command_text or "/status"
+            command_text = args.command_text or args.send_command_text or "/status"
             result = render_command_result(args, config, command_text, mode="dry_run")
+            emit_result(args, result)
+            return 0 if result.get("status") != "unsupported" else 2
+        if args.send_command_text:
+            config = resolve_telegram_config(args.env_file, required=True)
+            result = send_command_text(args, config)
             emit_result(args, result)
             return 0 if result.get("status") != "unsupported" else 2
         if not args.once:

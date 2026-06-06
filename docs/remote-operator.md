@@ -487,12 +487,19 @@ scripts/offdesk_remote_operator_telegram.py \
   --once \
   --env-file /path/to/telegram.env \
   --forager-bin target/debug/forager
+
+scripts/offdesk_remote_operator_telegram.py \
+  --send-command-text "/status" \
+  --env-file /path/to/telegram.env \
+  --forager-bin target/debug/forager
 ```
 
 The adapter accepts only `/status`, `/pending`, `/plans`, `/show <plan-id>`,
 and `/help`. Unsupported commands such as `/approve`, `/launch`, `/exec`, or
 `/git push` return an unsupported result and do not call the projection CLI.
-Live mode currently handles one Telegram update at a time with `--once`.
+Live polling currently handles one Telegram update at a time with `--once`.
+`--send-command-text` sends one read-only projection to the configured owner
+chat without consuming updates.
 
 ### Phase 2: Remote Envelope And Receipts
 
