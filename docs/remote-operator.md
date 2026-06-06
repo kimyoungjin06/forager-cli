@@ -475,6 +475,25 @@ These commands emit `remote_operator_readonly_projection.v1` with
 transport adapter to render. The `pending` projection reads approval rows
 without resolving or expiring them.
 
+The first Telegram adapter is also read-only:
+
+```bash
+scripts/offdesk_remote_operator_telegram.py \
+  --dry-run \
+  --command-text "/status" \
+  --forager-bin target/debug/forager
+
+scripts/offdesk_remote_operator_telegram.py \
+  --once \
+  --env-file /path/to/telegram.env \
+  --forager-bin target/debug/forager
+```
+
+The adapter accepts only `/status`, `/pending`, `/plans`, `/show <plan-id>`,
+and `/help`. Unsupported commands such as `/approve`, `/launch`, `/exec`, or
+`/git push` return an unsupported result and do not call the projection CLI.
+Live mode currently handles one Telegram update at a time with `--once`.
+
 ### Phase 2: Remote Envelope And Receipts
 
 - Add `remote_command_envelope.v1`.
