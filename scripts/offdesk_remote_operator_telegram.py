@@ -40,6 +40,17 @@ DEFAULT_STATE_FILE = pathlib.Path(
 )
 
 RESULT_SCHEMA = "remote_operator_telegram_adapter_result.v1"
+MOBILE_CARD_CONTRACT_SCHEMA = "telegram_mobile_card_contract.v1"
+MOBILE_CARD_MAX_LINES = 12
+MOBILE_CARD_MAX_CHARS = 900
+MOBILE_CARD_FORBIDDEN_TERMS = (
+    "Forager Remote Status",
+    "Read-only",
+    "dispatch",
+    "shell",
+    "launch-prep",
+    "runtime_handle_alive",
+)
 ALLOWED_COMMANDS = ("status", "pending", "plans", "show", "help")
 FORBIDDEN_REMOTE_INTENTS = (
     "approve_plan",
@@ -72,6 +83,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out", type=pathlib.Path, help="Optional JSON result path.")
     parser.add_argument("--command-text", help="Deterministic command text, for tests or manual dry-runs.")
     parser.add_argument("--send-command-text", help="Render a read-only command and send it to the configured target chat.")
+    parser.add_argument("--projection-file", type=pathlib.Path, help="Dry-run only: render this read-only projection instead of invoking forager.")
     parser.add_argument("--dry-run", action="store_true", help="Do not call the Telegram API.")
     parser.add_argument("--once", action="store_true", help="Poll Telegram once and answer at most one update.")
     parser.add_argument("--poll-timeout-sec", type=int, default=5)
@@ -262,6 +274,24 @@ def run_projection(forager_bin: str, profile: str, parsed: dict[str, Any]) -> di
         projection = json.loads(process.stdout)
     except json.JSONDecodeError as error:
         raise RemoteOperatorTelegramError("forager projection did not return JSON") from error
+    validate_projection(projection, expected_command=parsed.get("command"))
+    return projection
+
+
+def load_projection_file(path: pathlib.Path, parsed: dict[str, Any]) -> dict[str, Any]:
+    try:
+        projection = load_json(path)
+    except OSError as error:
+        raise RemoteOperatorTelegramError(f"projection file cannot be read: {path}") from error
+    except json.JSONDecodeError as error:
+        raise RemoteOperatorTelegramError(f"projection file is not valid JSON: {path}") from error
+    if not isinstance(projection, dict):
+        raise RemoteOperatorTelegramError("projection file must contain one JSON object")
+    validate_projection(projection, expected_command=parsed.get("command"))
+    return projection
+
+
+def validate_projection(projection: dict[str, Any], *, expected_command: Any = None) -> None:
     if projection.get("schema") != "remote_operator_readonly_projection.v1":
         raise RemoteOperatorTelegramError("unexpected projection schema")
     if projection.get("read_only") is not True:
@@ -270,7 +300,12 @@ def run_projection(forager_bin: str, profile: str, parsed: dict[str, Any]) -> di
         raise RemoteOperatorTelegramError("projection unexpectedly authorizes mutation")
     if projection.get("approval_authorized") is not False:
         raise RemoteOperatorTelegramError("projection unexpectedly authorizes approval")
-    return projection
+    expected = str(expected_command or "").strip()
+    actual = str(projection.get("command") or "").strip()
+    if expected and actual != expected:
+        raise RemoteOperatorTelegramError(
+            f"projection command mismatch: expected {expected}, got {actual or 'missing'}"
+        )
 
 
 def sanitize_text(text: str, *, max_chars: int = 1200) -> str:
@@ -331,7 +366,9 @@ def render_pending_message(projection: dict[str, Any]) -> str:
         "<b>승인 대기</b>",
         f"대상: {number(payload, 'approval_count')}개",
     ]
-    if not approvals:
+    if approvals:
+        lines.append(f"상태: 승인 요청 {number(payload, 'approval_count')}개를 확인해야 합니다.")
+    else:
         lines.append("상태: 지금 승인할 항목이 없습니다.")
     for approval in approvals[:3]:
         if not isinstance(approval, dict):
@@ -345,9 +382,15 @@ def render_pending_message(projection: dict[str, Any]) -> str:
         )
     if len(approvals) > 3:
         lines.append(f"- 외 {len(approvals) - 3}개")
+    next_line = (
+        "다음: 로컬에서 승인 요청 내용을 확인합니다."
+        if approvals
+        else "다음: 조치 없음. 승인 요청이 생기면 다시 확인합니다."
+    )
     lines.extend(
         [
             "",
+            next_line,
             "읽기 전용: Telegram 승인 버튼은 아직 열지 않았습니다.",
             f"검증: <code>{html.escape(short_hash(card.get('observed_hash')))}</code>",
         ]
@@ -363,7 +406,9 @@ def render_plans_message(projection: dict[str, Any]) -> str:
         "<b>자율주행 계획</b>",
         f"등록 계획: {number(payload, 'plan_count')}개",
     ]
-    if not plans:
+    if plans:
+        lines.append(f"상태: 계획 {number(payload, 'plan_count')}개를 확인할 수 있습니다.")
+    else:
         lines.append("상태: 등록된 계획이 없습니다.")
     for plan in plans[:4]:
         if not isinstance(plan, dict):
@@ -401,6 +446,7 @@ def render_show_message(projection: dict[str, Any]) -> str:
     lines = [
         "<b>계획 상세</b>",
         f"계획: {html.escape(str(plan.get('plan_id') or 'unknown'))}",
+        f"상태: {html.escape(display_review_status(plan.get('review_status')))}",
         f"리뷰: {html.escape(display_review_status(plan.get('review_status')))} / 실행 준비 {len(launch_preps)}개",
         f"다음: {html.escape(display_next_action(plan.get('next_safe_action')))}",
     ]
@@ -544,6 +590,35 @@ def safe_string_list(value: Any) -> list[str]:
     return [sanitize_text(str(item), max_chars=400) for item in value if str(item).strip()]
 
 
+def mobile_card_contract(message: str) -> dict[str, Any]:
+    lines = str(message or "").splitlines()
+    warnings: list[str] = []
+    if len(lines) > MOBILE_CARD_MAX_LINES:
+        warnings.append("too_many_lines")
+    if len(str(message or "")) > MOBILE_CARD_MAX_CHARS:
+        warnings.append("too_many_chars")
+    if not lines or not lines[0].strip().startswith("<b>"):
+        warnings.append("missing_title")
+    if not any(line.startswith("상태:") for line in lines) and "읽기 전용 명령:" not in message:
+        warnings.append("missing_status_headline")
+    if "다음:" not in message and "읽기 전용 명령:" not in message:
+        warnings.append("missing_next_action")
+    leaked_terms = [term for term in MOBILE_CARD_FORBIDDEN_TERMS if term in message]
+    if leaked_terms:
+        warnings.append("forbidden_terms:" + ",".join(leaked_terms))
+    return {
+        "schema": MOBILE_CARD_CONTRACT_SCHEMA,
+        "line_count": len(lines),
+        "char_count": len(str(message or "")),
+        "max_lines": MOBILE_CARD_MAX_LINES,
+        "max_chars": MOBILE_CARD_MAX_CHARS,
+        "has_title": bool(lines and lines[0].strip().startswith("<b>")),
+        "has_status_headline": any(line.startswith("상태:") for line in lines),
+        "has_next_action": "다음:" in message,
+        "warnings": warnings,
+    }
+
+
 def help_message() -> str:
     return "\n".join(
         [
@@ -587,25 +662,32 @@ def render_command_result(
     parsed = parse_remote_command(command_text)
     result["parsed_command"] = parsed
     if not parsed.get("supported"):
+        message_preview = help_message()
         result.update(
             {
                 "status": "unsupported",
                 "reason": parsed.get("reason"),
                 "projection": None,
-                "message_preview": help_message(),
+                "message_preview": message_preview,
+                "mobile_card_contract": mobile_card_contract(message_preview),
             }
         )
         return result
     if parsed.get("command") == "help":
+        message_preview = help_message()
         result.update(
             {
                 "status": "rendered",
                 "projection": None,
-                "message_preview": help_message(),
+                "message_preview": message_preview,
+                "mobile_card_contract": mobile_card_contract(message_preview),
             }
         )
         return result
-    projection = run_projection(args.forager_bin, args.profile, parsed)
+    if args.projection_file:
+        projection = load_projection_file(args.projection_file, parsed)
+    else:
+        projection = run_projection(args.forager_bin, args.profile, parsed)
     message_preview = render_projection_message(
         projection,
         max_chars=max(200, int(args.max_message_chars)),
@@ -616,6 +698,7 @@ def render_command_result(
             "projection_schema": projection.get("schema"),
             "projection": projection,
             "message_preview": message_preview,
+            "mobile_card_contract": mobile_card_contract(message_preview),
         }
     )
     return result
@@ -803,6 +886,8 @@ def emit_result(args: argparse.Namespace, result: dict[str, Any]) -> None:
 def main() -> int:
     args = parse_args()
     try:
+        if args.projection_file and not args.dry_run:
+            raise RemoteOperatorTelegramError("--projection-file is only allowed with --dry-run")
         if args.dry_run:
             config = resolve_telegram_config(args.env_file, required=False)
             command_text = args.command_text or args.send_command_text or "/status"
