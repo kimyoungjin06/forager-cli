@@ -14,7 +14,7 @@ for the long-running documentation and artifact model.
 ```bash
 forager project init /path/to/project \
   --project-key my-project \
-  --operation-target modules/03_regspec_machine \
+  --operation-target modules/01_research \
   --include-git \
   --json
 ```
@@ -39,9 +39,13 @@ Use `--out <dir>` to place the packet somewhere else. Existing non-empty output
 directories are refused unless `--force` is provided.
 
 Use `--operation-target <MODULE_PATH_OR_ID>` when a project-level initialization
-should prioritize a known module, such as TwinPaper's
-`modules/03_regspec_machine`. The project remains the top-level target, while
-the selected module is recorded as a module operation target.
+should prioritize a module. The project remains the top-level target, while the
+selected module is recorded as a module operation target.
+
+Known module-profile builders are not inferred from project names. If a project
+has an existing module profile/evidence workflow, pass it explicitly with
+`--module-profile-spec <json>`. This keeps Forager generic while still allowing
+project-specific adapters.
 
 ## Boundary
 
@@ -76,24 +80,60 @@ for operator review.
 module operation profiles. They are review targets.
 
 `MODULE_OPERATION_PREFLIGHT.json` turns selected operation targets into an
-explicit preflight checklist. It records known module-profile builders,
-evidence-bundle/review commands, runtime blockers, and operator decisions. It
-is advisory and read-only; it does not run the commands or authorize Offdesk
-runtime.
+explicit preflight checklist. It records externally supplied module-profile
+builders, evidence-bundle/review commands, runtime blockers, and operator
+decisions. It is advisory and read-only; it does not run the commands or
+authorize Offdesk runtime.
 
-For example, a TwinPaper initialization should use:
+For example, initialize a generic project module with:
 
 ```bash
-forager project init /home/.../1.2.8.TwinPaper \
-  --project-key twinpaper \
-  --operation-target modules/03_regspec_machine
+forager project init /path/to/project \
+  --project-key my-project \
+  --operation-target modules/01_research \
+  --module-profile-spec module-profile-spec.json
 ```
+
+The module profile spec is a project-specific adapter:
+
+```json
+{
+  "profile_kind": "my_project_module01_operation_profile",
+  "project_key": "my-project",
+  "module_path": "modules/01_research",
+  "profile_artifact": "module01_operation_profile.json",
+  "commands": [
+    {
+      "purpose": "build_evidence_bundle",
+      "command_template": "scripts/build_evidence_bundle.py --repo {repo} --out {evidence_bundle}"
+    },
+    {
+      "purpose": "review_evidence_bundle",
+      "command_template": "scripts/review_evidence_bundle.py --bundle {evidence_bundle} --out {evidence_review}"
+    },
+    {
+      "purpose": "build_module_operation_profile",
+      "command_template": "scripts/build_module_profile.py --repo {repo} --scope {scope_ref} --out {module_profile}"
+    },
+    {
+      "purpose": "prepare_offdesk_task_after_review",
+      "command_template": "scripts/prepare_offdesk_task.py --repo {repo} --project-key {project_key} --module-path {module_path}",
+      "requires_runtime_approval": true
+    }
+  ]
+}
+```
+
+Supported placeholders are `{repo}`, `{artifact_dir}`, `{evidence_bundle}`,
+`{evidence_review}`, `{module_profile}`, `{project_key}`, `{scope_ref}`, and
+`{module_path}`. Without an explicit spec, preflight remains generic and asks the
+operator to author/review a module operation profile before Offdesk runtime.
 
 This records:
 
 ```text
-project scope: twinpaper
-module operation scope: module03_regspec_machine
+project scope: my-project
+module operation scope: module01_research
 ```
 
 Do not initialize the module as the project unless it is being split into a
@@ -242,8 +282,8 @@ and a restore plan, appends one entry, and writes
    bundle builder.
 13. Promote only reviewed wiki seeds.
 14. Start Ondesk from `ONDESK_START_PACKAGE.md`.
-15. Prepare Offdesk with a matching module operation preflight artifact, for
-   example `scripts/prepare_twinpaper_offdesk_task.py --module-preflight-artifact latest`.
+15. Prepare Offdesk with a matching module operation preflight artifact using
+   the project-specific command listed in `MODULE_OPERATION_PREFLIGHT.json`.
 16. Enqueue Offdesk only after runtime capability, evidence, and closeout
    requirements are explicit.
 

@@ -579,6 +579,7 @@ Create a read-only project operation initialization packet
 
 * `--project-key <PROJECT_KEY>` — Stable project key used by Ondesk, Offdesk, and adaptive wiki records
 * `--operation-target <MODULE_PATH_OR_ID>` — Module path/id to mark as a prioritized operation target
+* `--module-profile-spec <PATH>` — Project-specific module operation profile spec. Repeat to register multiple specs
 * `--out <OUT>` — Write the initialization packet to this directory
 * `--include-git` — Include read-only git branch/status/diff-stat evidence
 * `--force` — Overwrite known initialization files when --out already contains files
