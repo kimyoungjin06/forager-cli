@@ -74,10 +74,12 @@ fn remote_operator_telegram_dry_run_status_renders_read_only_projection() -> Res
     assert_eq!(result["projection"]["read_only"], true);
     assert_eq!(result["projection"]["mutation_authorized"], false);
     assert_eq!(result["projection"]["approval_authorized"], false);
-    assert!(result["message_preview"]
-        .as_str()
-        .expect("message preview")
-        .contains("Read-only"));
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("Forager 점검"));
+    assert!(preview.contains("다음:"));
+    assert!(preview.contains("읽기 전용"));
+    assert!(!preview.contains("Forager Remote Status"));
+    assert!(!preview.contains("Read-only"));
     assert!(result["target_chat_id_hash"]
         .as_str()
         .expect("chat hash")

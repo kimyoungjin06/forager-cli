@@ -284,27 +284,258 @@ def sanitize_text(text: str, *, max_chars: int = 1200) -> str:
 
 
 def render_projection_message(projection: dict[str, Any], *, max_chars: int) -> str:
+    command = str(projection.get("command") or "").strip()
+    if command == "status":
+        message = render_status_message(projection)
+    elif command == "pending":
+        message = render_pending_message(projection)
+    elif command == "plans":
+        message = render_plans_message(projection)
+    elif command == "show":
+        message = render_show_message(projection)
+    else:
+        message = render_generic_projection_message(projection)
+    if len(message) > max_chars:
+        return message[: max(0, max_chars - 20)] + "\n...<truncated>"
+    return message
+
+
+def render_status_message(projection: dict[str, Any]) -> str:
+    payload = projection_payload(projection)
+    card = projection_card(projection)
+    return "\n".join(
+        [
+            "<b>Forager 점검</b>",
+            status_headline(payload),
+            "",
+            f"세션: 실행 {number(payload, 'running')} / 대기 {number(payload, 'waiting')} / 전체 {number(payload, 'total')}",
+            (
+                "자율주행: 대기 "
+                f"{number(payload, 'queued_offdesk_tasks')} / 진행 {number(payload, 'active_offdesk_tasks')} / "
+                f"실패 {number(payload, 'failed_offdesk_tasks')}"
+            ),
+            f"승인 요청: {number(payload, 'pending_approvals')} / 마무리 확인: {number(payload, 'closeout_required_offdesk_tasks')}",
+            "",
+            status_next_action(payload),
+            "읽기 전용: Telegram에서는 조회만 됩니다.",
+            f"검증: <code>{html.escape(short_hash(card.get('observed_hash')))}</code>",
+        ]
+    )
+
+
+def render_pending_message(projection: dict[str, Any]) -> str:
+    payload = projection_payload(projection)
+    card = projection_card(projection)
+    approvals = payload.get("approvals") if isinstance(payload.get("approvals"), list) else []
+    lines = [
+        "<b>승인 대기</b>",
+        f"대상: {number(payload, 'approval_count')}개",
+    ]
+    if not approvals:
+        lines.append("상태: 지금 승인할 항목이 없습니다.")
+    for approval in approvals[:3]:
+        if not isinstance(approval, dict):
+            continue
+        expired = " 만료" if approval.get("expired") else ""
+        lines.append(
+            "- "
+            + html.escape(str(approval.get("approval_id") or "approval"))
+            + f": {html.escape(display_action(approval.get('action')))}"
+            + expired
+        )
+    if len(approvals) > 3:
+        lines.append(f"- 외 {len(approvals) - 3}개")
+    lines.extend(
+        [
+            "",
+            "읽기 전용: Telegram 승인 버튼은 아직 열지 않았습니다.",
+            f"검증: <code>{html.escape(short_hash(card.get('observed_hash')))}</code>",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def render_plans_message(projection: dict[str, Any]) -> str:
+    payload = projection_payload(projection)
+    card = projection_card(projection)
+    plans = payload.get("plans") if isinstance(payload.get("plans"), list) else []
+    lines = [
+        "<b>자율주행 계획</b>",
+        f"등록 계획: {number(payload, 'plan_count')}개",
+    ]
+    if not plans:
+        lines.append("상태: 등록된 계획이 없습니다.")
+    for plan in plans[:4]:
+        if not isinstance(plan, dict):
+            continue
+        lines.append(
+            "- "
+            + html.escape(str(plan.get("plan_id") or "plan"))
+            + ": "
+            + html.escape(display_review_status(plan.get("review_status")))
+        )
+    if len(plans) > 4:
+        lines.append(f"- 외 {len(plans) - 4}개")
+    next_line = (
+        "다음: <code>/show PLAN_ID</code> 로 세부 내용을 확인합니다."
+        if plans
+        else "다음: 조치 없음. 등록된 계획이 생기면 세부 확인을 진행합니다."
+    )
+    lines.extend(
+        [
+            "",
+            next_line,
+            "읽기 전용: 계획 승인과 실행은 여기서 막혀 있습니다.",
+            f"검증: <code>{html.escape(short_hash(card.get('observed_hash')))}</code>",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def render_show_message(projection: dict[str, Any]) -> str:
+    payload = projection_payload(projection)
+    card = projection_card(projection)
+    plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else {}
+    reviews = payload.get("reviews") if isinstance(payload.get("reviews"), list) else []
+    launch_preps = payload.get("launch_preps") if isinstance(payload.get("launch_preps"), list) else []
+    lines = [
+        "<b>계획 상세</b>",
+        f"계획: {html.escape(str(plan.get('plan_id') or 'unknown'))}",
+        f"리뷰: {html.escape(display_review_status(plan.get('review_status')))} / 실행 준비 {len(launch_preps)}개",
+        f"다음: {html.escape(display_next_action(plan.get('next_safe_action')))}",
+    ]
+    if reviews:
+        latest = reviews[-1] if isinstance(reviews[-1], dict) else {}
+        lines.append(
+            "최근 리뷰: "
+            + html.escape(str(latest.get("decision") or "unknown"))
+            + " by "
+            + html.escape(str(latest.get("reviewer") or "operator"))
+        )
+    lines.extend(
+        [
+            "",
+            "읽기 전용: 실행 승인은 별도 절차가 필요합니다.",
+            f"검증: <code>{html.escape(short_hash(card.get('observed_hash')))}</code>",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def render_generic_projection_message(projection: dict[str, Any]) -> str:
     card = projection.get("card") if isinstance(projection.get("card"), dict) else {}
-    title = html.escape(str(card.get("title") or "Forager Remote Operator"))
+    title = html.escape(str(card.get("title") or "Forager"))
     lines = [f"<b>{title}</b>"]
-    for item in safe_string_list(card.get("summary_lines"))[:6]:
+    for item in safe_string_list(card.get("summary_lines"))[:4]:
         lines.append(f"- {html.escape(item)}")
-    detail_lines = safe_string_list(card.get("detail_lines"))[:5]
+    detail_lines = safe_string_list(card.get("detail_lines"))[:3]
     if detail_lines:
         lines.append("")
-        lines.append("<b>Details</b>")
+        lines.append("<b>상세</b>")
         for item in detail_lines:
             lines.append(f"- {html.escape(item)}")
     observed_hash = str(card.get("observed_hash") or "").strip()
     if observed_hash:
         lines.append("")
-        lines.append(f"<code>{html.escape(observed_hash)}</code>")
+        lines.append(f"검증: <code>{html.escape(short_hash(observed_hash))}</code>")
     lines.append("")
-    lines.append("Read-only: approval, launch, dispatch, and shell execution are disabled.")
-    message = "\n".join(lines)
-    if len(message) > max_chars:
-        return message[: max(0, max_chars - 20)] + "\n...<truncated>"
-    return message
+    lines.append("읽기 전용: Telegram에서는 조회만 됩니다.")
+    return "\n".join(lines)
+
+
+def projection_payload(projection: dict[str, Any]) -> dict[str, Any]:
+    payload = projection.get("payload")
+    return payload if isinstance(payload, dict) else {}
+
+
+def projection_card(projection: dict[str, Any]) -> dict[str, Any]:
+    card = projection.get("card")
+    return card if isinstance(card, dict) else {}
+
+
+def number(value: dict[str, Any], key: str) -> int:
+    raw = value.get(key)
+    return int(raw) if isinstance(raw, int) else 0
+
+
+def status_headline(payload: dict[str, Any]) -> str:
+    pending = number(payload, "pending_approvals")
+    failed = number(payload, "failed_offdesk_tasks")
+    closeout = number(payload, "closeout_required_offdesk_tasks")
+    active = number(payload, "active_offdesk_tasks")
+    queued = number(payload, "queued_offdesk_tasks")
+    if pending:
+        return f"상태: 승인 요청 {pending}개를 확인해야 합니다."
+    if failed:
+        return f"상태: 실패한 자율주행 {failed}개가 있습니다."
+    if closeout:
+        return f"상태: 마무리 확인 {closeout}개가 필요합니다."
+    if active:
+        return f"상태: 자율주행 {active}개가 진행 중입니다."
+    if queued:
+        return f"상태: 자율주행 {queued}개가 대기 중입니다."
+    return "상태: 지금 처리할 항목은 없습니다."
+
+
+def status_next_action(payload: dict[str, Any]) -> str:
+    pending = number(payload, "pending_approvals")
+    failed = number(payload, "failed_offdesk_tasks")
+    closeout = number(payload, "closeout_required_offdesk_tasks")
+    if pending:
+        return "다음: <code>/pending</code> 으로 승인 요청을 확인합니다."
+    if failed or closeout:
+        return "다음: 실패/마무리 항목을 로컬에서 점검합니다."
+    return "다음: 조치 없음. 상태 확인만 유지하면 됩니다."
+
+
+def display_action(value: Any) -> str:
+    text = str(value or "").strip()
+    labels = {
+        "approve_plan": "계획 승인",
+        "approve_launch": "실행 승인",
+        "deny_launch": "실행 거절",
+        "provider_fallback": "모델 대체",
+        "provider_retarget": "모델 변경",
+    }
+    return labels.get(text, text.replace("_", " ") or "확인 필요")
+
+
+def display_review_status(value: Any) -> str:
+    text = str(value or "").strip()
+    labels = {
+        "accepted": "승인됨",
+        "approved": "승인됨",
+        "pending": "검토 대기",
+        "missing": "검토 없음",
+        "not_reviewed": "검토 없음",
+        "revision_required": "수정 필요",
+        "rejected": "거절됨",
+        "review_unknown": "검토 상태 불명",
+        "unknown": "상태 불명",
+    }
+    return labels.get(text, text.replace("_", " ") or "상태 불명")
+
+
+def display_next_action(value: Any) -> str:
+    text = str(value or "").strip()
+    labels = {
+        "inspect": "내용 확인",
+        "review": "리뷰 필요",
+        "approve": "승인 검토",
+        "launch_prep": "실행 준비 확인",
+        "launch": "실행 검토",
+        "closeout": "마무리 확인",
+    }
+    return labels.get(text, text.replace("_", " ") or "내용 확인")
+
+
+def short_hash(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "sha256:unknown"
+    if text.startswith("sha256:") and len(text) > 22:
+        return text[:22]
+    return text
 
 
 def safe_string_list(value: Any) -> list[str]:
@@ -316,14 +547,14 @@ def safe_string_list(value: Any) -> list[str]:
 def help_message() -> str:
     return "\n".join(
         [
-            "<b>Forager Remote Operator</b>",
-            "Read-only commands:",
+            "<b>Forager 원격 상태</b>",
+            "읽기 전용 명령:",
             "- /status",
             "- /pending [--all]",
             "- /plans [--project-key KEY] [--latest]",
             "- /show PLAN_ID",
             "",
-            "Approval, launch, dispatch, shell, git push, delete, and provider retargeting are disabled.",
+            "승인, 실행, 작업 배포, 터미널 명령, git push, 삭제, 모델 변경은 막혀 있습니다.",
         ]
     )
 
