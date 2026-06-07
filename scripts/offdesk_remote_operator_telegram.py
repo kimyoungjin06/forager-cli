@@ -48,6 +48,7 @@ DEFAULT_FEEDBACK_FILE = pathlib.Path(
 RESULT_SCHEMA = "remote_operator_telegram_adapter_result.v1"
 MOBILE_CARD_CONTRACT_SCHEMA = "telegram_mobile_card_contract.v1"
 CHOICE_SURFACE_CONTRACT_SCHEMA = "telegram_choice_surface_contract.v1"
+INTERACTION_CONTEXT_SCHEMA = "telegram_interaction_context.v1"
 MOBILE_CARD_MAX_LINES = 8
 MOBILE_CARD_MAX_CHARS = 650
 MOBILE_CARD_FORBIDDEN_TERMS = (
@@ -63,9 +64,11 @@ MOBILE_CARD_FORBIDDEN_TERMS = (
 BUTTON_COMMAND_ALIASES = {
     "상태": "/status",
     "승인 대기": "/pending",
+    "전체 승인": "/pending --all",
     "계획": "/plans --latest",
     "도움말": "/help",
 }
+CORE_BUTTON_LABELS = ("상태", "승인 대기", "계획", "도움말")
 ALLOWED_COMMANDS = ("status", "pending", "plans", "show", "help", "feedback")
 FORBIDDEN_REMOTE_INTENTS = (
     "approve_plan",
@@ -644,6 +647,149 @@ def safe_string_list(value: Any) -> list[str]:
     return [sanitize_text(str(item), max_chars=400) for item in value if str(item).strip()]
 
 
+def show_command_for(plan_id: Any) -> str:
+    value = str(plan_id or "").strip()
+    return f"/show {shlex.quote(value)}" if value else "/plans --latest"
+
+
+def interaction_context_from_projection(projection: dict[str, Any]) -> dict[str, Any]:
+    command = str(projection.get("command") or "").strip()
+    payload = projection_payload(projection)
+    profile = profile_label_from_projection(projection)
+    context: dict[str, Any] = {
+        "schema": INTERACTION_CONTEXT_SCHEMA,
+        "command": command or "unknown",
+        "profile": profile,
+        "projection_generated_at": str(projection.get("generated_at") or ""),
+        "context_kind": "generic",
+        "focus_kind": None,
+        "focus_ref": None,
+        "focus_label": None,
+        "next_command": None,
+    }
+    if command == "status":
+        pending = number(payload, "pending_approvals")
+        failed = number(payload, "failed_offdesk_tasks")
+        closeout = number(payload, "closeout_required_offdesk_tasks")
+        active = number(payload, "active_offdesk_tasks")
+        queued = number(payload, "queued_offdesk_tasks")
+        if pending:
+            context.update(
+                {
+                    "context_kind": "status_attention",
+                    "focus_kind": "approval_queue",
+                    "focus_ref": str(pending),
+                    "focus_label": f"승인 요청 {pending}개",
+                    "next_command": "/pending",
+                }
+            )
+        elif failed or closeout:
+            context.update(
+                {
+                    "context_kind": "status_attention",
+                    "focus_kind": "local_review",
+                    "focus_ref": f"failed:{failed};closeout:{closeout}",
+                    "focus_label": status_summary(payload),
+                    "next_command": "/status",
+                }
+            )
+        elif active or queued:
+            context.update(
+                {
+                    "context_kind": "status_activity",
+                    "focus_kind": "offdesk_activity",
+                    "focus_ref": f"active:{active};queued:{queued}",
+                    "focus_label": status_summary(payload),
+                    "next_command": "/status",
+                }
+            )
+        else:
+            context.update(
+                {
+                    "context_kind": "status_clear",
+                    "focus_kind": "none",
+                    "focus_label": "처리할 항목 없음",
+                    "next_command": "/status",
+                }
+            )
+    elif command == "pending":
+        approvals = payload.get("approvals") if isinstance(payload.get("approvals"), list) else []
+        if approvals and isinstance(approvals[0], dict):
+            approval = approvals[0]
+            context.update(
+                {
+                    "context_kind": "approval_attention",
+                    "focus_kind": "approval",
+                    "focus_ref": str(approval.get("approval_id") or "approval"),
+                    "focus_label": display_action(approval.get("action")),
+                    "next_command": "/pending --all" if len(approvals) > 1 else "/pending",
+                }
+            )
+        else:
+            context.update(
+                {
+                    "context_kind": "approval_clear",
+                    "focus_kind": "none",
+                    "focus_label": "승인할 항목 없음",
+                    "next_command": "/pending",
+                }
+            )
+    elif command == "plans":
+        plans = payload.get("plans") if isinstance(payload.get("plans"), list) else []
+        if plans and isinstance(plans[0], dict):
+            plan = plans[0]
+            plan_id = str(plan.get("plan_id") or "plan")
+            context.update(
+                {
+                    "context_kind": "plan_attention",
+                    "focus_kind": "plan",
+                    "focus_ref": plan_id,
+                    "focus_label": display_review_status(plan.get("review_status")),
+                    "next_command": show_command_for(plan_id),
+                }
+            )
+        else:
+            context.update(
+                {
+                    "context_kind": "plan_clear",
+                    "focus_kind": "none",
+                    "focus_label": "등록된 계획 없음",
+                    "next_command": "/plans --latest",
+                }
+            )
+    elif command == "show":
+        plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else {}
+        plan_id = str(plan.get("plan_id") or "unknown")
+        context.update(
+            {
+                "context_kind": "plan_detail",
+                "focus_kind": "plan",
+                "focus_ref": plan_id,
+                "focus_label": display_review_status(plan.get("review_status")),
+                "next_command": "/plans --latest",
+            }
+        )
+    return context
+
+
+def interaction_context_label(context: dict[str, Any] | None) -> str:
+    if not isinstance(context, dict):
+        return ""
+    focus_kind = str(context.get("focus_kind") or "").strip()
+    focus_ref = str(context.get("focus_ref") or "").strip()
+    focus_label = str(context.get("focus_label") or "").strip()
+    if focus_kind == "plan" and focus_ref:
+        suffix = f" · {focus_label}" if focus_label else ""
+        return f"계획 {focus_ref}{suffix}"
+    if focus_kind == "approval" and focus_ref:
+        suffix = f" · {focus_label}" if focus_label else ""
+        return f"승인 {focus_ref}{suffix}"
+    if focus_label:
+        return focus_label
+    command = str(context.get("command") or "").strip()
+    return command
+
+
 def mobile_card_contract(message: str) -> dict[str, Any]:
     lines = str(message or "").splitlines()
     warnings: list[str] = []
@@ -673,19 +819,62 @@ def mobile_card_contract(message: str) -> dict[str, Any]:
     }
 
 
-def choice_keyboard() -> dict[str, Any]:
+def choice_keyboard(context: dict[str, Any] | None = None) -> dict[str, Any]:
+    rows: list[list[str]] = []
+    seen: set[str] = set()
+
+    def add_row(*labels: str) -> None:
+        row: list[str] = []
+        for label in labels:
+            text = str(label or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            row.append(text)
+        if row:
+            rows.append(row)
+
+    context_kind = str(context.get("context_kind") or "") if isinstance(context, dict) else ""
+    next_command = str(context.get("next_command") or "").strip() if isinstance(context, dict) else ""
+    if next_command and next_command not in {"/status", "/pending", "/plans --latest", "/help"}:
+        add_row(next_command)
+    if context_kind == "status_attention":
+        add_row("승인 대기", "계획")
+        add_row("상태", "도움말")
+    elif context_kind == "approval_attention":
+        add_row("전체 승인", "상태")
+        add_row("승인 대기", "계획")
+        add_row("도움말")
+    elif context_kind == "plan_attention":
+        add_row("계획", "상태")
+        add_row("승인 대기", "도움말")
+    elif context_kind == "plan_detail":
+        add_row("계획", "상태")
+        add_row("승인 대기", "도움말")
+    else:
+        add_row("상태", "승인 대기")
+        add_row("계획", "도움말")
+    for label in CORE_BUTTON_LABELS:
+        if label not in seen:
+            add_row(label)
     return {
-        "keyboard": [
-            ["상태", "승인 대기"],
-            ["계획", "도움말"],
-        ],
+        "keyboard": rows,
         "resize_keyboard": True,
         "one_time_keyboard": False,
         "input_field_placeholder": "의견을 직접 입력할 수 있습니다",
     }
 
 
-def choice_surface_contract(reply_markup: dict[str, Any] | None) -> dict[str, Any]:
+def button_resolves_to(button_text: str, command_text: str) -> bool:
+    button = str(button_text or "").strip()
+    command = str(command_text or "").strip()
+    return bool(command) and (button == command or BUTTON_COMMAND_ALIASES.get(button) == command)
+
+
+def choice_surface_contract(
+    reply_markup: dict[str, Any] | None,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     warnings: list[str] = []
     keyboard = reply_markup.get("keyboard") if isinstance(reply_markup, dict) else None
     button_texts: list[str] = []
@@ -700,7 +889,7 @@ def choice_surface_contract(reply_markup: dict[str, Any] | None) -> dict[str, An
                     button_texts.append(str(button.get("text") or ""))
     else:
         warnings.append("missing_keyboard")
-    for label in BUTTON_COMMAND_ALIASES:
+    for label in CORE_BUTTON_LABELS:
         if label not in button_texts:
             warnings.append(f"missing_button:{label}")
     placeholder = ""
@@ -708,10 +897,19 @@ def choice_surface_contract(reply_markup: dict[str, Any] | None) -> dict[str, An
         placeholder = str(reply_markup.get("input_field_placeholder") or "")
     if "의견" not in placeholder:
         warnings.append("missing_freeform_placeholder")
+    next_command = str(context.get("next_command") or "").strip() if isinstance(context, dict) else ""
+    has_contextual_choice = False
+    if next_command:
+        has_contextual_choice = any(button_resolves_to(button, next_command) for button in button_texts)
+        if not has_contextual_choice:
+            warnings.append(f"missing_contextual_choice:{next_command}")
     return {
         "schema": CHOICE_SURFACE_CONTRACT_SCHEMA,
         "button_texts": button_texts,
         "has_freeform_placeholder": "의견" in placeholder,
+        "context_kind": context.get("context_kind") if isinstance(context, dict) else None,
+        "context_command": next_command or None,
+        "has_contextual_choice": has_contextual_choice,
         "warnings": warnings,
     }
 
@@ -729,17 +927,29 @@ def help_message(*, profile: Any, generated_at: Any) -> str:
     )
 
 
-def render_feedback_message(*, profile: Any, generated_at: Any, feedback_text: str) -> str:
+def render_feedback_message(
+    *,
+    profile: Any,
+    generated_at: Any,
+    feedback_text: str,
+    feedback_context: dict[str, Any] | None = None,
+) -> str:
     excerpt = sanitize_text(feedback_text, max_chars=120)
-    return "\n".join(
+    lines = [
+        title_with_profile("의견 접수", profile),
+        "상태: 입력 내용을 저장했습니다.",
+        basis_line(generated_at),
+    ]
+    context_label = interaction_context_label(feedback_context)
+    if context_label:
+        lines.append(f"맥락: {html.escape(context_label)}")
+    lines.extend(
         [
-            title_with_profile("의견 접수", profile),
-            "상태: 입력 내용을 저장했습니다.",
-            basis_line(generated_at),
             f"내용: {html.escape(excerpt)}",
             "다음: 로컬 검토 대기",
         ]
     )
+    return "\n".join(lines)
 
 
 def result_base(args: argparse.Namespace, config: dict[str, Any], mode: str) -> dict[str, Any]:
@@ -758,22 +968,29 @@ def result_base(args: argparse.Namespace, config: dict[str, Any], mode: str) -> 
     }
 
 
+def attach_choice_surface(result: dict[str, Any], context: dict[str, Any] | None) -> None:
+    reply_markup = choice_keyboard(context)
+    result["reply_markup_preview"] = reply_markup
+    result["choice_surface_contract"] = choice_surface_contract(reply_markup, context)
+    if isinstance(context, dict):
+        result["interaction_context"] = context
+
+
 def render_command_result(
     args: argparse.Namespace,
     config: dict[str, Any],
     command_text: str,
     *,
     mode: str,
+    feedback_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     result = result_base(args, config, mode)
-    reply_markup = choice_keyboard()
-    result["reply_markup_preview"] = reply_markup
-    result["choice_surface_contract"] = choice_surface_contract(reply_markup)
     result["command_text"] = sanitize_text(command_text, max_chars=400)
     parsed = parse_remote_command(command_text)
     result["parsed_command"] = parsed
     if not parsed.get("supported"):
         message_preview = help_message(profile=args.profile, generated_at=result["generated_at"])
+        attach_choice_surface(result, None)
         result.update(
             {
                 "status": "unsupported",
@@ -786,6 +1003,7 @@ def render_command_result(
         return result
     if parsed.get("command") == "help":
         message_preview = help_message(profile=args.profile, generated_at=result["generated_at"])
+        attach_choice_surface(result, None)
         result.update(
             {
                 "status": "rendered",
@@ -800,7 +1018,11 @@ def render_command_result(
             profile=args.profile,
             generated_at=result["generated_at"],
             feedback_text=str(parsed.get("feedback_text") or command_text),
+            feedback_context=feedback_context,
         )
+        attach_choice_surface(result, feedback_context)
+        if isinstance(feedback_context, dict):
+            result["feedback_context"] = feedback_context
         result.update(
             {
                 "status": "rendered",
@@ -818,6 +1040,8 @@ def render_command_result(
         projection,
         max_chars=max(200, int(args.max_message_chars)),
     )
+    interaction_context = interaction_context_from_projection(projection)
+    attach_choice_surface(result, interaction_context)
     result.update(
         {
             "status": "rendered",
@@ -870,6 +1094,42 @@ def load_state(path: pathlib.Path) -> dict[str, Any]:
 def save_state(path: pathlib.Path, state: dict[str, Any]) -> None:
     state["updated_at"] = utc_now()
     write_json(path, state)
+
+
+def last_context_for_chat_hash(state: dict[str, Any], chat_hash: Any) -> dict[str, Any] | None:
+    contexts = state.get("last_interaction_context_by_chat")
+    if not isinstance(contexts, dict):
+        return None
+    context = contexts.get(str(chat_hash or ""))
+    return context if isinstance(context, dict) else None
+
+
+def remember_context_for_chat_hash(
+    state: dict[str, Any],
+    chat_hash: Any,
+    rendered: dict[str, Any],
+) -> None:
+    context = rendered.get("interaction_context")
+    parsed = rendered.get("parsed_command") if isinstance(rendered.get("parsed_command"), dict) else {}
+    if not isinstance(context, dict) or parsed.get("command") == "feedback":
+        return
+    contexts = state.setdefault("last_interaction_context_by_chat", {})
+    if not isinstance(contexts, dict):
+        contexts = {}
+        state["last_interaction_context_by_chat"] = contexts
+    remembered = dict(context)
+    remembered["remembered_at"] = utc_now()
+    if isinstance(rendered.get("sent_message_id"), int):
+        remembered["source_message_id"] = rendered["sent_message_id"]
+    contexts[str(chat_hash or "")] = remembered
+
+
+def remember_context_for_message(
+    state: dict[str, Any],
+    message: dict[str, Any],
+    rendered: dict[str, Any],
+) -> None:
+    remember_context_for_chat_hash(state, sha256_short(chat_id_for(message)), rendered)
 
 
 def get_updates(config: dict[str, Any], offset: int, args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -946,7 +1206,14 @@ def message_id_for(message: dict[str, Any]) -> int | None:
     return int(value) if isinstance(value, int) else None
 
 
-def record_feedback(args: argparse.Namespace, config: dict[str, Any], message: dict[str, Any], text: str) -> dict[str, Any]:
+def record_feedback(
+    args: argparse.Namespace,
+    config: dict[str, Any],
+    message: dict[str, Any],
+    text: str,
+    *,
+    feedback_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     record = {
         "schema": "remote_operator_telegram_feedback.v1",
         "received_at": utc_now(),
@@ -956,12 +1223,14 @@ def record_feedback(args: argparse.Namespace, config: dict[str, Any], message: d
         "message_id": message_id_for(message),
         "feedback_text": sanitize_text(text, max_chars=2000),
         "target_chat_id_hash": config.get("target_chat_id_hash"),
+        "feedback_context": feedback_context,
     }
     append_jsonl(args.feedback_file, record)
     return {
         "feedback_recorded": True,
         "feedback_file": str(args.feedback_file),
         "feedback_text_chars": len(str(text or "")),
+        "feedback_context": feedback_context,
     }
 
 
@@ -1005,10 +1274,25 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
         if not text:
             result.update({"status": "ignored", "reason": "empty_message"})
             continue
-        rendered = render_command_result(args, config, text, mode="live_once")
+        feedback_context = last_context_for_chat_hash(state, sha256_short(chat_id_for(message)))
+        rendered = render_command_result(
+            args,
+            config,
+            text,
+            mode="live_once",
+            feedback_context=feedback_context,
+        )
         parsed_command = rendered.get("parsed_command") if isinstance(rendered.get("parsed_command"), dict) else {}
         if parsed_command.get("command") == "feedback":
-            rendered.update(record_feedback(args, config, message, text))
+            rendered.update(
+                record_feedback(
+                    args,
+                    config,
+                    message,
+                    text,
+                    feedback_context=feedback_context,
+                )
+            )
         message_id = send_message(
             config,
             chat_id_for(message),
@@ -1019,6 +1303,7 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
             else None,
         )
         rendered["sent_message_id"] = message_id
+        remember_context_for_message(state, message, rendered)
         result = rendered
         break
     if max_update_id >= int(state.get("offset") or 0):
@@ -1031,11 +1316,14 @@ def send_command_text(args: argparse.Namespace, config: dict[str, Any]) -> dict[
     target_chat_id = str(config.get("target_chat_id") or "").strip()
     if not target_chat_id:
         raise RemoteOperatorTelegramError("target chat id is missing")
+    state = load_state(args.state_file)
+    feedback_context = last_context_for_chat_hash(state, sha256_short(target_chat_id))
     rendered = render_command_result(
         args,
         config,
         args.send_command_text or "/status",
         mode="live_send",
+        feedback_context=feedback_context,
     )
     if rendered.get("status") != "rendered":
         return rendered
@@ -1048,6 +1336,8 @@ def send_command_text(args: argparse.Namespace, config: dict[str, Any]) -> dict[
         if isinstance(rendered.get("reply_markup_preview"), dict)
         else None,
     )
+    remember_context_for_chat_hash(state, sha256_short(target_chat_id), rendered)
+    save_state(args.state_file, state)
     return rendered
 
 
@@ -1065,7 +1355,18 @@ def main() -> int:
         if args.dry_run:
             config = resolve_telegram_config(args.env_file, required=False)
             command_text = args.command_text or args.send_command_text or "/status"
-            result = render_command_result(args, config, command_text, mode="dry_run")
+            state = load_state(args.state_file)
+            feedback_context = last_context_for_chat_hash(
+                state,
+                config.get("target_chat_id_hash"),
+            )
+            result = render_command_result(
+                args,
+                config,
+                command_text,
+                mode="dry_run",
+                feedback_context=feedback_context,
+            )
             emit_result(args, result)
             return 0 if result.get("status") != "unsupported" else 2
         if args.send_command_text:
