@@ -44,6 +44,12 @@ DEFAULT_FEEDBACK_FILE = pathlib.Path(
         str(pathlib.Path.home() / ".cache" / "forager" / "remote_operator_telegram_feedback.jsonl"),
     )
 )
+DEFAULT_FEEDBACK_INGEST_DIR = pathlib.Path(
+    os.environ.get(
+        "OFFDESK_REMOTE_OPERATOR_TELEGRAM_FEEDBACK_INGEST_DIR",
+        str(pathlib.Path.home() / ".cache" / "forager" / "remote_operator_telegram_feedback_ingest"),
+    )
+)
 
 RESULT_SCHEMA = "remote_operator_telegram_adapter_result.v1"
 MOBILE_CARD_CONTRACT_SCHEMA = "telegram_mobile_card_contract.v1"
@@ -99,6 +105,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--env-file", type=pathlib.Path, default=DEFAULT_TELEGRAM_ENV_FILE)
     parser.add_argument("--state-file", type=pathlib.Path, default=DEFAULT_STATE_FILE)
     parser.add_argument("--feedback-file", type=pathlib.Path, default=DEFAULT_FEEDBACK_FILE)
+    parser.add_argument("--feedback-ingest-dir", type=pathlib.Path, default=DEFAULT_FEEDBACK_INGEST_DIR)
+    parser.add_argument(
+        "--no-decision-feedback-ingest",
+        dest="decision_feedback_ingest",
+        action="store_false",
+        default=True,
+        help="Record freeform Telegram feedback JSONL only; do not promote it to offdesk decisions.",
+    )
     parser.add_argument("--out", type=pathlib.Path, help="Optional JSON result path.")
     parser.add_argument("--command-text", help="Deterministic command text, for tests or manual dry-runs.")
     parser.add_argument("--send-command-text", help="Render a read-only command and send it to the configured target chat.")
@@ -314,6 +328,81 @@ def run_projection(forager_bin: str, profile: str, parsed: dict[str, Any]) -> di
         raise RemoteOperatorTelegramError("forager projection did not return JSON") from error
     validate_projection(projection, expected_command=parsed.get("command"))
     return projection
+
+
+def decision_feedback_ingest_command(
+    args: argparse.Namespace,
+    feedback_path: pathlib.Path,
+) -> list[str]:
+    argv = [args.forager_bin]
+    if args.profile:
+        argv.extend(["--profile", args.profile])
+    argv.extend(
+        [
+            "offdesk",
+            "decision",
+            "ingest-telegram-feedback",
+            "--feedback",
+            str(feedback_path),
+            "--json",
+        ]
+    )
+    return argv
+
+
+def ingest_feedback_decision(
+    args: argparse.Namespace,
+    feedback_record: dict[str, Any],
+) -> dict[str, Any]:
+    if not args.decision_feedback_ingest:
+        return {"decision_feedback_ingest_status": "disabled"}
+    fingerprint = hashlib.sha256(
+        json.dumps(feedback_record, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:16]
+    message_id = feedback_record.get("message_id")
+    suffix = str(message_id) if message_id is not None else fingerprint
+    feedback_path = args.feedback_ingest_dir / f"telegram_feedback_{suffix}_{fingerprint}.json"
+    write_json(feedback_path, feedback_record)
+    command = decision_feedback_ingest_command(args, feedback_path)
+    try:
+        process = subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+    except OSError as error:
+        return {
+            "decision_feedback_ingest_status": "error",
+            "decision_feedback_ingest_file": str(feedback_path),
+            "decision_feedback_ingest_error": sanitize_text(str(error), max_chars=300),
+        }
+    if process.returncode != 0:
+        return {
+            "decision_feedback_ingest_status": "error",
+            "decision_feedback_ingest_file": str(feedback_path),
+            "decision_feedback_ingest_error": sanitize_text(
+                process.stderr.strip() or process.stdout.strip(),
+                max_chars=300,
+            ),
+        }
+    try:
+        report = json.loads(process.stdout)
+    except json.JSONDecodeError:
+        return {
+            "decision_feedback_ingest_status": "error",
+            "decision_feedback_ingest_file": str(feedback_path),
+            "decision_feedback_ingest_error": "decision ingest did not return JSON",
+        }
+    return {
+        "decision_feedback_ingest_status": "recorded"
+        if report.get("appended") is True
+        else "existing",
+        "decision_feedback_ingest_file": str(feedback_path),
+        "decision_feedback_decision_id": report.get("decision_id"),
+        "decision_feedback_appended": bool(report.get("appended")),
+    }
 
 
 def load_projection_file(path: pathlib.Path, parsed: dict[str, Any]) -> dict[str, Any]:
@@ -933,11 +1022,18 @@ def render_feedback_message(
     generated_at: Any,
     feedback_text: str,
     feedback_context: dict[str, Any] | None = None,
+    inbox_status: str | None = None,
 ) -> str:
     excerpt = sanitize_text(feedback_text, max_chars=120)
+    if inbox_status in {"recorded", "existing"}:
+        status_line = "상태: 입력 내용을 결정함에 등록했습니다."
+    elif inbox_status == "error":
+        status_line = "상태: 입력 저장됨 · 결정함 등록 실패"
+    else:
+        status_line = "상태: 입력 내용을 저장했습니다."
     lines = [
         title_with_profile("의견 접수", profile),
-        "상태: 입력 내용을 저장했습니다.",
+        status_line,
         basis_line(generated_at),
     ]
     context_label = interaction_context_label(feedback_context)
@@ -1231,6 +1327,7 @@ def record_feedback(
         "feedback_file": str(args.feedback_file),
         "feedback_text_chars": len(str(text or "")),
         "feedback_context": feedback_context,
+        "feedback_record": record,
     }
 
 
@@ -1284,15 +1381,26 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
         )
         parsed_command = rendered.get("parsed_command") if isinstance(rendered.get("parsed_command"), dict) else {}
         if parsed_command.get("command") == "feedback":
-            rendered.update(
-                record_feedback(
-                    args,
-                    config,
-                    message,
-                    text,
-                    feedback_context=feedback_context,
-                )
+            feedback_result = record_feedback(
+                args,
+                config,
+                message,
+                text,
+                feedback_context=feedback_context,
             )
+            feedback_record = feedback_result.pop("feedback_record", None)
+            rendered.update(feedback_result)
+            if isinstance(feedback_record, dict):
+                ingest_result = ingest_feedback_decision(args, feedback_record)
+                rendered.update(ingest_result)
+                rendered["message_preview"] = render_feedback_message(
+                    profile=args.profile,
+                    generated_at=rendered["generated_at"],
+                    feedback_text=str(parsed_command.get("feedback_text") or text),
+                    feedback_context=feedback_context,
+                    inbox_status=str(ingest_result.get("decision_feedback_ingest_status") or ""),
+                )
+                rendered["mobile_card_contract"] = mobile_card_contract(rendered["message_preview"])
         message_id = send_message(
             config,
             chat_id_for(message),

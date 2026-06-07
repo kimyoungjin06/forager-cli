@@ -733,6 +733,184 @@ fn offdesk_decision_ingest_telegram_appends_profile_handoff_and_receipt() -> Res
 
 #[test]
 #[serial]
+fn offdesk_decision_ingest_telegram_feedback_creates_reviewable_inbox_item() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let artifact_dir = temp.path().join("relay");
+    fs::create_dir_all(&artifact_dir)?;
+    let old_feedback = json!({
+        "schema": "remote_operator_telegram_feedback.v1",
+        "received_at": Utc::now(),
+        "profile": "default",
+        "chat_id_hash": "sha256:old-chat",
+        "user_id_hash": "sha256:old-user",
+        "message_id": 1,
+        "feedback_text": "old feedback",
+        "target_chat_id_hash": "sha256:old-chat",
+        "feedback_context": serde_json::Value::Null
+    });
+    let feedback = json!({
+        "schema": "remote_operator_telegram_feedback.v1",
+        "received_at": Utc::now(),
+        "profile": "default",
+        "chat_id_hash": "sha256:chat",
+        "user_id_hash": "sha256:user",
+        "message_id": 777,
+        "feedback_text": "실패 조건 보강 필요",
+        "target_chat_id_hash": "sha256:chat",
+        "feedback_context": {
+            "schema": "telegram_interaction_context.v1",
+            "command": "plans",
+            "profile": "default",
+            "context_kind": "plan_attention",
+            "focus_kind": "plan",
+            "focus_ref": "plan_harness_mobile",
+            "focus_label": "수정 필요",
+            "next_command": "/show plan_harness_mobile",
+            "project_key": "project",
+            "request_id": "request",
+            "task_id": "task"
+        }
+    });
+    let feedback_path = artifact_dir.join("feedback.jsonl");
+    fs::write(
+        &feedback_path,
+        format!(
+            "{}\n{}\n",
+            serde_json::to_string(&old_feedback)?,
+            serde_json::to_string(&feedback)?
+        ),
+    )?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "decision",
+            "ingest-telegram-feedback",
+            "--feedback",
+            feedback_path.to_str().expect("utf8 feedback path"),
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    let decision_id = report["decision_id"].as_str().expect("decision id");
+    assert!(decision_id.starts_with("telegram-feedback-"));
+    assert_eq!(report["appended"], true);
+    assert_eq!(report["record"]["status"], "user_pending");
+    assert_eq!(report["record"]["materiality"], "medium");
+    assert_eq!(
+        report["record"]["source_surface"],
+        "telegram.remote_operator.feedback"
+    );
+    assert_eq!(
+        report["record"]["decision_request"]["kind"],
+        "telegram_operator_feedback"
+    );
+    assert_eq!(report["record"]["route"]["target"], "user");
+    assert_eq!(
+        report["record"]["approval_brief"]["source"],
+        "telegram.remote_operator.feedback"
+    );
+    assert!(report["record"]["decision_request"]["non_authorized_scope"]
+        .as_array()
+        .expect("non-authorized scope")
+        .iter()
+        .any(|scope| scope.as_str() == Some("approval resolution")));
+    assert_eq!(report["validation_issues"], json!([]));
+    let ledger_path = profile_dir.join("offdesk_decisions.jsonl");
+    let ledger = fs::read_to_string(&ledger_path)?;
+    assert_eq!(ledger.lines().count(), 1);
+
+    let mut replay_feedback = feedback.clone();
+    replay_feedback["received_at"] = json!(Utc::now() + Duration::seconds(5));
+    fs::write(
+        &feedback_path,
+        format!("{}\n", serde_json::to_string(&replay_feedback)?),
+    )?;
+
+    let duplicate_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "decision",
+            "ingest-telegram-feedback",
+            "--feedback",
+            feedback_path.to_str().expect("utf8 feedback path"),
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        duplicate_output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&duplicate_output.stderr)
+    );
+    let duplicate_report: serde_json::Value = serde_json::from_slice(&duplicate_output.stdout)?;
+    assert_eq!(duplicate_report["decision_id"], decision_id);
+    assert_eq!(duplicate_report["appended"], false);
+    let ledger = fs::read_to_string(&ledger_path)?;
+    assert_eq!(ledger.lines().count(), 1);
+
+    let resolve_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "decision",
+            "resolve",
+            decision_id,
+            "--decision",
+            "revise",
+            "--note",
+            "Tighten the mobile feedback summary before the next offdesk run.",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        resolve_output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&resolve_output.stderr)
+    );
+    let resolved: serde_json::Value = serde_json::from_slice(&resolve_output.stdout)?;
+    assert_eq!(resolved["record"]["status"], "handoff_ready");
+    assert_eq!(
+        resolved["record"]["execution_handoff"]["approved_direction"],
+        "revise"
+    );
+
+    let receipt_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "decision",
+            "receipt",
+            decision_id,
+            "--result-status",
+            "reviewed",
+            "--evidence",
+            "Telegram feedback was reviewed by the planning harness.",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        receipt_output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&receipt_output.stderr)
+    );
+    let receipted: serde_json::Value = serde_json::from_slice(&receipt_output.stdout)?;
+    assert_eq!(receipted["record"]["status"], "receipted");
+    assert_eq!(
+        receipted["record"]["decision_receipt"]["result_status"],
+        "reviewed"
+    );
+    let ledger = fs::read_to_string(&ledger_path)?;
+    assert_eq!(ledger.lines().count(), 3);
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn offdesk_decisions_report_validation_issues() -> Result<()> {
     let temp = tempdir()?;
     let profile_dir = profile_dir(temp.path());
