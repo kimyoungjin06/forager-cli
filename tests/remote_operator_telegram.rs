@@ -78,12 +78,32 @@ fn assert_mobile_contract(result: &Value) {
         .as_array()
         .expect("mobile card warnings")
         .is_empty());
-    assert!(contract["line_count"].as_u64().expect("line count") <= 12);
+    assert!(contract["line_count"].as_u64().expect("line count") <= 8);
+    let choice_contract = &result["choice_surface_contract"];
+    assert_eq!(
+        choice_contract["schema"],
+        "telegram_choice_surface_contract.v1"
+    );
+    assert!(choice_contract["warnings"]
+        .as_array()
+        .expect("choice surface warnings")
+        .is_empty());
+    for label in ["상태", "승인 대기", "계획", "도움말"] {
+        assert!(choice_contract["button_texts"]
+            .as_array()
+            .expect("button texts")
+            .iter()
+            .any(|item| item == label));
+    }
+    assert_eq!(choice_contract["has_freeform_placeholder"], true);
 
     let preview = result["message_preview"].as_str().expect("message preview");
     for forbidden in [
         "Forager Remote Status",
         "Read-only",
+        "읽기 전용",
+        "검증:",
+        "sha256:",
         "dispatch",
         "shell",
         "launch-prep",
@@ -141,9 +161,9 @@ fn remote_operator_telegram_dry_run_status_renders_read_only_projection() -> Res
     assert_eq!(result["projection"]["mutation_authorized"], false);
     assert_eq!(result["projection"]["approval_authorized"], false);
     let preview = result["message_preview"].as_str().expect("message preview");
-    assert!(preview.contains("Forager 점검"));
+    assert!(preview.contains("Forager 점검 / default"));
+    assert!(preview.contains("상태: 정상, 처리할 항목 없음"));
     assert!(preview.contains("다음:"));
-    assert!(preview.contains("읽기 전용"));
     assert!(!preview.contains("Forager Remote Status"));
     assert!(!preview.contains("Read-only"));
     assert_mobile_contract(&result);
@@ -205,6 +225,79 @@ fn remote_operator_telegram_rejects_approval_command_without_projection() -> Res
 
 #[test]
 #[serial]
+fn remote_operator_telegram_korean_buttons_map_to_safe_commands() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let out = temp.path().join("remote_button_alias.json");
+
+    let output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--command-text")
+        .arg("계획")
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--out")
+        .arg(&out)
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["status"], "rendered");
+    assert_eq!(result["parsed_command"]["command"], "plans");
+    assert_eq!(
+        result["parsed_command"]["argv"],
+        json!(["plans", "--latest"])
+    );
+    assert_mobile_contract(&result);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_freeform_feedback_gets_mobile_receipt() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let out = temp.path().join("remote_feedback.json");
+
+    let output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--command-text")
+        .arg("승인 전 실패 조건을 더 명확히 적어줘")
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--out")
+        .arg(&out)
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["status"], "rendered");
+    assert_eq!(result["parsed_command"]["command"], "feedback");
+    assert_eq!(result["projection"], Value::Null);
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>의견 접수 / default</b>"));
+    assert!(preview.contains("상태: 입력 내용을 저장했습니다."));
+    assert!(preview.contains("승인 전 실패 조건을 더 명확히 적어줘"));
+    assert_mobile_contract(&result);
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn remote_operator_telegram_status_fixture_prioritizes_attention() -> Result<()> {
     let temp = tempdir()?;
     let env_path = temp.path().join("telegram.env");
@@ -242,9 +335,9 @@ fn remote_operator_telegram_status_fixture_prioritizes_attention() -> Result<()>
     assert!(output.status.success());
     let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
     let preview = result["message_preview"].as_str().expect("message preview");
-    assert!(preview.contains("상태: 승인 요청 2개를 확인해야 합니다."));
-    assert!(preview.contains("다음: <code>/pending</code>"));
-    assert!(preview.contains("자율주행: 대기 3 / 진행 1 / 실패 1"));
+    assert!(preview.contains("상태: 승인 요청 2개 확인 필요"));
+    assert!(preview.contains("다음: <code>/pending</code> 으로 승인 요청 확인"));
+    assert!(preview.contains("승인 2 · 실패 1 · 마무리 1 · 자율주행 진행 1 / 대기 3"));
     assert_mobile_contract(&result);
     Ok(())
 }
@@ -286,12 +379,12 @@ fn remote_operator_telegram_pending_fixture_is_mobile_scannable() -> Result<()> 
     assert!(output.status.success());
     let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
     let preview = result["message_preview"].as_str().expect("message preview");
-    assert!(preview.contains("<b>승인 대기</b>"));
+    assert!(preview.contains("<b>승인 대기 / default</b>"));
+    assert!(preview.contains("상태: 승인 요청 4개 확인 필요 · 만료 1"));
     assert!(preview.contains("계획 승인"));
     assert!(preview.contains("실행 승인"));
-    assert!(preview.contains("모델 변경 만료"));
-    assert!(preview.contains("- 외 1개"));
-    assert!(preview.contains("다음:"));
+    assert!(preview.contains("- 외 2개"));
+    assert!(preview.contains("다음: 로컬에서 승인 판단"));
     assert_mobile_contract(&result);
     Ok(())
 }
@@ -330,9 +423,9 @@ fn remote_operator_telegram_plans_fixture_has_empty_and_nonempty_next_actions() 
     assert!(output.status.success());
     let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
     let preview = result["message_preview"].as_str().expect("message preview");
-    assert!(preview.contains("<b>자율주행 계획</b>"));
+    assert!(preview.contains("<b>자율주행 계획 / default</b>"));
     assert!(preview.contains("plan_harness_mobile: 수정 필요"));
-    assert!(preview.contains("다음: <code>/show PLAN_ID</code>"));
+    assert!(preview.contains("다음: <code>/show PLAN_ID</code> 로 세부 확인"));
     assert_mobile_contract(&result);
     Ok(())
 }

@@ -38,20 +38,35 @@ DEFAULT_STATE_FILE = pathlib.Path(
         str(pathlib.Path.home() / ".cache" / "forager" / "remote_operator_telegram_state.json"),
     )
 )
+DEFAULT_FEEDBACK_FILE = pathlib.Path(
+    os.environ.get(
+        "OFFDESK_REMOTE_OPERATOR_TELEGRAM_FEEDBACK",
+        str(pathlib.Path.home() / ".cache" / "forager" / "remote_operator_telegram_feedback.jsonl"),
+    )
+)
 
 RESULT_SCHEMA = "remote_operator_telegram_adapter_result.v1"
 MOBILE_CARD_CONTRACT_SCHEMA = "telegram_mobile_card_contract.v1"
-MOBILE_CARD_MAX_LINES = 12
-MOBILE_CARD_MAX_CHARS = 900
+CHOICE_SURFACE_CONTRACT_SCHEMA = "telegram_choice_surface_contract.v1"
+MOBILE_CARD_MAX_LINES = 8
+MOBILE_CARD_MAX_CHARS = 650
 MOBILE_CARD_FORBIDDEN_TERMS = (
     "Forager Remote Status",
     "Read-only",
+    "검증:",
+    "sha256:",
     "dispatch",
     "shell",
     "launch-prep",
     "runtime_handle_alive",
 )
-ALLOWED_COMMANDS = ("status", "pending", "plans", "show", "help")
+BUTTON_COMMAND_ALIASES = {
+    "상태": "/status",
+    "승인 대기": "/pending",
+    "계획": "/plans --latest",
+    "도움말": "/help",
+}
+ALLOWED_COMMANDS = ("status", "pending", "plans", "show", "help", "feedback")
 FORBIDDEN_REMOTE_INTENTS = (
     "approve_plan",
     "approve_launch",
@@ -80,6 +95,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--forager-bin", default=os.environ.get("FORAGER_BIN", "forager"))
     parser.add_argument("--env-file", type=pathlib.Path, default=DEFAULT_TELEGRAM_ENV_FILE)
     parser.add_argument("--state-file", type=pathlib.Path, default=DEFAULT_STATE_FILE)
+    parser.add_argument("--feedback-file", type=pathlib.Path, default=DEFAULT_FEEDBACK_FILE)
     parser.add_argument("--out", type=pathlib.Path, help="Optional JSON result path.")
     parser.add_argument("--command-text", help="Deterministic command text, for tests or manual dry-runs.")
     parser.add_argument("--send-command-text", help="Render a read-only command and send it to the configured target chat.")
@@ -95,6 +111,12 @@ def parse_args() -> argparse.Namespace:
 def write_json(path: pathlib.Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def append_jsonl(path: pathlib.Path, value: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n")
 
 
 def load_json(path: pathlib.Path) -> Any:
@@ -177,12 +199,25 @@ def parse_remote_command(command_text: str) -> dict[str, Any]:
     text = str(command_text or "").strip()
     if not text:
         return unsupported_command(text, "empty_command")
+    original_text = text
+    alias = BUTTON_COMMAND_ALIASES.get(text)
+    if alias:
+        text = alias
+    if not text.startswith("/"):
+        return {
+            "supported": True,
+            "command": "feedback",
+            "argv": [],
+            "reason": "freeform_feedback",
+            "command_text": original_text,
+            "feedback_text": original_text,
+        }
     try:
         tokens = shlex.split(text)
     except ValueError as error:
-        return unsupported_command(text, f"parse_error:{error}")
+        return unsupported_command(original_text, f"parse_error:{error}")
     if not tokens:
-        return unsupported_command(text, "empty_command")
+        return unsupported_command(original_text, "empty_command")
 
     command = normalize_command_name(tokens[0])
     args = tokens[1:]
@@ -190,7 +225,7 @@ def parse_remote_command(command_text: str) -> dict[str, Any]:
         return {"supported": True, "command": "help", "argv": [], "reason": "help"}
     if command == "status":
         if args:
-            return unsupported_command(text, "status_accepts_no_arguments")
+            return unsupported_command(original_text, "status_accepts_no_arguments")
         return {"supported": True, "command": "status", "argv": ["status"]}
     if command == "pending":
         argv = ["pending"]
@@ -198,13 +233,13 @@ def parse_remote_command(command_text: str) -> dict[str, Any]:
             if arg == "--all":
                 argv.append("--all")
             else:
-                return unsupported_command(text, f"unsupported_pending_argument:{arg}")
+                return unsupported_command(original_text, f"unsupported_pending_argument:{arg}")
         return {"supported": True, "command": "pending", "argv": argv}
     if command == "plans":
-        return parse_plans_command(text, args)
+        return parse_plans_command(original_text, args)
     if command == "show":
-        return parse_show_command(text, args)
-    return unsupported_command(text, "unsupported_remote_operator_command")
+        return parse_show_command(original_text, args)
+    return unsupported_command(original_text, "unsupported_remote_operator_command")
 
 
 def parse_plans_command(command_text: str, args: list[str]) -> dict[str, Any]:
@@ -318,6 +353,32 @@ def sanitize_text(text: str, *, max_chars: int = 1200) -> str:
     return safe
 
 
+def kst_time_label(value: Any) -> str:
+    text = str(value or "").strip()
+    try:
+        timestamp = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        timestamp = dt.datetime.now(dt.timezone.utc)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=dt.timezone.utc)
+    kst = dt.timezone(dt.timedelta(hours=9), name="KST")
+    return timestamp.astimezone(kst).strftime("%H:%M KST")
+
+
+def profile_label_from_projection(projection: dict[str, Any]) -> str:
+    payload = projection_payload(projection)
+    value = payload.get("profile") or projection.get("forager_profile") or "default"
+    return sanitize_text(str(value), max_chars=80)
+
+
+def title_with_profile(title: str, profile: Any) -> str:
+    return f"<b>{html.escape(str(title))} / {html.escape(str(profile or 'default'))}</b>"
+
+
+def basis_line(generated_at: Any) -> str:
+    return f"기준: {kst_time_label(generated_at)}"
+
+
 def render_projection_message(projection: dict[str, Any], *, max_chars: int) -> str:
     command = str(projection.get("command") or "").strip()
     if command == "status":
@@ -337,40 +398,39 @@ def render_projection_message(projection: dict[str, Any], *, max_chars: int) -> 
 
 def render_status_message(projection: dict[str, Any]) -> str:
     payload = projection_payload(projection)
-    card = projection_card(projection)
+    profile = profile_label_from_projection(projection)
+    summary = status_summary(payload)
     return "\n".join(
         [
-            "<b>Forager 점검</b>",
+            title_with_profile("Forager 점검", profile),
             status_headline(payload),
+            basis_line(projection.get("generated_at")),
             "",
-            f"세션: 실행 {number(payload, 'running')} / 대기 {number(payload, 'waiting')} / 전체 {number(payload, 'total')}",
-            (
-                "자율주행: 대기 "
-                f"{number(payload, 'queued_offdesk_tasks')} / 진행 {number(payload, 'active_offdesk_tasks')} / "
-                f"실패 {number(payload, 'failed_offdesk_tasks')}"
-            ),
-            f"승인 요청: {number(payload, 'pending_approvals')} / 마무리 확인: {number(payload, 'closeout_required_offdesk_tasks')}",
-            "",
+            summary,
             status_next_action(payload),
-            "읽기 전용: Telegram에서는 조회만 됩니다.",
-            f"검증: <code>{html.escape(short_hash(card.get('observed_hash')))}</code>",
         ]
     )
 
 
 def render_pending_message(projection: dict[str, Any]) -> str:
     payload = projection_payload(projection)
-    card = projection_card(projection)
+    profile = profile_label_from_projection(projection)
     approvals = payload.get("approvals") if isinstance(payload.get("approvals"), list) else []
     lines = [
-        "<b>승인 대기</b>",
-        f"대상: {number(payload, 'approval_count')}개",
+        title_with_profile("승인 대기", profile),
     ]
     if approvals:
-        lines.append(f"상태: 승인 요청 {number(payload, 'approval_count')}개를 확인해야 합니다.")
+        expired_count = sum(1 for item in approvals if isinstance(item, dict) and item.get("expired"))
+        expired_suffix = f" · 만료 {expired_count}" if expired_count else ""
+        lines.append(
+            f"상태: 승인 요청 {number(payload, 'approval_count')}개 확인 필요{expired_suffix}"
+        )
     else:
-        lines.append("상태: 지금 승인할 항목이 없습니다.")
-    for approval in approvals[:3]:
+        lines.append("상태: 승인할 항목 없음")
+    lines.append(basis_line(projection.get("generated_at")))
+    if approvals:
+        lines.append("")
+    for approval in approvals[:2]:
         if not isinstance(approval, dict):
             continue
         expired = " 만료" if approval.get("expired") else ""
@@ -380,37 +440,32 @@ def render_pending_message(projection: dict[str, Any]) -> str:
             + f": {html.escape(display_action(approval.get('action')))}"
             + expired
         )
-    if len(approvals) > 3:
-        lines.append(f"- 외 {len(approvals) - 3}개")
+    if len(approvals) > 2:
+        lines.append(f"- 외 {len(approvals) - 2}개")
     next_line = (
-        "다음: 로컬에서 승인 요청 내용을 확인합니다."
+        "다음: 로컬에서 승인 판단"
         if approvals
-        else "다음: 조치 없음. 승인 요청이 생기면 다시 확인합니다."
+        else "다음: 알림 대기"
     )
-    lines.extend(
-        [
-            "",
-            next_line,
-            "읽기 전용: Telegram 승인 버튼은 아직 열지 않았습니다.",
-            f"검증: <code>{html.escape(short_hash(card.get('observed_hash')))}</code>",
-        ]
-    )
+    lines.append(next_line)
     return "\n".join(lines)
 
 
 def render_plans_message(projection: dict[str, Any]) -> str:
     payload = projection_payload(projection)
-    card = projection_card(projection)
+    profile = profile_label_from_projection(projection)
     plans = payload.get("plans") if isinstance(payload.get("plans"), list) else []
     lines = [
-        "<b>자율주행 계획</b>",
-        f"등록 계획: {number(payload, 'plan_count')}개",
+        title_with_profile("자율주행 계획", profile),
     ]
     if plans:
-        lines.append(f"상태: 계획 {number(payload, 'plan_count')}개를 확인할 수 있습니다.")
+        lines.append(f"상태: 계획 {number(payload, 'plan_count')}개 확인 가능")
     else:
-        lines.append("상태: 등록된 계획이 없습니다.")
-    for plan in plans[:4]:
+        lines.append("상태: 등록된 계획 없음")
+    lines.append(basis_line(projection.get("generated_at")))
+    if plans:
+        lines.append("")
+    for plan in plans[:2]:
         if not isinstance(plan, dict):
             continue
         lines.append(
@@ -419,34 +474,28 @@ def render_plans_message(projection: dict[str, Any]) -> str:
             + ": "
             + html.escape(display_review_status(plan.get("review_status")))
         )
-    if len(plans) > 4:
-        lines.append(f"- 외 {len(plans) - 4}개")
+    if len(plans) > 2:
+        lines.append(f"- 외 {len(plans) - 2}개")
     next_line = (
-        "다음: <code>/show PLAN_ID</code> 로 세부 내용을 확인합니다."
+        "다음: <code>/show PLAN_ID</code> 로 세부 확인"
         if plans
-        else "다음: 조치 없음. 등록된 계획이 생기면 세부 확인을 진행합니다."
+        else "다음: 계획 등록 후 확인"
     )
-    lines.extend(
-        [
-            "",
-            next_line,
-            "읽기 전용: 계획 승인과 실행은 여기서 막혀 있습니다.",
-            f"검증: <code>{html.escape(short_hash(card.get('observed_hash')))}</code>",
-        ]
-    )
+    lines.append(next_line)
     return "\n".join(lines)
 
 
 def render_show_message(projection: dict[str, Any]) -> str:
     payload = projection_payload(projection)
-    card = projection_card(projection)
+    profile = profile_label_from_projection(projection)
     plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else {}
     reviews = payload.get("reviews") if isinstance(payload.get("reviews"), list) else []
     launch_preps = payload.get("launch_preps") if isinstance(payload.get("launch_preps"), list) else []
     lines = [
-        "<b>계획 상세</b>",
-        f"계획: {html.escape(str(plan.get('plan_id') or 'unknown'))}",
+        title_with_profile("계획 상세", profile),
         f"상태: {html.escape(display_review_status(plan.get('review_status')))}",
+        basis_line(projection.get("generated_at")),
+        f"계획: {html.escape(str(plan.get('plan_id') or 'unknown'))}",
         f"리뷰: {html.escape(display_review_status(plan.get('review_status')))} / 실행 준비 {len(launch_preps)}개",
         f"다음: {html.escape(display_next_action(plan.get('next_safe_action')))}",
     ]
@@ -458,34 +507,21 @@ def render_show_message(projection: dict[str, Any]) -> str:
             + " by "
             + html.escape(str(latest.get("reviewer") or "operator"))
         )
-    lines.extend(
-        [
-            "",
-            "읽기 전용: 실행 승인은 별도 절차가 필요합니다.",
-            f"검증: <code>{html.escape(short_hash(card.get('observed_hash')))}</code>",
-        ]
-    )
     return "\n".join(lines)
 
 
 def render_generic_projection_message(projection: dict[str, Any]) -> str:
     card = projection.get("card") if isinstance(projection.get("card"), dict) else {}
     title = html.escape(str(card.get("title") or "Forager"))
-    lines = [f"<b>{title}</b>"]
-    for item in safe_string_list(card.get("summary_lines"))[:4]:
+    summary_lines = safe_string_list(card.get("summary_lines"))
+    lines = [
+        f"<b>{title}</b>",
+        "상태: " + html.escape(summary_lines[0] if summary_lines else "내용 확인"),
+        basis_line(projection.get("generated_at")),
+    ]
+    for item in summary_lines[1:4]:
         lines.append(f"- {html.escape(item)}")
-    detail_lines = safe_string_list(card.get("detail_lines"))[:3]
-    if detail_lines:
-        lines.append("")
-        lines.append("<b>상세</b>")
-        for item in detail_lines:
-            lines.append(f"- {html.escape(item)}")
-    observed_hash = str(card.get("observed_hash") or "").strip()
-    if observed_hash:
-        lines.append("")
-        lines.append(f"검증: <code>{html.escape(short_hash(observed_hash))}</code>")
-    lines.append("")
-    lines.append("읽기 전용: Telegram에서는 조회만 됩니다.")
+    lines.append("다음: 세부 내용은 로컬에서 확인")
     return "\n".join(lines)
 
 
@@ -511,16 +547,34 @@ def status_headline(payload: dict[str, Any]) -> str:
     active = number(payload, "active_offdesk_tasks")
     queued = number(payload, "queued_offdesk_tasks")
     if pending:
-        return f"상태: 승인 요청 {pending}개를 확인해야 합니다."
+        return f"상태: 승인 요청 {pending}개 확인 필요"
     if failed:
-        return f"상태: 실패한 자율주행 {failed}개가 있습니다."
+        return f"상태: 실패한 자율주행 {failed}개"
     if closeout:
-        return f"상태: 마무리 확인 {closeout}개가 필요합니다."
+        return f"상태: 마무리 확인 {closeout}개 필요"
     if active:
-        return f"상태: 자율주행 {active}개가 진행 중입니다."
+        return f"상태: 자율주행 {active}개 진행 중"
     if queued:
-        return f"상태: 자율주행 {queued}개가 대기 중입니다."
-    return "상태: 지금 처리할 항목은 없습니다."
+        return f"상태: 자율주행 {queued}개 대기 중"
+    return "상태: 정상, 처리할 항목 없음"
+
+
+def status_summary(payload: dict[str, Any]) -> str:
+    pending = number(payload, "pending_approvals")
+    failed = number(payload, "failed_offdesk_tasks")
+    closeout = number(payload, "closeout_required_offdesk_tasks")
+    active = number(payload, "active_offdesk_tasks")
+    queued = number(payload, "queued_offdesk_tasks")
+    parts: list[str] = []
+    if pending:
+        parts.append(f"승인 {pending}")
+    if failed:
+        parts.append(f"실패 {failed}")
+    if closeout:
+        parts.append(f"마무리 {closeout}")
+    if active or queued:
+        parts.append(f"자율주행 진행 {active} / 대기 {queued}")
+    return " · ".join(parts) if parts else "작업 없음 · 승인 없음 · 실패 없음"
 
 
 def status_next_action(payload: dict[str, Any]) -> str:
@@ -528,10 +582,10 @@ def status_next_action(payload: dict[str, Any]) -> str:
     failed = number(payload, "failed_offdesk_tasks")
     closeout = number(payload, "closeout_required_offdesk_tasks")
     if pending:
-        return "다음: <code>/pending</code> 으로 승인 요청을 확인합니다."
+        return "다음: <code>/pending</code> 으로 승인 요청 확인"
     if failed or closeout:
-        return "다음: 실패/마무리 항목을 로컬에서 점검합니다."
-    return "다음: 조치 없음. 상태 확인만 유지하면 됩니다."
+        return "다음: 실패/마무리 항목 로컬 점검"
+    return "다음: 알림 대기"
 
 
 def display_action(value: Any) -> str:
@@ -599,9 +653,9 @@ def mobile_card_contract(message: str) -> dict[str, Any]:
         warnings.append("too_many_chars")
     if not lines or not lines[0].strip().startswith("<b>"):
         warnings.append("missing_title")
-    if not any(line.startswith("상태:") for line in lines) and "읽기 전용 명령:" not in message:
+    if not any(line.startswith("상태:") for line in lines):
         warnings.append("missing_status_headline")
-    if "다음:" not in message and "읽기 전용 명령:" not in message:
+    if "다음:" not in message:
         warnings.append("missing_next_action")
     leaked_terms = [term for term in MOBILE_CARD_FORBIDDEN_TERMS if term in message]
     if leaked_terms:
@@ -619,17 +673,71 @@ def mobile_card_contract(message: str) -> dict[str, Any]:
     }
 
 
-def help_message() -> str:
+def choice_keyboard() -> dict[str, Any]:
+    return {
+        "keyboard": [
+            ["상태", "승인 대기"],
+            ["계획", "도움말"],
+        ],
+        "resize_keyboard": True,
+        "one_time_keyboard": False,
+        "input_field_placeholder": "의견을 직접 입력할 수 있습니다",
+    }
+
+
+def choice_surface_contract(reply_markup: dict[str, Any] | None) -> dict[str, Any]:
+    warnings: list[str] = []
+    keyboard = reply_markup.get("keyboard") if isinstance(reply_markup, dict) else None
+    button_texts: list[str] = []
+    if isinstance(keyboard, list):
+        for row in keyboard:
+            if not isinstance(row, list):
+                continue
+            for button in row:
+                if isinstance(button, str):
+                    button_texts.append(button)
+                elif isinstance(button, dict):
+                    button_texts.append(str(button.get("text") or ""))
+    else:
+        warnings.append("missing_keyboard")
+    for label in BUTTON_COMMAND_ALIASES:
+        if label not in button_texts:
+            warnings.append(f"missing_button:{label}")
+    placeholder = ""
+    if isinstance(reply_markup, dict):
+        placeholder = str(reply_markup.get("input_field_placeholder") or "")
+    if "의견" not in placeholder:
+        warnings.append("missing_freeform_placeholder")
+    return {
+        "schema": CHOICE_SURFACE_CONTRACT_SCHEMA,
+        "button_texts": button_texts,
+        "has_freeform_placeholder": "의견" in placeholder,
+        "warnings": warnings,
+    }
+
+
+def help_message(*, profile: Any, generated_at: Any) -> str:
     return "\n".join(
         [
-            "<b>Forager 원격 상태</b>",
-            "읽기 전용 명령:",
-            "- /status",
-            "- /pending [--all]",
-            "- /plans [--project-key KEY] [--latest]",
-            "- /show PLAN_ID",
+            title_with_profile("Forager 원격 조작", profile),
+            "상태: 버튼으로 조회하고, 애매하면 직접 입력합니다.",
+            basis_line(generated_at),
             "",
-            "승인, 실행, 작업 배포, 터미널 명령, git push, 삭제, 모델 변경은 막혀 있습니다.",
+            "직접 명령: /status, /pending, /plans, /show PLAN_ID",
+            "다음: 필요한 버튼을 누르거나 의견을 입력하세요.",
+        ]
+    )
+
+
+def render_feedback_message(*, profile: Any, generated_at: Any, feedback_text: str) -> str:
+    excerpt = sanitize_text(feedback_text, max_chars=120)
+    return "\n".join(
+        [
+            title_with_profile("의견 접수", profile),
+            "상태: 입력 내용을 저장했습니다.",
+            basis_line(generated_at),
+            f"내용: {html.escape(excerpt)}",
+            "다음: 로컬 검토 대기",
         ]
     )
 
@@ -658,11 +766,14 @@ def render_command_result(
     mode: str,
 ) -> dict[str, Any]:
     result = result_base(args, config, mode)
+    reply_markup = choice_keyboard()
+    result["reply_markup_preview"] = reply_markup
+    result["choice_surface_contract"] = choice_surface_contract(reply_markup)
     result["command_text"] = sanitize_text(command_text, max_chars=400)
     parsed = parse_remote_command(command_text)
     result["parsed_command"] = parsed
     if not parsed.get("supported"):
-        message_preview = help_message()
+        message_preview = help_message(profile=args.profile, generated_at=result["generated_at"])
         result.update(
             {
                 "status": "unsupported",
@@ -674,7 +785,22 @@ def render_command_result(
         )
         return result
     if parsed.get("command") == "help":
-        message_preview = help_message()
+        message_preview = help_message(profile=args.profile, generated_at=result["generated_at"])
+        result.update(
+            {
+                "status": "rendered",
+                "projection": None,
+                "message_preview": message_preview,
+                "mobile_card_contract": mobile_card_contract(message_preview),
+            }
+        )
+        return result
+    if parsed.get("command") == "feedback":
+        message_preview = render_feedback_message(
+            profile=args.profile,
+            generated_at=result["generated_at"],
+            feedback_text=str(parsed.get("feedback_text") or command_text),
+        )
         result.update(
             {
                 "status": "rendered",
@@ -761,16 +887,26 @@ def get_updates(config: dict[str, Any], offset: int, args: argparse.Namespace) -
     return [item for item in updates if isinstance(item, dict)] if isinstance(updates, list) else []
 
 
-def send_message(config: dict[str, Any], chat_id: str, message: str, args: argparse.Namespace) -> int | None:
+def send_message(
+    config: dict[str, Any],
+    chat_id: str,
+    message: str,
+    args: argparse.Namespace,
+    *,
+    reply_markup: dict[str, Any] | None = None,
+) -> int | None:
+    payload = {
+        "chat_id": chat_id,
+        "text": message,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     data = telegram_api(
         config["token"],
         "sendMessage",
-        {
-            "chat_id": chat_id,
-            "text": message,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        },
+        payload,
         timeout_sec=max(1, int(args.api_timeout_sec)),
     )
     result = data.get("result")
@@ -803,6 +939,30 @@ def user_id_for(message: dict[str, Any]) -> str:
         return ""
     value = user.get("id")
     return str(value or "").strip()
+
+
+def message_id_for(message: dict[str, Any]) -> int | None:
+    value = message.get("message_id")
+    return int(value) if isinstance(value, int) else None
+
+
+def record_feedback(args: argparse.Namespace, config: dict[str, Any], message: dict[str, Any], text: str) -> dict[str, Any]:
+    record = {
+        "schema": "remote_operator_telegram_feedback.v1",
+        "received_at": utc_now(),
+        "profile": args.profile,
+        "chat_id_hash": sha256_short(chat_id_for(message)),
+        "user_id_hash": sha256_short(user_id_for(message)),
+        "message_id": message_id_for(message),
+        "feedback_text": sanitize_text(text, max_chars=2000),
+        "target_chat_id_hash": config.get("target_chat_id_hash"),
+    }
+    append_jsonl(args.feedback_file, record)
+    return {
+        "feedback_recorded": True,
+        "feedback_file": str(args.feedback_file),
+        "feedback_text_chars": len(str(text or "")),
+    }
 
 
 def update_is_allowed(config: dict[str, Any], message: dict[str, Any]) -> tuple[bool, str]:
@@ -846,7 +1006,18 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
             result.update({"status": "ignored", "reason": "empty_message"})
             continue
         rendered = render_command_result(args, config, text, mode="live_once")
-        message_id = send_message(config, chat_id_for(message), rendered["message_preview"], args)
+        parsed_command = rendered.get("parsed_command") if isinstance(rendered.get("parsed_command"), dict) else {}
+        if parsed_command.get("command") == "feedback":
+            rendered.update(record_feedback(args, config, message, text))
+        message_id = send_message(
+            config,
+            chat_id_for(message),
+            rendered["message_preview"],
+            args,
+            reply_markup=rendered.get("reply_markup_preview")
+            if isinstance(rendered.get("reply_markup_preview"), dict)
+            else None,
+        )
         rendered["sent_message_id"] = message_id
         result = rendered
         break
@@ -873,6 +1044,9 @@ def send_command_text(args: argparse.Namespace, config: dict[str, Any]) -> dict[
         target_chat_id,
         rendered["message_preview"],
         args,
+        reply_markup=rendered.get("reply_markup_preview")
+        if isinstance(rendered.get("reply_markup_preview"), dict)
+        else None,
     )
     return rendered
 
