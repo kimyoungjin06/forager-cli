@@ -4227,6 +4227,10 @@ fn decision_record_from_telegram_feedback(
             .unwrap_or(""),
     )
     .unwrap_or_else(|| "(empty feedback)".to_string());
+    let feedback_kind = json_string_field(feedback, "feedback_kind")
+        .and_then(|value| safe_nonempty(&value))
+        .unwrap_or_else(|| classify_telegram_feedback_kind(&feedback_text).to_string());
+    let is_planning_request = feedback_kind == "planning_request";
     let feedback_excerpt = truncate_chars(&feedback_text, 240);
     let project_key = feedback_context_string(feedback, "project_key")
         .or_else(|| json_string_field(feedback, "profile").and_then(|value| safe_nonempty(&value)))
@@ -4241,14 +4245,24 @@ fn decision_record_from_telegram_feedback(
         .unwrap_or_else(|| format!("telegram-feedback-{hash_prefix}"));
     let task_id = feedback_context_string(feedback, "task_id")
         .or_else(|| feedback_context_string(feedback, "focus_ref"))
-        .unwrap_or_else(|| "telegram-feedback".to_string());
+        .unwrap_or_else(|| {
+            if is_planning_request {
+                "telegram-plan-request".to_string()
+            } else {
+                "telegram-feedback".to_string()
+            }
+        });
     let focus_kind = feedback_context_string(feedback, "focus_kind");
     let context_kind = feedback_context_string(feedback, "context_kind");
     let focus_ref = feedback_context_string(feedback, "focus_ref");
     let context_label = feedback_context_string(feedback, "focus_label")
         .or_else(|| focus_ref.clone())
         .or_else(|| context_kind.clone());
-    let materiality = feedback_materiality(context_kind.as_deref(), focus_kind.as_deref());
+    let materiality = if is_planning_request {
+        DecisionMateriality::Medium
+    } else {
+        feedback_materiality(context_kind.as_deref(), focus_kind.as_deref())
+    };
 
     let mut evidence_refs = vec![DecisionTraceRef {
         kind: "telegram_feedback".to_string(),
@@ -4271,8 +4285,16 @@ fn decision_record_from_telegram_feedback(
     }
 
     let mut why_now = vec![
-        "The remote operator sent freeform Telegram feedback.".to_string(),
-        "Freeform feedback is review input only; it does not authorize runtime mutation or approval resolution.".to_string(),
+        if is_planning_request {
+            "The remote operator sent a Telegram planning request.".to_string()
+        } else {
+            "The remote operator sent freeform Telegram feedback.".to_string()
+        },
+        if is_planning_request {
+            "Telegram planning requests are captured for Plan Mode review; they do not start autonomous work by themselves.".to_string()
+        } else {
+            "Freeform feedback is review input only; it does not authorize runtime mutation or approval resolution.".to_string()
+        },
     ];
     if let Some(label) = context_label.as_deref() {
         why_now.push(format!("Referenced context: {label}."));
@@ -4289,16 +4311,36 @@ fn decision_record_from_telegram_feedback(
 
     let options = vec![
         DecisionOption {
-            id: "revise".to_string(),
-            label: "Revise next step".to_string(),
-            description:
+            id: if is_planning_request {
+                "plan".to_string()
+            } else {
+                "revise".to_string()
+            },
+            label: if is_planning_request {
+                "Create plan candidate".to_string()
+            } else {
+                "Revise next step".to_string()
+            },
+            description: if is_planning_request {
+                "Turn this Telegram request into a bounded Offdesk planning candidate for local review."
+                    .to_string()
+            } else {
                 "Use this feedback to revise the referenced plan, approval review, or handoff direction."
-                    .to_string(),
-            impact: Some(
+                    .to_string()
+            },
+            impact: Some(if is_planning_request {
+                "Creates a handoff-ready decision for plan drafting; execution still needs normal approval gates."
+                        .to_string()
+            } else {
                 "Creates a handoff-ready decision that still needs an explicit receipt after review."
-                    .to_string(),
-            ),
-            natural_input_prompt: Some("Describe the bounded revision to make.".to_string()),
+                        .to_string()
+            }),
+            natural_input_prompt: Some(if is_planning_request {
+                "Describe the project, goal, timebox, and constraints for the plan candidate."
+                    .to_string()
+            } else {
+                "Describe the bounded revision to make.".to_string()
+            }),
         },
         DecisionOption {
             id: "defer".to_string(),
@@ -4312,7 +4354,9 @@ fn decision_record_from_telegram_feedback(
             label: "Not actionable".to_string(),
             description: "Close the feedback as reviewed but not actionable.".to_string(),
             impact: Some("The inbox item is denied without an execution handoff.".to_string()),
-            natural_input_prompt: Some("State why the feedback does not change the current direction.".to_string()),
+            natural_input_prompt: Some(
+                "State why the feedback does not change the current direction.".to_string(),
+            ),
         },
     ];
     let approval_options = options
@@ -4326,8 +4370,16 @@ fn decision_record_from_telegram_feedback(
         .collect::<Vec<_>>();
     let mut decision_impacts = HashMap::new();
     decision_impacts.insert(
-        "revise".to_string(),
-        "Reviewers may revise the bounded plan or handoff direction; execution still needs the normal handoff and receipt.".to_string(),
+        if is_planning_request {
+            "plan".to_string()
+        } else {
+            "revise".to_string()
+        },
+        if is_planning_request {
+            "Reviewers may create a bounded plan candidate; execution still needs normal plan review, launch prep, and gate approval.".to_string()
+        } else {
+            "Reviewers may revise the bounded plan or handoff direction; execution still needs the normal handoff and receipt.".to_string()
+        },
     );
     decision_impacts.insert(
         "defer".to_string(),
@@ -4348,11 +4400,24 @@ fn decision_record_from_telegram_feedback(
         approval_context.insert("focus_ref".to_string(), value.to_string());
     }
 
-    let subject = context_label
-        .as_deref()
-        .map(|label| format!("Telegram feedback: {label}"))
-        .unwrap_or_else(|| "Telegram feedback".to_string());
-    let current_scope = "Review and classify this feedback for the referenced Offdesk context only. This decision does not execute work by itself.".to_string();
+    let subject = if is_planning_request {
+        "Telegram planning request".to_string()
+    } else {
+        context_label
+            .as_deref()
+            .map(|label| format!("Telegram feedback: {label}"))
+            .unwrap_or_else(|| "Telegram feedback".to_string())
+    };
+    let current_scope = if is_planning_request {
+        "Review this Telegram planning request and, if appropriate, turn it into a bounded Offdesk plan candidate. This decision does not execute work by itself.".to_string()
+    } else {
+        "Review and classify this feedback for the referenced Offdesk context only. This decision does not execute work by itself.".to_string()
+    };
+    let source_surface = if is_planning_request {
+        "telegram.remote_operator.plan_request"
+    } else {
+        "telegram.remote_operator.feedback"
+    };
 
     Ok(DecisionRecord {
         schema: DECISION_RECORD_SCHEMA.to_string(),
@@ -4361,17 +4426,29 @@ fn decision_record_from_telegram_feedback(
         request_id,
         task_id,
         raised_by: DecisionRaisedBy::Operator,
-        source_surface: "telegram.remote_operator.feedback".to_string(),
+        source_surface: source_surface.to_string(),
         materiality,
         status: DecisionStatus::UserPending,
         created_at: received_at,
         updated_at: received_at,
         decision_request: DecisionRequest {
-            kind: "telegram_operator_feedback".to_string(),
-            summary: format!("Telegram feedback: {feedback_excerpt}"),
-            decision_needed:
+            kind: if is_planning_request {
+                "telegram_operator_plan_request".to_string()
+            } else {
+                "telegram_operator_feedback".to_string()
+            },
+            summary: if is_planning_request {
+                format!("Telegram planning request: {feedback_excerpt}")
+            } else {
+                format!("Telegram feedback: {feedback_excerpt}")
+            },
+            decision_needed: if is_planning_request {
+                "Decide whether to create a bounded Offdesk plan candidate from this Telegram request."
+                    .to_string()
+            } else {
                 "Decide whether the feedback changes the referenced plan, approval review, or next Offdesk handoff."
-                    .to_string(),
+                    .to_string()
+            },
             why_now,
             current_scope: current_scope.clone(),
             non_authorized_scope: non_authorized_scope.clone(),
@@ -4384,11 +4461,20 @@ fn decision_record_from_telegram_feedback(
             schema: JUDGMENT_ROUTE_SCHEMA.to_string(),
             evaluator: JudgmentEvaluator::DeterministicGate,
             reason:
-                "Telegram freeform text is operator feedback, so the adapter may only promote it into a reviewable decision inbox item."
+                if is_planning_request {
+                    "Telegram planning text is captured as a planning request, not as runtime authority."
+                } else {
+                    "Telegram freeform text is operator feedback, so the adapter may only promote it into a reviewable decision inbox item."
+                }
                     .to_string(),
             policy_basis: vec![
                 "Remote operator transport is read-only.".to_string(),
-                "Freeform Telegram text is not an approval or execution command.".to_string(),
+                if is_planning_request {
+                    "Telegram planning requests require local Plan Mode review before any work starts."
+                        .to_string()
+                } else {
+                    "Freeform Telegram text is not an approval or execution command.".to_string()
+                },
             ],
             evidence_refs: evidence_refs.clone(),
             selected_by: actor.clone(),
@@ -4399,10 +4485,18 @@ fn decision_record_from_telegram_feedback(
             materiality,
             target: DecisionRouteTarget::User,
             reason:
-                "Human review is required before feedback can change a plan, approval, or workload direction."
+                if is_planning_request {
+                    "Human review is required before a Telegram planning request becomes a plan candidate."
+                } else {
+                    "Human review is required before feedback can change a plan, approval, or workload direction."
+                }
                     .to_string(),
             policy_basis: vec![
-                "Feedback is captured as input, not authority.".to_string(),
+                if is_planning_request {
+                    "Planning requests are captured as intent, not authority.".to_string()
+                } else {
+                    "Feedback is captured as input, not authority.".to_string()
+                },
                 "Existing decision resolve/receipt commands must close the loop.".to_string(),
             ],
             default_if_no_reply: Some("defer".to_string()),
@@ -4410,27 +4504,65 @@ fn decision_record_from_telegram_feedback(
         }),
         approval_brief: Some(ApprovalBrief {
             schema: "approval_brief.v1".to_string(),
-            source: Some("telegram.remote_operator.feedback".to_string()),
-            recommendation: "revise".to_string(),
+            source: Some(source_surface.to_string()),
+            recommendation: if is_planning_request {
+                "plan".to_string()
+            } else {
+                "revise".to_string()
+            },
             subject,
             summary_lines: vec![
-                format!("Feedback: {feedback_excerpt}"),
-                "This message was promoted to the decision inbox for review only.".to_string(),
+                if is_planning_request {
+                    format!("Planning request: {feedback_excerpt}")
+                } else {
+                    format!("Feedback: {feedback_excerpt}")
+                },
+                if is_planning_request {
+                    "This request was captured for plan drafting only; no work has started."
+                        .to_string()
+                } else {
+                    "This message was promoted to the decision inbox for review only.".to_string()
+                },
             ],
             judgment_route_summary: Some(
-                "판단 경로: Telegram freeform feedback - deterministic promotion to review inbox, no runtime authority.".to_string(),
+                if is_planning_request {
+                    "판단 경로: Telegram planning request - deterministic promotion to planning inbox, no runtime authority.".to_string()
+                } else {
+                    "판단 경로: Telegram freeform feedback - deterministic promotion to review inbox, no runtime authority.".to_string()
+                },
             ),
             evidence_sufficiency: Some(
-                "The feedback text and last Telegram interaction context are captured; further action needs explicit review."
-                    .to_string(),
+                if is_planning_request {
+                    "The request text is captured; plan creation and execution still need explicit local review."
+                        .to_string()
+                } else {
+                    "The feedback text and last Telegram interaction context are captured; further action needs explicit review."
+                        .to_string()
+                },
             ),
             default_if_no_reply: Some("defer".to_string()),
             scope: current_scope,
-            question: "How should this Telegram feedback be handled?".to_string(),
+            question: if is_planning_request {
+                "Should this Telegram request become a bounded Offdesk plan candidate?".to_string()
+            } else {
+                "How should this Telegram feedback be handled?".to_string()
+            },
             options: approval_options,
             why_recommendation: vec![
-                "Freeform feedback often indicates a needed plan or review adjustment.".to_string(),
-                "The safest default is to revise only after a bounded review decision.".to_string(),
+                if is_planning_request {
+                    "The message explicitly asks whether autonomous work can be planned."
+                        .to_string()
+                } else {
+                    "Freeform feedback often indicates a needed plan or review adjustment."
+                        .to_string()
+                },
+                if is_planning_request {
+                    "The safest next step is a bounded plan candidate, not immediate execution."
+                        .to_string()
+                } else {
+                    "The safest default is to revise only after a bounded review decision."
+                        .to_string()
+                },
             ],
             evidence: evidence_refs
                 .iter()
@@ -4438,7 +4570,12 @@ fn decision_record_from_telegram_feedback(
                 .collect(),
             decision_impacts,
             reply_examples: vec![
-                "revise: tighten the next plan around the missing mobile UX evidence".to_string(),
+                if is_planning_request {
+                    "plan: draft a bounded plan for the requested project and timebox".to_string()
+                } else {
+                    "revise: tighten the next plan around the missing mobile UX evidence"
+                        .to_string()
+                },
                 "defer: wait until the morning review".to_string(),
                 "deny: no change needed because this is already covered".to_string(),
             ],
@@ -4473,6 +4610,28 @@ fn feedback_message_id(feedback: &Value) -> Option<String> {
         Some(Value::Number(value)) => Some(value.to_string()),
         Some(Value::String(value)) => safe_nonempty(value),
         _ => None,
+    }
+}
+
+fn classify_telegram_feedback_kind(text: &str) -> &'static str {
+    let normalized = text.trim().to_lowercase();
+    if [
+        "자율주행",
+        "계획",
+        "plan",
+        "offdesk",
+        "진행",
+        "처리",
+        "검토해볼까",
+        "시작",
+        "맡기",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+    {
+        "planning_request"
+    } else {
+        "freeform_feedback"
     }
 }
 

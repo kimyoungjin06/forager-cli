@@ -910,6 +910,76 @@ fn offdesk_decision_ingest_telegram_feedback_creates_reviewable_inbox_item() -> 
 }
 
 #[test]
+fn offdesk_decision_ingest_telegram_planning_request_is_not_generic_feedback() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let artifact_dir = temp.path().join("relay");
+    fs::create_dir_all(&artifact_dir)?;
+    let feedback = json!({
+        "schema": "remote_operator_telegram_feedback.v1",
+        "received_at": Utc::now(),
+        "profile": "default",
+        "chat_id_hash": "sha256:chat",
+        "user_id_hash": "sha256:user",
+        "message_id": 706,
+        "feedback_text": "nanoclustering Fractal tree 개발쪽을 자율주행으로 처리할 수 있을지 검토해볼까",
+        "feedback_kind": "planning_request",
+        "target_chat_id_hash": "sha256:chat",
+        "feedback_context": {
+            "schema": "telegram_interaction_context.v1",
+            "command": "status",
+            "profile": "default",
+            "context_kind": "status_clear",
+            "focus_kind": "none",
+            "focus_label": "처리할 항목 없음"
+        }
+    });
+    let feedback_path = artifact_dir.join("feedback.json");
+    fs::write(&feedback_path, serde_json::to_string_pretty(&feedback)?)?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "decision",
+            "ingest-telegram-feedback",
+            "--feedback",
+            feedback_path.to_str().expect("utf8 feedback path"),
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(report["appended"], true);
+    assert_eq!(report["record"]["status"], "user_pending");
+    assert_eq!(report["record"]["materiality"], "medium");
+    assert_eq!(
+        report["record"]["source_surface"],
+        "telegram.remote_operator.plan_request"
+    );
+    assert_eq!(
+        report["record"]["decision_request"]["kind"],
+        "telegram_operator_plan_request"
+    );
+    assert_eq!(report["record"]["approval_brief"]["recommendation"], "plan");
+    assert!(report["record"]["approval_brief"]["summary_lines"][1]
+        .as_str()
+        .expect("summary line")
+        .contains("no work has started"));
+    assert!(report["record"]["decision_request"]["non_authorized_scope"]
+        .as_array()
+        .expect("non-authorized scope")
+        .iter()
+        .any(|scope| scope.as_str() == Some("background dispatch")));
+    assert_eq!(report["validation_issues"], json!([]));
+    Ok(())
+}
+
+#[test]
 #[serial]
 fn offdesk_decisions_report_validation_issues() -> Result<()> {
     let temp = tempdir()?;

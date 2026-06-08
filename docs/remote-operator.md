@@ -514,6 +514,12 @@ Telegram messages should stay short enough for mobile scanning: a compact
 title, the current state, and the next local-safe action. Longer listener
 diagnostics belong in local health output, not in the chat message.
 
+Freeform Telegram text can be captured as either feedback or a planning
+request. Planning requests are intentionally not executed from Telegram. They
+must be promoted into the decision inbox as `telegram_operator_plan_request`
+with an explicit note that no autonomous work has started. The next local step
+is to turn that inbox item into a bounded Plan Mode candidate.
+
 For a user-level service:
 
 ```bash
@@ -540,6 +546,9 @@ systemctl --user status forager-telegram-operator.service
 - Generate candidate ranking and plan artifacts.
 - Register plans through `forager offdesk plan`.
 - Display summaries with observed hashes.
+- Convert `telegram_operator_plan_request` inbox items into bounded Plan Mode
+  candidates. This closes the gap where an operator sends a Telegram request
+  after leaving the desk but no local plan has been registered yet.
 
 ### Phase 4: Plan Review Bridge
 

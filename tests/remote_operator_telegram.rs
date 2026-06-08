@@ -318,6 +318,46 @@ fn remote_operator_telegram_freeform_feedback_gets_mobile_receipt() -> Result<()
 
 #[test]
 #[serial]
+fn remote_operator_telegram_planning_request_makes_non_execution_receipt_explicit() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let out = temp.path().join("remote_plan_request.json");
+
+    let output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--command-text")
+        .arg("nanoclustering Fractal tree 개발쪽을 자율주행으로 처리할 수 있을지 검토해볼까")
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--out")
+        .arg(&out)
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["status"], "rendered");
+    assert_eq!(result["parsed_command"]["command"], "feedback");
+    assert_eq!(
+        result["parsed_command"]["feedback_kind"],
+        "planning_request"
+    );
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>계획 요청 접수</b>"));
+    assert!(preview.contains("아직 실행은 시작하지 않았습니다."));
+    assert!(preview.contains("로컬에서 계획으로 바꾸세요."));
+    assert!(!preview.contains("Fractal tree"));
+    assert_mobile_contract(&result);
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn remote_operator_telegram_feedback_uses_last_card_context() -> Result<()> {
     let temp = tempdir()?;
     let env_path = temp.path().join("telegram.env");

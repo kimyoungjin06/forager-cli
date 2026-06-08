@@ -237,13 +237,15 @@ def parse_remote_command(command_text: str) -> dict[str, Any]:
     if alias:
         text = alias
     if not text.startswith("/"):
+        feedback_kind = classify_feedback_kind(original_text)
         return {
             "supported": True,
             "command": "feedback",
             "argv": [],
-            "reason": "freeform_feedback",
+            "reason": feedback_kind,
             "command_text": original_text,
             "feedback_text": original_text,
+            "feedback_kind": feedback_kind,
         }
     try:
         tokens = shlex.split(text)
@@ -302,6 +304,24 @@ def parse_show_command(command_text: str, args: list[str]) -> dict[str, Any]:
     if len(args) != 1 or not args[0].strip():
         return unsupported_command(command_text, "show_requires_one_plan_ref")
     return {"supported": True, "command": "show", "argv": ["show", args[0].strip()]}
+
+
+def classify_feedback_kind(text: str) -> str:
+    normalized = str(text or "").strip().lower()
+    planning_markers = (
+        "자율주행",
+        "계획",
+        "plan",
+        "offdesk",
+        "진행",
+        "처리",
+        "검토해볼까",
+        "시작",
+        "맡기",
+    )
+    if any(marker in normalized for marker in planning_markers):
+        return "planning_request"
+    return "freeform_feedback"
 
 
 def unsupported_command(command_text: str, reason: str) -> dict[str, Any]:
@@ -1043,23 +1063,29 @@ def render_feedback_message(
     profile: Any,
     generated_at: Any,
     feedback_text: str,
+    feedback_kind: str = "freeform_feedback",
     feedback_context: dict[str, Any] | None = None,
     inbox_status: str | None = None,
 ) -> str:
+    is_planning_request = feedback_kind == "planning_request"
     if inbox_status in {"recorded", "existing"}:
-        status_line = "의견을 검토 목록에 넣었습니다."
+        status_line = "검토 목록에 넣었습니다." if is_planning_request else "의견을 검토 목록에 넣었습니다."
     elif inbox_status == "error":
-        status_line = "의견은 저장했지만 검토 목록 등록은 실패했습니다."
+        status_line = "요청은 저장했지만 검토 등록은 실패했습니다." if is_planning_request else "의견은 저장했지만 검토 목록 등록은 실패했습니다."
     else:
-        status_line = "의견을 저장했습니다."
+        status_line = "계획 요청을 저장했습니다." if is_planning_request else "의견을 저장했습니다."
     lines = [
-        title_with_profile("의견 접수", profile),
+        title_with_profile("계획 요청 접수" if is_planning_request else "의견 접수", profile),
         status_line,
     ]
     context_label = interaction_context_label(feedback_context)
-    if context_label:
+    if context_label and not is_planning_request:
         lines.append(f"관련: {html.escape(context_label)}")
-    lines.append("로컬에서 검토합니다.")
+    if is_planning_request:
+        lines.append("아직 실행은 시작하지 않았습니다.")
+        lines.append("로컬에서 계획으로 바꾸세요.")
+    else:
+        lines.append("로컬에서 검토합니다.")
     return "\n".join(lines)
 
 
@@ -1129,6 +1155,7 @@ def render_command_result(
             profile=args.profile,
             generated_at=result["generated_at"],
             feedback_text=str(parsed.get("feedback_text") or command_text),
+            feedback_kind=str(parsed.get("feedback_kind") or "freeform_feedback"),
             feedback_context=feedback_context,
         )
         attach_choice_surface(result, feedback_context)
@@ -1351,6 +1378,7 @@ def record_feedback(
         "user_id_hash": sha256_short(user_id_for(message)),
         "message_id": message_id_for(message),
         "feedback_text": sanitize_text(text, max_chars=2000),
+        "feedback_kind": classify_feedback_kind(text),
         "target_chat_id_hash": config.get("target_chat_id_hash"),
         "feedback_context": feedback_context,
     }
@@ -1433,6 +1461,7 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                     profile=args.profile,
                     generated_at=rendered["generated_at"],
                     feedback_text=str(parsed_command.get("feedback_text") or text),
+                    feedback_kind=str(parsed_command.get("feedback_kind") or "freeform_feedback"),
                     feedback_context=feedback_context,
                     inbox_status=str(ingest_result.get("decision_feedback_ingest_status") or ""),
                 )
