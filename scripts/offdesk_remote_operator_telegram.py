@@ -60,6 +60,9 @@ MOBILE_CARD_MAX_CHARS = 650
 MOBILE_CARD_FORBIDDEN_TERMS = (
     "Forager Remote Status",
     "Read-only",
+    "상태:",
+    "다음:",
+    "맥락:",
     "검증:",
     "sha256:",
     "dispatch",
@@ -465,11 +468,11 @@ def profile_label_from_projection(projection: dict[str, Any]) -> str:
 
 
 def title_with_profile(title: str, profile: Any) -> str:
-    return f"<b>{html.escape(str(title))} / {html.escape(str(profile or 'default'))}</b>"
+    return f"<b>{html.escape(str(title))}</b> · <code>{html.escape(str(profile or 'default'))}</code>"
 
 
 def basis_line(generated_at: Any) -> str:
-    return f"기준: {kst_time_label(generated_at)}"
+    return f"기준 {kst_time_label(generated_at)}"
 
 
 def render_projection_message(projection: dict[str, Any], *, max_chars: int) -> str:
@@ -497,10 +500,9 @@ def render_status_message(projection: dict[str, Any]) -> str:
         [
             title_with_profile("Forager 점검", profile),
             status_headline(payload),
-            basis_line(projection.get("generated_at")),
-            "",
             summary,
             status_next_action(payload),
+            basis_line(projection.get("generated_at")),
         ]
     )
 
@@ -514,33 +516,30 @@ def render_pending_message(projection: dict[str, Any]) -> str:
     ]
     if approvals:
         expired_count = sum(1 for item in approvals if isinstance(item, dict) and item.get("expired"))
-        expired_suffix = f" · 만료 {expired_count}" if expired_count else ""
+        expired_suffix = f" 만료 {expired_count}개 포함." if expired_count else ""
         lines.append(
-            f"상태: 승인 요청 {number(payload, 'approval_count')}개 확인 필요{expired_suffix}"
+            f"승인 요청 {number(payload, 'approval_count')}개가 기다립니다.{expired_suffix}"
         )
     else:
-        lines.append("상태: 승인할 항목 없음")
-    lines.append(basis_line(projection.get("generated_at")))
-    if approvals:
-        lines.append("")
+        lines.append("승인할 항목이 없습니다.")
     for approval in approvals[:2]:
         if not isinstance(approval, dict):
             continue
         expired = " 만료" if approval.get("expired") else ""
         lines.append(
-            "- "
-            + html.escape(str(approval.get("approval_id") or "approval"))
-            + f": {html.escape(display_action(approval.get('action')))}"
+            html.escape(str(approval.get("approval_id") or "approval"))
+            + f" · {html.escape(display_action(approval.get('action')))}"
             + expired
         )
     if len(approvals) > 2:
-        lines.append(f"- 외 {len(approvals) - 2}개")
+        lines.append(f"외 {len(approvals) - 2}개 더 있음")
     next_line = (
-        "다음: 로컬에서 승인 판단"
+        "할 일: 로컬에서 승인 판단"
         if approvals
-        else "다음: 알림 대기"
+        else "할 일: 알림 대기"
     )
     lines.append(next_line)
+    lines.append(basis_line(projection.get("generated_at")))
     return "\n".join(lines)
 
 
@@ -552,29 +551,26 @@ def render_plans_message(projection: dict[str, Any]) -> str:
         title_with_profile("자율주행 계획", profile),
     ]
     if plans:
-        lines.append(f"상태: 계획 {number(payload, 'plan_count')}개 확인 가능")
+        lines.append(f"계획 {number(payload, 'plan_count')}개가 있습니다.")
     else:
-        lines.append("상태: 등록된 계획 없음")
-    lines.append(basis_line(projection.get("generated_at")))
-    if plans:
-        lines.append("")
+        lines.append("등록된 계획이 없습니다.")
     for plan in plans[:2]:
         if not isinstance(plan, dict):
             continue
         lines.append(
-            "- "
-            + html.escape(str(plan.get("plan_id") or "plan"))
-            + ": "
+            html.escape(str(plan.get("plan_id") or "plan"))
+            + " · "
             + html.escape(display_review_status(plan.get("review_status")))
         )
     if len(plans) > 2:
-        lines.append(f"- 외 {len(plans) - 2}개")
+        lines.append(f"외 {len(plans) - 2}개 더 있음")
     next_line = (
-        "다음: <code>/show PLAN_ID</code> 로 세부 확인"
+        "할 일: <code>/show PLAN_ID</code>로 세부 확인"
         if plans
-        else "다음: 계획 등록 후 확인"
+        else "할 일: 계획 등록 후 확인"
     )
     lines.append(next_line)
+    lines.append(basis_line(projection.get("generated_at")))
     return "\n".join(lines)
 
 
@@ -586,11 +582,9 @@ def render_show_message(projection: dict[str, Any]) -> str:
     launch_preps = payload.get("launch_preps") if isinstance(payload.get("launch_preps"), list) else []
     lines = [
         title_with_profile("계획 상세", profile),
-        f"상태: {html.escape(display_review_status(plan.get('review_status')))}",
-        basis_line(projection.get("generated_at")),
         f"계획: {html.escape(str(plan.get('plan_id') or 'unknown'))}",
         f"리뷰: {html.escape(display_review_status(plan.get('review_status')))} / 실행 준비 {len(launch_preps)}개",
-        f"다음: {html.escape(display_next_action(plan.get('next_safe_action')))}",
+        f"할 일: {html.escape(display_next_action(plan.get('next_safe_action')))}",
     ]
     if reviews:
         latest = reviews[-1] if isinstance(reviews[-1], dict) else {}
@@ -600,6 +594,7 @@ def render_show_message(projection: dict[str, Any]) -> str:
             + " by "
             + html.escape(str(latest.get("reviewer") or "operator"))
         )
+    lines.append(basis_line(projection.get("generated_at")))
     return "\n".join(lines)
 
 
@@ -609,12 +604,12 @@ def render_generic_projection_message(projection: dict[str, Any]) -> str:
     summary_lines = safe_string_list(card.get("summary_lines"))
     lines = [
         f"<b>{title}</b>",
-        "상태: " + html.escape(summary_lines[0] if summary_lines else "내용 확인"),
-        basis_line(projection.get("generated_at")),
+        html.escape(summary_lines[0] if summary_lines else "내용 확인"),
     ]
     for item in summary_lines[1:4]:
-        lines.append(f"- {html.escape(item)}")
-    lines.append("다음: 세부 내용은 로컬에서 확인")
+        lines.append(html.escape(item))
+    lines.append("할 일: 세부 내용은 로컬에서 확인")
+    lines.append(basis_line(projection.get("generated_at")))
     return "\n".join(lines)
 
 
@@ -640,16 +635,16 @@ def status_headline(payload: dict[str, Any]) -> str:
     active = number(payload, "active_offdesk_tasks")
     queued = number(payload, "queued_offdesk_tasks")
     if pending:
-        return f"상태: 승인 요청 {pending}개 확인 필요"
+        return f"승인 요청 {pending}개가 먼저입니다."
     if failed:
-        return f"상태: 실패한 자율주행 {failed}개"
+        return f"실패한 자율주행 {failed}개를 확인해야 합니다."
     if closeout:
-        return f"상태: 마무리 확인 {closeout}개 필요"
+        return f"마무리 확인 {closeout}개가 남았습니다."
     if active:
-        return f"상태: 자율주행 {active}개 진행 중"
+        return f"자율주행 {active}개가 진행 중입니다."
     if queued:
-        return f"상태: 자율주행 {queued}개 대기 중"
-    return "상태: 정상, 처리할 항목 없음"
+        return f"자율주행 {queued}개가 대기 중입니다."
+    return "처리할 항목이 없습니다."
 
 
 def status_summary(payload: dict[str, Any]) -> str:
@@ -666,7 +661,7 @@ def status_summary(payload: dict[str, Any]) -> str:
     if closeout:
         parts.append(f"마무리 {closeout}")
     if active or queued:
-        parts.append(f"자율주행 진행 {active} / 대기 {queued}")
+        parts.append(f"진행 {active} / 대기 {queued}")
     return " · ".join(parts) if parts else "작업 없음 · 승인 없음 · 실패 없음"
 
 
@@ -675,10 +670,10 @@ def status_next_action(payload: dict[str, Any]) -> str:
     failed = number(payload, "failed_offdesk_tasks")
     closeout = number(payload, "closeout_required_offdesk_tasks")
     if pending:
-        return "다음: <code>/pending</code> 으로 승인 요청 확인"
+        return "할 일: <code>/pending</code>으로 승인 내용 보기"
     if failed or closeout:
-        return "다음: 실패/마무리 항목 로컬 점검"
-    return "다음: 알림 대기"
+        return "할 일: 실패/마무리 항목 로컬 점검"
+    return "할 일: 알림 대기"
 
 
 def display_action(value: Any) -> str:
@@ -882,16 +877,24 @@ def interaction_context_label(context: dict[str, Any] | None) -> str:
 
 def mobile_card_contract(message: str) -> dict[str, Any]:
     lines = str(message or "").splitlines()
+    content_lines = [line.strip() for line in lines if line.strip()]
     warnings: list[str] = []
     if len(lines) > MOBILE_CARD_MAX_LINES:
         warnings.append("too_many_lines")
     if len(str(message or "")) > MOBILE_CARD_MAX_CHARS:
         warnings.append("too_many_chars")
-    if not lines or not lines[0].strip().startswith("<b>"):
+    has_title = bool(content_lines and content_lines[0].startswith("<b>"))
+    body_lines = content_lines[1:] if has_title else content_lines
+    has_status_headline = any(
+        not line.startswith("기준 ") and not line.startswith("할 일:")
+        for line in body_lines
+    )
+    has_next_action = any(line.startswith("할 일:") for line in body_lines)
+    if not has_title:
         warnings.append("missing_title")
-    if not any(line.startswith("상태:") for line in lines):
+    if not has_status_headline:
         warnings.append("missing_status_headline")
-    if "다음:" not in message:
+    if not has_next_action:
         warnings.append("missing_next_action")
     leaked_terms = [term for term in MOBILE_CARD_FORBIDDEN_TERMS if term in message]
     if leaked_terms:
@@ -902,9 +905,9 @@ def mobile_card_contract(message: str) -> dict[str, Any]:
         "char_count": len(str(message or "")),
         "max_lines": MOBILE_CARD_MAX_LINES,
         "max_chars": MOBILE_CARD_MAX_CHARS,
-        "has_title": bool(lines and lines[0].strip().startswith("<b>")),
-        "has_status_headline": any(line.startswith("상태:") for line in lines),
-        "has_next_action": "다음:" in message,
+        "has_title": has_title,
+        "has_status_headline": has_status_headline,
+        "has_next_action": has_next_action,
         "warnings": warnings,
     }
 
@@ -1008,11 +1011,10 @@ def help_message(*, profile: Any, generated_at: Any) -> str:
     return "\n".join(
         [
             title_with_profile("Forager 원격 조작", profile),
-            "상태: 버튼으로 조회하고, 애매하면 직접 입력합니다.",
+            "버튼으로 조회하고, 애매하면 직접 의견을 쓰세요.",
+            "직접 명령: /status · /pending · /plans · /show PLAN_ID",
+            "할 일: 버튼을 누르거나 의견 입력",
             basis_line(generated_at),
-            "",
-            "직접 명령: /status, /pending, /plans, /show PLAN_ID",
-            "다음: 필요한 버튼을 누르거나 의견을 입력하세요.",
         ]
     )
 
@@ -1027,23 +1029,23 @@ def render_feedback_message(
 ) -> str:
     excerpt = sanitize_text(feedback_text, max_chars=120)
     if inbox_status in {"recorded", "existing"}:
-        status_line = "상태: 입력 내용을 결정함에 등록했습니다."
+        status_line = "의견을 검토 목록에 넣었습니다."
     elif inbox_status == "error":
-        status_line = "상태: 입력 저장됨 · 결정함 등록 실패"
+        status_line = "의견은 저장했지만 검토 목록 등록은 실패했습니다."
     else:
-        status_line = "상태: 입력 내용을 저장했습니다."
+        status_line = "의견을 저장했습니다."
     lines = [
         title_with_profile("의견 접수", profile),
         status_line,
-        basis_line(generated_at),
     ]
     context_label = interaction_context_label(feedback_context)
     if context_label:
-        lines.append(f"맥락: {html.escape(context_label)}")
+        lines.append(f"관련: {html.escape(context_label)}")
     lines.extend(
         [
-            f"내용: {html.escape(excerpt)}",
-            "다음: 로컬 검토 대기",
+            f"남긴 말: {html.escape(excerpt)}",
+            "할 일: 로컬에서 검토",
+            basis_line(generated_at),
         ]
     )
     return "\n".join(lines)
