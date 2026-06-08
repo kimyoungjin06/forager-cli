@@ -63,6 +63,7 @@ MOBILE_CARD_FORBIDDEN_TERMS = (
     "상태:",
     "다음:",
     "맥락:",
+    "기준 ",
     "검증:",
     "sha256:",
     "dispatch",
@@ -449,18 +450,6 @@ def sanitize_text(text: str, *, max_chars: int = 1200) -> str:
     return safe
 
 
-def kst_time_label(value: Any) -> str:
-    text = str(value or "").strip()
-    try:
-        timestamp = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
-    except ValueError:
-        timestamp = dt.datetime.now(dt.timezone.utc)
-    if timestamp.tzinfo is None:
-        timestamp = timestamp.replace(tzinfo=dt.timezone.utc)
-    kst = dt.timezone(dt.timedelta(hours=9), name="KST")
-    return timestamp.astimezone(kst).strftime("%H:%M KST")
-
-
 def profile_label_from_projection(projection: dict[str, Any]) -> str:
     payload = projection_payload(projection)
     value = payload.get("profile") or projection.get("forager_profile") or "default"
@@ -468,11 +457,10 @@ def profile_label_from_projection(projection: dict[str, Any]) -> str:
 
 
 def title_with_profile(title: str, profile: Any) -> str:
-    return f"<b>{html.escape(str(title))}</b> · <code>{html.escape(str(profile or 'default'))}</code>"
-
-
-def basis_line(generated_at: Any) -> str:
-    return f"기준 {kst_time_label(generated_at)}"
+    safe_profile = str(profile or "default").strip()
+    if safe_profile and safe_profile != "default":
+        return f"<b>{html.escape(str(title))}</b> · <code>{html.escape(safe_profile)}</code>"
+    return f"<b>{html.escape(str(title))}</b>"
 
 
 def render_projection_message(projection: dict[str, Any], *, max_chars: int) -> str:
@@ -495,16 +483,15 @@ def render_projection_message(projection: dict[str, Any], *, max_chars: int) -> 
 def render_status_message(projection: dict[str, Any]) -> str:
     payload = projection_payload(projection)
     profile = profile_label_from_projection(projection)
-    summary = status_summary(payload)
-    return "\n".join(
-        [
-            title_with_profile("Forager 점검", profile),
-            status_headline(payload),
-            summary,
-            status_next_action(payload),
-            basis_line(projection.get("generated_at")),
-        ]
-    )
+    lines = [
+        title_with_profile("Forager 점검", profile),
+        status_headline(payload),
+    ]
+    summary = status_summary(payload, primary_status_kind(payload))
+    if summary:
+        lines.append(summary)
+    lines.append(status_next_action(payload))
+    return "\n".join(lines)
 
 
 def render_pending_message(projection: dict[str, Any]) -> str:
@@ -526,20 +513,15 @@ def render_pending_message(projection: dict[str, Any]) -> str:
         if not isinstance(approval, dict):
             continue
         expired = " 만료" if approval.get("expired") else ""
-        lines.append(
-            html.escape(str(approval.get("approval_id") or "approval"))
-            + f" · {html.escape(display_action(approval.get('action')))}"
-            + expired
-        )
+        lines.append(html.escape(display_action(approval.get("action"))) + expired)
     if len(approvals) > 2:
         lines.append(f"외 {len(approvals) - 2}개 더 있음")
     next_line = (
-        "할 일: 로컬에서 승인 판단"
+        "승인은 로컬에서 판단하세요."
         if approvals
-        else "할 일: 알림 대기"
+        else "새 승인 요청이 오면 다시 확인하세요."
     )
     lines.append(next_line)
-    lines.append(basis_line(projection.get("generated_at")))
     return "\n".join(lines)
 
 
@@ -565,12 +547,11 @@ def render_plans_message(projection: dict[str, Any]) -> str:
     if len(plans) > 2:
         lines.append(f"외 {len(plans) - 2}개 더 있음")
     next_line = (
-        "할 일: <code>/show PLAN_ID</code>로 세부 확인"
+        "아래 버튼으로 계획 상세 보기"
         if plans
-        else "할 일: 계획 등록 후 확인"
+        else "계획을 등록한 뒤 다시 확인하세요."
     )
     lines.append(next_line)
-    lines.append(basis_line(projection.get("generated_at")))
     return "\n".join(lines)
 
 
@@ -584,7 +565,7 @@ def render_show_message(projection: dict[str, Any]) -> str:
         title_with_profile("계획 상세", profile),
         f"계획: {html.escape(str(plan.get('plan_id') or 'unknown'))}",
         f"리뷰: {html.escape(display_review_status(plan.get('review_status')))} / 실행 준비 {len(launch_preps)}개",
-        f"할 일: {html.escape(display_next_action(plan.get('next_safe_action')))}",
+        f"다음 조치: {html.escape(display_next_action(plan.get('next_safe_action')))}",
     ]
     if reviews:
         latest = reviews[-1] if isinstance(reviews[-1], dict) else {}
@@ -594,7 +575,6 @@ def render_show_message(projection: dict[str, Any]) -> str:
             + " by "
             + html.escape(str(latest.get("reviewer") or "operator"))
         )
-    lines.append(basis_line(projection.get("generated_at")))
     return "\n".join(lines)
 
 
@@ -608,8 +588,7 @@ def render_generic_projection_message(projection: dict[str, Any]) -> str:
     ]
     for item in summary_lines[1:4]:
         lines.append(html.escape(item))
-    lines.append("할 일: 세부 내용은 로컬에서 확인")
-    lines.append(basis_line(projection.get("generated_at")))
+    lines.append("세부 내용은 로컬에서 확인하세요.")
     return "\n".join(lines)
 
 
@@ -647,22 +626,36 @@ def status_headline(payload: dict[str, Any]) -> str:
     return "처리할 항목이 없습니다."
 
 
-def status_summary(payload: dict[str, Any]) -> str:
+def primary_status_kind(payload: dict[str, Any]) -> str:
+    if number(payload, "pending_approvals"):
+        return "pending"
+    if number(payload, "failed_offdesk_tasks"):
+        return "failed"
+    if number(payload, "closeout_required_offdesk_tasks"):
+        return "closeout"
+    if number(payload, "active_offdesk_tasks"):
+        return "active"
+    if number(payload, "queued_offdesk_tasks"):
+        return "queued"
+    return "none"
+
+
+def status_summary(payload: dict[str, Any], primary: str = "none") -> str:
     pending = number(payload, "pending_approvals")
     failed = number(payload, "failed_offdesk_tasks")
     closeout = number(payload, "closeout_required_offdesk_tasks")
     active = number(payload, "active_offdesk_tasks")
     queued = number(payload, "queued_offdesk_tasks")
     parts: list[str] = []
-    if pending:
+    if pending and primary != "pending":
         parts.append(f"승인 {pending}")
-    if failed:
+    if failed and primary != "failed":
         parts.append(f"실패 {failed}")
-    if closeout:
+    if closeout and primary != "closeout":
         parts.append(f"마무리 {closeout}")
-    if active or queued:
+    if (active or queued) and primary not in {"active", "queued"}:
         parts.append(f"진행 {active} / 대기 {queued}")
-    return " · ".join(parts) if parts else "작업 없음 · 승인 없음 · 실패 없음"
+    return "그 밖에 " + " · ".join(parts) if parts else ""
 
 
 def status_next_action(payload: dict[str, Any]) -> str:
@@ -670,10 +663,10 @@ def status_next_action(payload: dict[str, Any]) -> str:
     failed = number(payload, "failed_offdesk_tasks")
     closeout = number(payload, "closeout_required_offdesk_tasks")
     if pending:
-        return "할 일: <code>/pending</code>으로 승인 내용 보기"
+        return "아래 버튼으로 승인 내용 보기"
     if failed or closeout:
-        return "할 일: 실패/마무리 항목 로컬 점검"
-    return "할 일: 알림 대기"
+        return "로컬에서 실패/마무리 항목을 점검하세요."
+    return "새 알림이 오면 다시 확인하세요."
 
 
 def display_action(value: Any) -> str:
@@ -885,11 +878,24 @@ def mobile_card_contract(message: str) -> dict[str, Any]:
         warnings.append("too_many_chars")
     has_title = bool(content_lines and content_lines[0].startswith("<b>"))
     body_lines = content_lines[1:] if has_title else content_lines
+    action_markers = (
+        "아래 버튼",
+        "로컬에서",
+        "다시 확인",
+        "직접 의견",
+        "직접 입력",
+        "세부 내용",
+        "다음 조치:",
+    )
+
+    def is_action_line(line: str) -> bool:
+        return any(marker in line for marker in action_markers)
+
     has_status_headline = any(
-        not line.startswith("기준 ") and not line.startswith("할 일:")
+        not line.startswith("기준 ") and not is_action_line(line)
         for line in body_lines
     )
-    has_next_action = any(line.startswith("할 일:") for line in body_lines)
+    has_next_action = any(is_action_line(line) for line in body_lines)
     if not has_title:
         warnings.append("missing_title")
     if not has_status_headline:
@@ -1011,10 +1017,9 @@ def help_message(*, profile: Any, generated_at: Any) -> str:
     return "\n".join(
         [
             title_with_profile("Forager 원격 조작", profile),
-            "버튼으로 조회하고, 애매하면 직접 의견을 쓰세요.",
-            "직접 명령: /status · /pending · /plans · /show PLAN_ID",
-            "할 일: 버튼을 누르거나 의견 입력",
-            basis_line(generated_at),
+            "상태, 승인 요청, 계획을 빠르게 확인합니다.",
+            "버튼으로 조회하거나 직접 의견을 쓰세요.",
+            "직접 입력: /status · /pending · /plans",
         ]
     )
 
@@ -1027,7 +1032,6 @@ def render_feedback_message(
     feedback_context: dict[str, Any] | None = None,
     inbox_status: str | None = None,
 ) -> str:
-    excerpt = sanitize_text(feedback_text, max_chars=120)
     if inbox_status in {"recorded", "existing"}:
         status_line = "의견을 검토 목록에 넣었습니다."
     elif inbox_status == "error":
@@ -1041,13 +1045,7 @@ def render_feedback_message(
     context_label = interaction_context_label(feedback_context)
     if context_label:
         lines.append(f"관련: {html.escape(context_label)}")
-    lines.extend(
-        [
-            f"남긴 말: {html.escape(excerpt)}",
-            "할 일: 로컬에서 검토",
-            basis_line(generated_at),
-        ]
-    )
+    lines.append("로컬에서 검토합니다.")
     return "\n".join(lines)
 
 

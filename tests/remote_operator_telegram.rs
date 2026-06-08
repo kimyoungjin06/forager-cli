@@ -102,6 +102,10 @@ fn assert_mobile_contract(result: &Value) {
         "Forager Remote Status",
         "Read-only",
         "읽기 전용",
+        "상태:",
+        "다음:",
+        "맥락:",
+        "기준 ",
         "검증:",
         "sha256:",
         "dispatch",
@@ -170,9 +174,9 @@ fn remote_operator_telegram_dry_run_status_renders_read_only_projection() -> Res
     assert_eq!(result["projection"]["mutation_authorized"], false);
     assert_eq!(result["projection"]["approval_authorized"], false);
     let preview = result["message_preview"].as_str().expect("message preview");
-    assert!(preview.contains("<b>Forager 점검</b> · <code>default</code>"));
+    assert!(preview.contains("<b>Forager 점검</b>"));
     assert!(preview.contains("처리할 항목이 없습니다."));
-    assert!(preview.contains("할 일: 알림 대기"));
+    assert!(preview.contains("새 알림이 오면 다시 확인하세요."));
     assert!(!preview.contains("Forager Remote Status"));
     assert!(!preview.contains("Read-only"));
     assert_mobile_contract(&result);
@@ -298,9 +302,9 @@ fn remote_operator_telegram_freeform_feedback_gets_mobile_receipt() -> Result<()
     assert_eq!(result["parsed_command"]["command"], "feedback");
     assert_eq!(result["projection"], Value::Null);
     let preview = result["message_preview"].as_str().expect("message preview");
-    assert!(preview.contains("<b>의견 접수</b> · <code>default</code>"));
+    assert!(preview.contains("<b>의견 접수</b>"));
     assert!(preview.contains("의견을 저장했습니다."));
-    assert!(preview.contains("승인 전 실패 조건을 더 명확히 적어줘"));
+    assert!(!preview.contains("승인 전 실패 조건을 더 명확히 적어줘"));
     assert_mobile_contract(&result);
     Ok(())
 }
@@ -380,7 +384,8 @@ fn remote_operator_telegram_feedback_uses_last_card_context() -> Result<()> {
     let result: Value = serde_json::from_slice(&fs::read(&feedback_out)?)?;
     let preview = result["message_preview"].as_str().expect("message preview");
     assert!(preview.contains("관련: 계획 plan_harness_mobile · 수정 필요"));
-    assert!(preview.contains("남긴 말: 실패 조건 보강 필요"));
+    assert!(preview.contains("로컬에서 검토합니다."));
+    assert!(!preview.contains("남긴 말: 실패 조건 보강 필요"));
     assert_eq!(result["feedback_context"]["context_kind"], "plan_attention");
     assert_eq!(
         result["feedback_context"]["focus_ref"],
@@ -457,7 +462,7 @@ fn remote_operator_telegram_replay_feedback_records_decision_inbox_item() -> Res
         .starts_with("telegram-feedback-"));
     let preview = result["message_preview"].as_str().expect("message preview");
     assert!(preview.contains("의견을 검토 목록에 넣었습니다."));
-    assert!(preview.contains("모바일 메시지에서 핵심만 남겨줘"));
+    assert!(!preview.contains("모바일 메시지에서 핵심만 남겨줘"));
     assert_mobile_contract(&result);
 
     let feedback_rows = fs::read_to_string(&feedback_file)?;
@@ -533,8 +538,8 @@ fn remote_operator_telegram_status_fixture_prioritizes_attention() -> Result<()>
     let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
     let preview = result["message_preview"].as_str().expect("message preview");
     assert!(preview.contains("승인 요청 2개가 먼저입니다."));
-    assert!(preview.contains("할 일: <code>/pending</code>으로 승인 내용 보기"));
-    assert!(preview.contains("승인 2 · 실패 1 · 마무리 1 · 진행 1 / 대기 3"));
+    assert!(preview.contains("아래 버튼으로 승인 내용 보기"));
+    assert!(preview.contains("그 밖에 실패 1 · 마무리 1 · 진행 1 / 대기 3"));
     assert_eq!(
         result["interaction_context"]["context_kind"],
         "status_attention"
@@ -589,12 +594,12 @@ fn remote_operator_telegram_pending_fixture_is_mobile_scannable() -> Result<()> 
     assert!(output.status.success());
     let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
     let preview = result["message_preview"].as_str().expect("message preview");
-    assert!(preview.contains("<b>승인 대기</b> · <code>default</code>"));
+    assert!(preview.contains("<b>승인 대기</b>"));
     assert!(preview.contains("승인 요청 4개가 기다립니다. 만료 1개 포함."));
     assert!(preview.contains("계획 승인"));
     assert!(preview.contains("실행 승인"));
     assert!(preview.contains("외 2개 더 있음"));
-    assert!(preview.contains("할 일: 로컬에서 승인 판단"));
+    assert!(preview.contains("승인은 로컬에서 판단하세요."));
     assert_eq!(
         result["interaction_context"]["context_kind"],
         "approval_attention"
@@ -647,9 +652,9 @@ fn remote_operator_telegram_plans_fixture_has_empty_and_nonempty_next_actions() 
     assert!(output.status.success());
     let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
     let preview = result["message_preview"].as_str().expect("message preview");
-    assert!(preview.contains("<b>자율주행 계획</b> · <code>default</code>"));
+    assert!(preview.contains("<b>자율주행 계획</b>"));
     assert!(preview.contains("plan_harness_mobile · 수정 필요"));
-    assert!(preview.contains("할 일: <code>/show PLAN_ID</code>로 세부 확인"));
+    assert!(preview.contains("아래 버튼으로 계획 상세 보기"));
     assert_eq!(
         result["interaction_context"]["context_kind"],
         "plan_attention"
