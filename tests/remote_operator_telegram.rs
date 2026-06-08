@@ -397,6 +397,104 @@ fn remote_operator_telegram_feedback_uses_last_card_context() -> Result<()> {
 
 #[test]
 #[serial]
+fn remote_operator_telegram_replay_feedback_records_decision_inbox_item() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let update_path = temp.path().join("feedback_update.json");
+    fs::write(
+        &update_path,
+        serde_json::to_string_pretty(&json!({
+            "update_id": 500,
+            "message": {
+                "message_id": 777,
+                "date": 1780000000,
+                "chat": {"id": 123456789, "type": "private"},
+                "from": {"id": 987654321, "is_bot": false, "first_name": "Operator"},
+                "text": "모바일 메시지에서 핵심만 남겨줘"
+            }
+        }))?,
+    )?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+    let out = temp.path().join("replay_result.json");
+
+    let output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&update_path)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--out")
+        .arg(&out)
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["status"], "rendered");
+    assert_eq!(result["mode"], "live_once");
+    assert_eq!(result["feedback_recorded"], true);
+    assert_eq!(result["decision_feedback_ingest_status"], "recorded");
+    assert_eq!(result["decision_feedback_appended"], true);
+    assert!(result["decision_feedback_decision_id"]
+        .as_str()
+        .expect("decision id")
+        .starts_with("telegram-feedback-"));
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("상태: 입력 내용을 결정함에 등록했습니다."));
+    assert!(preview.contains("모바일 메시지에서 핵심만 남겨줘"));
+    assert_mobile_contract(&result);
+
+    let feedback_rows = fs::read_to_string(&feedback_file)?;
+    assert_eq!(feedback_rows.lines().count(), 1);
+    assert!(feedback_rows.contains("remote_operator_telegram_feedback.v1"));
+
+    let ledger_path = temp
+        .path()
+        .join(".config")
+        .join("forager")
+        .join("profiles")
+        .join("default")
+        .join("offdesk_decisions.jsonl");
+    let ledger = fs::read_to_string(&ledger_path)?;
+    assert_eq!(ledger.lines().count(), 1);
+    let decision: Value = serde_json::from_str(ledger.lines().next().expect("ledger row"))?;
+    assert_eq!(
+        decision["decision_id"],
+        result["decision_feedback_decision_id"]
+    );
+    assert_eq!(decision["status"], "user_pending");
+    assert_eq!(
+        decision["decision_request"]["kind"],
+        "telegram_operator_feedback"
+    );
+    assert_eq!(
+        decision["source_surface"],
+        "telegram.remote_operator.feedback"
+    );
+
+    let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    assert_eq!(state["offset"], 501);
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn remote_operator_telegram_status_fixture_prioritizes_attention() -> Result<()> {
     let temp = tempdir()?;
     let env_path = temp.path().join("telegram.env");

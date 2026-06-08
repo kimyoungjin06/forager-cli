@@ -116,6 +116,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out", type=pathlib.Path, help="Optional JSON result path.")
     parser.add_argument("--command-text", help="Deterministic command text, for tests or manual dry-runs.")
     parser.add_argument("--send-command-text", help="Render a read-only command and send it to the configured target chat.")
+    parser.add_argument("--replay-update-file", type=pathlib.Path, help="Dry-run only: process local Telegram update JSON through --once.")
     parser.add_argument("--projection-file", type=pathlib.Path, help="Dry-run only: render this read-only projection instead of invoking forager.")
     parser.add_argument("--dry-run", action="store_true", help="Do not call the Telegram API.")
     parser.add_argument("--once", action="store_true", help="Poll Telegram once and answer at most one update.")
@@ -1229,6 +1230,22 @@ def remember_context_for_message(
 
 
 def get_updates(config: dict[str, Any], offset: int, args: argparse.Namespace) -> list[dict[str, Any]]:
+    if args.replay_update_file:
+        value = load_json(args.replay_update_file)
+        if isinstance(value, dict) and isinstance(value.get("result"), list):
+            raw_updates = value["result"]
+        elif isinstance(value, list):
+            raw_updates = value
+        elif isinstance(value, dict):
+            raw_updates = [value]
+        else:
+            raw_updates = []
+        updates = [item for item in raw_updates if isinstance(item, dict)]
+        return [
+            item
+            for item in updates
+            if not isinstance(item.get("update_id"), int) or item["update_id"] >= int(offset)
+        ]
     data = telegram_api(
         config["token"],
         "getUpdates",
@@ -1259,6 +1276,8 @@ def send_message(
     }
     if reply_markup:
         payload["reply_markup"] = reply_markup
+    if args.dry_run:
+        return None
     data = telegram_api(
         config["token"],
         "sendMessage",
@@ -1460,8 +1479,14 @@ def main() -> int:
     try:
         if args.projection_file and not args.dry_run:
             raise RemoteOperatorTelegramError("--projection-file is only allowed with --dry-run")
+        if args.replay_update_file and not args.dry_run:
+            raise RemoteOperatorTelegramError("--replay-update-file is only allowed with --dry-run")
         if args.dry_run:
             config = resolve_telegram_config(args.env_file, required=False)
+            if args.replay_update_file:
+                result = run_once(args, config)
+                emit_result(args, result)
+                return 0 if result.get("status") != "unsupported" else 2
             command_text = args.command_text or args.send_command_text or "/status"
             state = load_state(args.state_file)
             feedback_context = last_context_for_chat_hash(
