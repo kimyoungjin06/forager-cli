@@ -78,7 +78,14 @@ fn assert_mobile_contract(result: &Value) {
         .as_array()
         .expect("mobile card warnings")
         .is_empty());
-    assert!(contract["line_count"].as_u64().expect("line count") <= 8);
+    assert!(
+        contract["line_count"].as_u64().expect("line count")
+            <= contract["max_lines"].as_u64().expect("max lines")
+    );
+    assert!(
+        contract["char_count"].as_u64().expect("char count")
+            <= contract["max_chars"].as_u64().expect("max chars")
+    );
     let choice_contract = &result["choice_surface_contract"];
     assert_eq!(
         choice_contract["schema"],
@@ -495,6 +502,171 @@ fn remote_operator_telegram_replay_feedback_records_decision_inbox_item() -> Res
 
     let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
     assert_eq!(state["offset"], 501);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_replay_poll_loop_handles_updates_without_once() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let update_path = temp.path().join("status_update.json");
+    fs::write(
+        &update_path,
+        serde_json::to_string_pretty(&json!({
+            "update_id": 600,
+            "message": {
+                "message_id": 778,
+                "date": 1780000001,
+                "chat": {"id": 123456789, "type": "private"},
+                "from": {"id": 987654321, "is_bot": false, "first_name": "Operator"},
+                "text": "/status"
+            }
+        }))?,
+    )?;
+    let state_path = temp.path().join("telegram_state.json");
+    let out = temp.path().join("poll_loop_result.json");
+
+    let output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--replay-update-file")
+        .arg(&update_path)
+        .arg("--max-polls")
+        .arg("2")
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--out")
+        .arg(&out)
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["mode"], "live_loop");
+    assert_eq!(result["status"], "max_polls_reached");
+    assert_eq!(result["poll_count"], 2);
+    assert_eq!(result["updates_seen"], 1);
+    assert_eq!(result["handled_result_count"], 1);
+    assert_eq!(result["last_handled_result"]["status"], "rendered");
+    assert_eq!(
+        result["last_handled_result"]["parsed_command"]["command"],
+        "status"
+    );
+    assert_mobile_contract(&result["last_handled_result"]);
+    assert_eq!(result["last_result"]["status"], "no_update");
+
+    let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    assert_eq!(state["offset"], 601);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_health_reports_fresh_listener_status() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let status_path = temp.path().join("loop_status.json");
+    fs::write(
+        &status_path,
+        serde_json::to_string_pretty(&json!({
+            "schema": "remote_operator_telegram_adapter_result.v1",
+            "mode": "live_loop",
+            "status": "polling",
+            "poll_count": 7,
+            "updates_seen": 2,
+            "handled_result_count": 1,
+            "last_result": {
+                "generated_at": "2099-01-01T00:00:00+00:00",
+                "status": "no_update"
+            },
+            "last_handled_result": {
+                "status": "rendered"
+            }
+        }))?,
+    )?;
+    let out = temp.path().join("health.json");
+
+    let output = remote_operator_command(temp.path())
+        .arg("--health")
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--loop-status-file")
+        .arg(&status_path)
+        .arg("--health-max-age-sec")
+        .arg("999999999")
+        .arg("--out")
+        .arg(&out)
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["schema"], "remote_operator_telegram_health.v1");
+    assert_eq!(result["health_status"], "healthy");
+    assert_eq!(result["listener_status"], "polling");
+    assert_eq!(result["poll_count"], 7);
+    assert_eq!(result["handled_result_count"], 1);
+    let serialized = serde_json::to_string(&result)?;
+    assert!(!serialized.contains("fake-token-for-test"));
+    assert!(!serialized.contains("999999:"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn telegram_operator_systemd_installer_dry_run_renders_unit() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let out = temp.path().join("service.json");
+
+    let output = Command::new("python3")
+        .arg(script_path("install_offdesk_telegram_operator_service.py"))
+        .arg("--dry-run")
+        .arg("--repo-root")
+        .arg(temp.path())
+        .arg("--forager-bin")
+        .arg(temp.path().join("target/debug/forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--loop-status-file")
+        .arg(temp.path().join("loop.json"))
+        .env("HOME", temp.path())
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::write(&out, &output.stdout)?;
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(
+        result["schema"],
+        "forager_telegram_operator_systemd_install.v1"
+    );
+    assert_eq!(result["installed"], false);
+    let unit = result["unit_preview"].as_str().expect("unit preview");
+    assert!(unit.contains("ExecStart="));
+    assert!(unit.contains("offdesk_remote_operator_telegram.py"));
+    assert!(unit.contains("--poll-timeout-sec 30"));
+    assert!(unit.contains("Restart=on-failure"));
+    assert!(!unit.contains("fake-token-for-test"));
     Ok(())
 }
 

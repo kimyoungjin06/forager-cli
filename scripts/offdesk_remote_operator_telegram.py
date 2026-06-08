@@ -50,13 +50,20 @@ DEFAULT_FEEDBACK_INGEST_DIR = pathlib.Path(
         str(pathlib.Path.home() / ".cache" / "forager" / "remote_operator_telegram_feedback_ingest"),
     )
 )
+DEFAULT_LOOP_STATUS_FILE = pathlib.Path(
+    os.environ.get(
+        "OFFDESK_REMOTE_OPERATOR_TELEGRAM_LOOP_STATUS",
+        str(pathlib.Path.home() / ".cache" / "forager" / "remote_operator_telegram_loop.json"),
+    )
+)
 
 RESULT_SCHEMA = "remote_operator_telegram_adapter_result.v1"
 MOBILE_CARD_CONTRACT_SCHEMA = "telegram_mobile_card_contract.v1"
 CHOICE_SURFACE_CONTRACT_SCHEMA = "telegram_choice_surface_contract.v1"
 INTERACTION_CONTEXT_SCHEMA = "telegram_interaction_context.v1"
-MOBILE_CARD_MAX_LINES = 8
-MOBILE_CARD_MAX_CHARS = 650
+HEALTH_SCHEMA = "remote_operator_telegram_health.v1"
+MOBILE_CARD_MAX_LINES = 5
+MOBILE_CARD_MAX_CHARS = 360
 MOBILE_CARD_FORBIDDEN_TERMS = (
     "Forager Remote Status",
     "Read-only",
@@ -110,6 +117,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--state-file", type=pathlib.Path, default=DEFAULT_STATE_FILE)
     parser.add_argument("--feedback-file", type=pathlib.Path, default=DEFAULT_FEEDBACK_FILE)
     parser.add_argument("--feedback-ingest-dir", type=pathlib.Path, default=DEFAULT_FEEDBACK_INGEST_DIR)
+    parser.add_argument("--loop-status-file", type=pathlib.Path, default=DEFAULT_LOOP_STATUS_FILE)
     parser.add_argument(
         "--no-decision-feedback-ingest",
         dest="decision_feedback_ingest",
@@ -120,10 +128,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out", type=pathlib.Path, help="Optional JSON result path.")
     parser.add_argument("--command-text", help="Deterministic command text, for tests or manual dry-runs.")
     parser.add_argument("--send-command-text", help="Render a read-only command and send it to the configured target chat.")
-    parser.add_argument("--replay-update-file", type=pathlib.Path, help="Dry-run only: process local Telegram update JSON through --once.")
+    parser.add_argument("--replay-update-file", type=pathlib.Path, help="Dry-run only: process local Telegram update JSON through the poller.")
     parser.add_argument("--projection-file", type=pathlib.Path, help="Dry-run only: render this read-only projection instead of invoking forager.")
     parser.add_argument("--dry-run", action="store_true", help="Do not call the Telegram API.")
     parser.add_argument("--once", action="store_true", help="Poll Telegram once and answer at most one update.")
+    parser.add_argument("--health", action="store_true", help="Report local Telegram listener health and exit.")
+    parser.add_argument("--health-max-age-sec", type=int, default=120)
+    parser.add_argument("--max-polls", type=int, help="Stop after this many polls; useful for smoke tests.")
     parser.add_argument("--poll-timeout-sec", type=int, default=5)
     parser.add_argument("--api-timeout-sec", type=int, default=20)
     parser.add_argument("--max-message-chars", type=int, default=3500)
@@ -509,11 +520,14 @@ def render_pending_message(projection: dict[str, Any]) -> str:
         )
     else:
         lines.append("승인할 항목이 없습니다.")
+    action_labels: list[str] = []
     for approval in approvals[:2]:
         if not isinstance(approval, dict):
             continue
         expired = " 만료" if approval.get("expired") else ""
-        lines.append(html.escape(display_action(approval.get("action"))) + expired)
+        action_labels.append(html.escape(display_action(approval.get("action"))) + expired)
+    if action_labels:
+        lines.append(" · ".join(action_labels))
     if len(approvals) > 2:
         lines.append(f"외 {len(approvals) - 2}개 더 있음")
     next_line = (
@@ -586,7 +600,7 @@ def render_generic_projection_message(projection: dict[str, Any]) -> str:
         f"<b>{title}</b>",
         html.escape(summary_lines[0] if summary_lines else "내용 확인"),
     ]
-    for item in summary_lines[1:4]:
+    for item in summary_lines[1:3]:
         lines.append(html.escape(item))
     lines.append("세부 내용은 로컬에서 확인하세요.")
     return "\n".join(lines)
@@ -1398,6 +1412,9 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
             mode="live_once",
             feedback_context=feedback_context,
         )
+        rendered["updates_seen"] = len(updates)
+        if isinstance(update_id, int):
+            rendered["processed_update_id"] = update_id
         parsed_command = rendered.get("parsed_command") if isinstance(rendered.get("parsed_command"), dict) else {}
         if parsed_command.get("command") == "feedback":
             feedback_result = record_feedback(
@@ -1439,6 +1456,133 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
     return result
 
 
+def loop_summary_base(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]:
+    result = result_base(args, config, "live_loop")
+    result.update(
+        {
+            "status": "polling",
+            "poll_count": 0,
+            "updates_seen": 0,
+            "handled_result_count": 0,
+            "last_result": None,
+            "last_handled_result": None,
+        }
+    )
+    return result
+
+
+def update_loop_summary(summary: dict[str, Any], result: dict[str, Any]) -> None:
+    summary["poll_count"] = int(summary.get("poll_count") or 0) + 1
+    summary["updates_seen"] = int(summary.get("updates_seen") or 0) + int(result.get("updates_seen") or 0)
+    summary["last_result"] = result
+    if result.get("status") != "no_update":
+        summary["handled_result_count"] = int(summary.get("handled_result_count") or 0) + 1
+        summary["last_handled_result"] = result
+
+
+def loop_status_path(args: argparse.Namespace) -> pathlib.Path | None:
+    if args.out:
+        return args.out
+    return args.loop_status_file
+
+
+def run_loop(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]:
+    summary = loop_summary_base(args, config)
+    max_polls = args.max_polls
+    status_path = loop_status_path(args)
+    try:
+        while max_polls is None or int(summary["poll_count"]) < max_polls:
+            result = run_once(args, config)
+            update_loop_summary(summary, result)
+            if status_path:
+                write_json(status_path, summary)
+            if max_polls is None and result.get("status") != "no_update":
+                print(json.dumps(result, ensure_ascii=False), flush=True)
+    except KeyboardInterrupt:
+        summary["status"] = "interrupted"
+        if status_path:
+            write_json(status_path, summary)
+        return summary
+    summary["status"] = "max_polls_reached" if max_polls is not None else "stopped"
+    return summary
+
+
+def parse_timestamp(value: Any) -> dt.datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = dt.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc)
+
+
+def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]:
+    status_path = args.loop_status_file
+    issues: list[str] = []
+    token_configured = bool(config.get("token"))
+    if not token_configured:
+        issues.append("telegram_bot_token_missing")
+    if not config.get("chat_allowlist_configured"):
+        issues.append("telegram_chat_allowlist_missing")
+    loop_status: dict[str, Any] = {}
+    if status_path.exists():
+        try:
+            loaded = load_json(status_path)
+            loop_status = loaded if isinstance(loaded, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            issues.append("loop_status_unreadable")
+    else:
+        issues.append("loop_status_missing")
+    last_result = loop_status.get("last_result") if isinstance(loop_status.get("last_result"), dict) else {}
+    last_poll_at = parse_timestamp(last_result.get("generated_at") or loop_status.get("generated_at"))
+    last_poll_age_sec = None
+    if last_poll_at:
+        last_poll_age_sec = max(
+            0,
+            int((dt.datetime.now(dt.timezone.utc) - last_poll_at).total_seconds()),
+        )
+        if last_poll_age_sec > max(1, int(args.health_max_age_sec)):
+            issues.append("last_poll_stale")
+    elif loop_status:
+        issues.append("last_poll_missing")
+    if str(loop_status.get("status") or "") not in {"polling", "max_polls_reached"} and loop_status:
+        issues.append("listener_not_polling")
+    health_status = "healthy" if not issues else "unhealthy"
+    return {
+        "schema": HEALTH_SCHEMA,
+        "generated_at": utc_now(),
+        "profile": args.profile,
+        "health_status": health_status,
+        "issues": issues,
+        "env_file": str(args.env_file),
+        "status_file": str(status_path),
+        "state_file": str(args.state_file),
+        "token_configured": token_configured,
+        "chat_allowlist_configured": bool(config.get("chat_allowlist_configured")),
+        "user_allowlist_configured": bool(config.get("user_allowlist_configured")),
+        "listener_status": loop_status.get("status"),
+        "poll_count": loop_status.get("poll_count"),
+        "updates_seen": loop_status.get("updates_seen"),
+        "handled_result_count": loop_status.get("handled_result_count"),
+        "last_poll_age_sec": last_poll_age_sec,
+        "last_result_status": last_result.get("status"),
+        "last_handled_status": (
+            loop_status.get("last_handled_result", {}).get("status")
+            if isinstance(loop_status.get("last_handled_result"), dict)
+            else None
+        ),
+        "read_only": True,
+        "mutation_authorized": False,
+        "approval_authorized": False,
+    }
+
+
 def send_command_text(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]:
     target_chat_id = str(config.get("target_chat_id") or "").strip()
     if not target_chat_id:
@@ -1477,14 +1621,25 @@ def emit_result(args: argparse.Namespace, result: dict[str, Any]) -> None:
 def main() -> int:
     args = parse_args()
     try:
+        if args.max_polls is not None and args.max_polls < 1:
+            raise RemoteOperatorTelegramError("--max-polls must be at least 1")
+        if args.once and args.max_polls is not None:
+            raise RemoteOperatorTelegramError("--once and --max-polls cannot be used together")
         if args.projection_file and not args.dry_run:
             raise RemoteOperatorTelegramError("--projection-file is only allowed with --dry-run")
         if args.replay_update_file and not args.dry_run:
             raise RemoteOperatorTelegramError("--replay-update-file is only allowed with --dry-run")
+        if args.max_polls is not None and not args.replay_update_file and (args.dry_run or args.once or args.send_command_text):
+            raise RemoteOperatorTelegramError("--max-polls is only used by the live poller or dry-run replay poller")
+        if args.health:
+            config = resolve_telegram_config(args.env_file, required=False)
+            result = listener_health(args, config)
+            emit_result(args, result)
+            return 0 if result.get("health_status") == "healthy" else 1
         if args.dry_run:
             config = resolve_telegram_config(args.env_file, required=False)
             if args.replay_update_file:
-                result = run_once(args, config)
+                result = run_loop(args, config) if args.max_polls is not None else run_once(args, config)
                 emit_result(args, result)
                 return 0 if result.get("status") != "unsupported" else 2
             command_text = args.command_text or args.send_command_text or "/status"
@@ -1507,10 +1662,8 @@ def main() -> int:
             result = send_command_text(args, config)
             emit_result(args, result)
             return 0 if result.get("status") != "unsupported" else 2
-        if not args.once:
-            raise RemoteOperatorTelegramError("live mode currently requires --once")
         config = resolve_telegram_config(args.env_file, required=True)
-        result = run_once(args, config)
+        result = run_once(args, config) if args.once else run_loop(args, config)
         emit_result(args, result)
         return 0
     except RemoteOperatorTelegramError as error:

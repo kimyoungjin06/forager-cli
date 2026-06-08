@@ -489,6 +489,14 @@ scripts/offdesk_remote_operator_telegram.py \
   --forager-bin target/debug/forager
 
 scripts/offdesk_remote_operator_telegram.py \
+  --env-file /path/to/telegram.env \
+  --forager-bin target/debug/forager
+
+scripts/offdesk_remote_operator_telegram.py \
+  --health \
+  --env-file /path/to/telegram.env
+
+scripts/offdesk_remote_operator_telegram.py \
   --send-command-text "/status" \
   --env-file /path/to/telegram.env \
   --forager-bin target/debug/forager
@@ -497,9 +505,27 @@ scripts/offdesk_remote_operator_telegram.py \
 The adapter accepts only `/status`, `/pending`, `/plans`, `/show <plan-id>`,
 and `/help`. Unsupported commands such as `/approve`, `/launch`, `/exec`, or
 `/git push` return an unsupported result and do not call the projection CLI.
-Live polling currently handles one Telegram update at a time with `--once`.
-`--send-command-text` sends one read-only projection to the configured owner
-chat without consuming updates.
+Without `--once`, live polling stays attached and keeps reading Telegram
+updates. `--once` is for one-shot probes, and `--max-polls` is available for
+bounded smoke tests. `--send-command-text` sends one read-only projection to
+the configured owner chat without consuming updates.
+
+Telegram messages should stay short enough for mobile scanning: a compact
+title, the current state, and the next local-safe action. Longer listener
+diagnostics belong in local health output, not in the chat message.
+
+For a user-level service:
+
+```bash
+scripts/install_offdesk_telegram_operator_service.py \
+  --install \
+  --enable \
+  --restart \
+  --env-file /path/to/telegram.env \
+  --forager-bin "$PWD/target/debug/forager"
+
+systemctl --user status forager-telegram-operator.service
+```
 
 ### Phase 2: Remote Envelope And Receipts
 
