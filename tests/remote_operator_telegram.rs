@@ -247,6 +247,23 @@ fn button_texts(result: &Value) -> Vec<String> {
         .collect()
 }
 
+fn write_text_update(path: &Path, update_id: i64, message_id: i64, text: &str) -> Result<()> {
+    fs::write(
+        path,
+        serde_json::to_string_pretty(&json!({
+            "update_id": update_id,
+            "message": {
+                "message_id": message_id,
+                "date": 1780000000,
+                "chat": {"id": 123456789, "type": "private"},
+                "from": {"id": 987654321, "is_bot": false, "first_name": "Operator"},
+                "text": text
+            }
+        }))?,
+    )?;
+    Ok(())
+}
+
 #[test]
 #[serial]
 fn remote_operator_telegram_dry_run_status_renders_read_only_projection() -> Result<()> {
@@ -789,6 +806,325 @@ fn remote_operator_telegram_replay_feedback_records_decision_inbox_item() -> Res
 
     let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
     assert_eq!(state["offset"], 501);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_replay_plan_request_creates_project_selection_session() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let workspace_root = temp.path().join("workspace");
+    fs::create_dir_all(workspace_root.join("Alpha"))?;
+    fs::create_dir_all(workspace_root.join("Beta"))?;
+    fs::write(
+        workspace_root.join("Alpha").join("README.md"),
+        "Alpha project\n",
+    )?;
+    fs::write(
+        workspace_root.join("Alpha").join("Cargo.toml"),
+        "[package]\nname = \"alpha\"\n",
+    )?;
+    fs::write(
+        workspace_root.join("Beta").join("README.md"),
+        "Beta project\n",
+    )?;
+    fs::write(
+        workspace_root.join("Beta").join("pyproject.toml"),
+        "[project]\nname = \"beta\"\n",
+    )?;
+    let update_path = temp.path().join("plan_update.json");
+    write_text_update(
+        &update_path,
+        700,
+        880,
+        "Alpha 프로젝트를 오늘 밤 자율주행 계획으로 잡아줘",
+    )?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+    let out = temp.path().join("plan_replay_result.json");
+
+    let output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&update_path)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&out)
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["status"], "rendered");
+    assert_eq!(result["parsed_command"]["command"], "feedback");
+    assert_eq!(
+        result["parsed_command"]["feedback_kind"],
+        "planning_request"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["schema"],
+        "telegram_remote_plan_session.v1"
+    );
+    assert_eq!(result["remote_plan_session"]["stage"], "project_selection");
+    assert_eq!(result["remote_plan_session"]["execution_authorized"], false);
+    assert_eq!(
+        result["remote_plan_session"]["candidates"][0]["display_name"],
+        "Alpha"
+    );
+    assert_eq!(
+        result["interaction_context"]["context_kind"],
+        "remote_plan_project_selection"
+    );
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>계획 대상 선택</b>"));
+    assert!(preview.contains("직접 입력"));
+    assert!(!preview.contains(workspace_root.to_str().expect("workspace path")));
+    assert!(button_texts(&result).contains(&"1 Alpha".to_string()));
+    assert!(button_texts(&result).contains(&"다시 스캔".to_string()));
+    assert!(button_texts(&result).contains(&"보류".to_string()));
+    assert_mobile_contract(&result);
+
+    let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    assert_eq!(state["offset"], 701);
+    assert_eq!(
+        state["remote_plan_sessions_by_chat"][result["target_chat_id_hash"].as_str().unwrap()]
+            ["stage"],
+        "project_selection"
+    );
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_replay_plan_session_accepts_direct_project_input() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let workspace_root = temp.path().join("workspace");
+    fs::create_dir_all(workspace_root.join("Alpha"))?;
+    fs::create_dir_all(workspace_root.join("Beta"))?;
+    fs::write(
+        workspace_root.join("Alpha").join("README.md"),
+        "Alpha project\n",
+    )?;
+    fs::write(
+        workspace_root.join("Alpha").join("Cargo.toml"),
+        "[package]\nname = \"alpha\"\n",
+    )?;
+    fs::write(
+        workspace_root.join("Beta").join("README.md"),
+        "Beta project\n",
+    )?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+    let first_update = temp.path().join("plan_update.json");
+    write_text_update(
+        &first_update,
+        710,
+        890,
+        "Alpha 프로젝트를 오늘 밤 자율주행 계획으로 잡아줘",
+    )?;
+    let first_out = temp.path().join("plan_replay_result.json");
+
+    let first_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&first_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&first_out)
+        .output()?;
+    assert!(
+        first_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&first_output.stdout),
+        String::from_utf8_lossy(&first_output.stderr)
+    );
+
+    let second_update = temp.path().join("selection_update.json");
+    write_text_update(&second_update, 711, 891, "1번")?;
+    let second_out = temp.path().join("selection_result.json");
+    let second_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&second_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&second_out)
+        .output()?;
+
+    assert!(
+        second_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&second_output.stdout),
+        String::from_utf8_lossy(&second_output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&second_out)?)?;
+    assert_eq!(result["status"], "rendered");
+    assert_eq!(result["parsed_command"]["command"], "remote_plan_selection");
+    assert_eq!(result["parsed_command"]["selection_status"], "selected");
+    assert_eq!(result["remote_plan_session"]["stage"], "project_selected");
+    assert_eq!(
+        result["remote_plan_session"]["selected_candidate"]["display_name"],
+        "Alpha"
+    );
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>계획 대상 선택됨</b>"));
+    assert!(preview.contains("초기화 검토"));
+    assert!(preview.contains("아직 실행은 시작하지 않았습니다."));
+    assert!(!preview.contains(workspace_root.to_str().expect("workspace path")));
+    assert_mobile_contract(&result);
+
+    let feedback_rows = fs::read_to_string(&feedback_file)?;
+    assert_eq!(feedback_rows.lines().count(), 1);
+    let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    assert_eq!(state["offset"], 712);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_replay_plan_session_accepts_manual_project_input() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let workspace_root = temp.path().join("workspace");
+    fs::create_dir_all(workspace_root.join("Alpha"))?;
+    fs::write(
+        workspace_root.join("Alpha").join("README.md"),
+        "Alpha project\n",
+    )?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+    let first_update = temp.path().join("plan_update.json");
+    write_text_update(
+        &first_update,
+        720,
+        900,
+        "Alpha 프로젝트를 오늘 밤 자율주행 계획으로 잡아줘",
+    )?;
+    let first_out = temp.path().join("plan_replay_result.json");
+    let first_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&first_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&first_out)
+        .output()?;
+    assert!(
+        first_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&first_output.stdout),
+        String::from_utf8_lossy(&first_output.stderr)
+    );
+
+    let second_update = temp.path().join("manual_selection_update.json");
+    write_text_update(&second_update, 721, 901, "Gamma 프로젝트")?;
+    let second_out = temp.path().join("manual_selection_result.json");
+    let second_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&second_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&second_out)
+        .output()?;
+    assert!(
+        second_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&second_output.stdout),
+        String::from_utf8_lossy(&second_output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&second_out)?)?;
+    assert_eq!(result["parsed_command"]["command"], "remote_plan_selection");
+    assert_eq!(result["parsed_command"]["selection_status"], "manual_input");
+    assert_eq!(
+        result["remote_plan_session"]["stage"],
+        "project_manual_input"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["selected_candidate"]["manual_input"],
+        true
+    );
+    assert_eq!(
+        result["remote_plan_session"]["selected_candidate"]["display_name"],
+        "Gamma 프로젝트"
+    );
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>계획 대상 선택됨</b>"));
+    assert!(preview.contains("Gamma 프로젝트"));
+    assert!(preview.contains("아직 실행은 시작하지 않았습니다."));
+    assert_mobile_contract(&result);
     Ok(())
 }
 

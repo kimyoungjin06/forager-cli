@@ -569,9 +569,18 @@ diagnostics belong in local health output, not in the chat message.
 
 Freeform Telegram text can be captured as either feedback or a planning
 request. Planning requests are intentionally not executed from Telegram. They
-must be promoted into the decision inbox as `telegram_operator_plan_request`
-with an explicit note that no autonomous work has started. The next local step
-is to turn that inbox item into a bounded Plan Mode candidate.
+are promoted into the decision inbox as `telegram_operator_plan_request` with
+an explicit note that no autonomous work has started, then the listener opens a
+short project-selection session. The operator can tap a candidate button or
+type a project number/name directly. If the typed project is not in the
+candidate list, the listener stores it as a manual project hint for later path
+confirmation. This only selects the Plan Mode target; launch, approval, shell,
+and git mutation remain unavailable from Telegram.
+
+Project candidate discovery is read-only and generic. Configure scan roots with
+repeated `--workspace-root` flags or `OFFDESK_REMOTE_OPERATOR_WORKSPACE_ROOTS`.
+If neither is set, the adapter scans the nearest `Workspace` directory when one
+is available.
 
 For a user-level service:
 
@@ -595,7 +604,8 @@ systemctl --user status forager-telegram-operator.service
 
 ### Phase 3: Plan Mode Bridge
 
-- Add portfolio project inventory.
+- Extend the read-only project inventory beyond the current Telegram
+  selection session.
 - Generate candidate ranking and plan artifacts.
 - Register plans through `forager offdesk plan`.
 - Display summaries with observed hashes.

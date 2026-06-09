@@ -79,6 +79,9 @@ CHOICE_SURFACE_CONTRACT_SCHEMA = "telegram_choice_surface_contract.v1"
 INTERACTION_CONTEXT_SCHEMA = "telegram_interaction_context.v1"
 HEALTH_SCHEMA = "remote_operator_telegram_health.v1"
 AGENT_INTENT_SCHEMA = "telegram_agent_intent.v1"
+REMOTE_PLAN_SESSION_SCHEMA = "telegram_remote_plan_session.v1"
+PROJECT_CANDIDATE_SCHEMA = "telegram_remote_project_candidate.v1"
+REMOTE_PLAN_SESSION_CONTEXT_KIND = "remote_plan_project_selection"
 MOBILE_CARD_MAX_LINES = 5
 MOBILE_CARD_MAX_CHARS = 360
 DEFAULT_AGENT_BASE_URLS = (
@@ -173,6 +176,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--agent-timeout-sec", type=int, default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_AGENT_TIMEOUT_SEC", "20")))
     parser.add_argument("--agent-num-ctx", type=int, default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_AGENT_NUM_CTX", "8192")))
     parser.add_argument("--agent-num-predict", type=int, default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_AGENT_NUM_PREDICT", "768")))
+    parser.add_argument(
+        "--workspace-root",
+        action="append",
+        type=pathlib.Path,
+        default=[],
+        help="Workspace root to scan for remote Plan Mode project candidates. Can be repeated.",
+    )
+    parser.add_argument(
+        "--max-project-candidates",
+        type=int,
+        default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_MAX_PROJECT_CANDIDATES", "3")),
+        help="Maximum project candidates to present in Telegram planning sessions.",
+    )
     parser.add_argument("--max-polls", type=int, help="Stop after this many polls; useful for smoke tests.")
     parser.add_argument("--poll-timeout-sec", type=int, default=5)
     parser.add_argument("--api-timeout-sec", type=int, default=20)
@@ -1045,6 +1061,586 @@ def safe_string_list(value: Any) -> list[str]:
     return [sanitize_text(str(item), max_chars=400) for item in value if str(item).strip()]
 
 
+def truncate_label(value: Any, *, max_chars: int = 34) -> str:
+    text = sanitize_text(str(value or "").strip(), max_chars=max_chars + 20)
+    if len(text) <= max_chars:
+        return text
+    return text[: max(1, max_chars - 1)] + "…"
+
+
+def slugify_project_key(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    text = re.sub(r"[^a-z0-9가-힣]+", "-", text)
+    return text.strip("-") or "project"
+
+
+def workspace_root_inputs(args: argparse.Namespace) -> list[pathlib.Path]:
+    roots: list[pathlib.Path] = []
+    for raw in args.workspace_root or []:
+        roots.append(pathlib.Path(raw))
+    for raw in csv_values(os.environ.get("OFFDESK_REMOTE_OPERATOR_WORKSPACE_ROOTS", "")):
+        roots.append(pathlib.Path(raw))
+    if roots:
+        return roots
+    for parent in REPO_ROOT.parents:
+        if parent.name == "Workspace" and parent.exists():
+            return [parent]
+    return [REPO_ROOT.parent]
+
+
+def workspace_roots(args: argparse.Namespace) -> list[pathlib.Path]:
+    roots: list[pathlib.Path] = []
+    seen: set[str] = set()
+    for raw in workspace_root_inputs(args):
+        try:
+            path = pathlib.Path(raw).expanduser().resolve()
+        except OSError:
+            path = pathlib.Path(raw).expanduser()
+        key = str(path)
+        if key in seen or not path.exists() or not path.is_dir():
+            continue
+        seen.add(key)
+        roots.append(path)
+    return roots
+
+
+PROJECT_MARKER_FILES = (
+    ".git",
+    ".forager",
+    "AGENTS.md",
+    "README.md",
+    "README_KO.md",
+    "Cargo.toml",
+    "pyproject.toml",
+    "package.json",
+    "uv.lock",
+)
+
+
+def project_marker_names(path: pathlib.Path) -> list[str]:
+    markers: list[str] = []
+    for name in PROJECT_MARKER_FILES:
+        if (path / name).exists():
+            markers.append(name)
+    return markers
+
+
+def looks_like_project_dir(path: pathlib.Path) -> bool:
+    if project_marker_names(path):
+        return True
+    try:
+        child_names = {child.name for child in path.iterdir() if child.is_dir()}
+    except OSError:
+        return False
+    return bool(child_names.intersection({"src", "scripts", "tests", "forager-cli"}))
+
+
+def discover_project_paths(roots: list[pathlib.Path], *, max_paths: int = 80) -> list[pathlib.Path]:
+    found: list[pathlib.Path] = []
+    seen: set[str] = set()
+
+    def add(path: pathlib.Path) -> None:
+        if len(found) >= max_paths:
+            return
+        try:
+            resolved = path.resolve()
+        except OSError:
+            resolved = path
+        key = str(resolved)
+        if key in seen or not path.exists() or not path.is_dir():
+            return
+        if not looks_like_project_dir(path):
+            return
+        seen.add(key)
+        found.append(path)
+
+    for root in roots:
+        add(root)
+        try:
+            children = sorted(
+                [child for child in root.iterdir() if child.is_dir() and not child.name.startswith(".")],
+                key=lambda item: item.name.lower(),
+            )
+        except OSError:
+            continue
+        for child in children:
+            add(child)
+        for child in children[:40]:
+            try:
+                nested = sorted(
+                    [
+                        grandchild
+                        for grandchild in child.iterdir()
+                        if grandchild.is_dir() and not grandchild.name.startswith(".")
+                    ],
+                    key=lambda item: item.name.lower(),
+                )
+            except OSError:
+                continue
+            for grandchild in nested:
+                if (grandchild / ".git").exists() or project_marker_names(grandchild):
+                    add(grandchild)
+    return found
+
+
+def git_output(path: pathlib.Path, args: list[str], *, timeout_sec: float = 1.5) -> str | None:
+    try:
+        process = subprocess.run(
+            ["git", "-C", str(path), *args],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=timeout_sec,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if process.returncode != 0:
+        return None
+    return process.stdout.strip()
+
+
+def is_git_repo(path: pathlib.Path) -> bool:
+    marker = path / ".git"
+    if marker.exists():
+        return True
+    return git_output(path, ["rev-parse", "--is-inside-work-tree"]) == "true"
+
+
+def request_tokens(*values: Any) -> set[str]:
+    text = " ".join(str(value or "") for value in values)
+    tokens = re.findall(r"[A-Za-z0-9가-힣]{2,}", text.lower())
+    return set(tokens)
+
+
+def relative_path_hint(path: pathlib.Path, roots: list[pathlib.Path]) -> str:
+    for root in roots:
+        try:
+            return str(path.resolve().relative_to(root.resolve()))
+        except (OSError, ValueError):
+            continue
+    return path.name
+
+
+def project_readiness(markers: list[str], git_repo: bool, dirty: bool | None) -> str:
+    if git_repo and dirty is False:
+        return "ready"
+    if git_repo:
+        return "needs_review"
+    if markers:
+        return "needs_review"
+    return "not_git"
+
+
+def project_risk(readiness: str, dirty: bool | None) -> str:
+    if readiness == "ready":
+        return "low"
+    if dirty is True:
+        return "medium"
+    return "medium" if readiness == "needs_review" else "high"
+
+
+def display_project_readiness(value: Any) -> str:
+    labels = {
+        "ready": "준비됨",
+        "needs_review": "검토 필요",
+        "not_git": "경로 확인 필요",
+    }
+    return labels.get(str(value or ""), "검토 필요")
+
+
+def display_project_risk(value: Any) -> str:
+    labels = {"low": "낮음", "medium": "중간", "high": "높음"}
+    return labels.get(str(value or ""), "중간")
+
+
+def build_project_candidate(
+    path: pathlib.Path,
+    *,
+    roots: list[pathlib.Path],
+    tokens: set[str],
+    rank: int,
+) -> dict[str, Any]:
+    markers = project_marker_names(path)
+    git_repo = is_git_repo(path)
+    branch = git_output(path, ["branch", "--show-current"]) if git_repo else None
+    head = git_output(path, ["rev-parse", "--short", "HEAD"]) if git_repo else None
+    status = git_output(path, ["status", "--porcelain"]) if git_repo else None
+    dirty = bool(status) if status is not None else (None if git_repo else False)
+    hint = relative_path_hint(path, roots)
+    display_name = path.name if path.name else hint
+    if "/" in hint and path.name not in hint.split("/", 1)[0]:
+        display_name = hint
+    readiness = project_readiness(markers, git_repo, dirty)
+    risk = project_risk(readiness, dirty)
+    reasons: list[str] = []
+    if git_repo:
+        reasons.append("git repository")
+    if dirty is False and git_repo:
+        reasons.append("clean worktree")
+    if dirty is True:
+        reasons.append("dirty worktree")
+    for marker in markers[:3]:
+        if marker != ".git":
+            reasons.append(marker)
+    name_blob = f"{display_name} {hint}".lower()
+    token_hits = sum(1 for token in tokens if token and token in name_blob)
+    score = token_hits * 20
+    score += 10 if git_repo else 0
+    score += 5 if dirty is False and git_repo else 0
+    score += min(5, len(markers))
+    score -= 3 if dirty is True else 0
+    return {
+        "schema": PROJECT_CANDIDATE_SCHEMA,
+        "rank": rank,
+        "score": score,
+        "project_key": slugify_project_key(display_name),
+        "display_name": truncate_label(display_name, max_chars=40),
+        "workspace_path": str(path),
+        "workspace_path_hint": sanitize_text(hint, max_chars=160),
+        "is_git_repo": git_repo,
+        "branch": branch,
+        "head": head,
+        "dirty": dirty,
+        "readiness": readiness,
+        "risk": risk,
+        "autonomy_fit": "high" if readiness == "ready" else "medium" if readiness == "needs_review" else "low",
+        "reasons": unique_nonempty(reasons)[:4],
+        "next_step": "init_review",
+    }
+
+
+def scan_project_candidates(
+    args: argparse.Namespace,
+    *,
+    request_text: str,
+    agent_intent: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    roots = workspace_roots(args)
+    token_set = request_tokens(
+        request_text,
+        agent_intent.get("project_hint") if isinstance(agent_intent, dict) else None,
+        agent_intent.get("goal") if isinstance(agent_intent, dict) else None,
+    )
+    candidates = [
+        build_project_candidate(path, roots=roots, tokens=token_set, rank=index + 1)
+        for index, path in enumerate(discover_project_paths(roots))
+    ]
+    candidates.sort(
+        key=lambda item: (
+            -int(item.get("score") or 0),
+            str(item.get("workspace_path_hint") or "").lower(),
+        )
+    )
+    limited = candidates[: max(1, int(args.max_project_candidates))]
+    for index, candidate in enumerate(limited, start=1):
+        candidate["rank"] = index
+    return limited
+
+
+def public_project_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+    public = dict(candidate)
+    if "workspace_path" in public:
+        public["workspace_path_hash"] = sha256_short(public.pop("workspace_path"))
+    return public
+
+
+def public_remote_plan_session(session: dict[str, Any]) -> dict[str, Any]:
+    public = dict(session)
+    public["candidates"] = [
+        public_project_candidate(candidate)
+        for candidate in session.get("candidates", [])
+        if isinstance(candidate, dict)
+    ]
+    selected = session.get("selected_candidate")
+    if isinstance(selected, dict):
+        public["selected_candidate"] = public_project_candidate(selected)
+    return public
+
+
+def remote_plan_choice_label(candidate: dict[str, Any]) -> str:
+    rank = int(candidate.get("rank") or 0)
+    name = truncate_label(candidate.get("display_name") or candidate.get("project_key"), max_chars=22)
+    return f"{rank} {name}".strip()
+
+
+def remote_plan_selection_context(session: dict[str, Any]) -> dict[str, Any]:
+    candidates = [
+        candidate
+        for candidate in session.get("candidates", [])
+        if isinstance(candidate, dict)
+    ]
+    return {
+        "schema": INTERACTION_CONTEXT_SCHEMA,
+        "command": "remote_plan_project_selection",
+        "profile": session.get("profile") or "default",
+        "context_kind": REMOTE_PLAN_SESSION_CONTEXT_KIND,
+        "focus_kind": "remote_plan_session",
+        "focus_ref": session.get("session_id"),
+        "focus_label": "계획 대상 선택",
+        "next_command": None,
+        "choice_labels": [remote_plan_choice_label(candidate) for candidate in candidates],
+    }
+
+
+def render_project_selection_message(*, profile: Any, session: dict[str, Any]) -> str:
+    candidates = [
+        candidate
+        for candidate in session.get("candidates", [])
+        if isinstance(candidate, dict)
+    ]
+    lines = [title_with_profile("계획 대상 선택", profile)]
+    if not candidates:
+        lines.append("후보 프로젝트를 찾지 못했습니다.")
+        lines.append("프로젝트명을 직접 입력하세요.")
+        lines.append("아직 실행은 시작하지 않았습니다.")
+        return "\n".join(lines)
+    lines.append(f"후보 {len(candidates)}개를 찾았습니다.")
+    for candidate in candidates[:2]:
+        name = truncate_label(candidate.get("display_name"), max_chars=22)
+        lines.append(
+            f"{candidate.get('rank')}. {html.escape(name)} · {display_project_readiness(candidate.get('readiness'))}"
+        )
+    if len(candidates) > 2:
+        lines[-1] = lines[-1] + f" 외 {len(candidates) - 2}"
+    lines.append("버튼 또는 번호/이름 직접 입력")
+    return "\n".join(lines[:MOBILE_CARD_MAX_LINES])
+
+
+def render_project_selected_message(*, profile: Any, session: dict[str, Any]) -> str:
+    candidate = session.get("selected_candidate") if isinstance(session.get("selected_candidate"), dict) else {}
+    name = truncate_label(candidate.get("display_name") or "프로젝트", max_chars=24)
+    readiness = display_project_readiness(candidate.get("readiness"))
+    risk = display_project_risk(candidate.get("risk"))
+    return "\n".join(
+        [
+            title_with_profile("계획 대상 선택됨", profile),
+            f"{html.escape(name)} · {readiness} · 위험 {risk}",
+            "다음 단계는 초기화 검토입니다.",
+            "아직 실행은 시작하지 않았습니다.",
+            "의견을 직접 입력할 수 있습니다.",
+        ]
+    )
+
+
+def manual_project_candidate(text: str) -> dict[str, Any]:
+    label = truncate_label(text, max_chars=40) or "직접 입력"
+    return {
+        "schema": PROJECT_CANDIDATE_SCHEMA,
+        "rank": None,
+        "score": 0,
+        "project_key": slugify_project_key(label),
+        "display_name": label,
+        "workspace_path_hint": "manual_input",
+        "is_git_repo": False,
+        "branch": None,
+        "head": None,
+        "dirty": None,
+        "readiness": "not_git",
+        "risk": "high",
+        "autonomy_fit": "low",
+        "reasons": ["manual input", "path not resolved"],
+        "next_step": "init_review",
+        "manual_input": True,
+    }
+
+
+def render_project_selection_error_message(*, profile: Any, session: dict[str, Any]) -> str:
+    candidates = [
+        candidate
+        for candidate in session.get("candidates", [])
+        if isinstance(candidate, dict)
+    ]
+    labels = " · ".join(str(candidate.get("rank")) for candidate in candidates[:3])
+    return "\n".join(
+        [
+            title_with_profile("선택 확인 필요", profile),
+            "입력한 후보를 찾지 못했습니다.",
+            f"가능한 번호: {html.escape(labels or '없음')}",
+            "버튼 또는 번호/이름 직접 입력",
+        ]
+    )
+
+
+def render_project_selection_deferred_message(*, profile: Any) -> str:
+    return "\n".join(
+        [
+            title_with_profile("계획 선택 보류", profile),
+            "세션을 보류했습니다.",
+            "아직 실행은 시작하지 않았습니다.",
+            "다시 시작하려면 계획 요청을 입력하세요.",
+        ]
+    )
+
+
+def create_remote_plan_session(
+    args: argparse.Namespace,
+    *,
+    chat_hash: str,
+    request_text: str,
+    parsed_command: dict[str, Any],
+    feedback_context: dict[str, Any] | None,
+    decision_id: Any = None,
+) -> dict[str, Any]:
+    agent_intent = parsed_command.get("agent_intent") if isinstance(parsed_command.get("agent_intent"), dict) else None
+    seed = f"{utc_now()}|{chat_hash}|{request_text}"
+    session = {
+        "schema": REMOTE_PLAN_SESSION_SCHEMA,
+        "session_id": "telegram-plan-" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:12],
+        "profile": args.profile,
+        "chat_id_hash": chat_hash,
+        "created_at": utc_now(),
+        "updated_at": utc_now(),
+        "stage": "project_selection",
+        "request_text": sanitize_text(request_text, max_chars=1200),
+        "feedback_kind": str(parsed_command.get("feedback_kind") or "planning_request"),
+        "feedback_context": feedback_context,
+        "agent_intent": agent_intent,
+        "decision_feedback_decision_id": decision_id,
+        "execution_authorized": False,
+        "approval_authorized": False,
+        "candidates": scan_project_candidates(
+            args,
+            request_text=request_text,
+            agent_intent=agent_intent,
+        ),
+    }
+    return session
+
+
+def remote_plan_sessions_by_chat(state: dict[str, Any]) -> dict[str, Any]:
+    sessions = state.setdefault("remote_plan_sessions_by_chat", {})
+    if not isinstance(sessions, dict):
+        sessions = {}
+        state["remote_plan_sessions_by_chat"] = sessions
+    return sessions
+
+
+def active_remote_plan_session(state: dict[str, Any], chat_hash: str) -> dict[str, Any] | None:
+    session = remote_plan_sessions_by_chat(state).get(str(chat_hash or ""))
+    if not isinstance(session, dict):
+        return None
+    if str(session.get("stage") or "") in {"project_selection"}:
+        return session
+    return None
+
+
+def store_remote_plan_session(state: dict[str, Any], chat_hash: str, session: dict[str, Any]) -> None:
+    session["updated_at"] = utc_now()
+    remote_plan_sessions_by_chat(state)[str(chat_hash or "")] = session
+
+
+def is_core_or_slash_command_text(text: str) -> bool:
+    stripped = str(text or "").strip()
+    return stripped.startswith("/") or stripped in BUTTON_COMMAND_ALIASES
+
+
+def candidate_matches_selection(candidate: dict[str, Any], text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    if not normalized:
+        return False
+    rank = str(candidate.get("rank") or "").strip()
+    if rank and re.match(rf"^\s*{re.escape(rank)}\s*(번)?(\s|$)", normalized):
+        return True
+    for value in (
+        candidate.get("display_name"),
+        candidate.get("project_key"),
+        candidate.get("workspace_path_hint"),
+    ):
+        option = str(value or "").strip().lower()
+        if option and (normalized == option or option in normalized or normalized in option):
+            return True
+    return False
+
+
+def selected_candidate_for_text(session: dict[str, Any], text: str) -> dict[str, Any] | None:
+    candidates = [
+        candidate
+        for candidate in session.get("candidates", [])
+        if isinstance(candidate, dict)
+    ]
+    for candidate in candidates:
+        if candidate_matches_selection(candidate, text):
+            return candidate
+    return None
+
+
+def handle_remote_plan_session_input(
+    args: argparse.Namespace,
+    config: dict[str, Any],
+    state: dict[str, Any],
+    *,
+    chat_hash: str,
+    session: dict[str, Any],
+    text: str,
+    mode: str,
+) -> dict[str, Any]:
+    result = result_base(args, config, mode)
+    result["command_text"] = sanitize_text(text, max_chars=400)
+    normalized = str(text or "").strip()
+    lowered = normalized.lower()
+    parsed = {
+        "supported": True,
+        "command": "remote_plan_selection",
+        "argv": [],
+        "command_text": normalized,
+        "session_id": session.get("session_id"),
+    }
+    if lowered in {"보류", "취소", "나중에", "hold", "cancel"}:
+        session["stage"] = "deferred"
+        store_remote_plan_session(state, chat_hash, session)
+        result["parsed_command"] = {**parsed, "selection_status": "deferred"}
+        message_preview = render_project_selection_deferred_message(profile=args.profile)
+        attach_choice_surface(result, None)
+    elif lowered in {"다시 스캔", "재스캔", "rescan", "scan again"}:
+        agent_intent = session.get("agent_intent") if isinstance(session.get("agent_intent"), dict) else None
+        session["candidates"] = scan_project_candidates(
+            args,
+            request_text=str(session.get("request_text") or ""),
+            agent_intent=agent_intent,
+        )
+        session["stage"] = "project_selection"
+        store_remote_plan_session(state, chat_hash, session)
+        result["parsed_command"] = {**parsed, "selection_status": "rescanned"}
+        message_preview = render_project_selection_message(profile=args.profile, session=session)
+        attach_choice_surface(result, remote_plan_selection_context(session))
+    else:
+        candidate = selected_candidate_for_text(session, normalized)
+        if candidate:
+            session["stage"] = "project_selected"
+            session["selected_candidate"] = candidate
+            store_remote_plan_session(state, chat_hash, session)
+            result["parsed_command"] = {
+                **parsed,
+                "selection_status": "selected",
+                "selected_project_key": candidate.get("project_key"),
+            }
+            message_preview = render_project_selected_message(profile=args.profile, session=session)
+            attach_choice_surface(result, None)
+        else:
+            manual_candidate = manual_project_candidate(normalized)
+            session["stage"] = "project_manual_input"
+            session["selected_candidate"] = manual_candidate
+            store_remote_plan_session(state, chat_hash, session)
+            result["parsed_command"] = {
+                **parsed,
+                "selection_status": "manual_input",
+                "selected_project_key": manual_candidate.get("project_key"),
+            }
+            message_preview = render_project_selected_message(profile=args.profile, session=session)
+            attach_choice_surface(result, None)
+    result.update(
+        {
+            "status": "rendered",
+            "projection": None,
+            "remote_plan_session": public_remote_plan_session(session),
+            "message_preview": message_preview,
+            "mobile_card_contract": mobile_card_contract(message_preview),
+        }
+    )
+    return result
+
+
 def show_command_for(plan_id: Any) -> str:
     value = str(plan_id or "").strip()
     return f"/show {shlex.quote(value)}" if value else "/plans --latest"
@@ -1255,6 +1851,25 @@ def choice_keyboard(context: dict[str, Any] | None = None) -> dict[str, Any]:
 
     context_kind = str(context.get("context_kind") or "") if isinstance(context, dict) else ""
     next_command = str(context.get("next_command") or "").strip() if isinstance(context, dict) else ""
+    if context_kind == REMOTE_PLAN_SESSION_CONTEXT_KIND:
+        choice_labels = (
+            context.get("choice_labels") if isinstance(context, dict) else []
+        )
+        labels = [str(label or "").strip() for label in choice_labels if str(label or "").strip()] if isinstance(choice_labels, list) else []
+        for index in range(0, len(labels), 2):
+            add_row(*labels[index : index + 2])
+        add_row("다시 스캔", "보류")
+        add_row("상태", "계획")
+        add_row("승인 대기", "도움말")
+        for label in CORE_BUTTON_LABELS:
+            if label not in seen:
+                add_row(label)
+        return {
+            "keyboard": rows,
+            "resize_keyboard": True,
+            "one_time_keyboard": False,
+            "input_field_placeholder": "번호/프로젝트명 또는 의견을 직접 입력",
+        }
     if next_command and next_command not in {"/status", "/pending", "/plans --latest", "/help"}:
         add_row(next_command)
     if context_kind == "status_attention":
@@ -1318,6 +1933,12 @@ def choice_surface_contract(
         warnings.append("missing_freeform_placeholder")
     next_command = str(context.get("next_command") or "").strip() if isinstance(context, dict) else ""
     has_contextual_choice = False
+    choice_labels = context.get("choice_labels") if isinstance(context, dict) else None
+    if isinstance(choice_labels, list) and choice_labels:
+        expected = [str(label or "").strip() for label in choice_labels if str(label or "").strip()]
+        has_contextual_choice = any(label in button_texts for label in expected)
+        if not has_contextual_choice:
+            warnings.append("missing_contextual_choice:choice_labels")
     if next_command:
         has_contextual_choice = any(button_resolves_to(button, next_command) for button in button_texts)
         if not has_contextual_choice:
@@ -1744,19 +2365,33 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
         if not text:
             result.update({"status": "ignored", "reason": "empty_message"})
             continue
-        feedback_context = last_context_for_chat_hash(state, sha256_short(chat_id_for(message)))
-        rendered = render_command_result(
-            args,
-            config,
-            text,
-            mode="live_once",
-            feedback_context=feedback_context,
-        )
+        chat_hash = sha256_short(chat_id_for(message))
+        active_session = active_remote_plan_session(state, chat_hash)
+        if active_session and not is_core_or_slash_command_text(text):
+            rendered = handle_remote_plan_session_input(
+                args,
+                config,
+                state,
+                chat_hash=chat_hash,
+                session=active_session,
+                text=text,
+                mode="live_once",
+            )
+        else:
+            feedback_context = last_context_for_chat_hash(state, chat_hash)
+            rendered = render_command_result(
+                args,
+                config,
+                text,
+                mode="live_once",
+                feedback_context=feedback_context,
+            )
         rendered["updates_seen"] = len(updates)
         if isinstance(update_id, int):
             rendered["processed_update_id"] = update_id
         parsed_command = rendered.get("parsed_command") if isinstance(rendered.get("parsed_command"), dict) else {}
         if parsed_command.get("command") == "feedback":
+            feedback_context = last_context_for_chat_hash(state, chat_hash)
             feedback_result = record_feedback(
                 args,
                 config,
@@ -1779,6 +2414,23 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                     inbox_status=str(ingest_result.get("decision_feedback_ingest_status") or ""),
                 )
                 rendered["mobile_card_contract"] = mobile_card_contract(rendered["message_preview"])
+                if str(parsed_command.get("feedback_kind") or "") == "planning_request":
+                    session = create_remote_plan_session(
+                        args,
+                        chat_hash=chat_hash,
+                        request_text=str(parsed_command.get("feedback_text") or text),
+                        parsed_command=parsed_command,
+                        feedback_context=feedback_context,
+                        decision_id=ingest_result.get("decision_feedback_decision_id"),
+                    )
+                    store_remote_plan_session(state, chat_hash, session)
+                    rendered["remote_plan_session"] = public_remote_plan_session(session)
+                    rendered["message_preview"] = render_project_selection_message(
+                        profile=args.profile,
+                        session=session,
+                    )
+                    attach_choice_surface(rendered, remote_plan_selection_context(session))
+                    rendered["mobile_card_contract"] = mobile_card_contract(rendered["message_preview"])
         message_id = send_message(
             config,
             chat_id_for(message),
