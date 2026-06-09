@@ -610,6 +610,13 @@ checks that the draft hash still matches the dry-run receipt, then runs
 Offdesk plan registry only. It still does not record a plan-review approval,
 build launch-preparation packets, enqueue work, or start runtime execution.
 
+After registration succeeds, the listener keeps the same Telegram session active
+and offers `계획 승인`. This maps only to
+`forager offdesk plan-review <plan-id> --decision approved --json` and stores a
+`telegram_remote_plan_review.v1` receipt. The receipt records the reviewed plan,
+source hash, and Offdesk review record path for local audit. It does not build
+launch-preparation packets, enqueue work, or start runtime execution.
+
 Project candidate discovery is read-only and generic. Configure scan roots with
 repeated `--workspace-root` flags or `OFFDESK_REMOTE_OPERATOR_WORKSPACE_ROOTS`.
 If neither is set, the adapter scans the nearest `Workspace` directory when one
@@ -645,13 +652,14 @@ systemctl --user status forager-telegram-operator.service
 - Convert `telegram_operator_plan_request` inbox items into bounded Plan Mode
   candidates. This closes the gap where an operator sends a Telegram request
   after leaving the desk but no local plan has been registered yet.
-- Promote `telegram_remote_plan_registration.v1` receipts into plan-review
-  candidates only after local review.
+- Promote `telegram_remote_plan_registration.v1` receipts into approved
+  `forager offdesk plan-review` records only after explicit Telegram operator
+  confirmation.
 
 ### Phase 4: Plan Review Bridge
 
-- Allow `approve_plan`, `request_revision`, and `reject_plan`.
-- Map approvals to `forager offdesk plan-review`.
+- Keep `계획 승인` as an explicit positive plan-review action.
+- Add revision-required and rejected decisions.
 - Reject stale approvals by observed hash.
 - Never enqueue or launch work in this phase.
 

@@ -91,6 +91,7 @@ PROJECT_INIT_PREVIEW_SCHEMA = "telegram_remote_project_init_preview.v1"
 PROJECT_INIT_RUN_SCHEMA = "telegram_remote_project_init_run.v1"
 PLAN_DRAFT_SCHEMA = "telegram_remote_plan_draft.v1"
 PLAN_REGISTRATION_SCHEMA = "telegram_remote_plan_registration.v1"
+PLAN_REVIEW_SCHEMA = "telegram_remote_plan_review.v1"
 REMOTE_PLAN_SESSION_CONTEXT_KIND = "remote_plan_project_selection"
 REMOTE_PLAN_INIT_CONTEXT_KIND = "remote_plan_init_review"
 MOBILE_CARD_MAX_LINES = 5
@@ -212,6 +213,11 @@ def parse_args() -> argparse.Namespace:
         "--plan-registration-timeout-sec",
         type=int,
         default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_PLAN_REGISTRATION_TIMEOUT_SEC", "60")),
+    )
+    parser.add_argument(
+        "--plan-review-timeout-sec",
+        type=int,
+        default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_PLAN_REVIEW_TIMEOUT_SEC", "60")),
     )
     parser.add_argument(
         "--workspace-root",
@@ -1412,6 +1418,9 @@ def public_remote_plan_session(session: dict[str, Any]) -> dict[str, Any]:
     registration = session.get("plan_registration")
     if isinstance(registration, dict):
         public["plan_registration"] = public_plan_registration(registration)
+    review = session.get("plan_review")
+    if isinstance(review, dict):
+        public["plan_review"] = public_plan_review(review)
     return public
 
 
@@ -1511,6 +1520,44 @@ def public_offdesk_plan_registration_output(output: dict[str, Any]) -> dict[str,
     return public
 
 
+def public_plan_review(review: dict[str, Any]) -> dict[str, Any]:
+    public = dict(review)
+    plan_ref = str(public.get("plan_ref") or "")
+    if plan_ref and ("/" in plan_ref or "\\" in plan_ref):
+        public["plan_ref_hash"] = sha256_short(str(public.pop("plan_ref")))
+    for key in ("registration_json", "copied_source_json"):
+        value = str(public.pop(key, "") or "")
+        if value:
+            public[f"{key}_hash"] = sha256_short(value)
+    command = public.get("review_command")
+    if isinstance(command, list) and plan_ref and ("/" in plan_ref or "\\" in plan_ref):
+        public["review_command"] = [
+            "<plan_ref>" if str(item) == plan_ref else str(item)
+            for item in command
+        ]
+    output = public.get("review_output")
+    if isinstance(output, dict):
+        public["review_output"] = public_offdesk_plan_review_output(output)
+    return public
+
+
+def public_offdesk_plan_review_output(output: dict[str, Any]) -> dict[str, Any]:
+    public = dict(output)
+    for key in ("registration_path", "review_file"):
+        value = str(public.pop(key, "") or "")
+        if value:
+            public[f"{key}_hash"] = sha256_short(value)
+    artifacts = public.get("artifacts")
+    if isinstance(artifacts, dict):
+        public["artifacts"] = {
+            key: sha256_short(str(value))
+            if str(value or "").strip()
+            else None
+            for key, value in artifacts.items()
+        }
+    return public
+
+
 def remote_plan_choice_label(candidate: dict[str, Any]) -> str:
     rank = int(candidate.get("rank") or 0)
     name = truncate_label(candidate.get("display_name") or candidate.get("project_key"), max_chars=22)
@@ -1541,6 +1588,8 @@ def remote_plan_init_context(session: dict[str, Any]) -> dict[str, Any]:
     stage = str(session.get("stage") or "")
     if stage == "project_init_previewed":
         primary = "초기화 생성"
+    elif stage in {"plan_registered", "plan_review_failed"}:
+        primary = "계획 승인"
     elif stage == "plan_draft_validated":
         primary = "계획 등록"
     elif stage in {"project_init_created", "plan_draft_failed"}:
@@ -1741,6 +1790,47 @@ def render_plan_registered_message(*, profile: Any, session: dict[str, Any]) -> 
             "계획을 등록했습니다.",
             "아직 실행은 시작하지 않았습니다.",
             "로컬에서 계획 검토",
+        ]
+    )
+
+
+def render_plan_review_required_message(*, profile: Any) -> str:
+    return "\n".join(
+        [
+            title_with_profile("계획 등록 필요", profile),
+            "먼저 계획을 등록하세요.",
+            "계획 검토는 아직 기록하지 않았습니다.",
+            "아직 실행은 시작하지 않았습니다.",
+            "버튼 또는 의견 직접 입력",
+        ]
+    )
+
+
+def render_plan_review_approved_message(*, profile: Any, session: dict[str, Any]) -> str:
+    review = session.get("plan_review") if isinstance(session.get("plan_review"), dict) else {}
+    output = review.get("review_output") if isinstance(review.get("review_output"), dict) else {}
+    project_key = truncate_label(review.get("project_key") or output.get("project_key") or "프로젝트", max_chars=24)
+    return "\n".join(
+        [
+            title_with_profile("계획 승인됨", profile),
+            f"{html.escape(project_key)} · 실행 준비 후보",
+            "계획 검토를 기록했습니다.",
+            "실행 준비는 아직 하지 않았습니다.",
+            "로컬에서 실행 준비 검토",
+        ]
+    )
+
+
+def render_plan_review_failed_message(*, profile: Any, session: dict[str, Any]) -> str:
+    review = session.get("plan_review") if isinstance(session.get("plan_review"), dict) else {}
+    reason = truncate_label(review.get("error") or "승인 실패", max_chars=42)
+    return "\n".join(
+        [
+            title_with_profile("계획 승인 실패", profile),
+            html.escape(reason),
+            "계획 검토를 기록하지 못했습니다.",
+            "아직 실행은 시작하지 않았습니다.",
+            "로컬에서 원인 확인",
         ]
     )
 
@@ -2065,6 +2155,18 @@ def plan_registration_create_text(text: str) -> bool:
     }
 
 
+def plan_review_approve_text(text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    return normalized in {
+        "계획 승인",
+        "계획승인",
+        "승인",
+        "plan approve",
+        "approve plan",
+        "approve",
+    }
+
+
 def build_multiturn_plan_draft(session: dict[str, Any], init_run: dict[str, Any]) -> dict[str, Any]:
     output = init_run.get("project_init_output") if isinstance(init_run.get("project_init_output"), dict) else {}
     summary = output.get("summary") if isinstance(output.get("summary"), dict) else {}
@@ -2335,6 +2437,156 @@ def register_plan_draft(
     return receipt
 
 
+def registered_plan_ref(registration: dict[str, Any]) -> str:
+    output = registration.get("registration_output") if isinstance(registration.get("registration_output"), dict) else {}
+    plan_id = str(output.get("plan_id") or "").strip()
+    if plan_id:
+        return plan_id
+    artifacts = output.get("artifacts") if isinstance(output.get("artifacts"), dict) else {}
+    registry_dir = str(artifacts.get("registry_dir") or "").strip()
+    if registry_dir:
+        return pathlib.Path(registry_dir).name
+    return ""
+
+
+def approve_registered_plan(
+    args: argparse.Namespace,
+    *,
+    session: dict[str, Any],
+    registration: dict[str, Any],
+) -> dict[str, Any]:
+    output = registration.get("registration_output") if isinstance(registration.get("registration_output"), dict) else {}
+    artifacts = output.get("artifacts") if isinstance(output.get("artifacts"), dict) else {}
+    project_key = str(output.get("project_key") or registration.get("project_key") or "project")
+    plan_ref = registered_plan_ref(registration)
+    artifact_dir = args.remote_plan_artifact_dir.expanduser() / str(session.get("session_id") or "session")
+    receipt_path = artifact_dir / "PLAN_REVIEW.json"
+    copied_source_json = str(artifacts.get("copied_source_json") or "").strip()
+    expected_source_sha = str(output.get("source_sha256") or "").strip()
+    receipt = {
+        "schema": PLAN_REVIEW_SCHEMA,
+        "created_at": utc_now(),
+        "session_id": session.get("session_id"),
+        "profile": args.profile,
+        "project_key": project_key,
+        "plan_ref": plan_ref,
+        "registration_json": str(artifacts.get("registration_json") or ""),
+        "copied_source_json": copied_source_json,
+        "expected_source_sha256": expected_source_sha,
+        "plan_review_authorized": True,
+        "approval_authorized": False,
+        "execution_authorized": False,
+        "launch_preparation_authorized": False,
+        "enqueue_authorized": False,
+        "runtime_authorized": False,
+    }
+    if not plan_ref:
+        receipt.update(
+            {
+                "status": "error",
+                "error": "registered plan id unavailable",
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    if copied_source_json and expected_source_sha:
+        try:
+            current_sha = sha256_hex(pathlib.Path(copied_source_json).read_bytes())
+        except OSError as error:
+            receipt.update(
+                {
+                    "status": "error",
+                    "error": sanitize_text(f"registered plan source unavailable: {error}", max_chars=400),
+                    "artifact_path": str(receipt_path),
+                }
+            )
+            write_json(receipt_path, receipt)
+            return receipt
+        receipt["current_source_sha256"] = current_sha
+        if current_sha != expected_source_sha:
+            receipt.update(
+                {
+                    "status": "stale",
+                    "error": "registered plan source changed after registration",
+                    "artifact_path": str(receipt_path),
+                }
+            )
+            write_json(receipt_path, receipt)
+            return receipt
+    command = [args.forager_bin]
+    if args.profile:
+        command.extend(["--profile", args.profile])
+    command.extend(
+        [
+            "offdesk",
+            "plan-review",
+            plan_ref,
+            "--decision",
+            "approved",
+            "--reviewer",
+            "telegram",
+            "--reason",
+            "Telegram operator approved the registered plan for a separate launch-preparation review.",
+            "--follow-up",
+            "Prepare launch packet in a separate command.",
+            "--json",
+        ]
+    )
+    receipt["review_command"] = command
+    try:
+        process = subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=max(1, int(args.plan_review_timeout_sec)),
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"{type(error).__name__}: {error}", max_chars=400),
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt["returncode"] = process.returncode
+    if process.returncode != 0:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(process.stderr.strip() or process.stdout.strip(), max_chars=600),
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    try:
+        review_output = json.loads(process.stdout)
+    except json.JSONDecodeError as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"plan review did not return JSON: {error}", max_chars=400),
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt.update(
+        {
+            "status": "approved" if review_output.get("decision") == "approved" else "reviewed",
+            "review_output": review_output,
+            "artifact_path": str(receipt_path),
+        }
+    )
+    write_json(receipt_path, receipt)
+    return receipt
+
+
 def remote_plan_sessions_by_chat(state: dict[str, Any]) -> dict[str, Any]:
     sessions = state.setdefault("remote_plan_sessions_by_chat", {})
     if not isinstance(sessions, dict):
@@ -2357,7 +2609,9 @@ def active_remote_plan_session(state: dict[str, Any], chat_hash: str) -> dict[st
         "project_init_failed",
         "plan_draft_validated",
         "plan_draft_failed",
+        "plan_registered",
         "plan_registration_failed",
+        "plan_review_failed",
     }:
         return session
     return None
@@ -2521,6 +2775,7 @@ def handle_remote_plan_session_input(
         session.pop("project_init_run", None)
         session.pop("plan_draft", None)
         session.pop("plan_registration", None)
+        session.pop("plan_review", None)
         store_remote_plan_session(state, chat_hash, session)
         result["parsed_command"] = {**parsed, "selection_status": "reselect"}
         message_preview = render_project_selection_message(profile=args.profile, session=session)
@@ -2594,6 +2849,34 @@ def handle_remote_plan_session_input(
                 "selected_project_key": selected.get("project_key"),
             }
             attach_choice_surface(result, remote_plan_init_context(session))
+    elif plan_review_approve_text(normalized):
+        registration = session.get("plan_registration") if isinstance(session.get("plan_registration"), dict) else {}
+        if stage not in {"plan_registered", "plan_review_failed"} or registration.get("status") != "registered":
+            result["parsed_command"] = {**parsed, "selection_status": "plan_registration_required"}
+            message_preview = render_plan_review_required_message(profile=args.profile)
+            attach_choice_surface(result, remote_plan_init_context(session))
+        else:
+            review = approve_registered_plan(args, session=session, registration=registration)
+            session["plan_review"] = review
+            if review.get("status") == "approved":
+                session["stage"] = "plan_review_approved"
+                message_preview = render_plan_review_approved_message(profile=args.profile, session=session)
+                selection_status = "plan_review_approved"
+                choice_context = None
+            else:
+                session["stage"] = "plan_review_failed"
+                message_preview = render_plan_review_failed_message(profile=args.profile, session=session)
+                selection_status = (
+                    "plan_review_stale" if review.get("status") == "stale" else "plan_review_failed"
+                )
+                choice_context = remote_plan_init_context(session)
+            store_remote_plan_session(state, chat_hash, session)
+            result["parsed_command"] = {
+                **parsed,
+                "selection_status": selection_status,
+                "selected_project_key": review.get("project_key"),
+            }
+            attach_choice_surface(result, choice_context)
     elif plan_registration_create_text(normalized):
         draft = session.get("plan_draft") if isinstance(session.get("plan_draft"), dict) else {}
         if stage != "plan_draft_validated" or draft.get("status") != "validated":
@@ -2607,7 +2890,7 @@ def handle_remote_plan_session_input(
                 session["stage"] = "plan_registered"
                 message_preview = render_plan_registered_message(profile=args.profile, session=session)
                 selection_status = "plan_registered"
-                choice_context = None
+                choice_context = remote_plan_init_context(session)
             elif registration.get("status") == "stale":
                 session["stage"] = "plan_registration_failed"
                 message_preview = render_plan_registration_stale_message(profile=args.profile)

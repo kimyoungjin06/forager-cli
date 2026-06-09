@@ -1596,12 +1596,147 @@ fn remote_operator_telegram_replay_plan_session_builds_init_preview_receipt() ->
     assert!(preview.contains("아직 실행은 시작하지 않았습니다."));
     assert!(preview.contains("로컬에서 계획 검토"));
     assert!(!preview.contains(workspace_root.to_str().expect("workspace path")));
+    assert!(button_texts(&result).contains(&"계획 승인".to_string()));
+    assert_mobile_contract(&result);
+
+    let seventh_update = temp.path().join("plan_review_update.json");
+    write_text_update(&seventh_update, 736, 916, "계획 승인")?;
+    let seventh_out = temp.path().join("plan_review_result.json");
+    let seventh_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&seventh_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--remote-plan-artifact-dir")
+        .arg(&plan_artifact_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&seventh_out)
+        .output()?;
+    assert!(
+        seventh_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&seventh_output.stdout),
+        String::from_utf8_lossy(&seventh_output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&seventh_out)?)?;
+    assert_eq!(result["parsed_command"]["command"], "remote_plan_selection");
+    assert_eq!(
+        result["parsed_command"]["selection_status"],
+        "plan_review_approved"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["stage"],
+        "plan_review_approved"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_review"]["schema"],
+        "telegram_remote_plan_review.v1"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_review"]["status"],
+        "approved"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_review"]["plan_review_authorized"],
+        true
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_review"]["execution_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_review"]["launch_preparation_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_review"]["runtime_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_review"]["review_output"]["schema"],
+        "offdesk_plan_review.v1"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_review"]["review_output"]["decision"],
+        "approved"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_review"]["review_output"]
+            ["ready_for_launch_preparation_candidate"],
+        true
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_review"]["review_output"]["ready_for_enqueue"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_review"]["review_output"]["applies_file_operations"],
+        false
+    );
+    assert!(
+        result["remote_plan_session"]["plan_review"]["review_output"]["registration_path"]
+            .is_null()
+    );
+    assert!(
+        result["remote_plan_session"]["plan_review"]["review_output"]["registration_path_hash"]
+            .is_string()
+    );
+    assert!(
+        result["remote_plan_session"]["plan_review"]["review_output"]["artifacts"]
+            ["review_record_json"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("sha256:")
+    );
+    let artifact_path = result["remote_plan_session"]["plan_review"]["artifact_path"]
+        .as_str()
+        .expect("plan review receipt path");
+    let artifact: Value = serde_json::from_slice(&fs::read(artifact_path)?)?;
+    assert_eq!(artifact["schema"], "telegram_remote_plan_review.v1");
+    assert_eq!(artifact["status"], "approved");
+    assert_eq!(artifact["plan_review_authorized"], true);
+    assert_eq!(artifact["execution_authorized"], false);
+    assert_eq!(artifact["launch_preparation_authorized"], false);
+    assert_eq!(artifact["runtime_authorized"], false);
+    assert_eq!(
+        artifact["review_output"]["schema"],
+        "offdesk_plan_review.v1"
+    );
+    assert_eq!(artifact["review_output"]["decision"], "approved");
+    assert_eq!(
+        artifact["review_output"]["ready_for_launch_preparation_candidate"],
+        true
+    );
+    assert_eq!(artifact["review_output"]["ready_for_enqueue"], false);
+    assert_eq!(artifact["review_output"]["applies_file_operations"], false);
+    let review_record_path = artifact["review_output"]["artifacts"]["review_record_json"]
+        .as_str()
+        .expect("review record path");
+    assert!(Path::new(review_record_path).exists());
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>계획 승인됨</b>"));
+    assert!(preview.contains("계획 검토를 기록했습니다."));
+    assert!(preview.contains("실행 준비는 아직 하지 않았습니다."));
+    assert!(preview.contains("로컬에서 실행 준비 검토"));
+    assert!(!preview.contains(workspace_root.to_str().expect("workspace path")));
     assert_mobile_contract(&result);
 
     let feedback_rows = fs::read_to_string(&feedback_file)?;
     assert_eq!(feedback_rows.lines().count(), 1);
     let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
-    assert_eq!(state["offset"], 736);
+    assert_eq!(state["offset"], 737);
     Ok(())
 }
 
