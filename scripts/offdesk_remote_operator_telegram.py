@@ -25,6 +25,8 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from offdesk_llm_endpoint import default_ollama_base_url
+
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEFAULT_TELEGRAM_ENV_FILE = pathlib.Path(
@@ -73,9 +75,9 @@ AGENT_INTENT_SCHEMA = "telegram_agent_intent.v1"
 MOBILE_CARD_MAX_LINES = 5
 MOBILE_CARD_MAX_CHARS = 360
 DEFAULT_AGENT_BASE_URLS = (
+    default_ollama_base_url(),
     "http://127.0.0.1:11434",
     "http://localhost:11434",
-    "http://172.16.0.37:11434",
 )
 DEFAULT_AGENT_MODEL_CANDIDATES = (
     "qwen3-coder-next:latest",

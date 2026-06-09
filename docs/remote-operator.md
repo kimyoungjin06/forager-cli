@@ -79,7 +79,7 @@ intent_mode = "auto"
 provider = "ollama"
 base_urls = [
   "http://127.0.0.1:11434",
-  "http://172.16.0.37:11434"
+  "http://<gpu-server>:11434"
 ]
 models = [
   "qwen3-coder-next:latest",

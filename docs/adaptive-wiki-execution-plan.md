@@ -1566,14 +1566,14 @@ python3 -m py_compile scripts/offdesk_wiki_llm_harness.py
 python3 -m py_compile scripts/offdesk_twinpaper_autonomy_workload.py
 python3 -m py_compile scripts/offdesk_runtime_episode_harness.py
 scripts/offdesk_role_episode_harness.py
-scripts/offdesk_role_llm_episode_harness.py --model qwen3-coder-next:latest --base-url http://172.16.0.37:11434 --temperature 0.0 --max-budget 2048 --num-ctx 8192
-scripts/offdesk_role_llm_episode_harness.py --model qwen3-coder-next:latest --base-url http://172.16.0.37:11434 --temperature 0.0 --iterations 5 --max-budget 2048 --num-ctx 8192
+scripts/offdesk_role_llm_episode_harness.py --model qwen3-coder-next:latest --base-url http://<gpu-server>:11434 --temperature 0.0 --max-budget 2048 --num-ctx 8192
+scripts/offdesk_role_llm_episode_harness.py --model qwen3-coder-next:latest --base-url http://<gpu-server>:11434 --temperature 0.0 --iterations 5 --max-budget 2048 --num-ctx 8192
 scripts/build_twinpaper_evidence_bundle.py --out target/twinpaper-evidence-smoke/evidence_bundle.json
 scripts/review_evidence_bundle.py --bundle target/twinpaper-evidence-smoke/evidence_bundle.json --out target/twinpaper-evidence-smoke/evidence_review.json
 scripts/review_twinpaper_offdesk_result.py --result /home/kimyoungjin06/.config/agent-of-empires/profiles/twinpaper-adaptive-debug/offdesk_workloads/twinpaper_autonomy/20260520T111823Z/result.json --out target/offdesk-result-review-smoke/results.json
 scripts/review_twinpaper_offdesk_result.py --result target/offdesk-workload-smoke/post-review-v1/result.json --out target/offdesk-result-review-smoke/post-review-v1-retuned/results.json
-scripts/offdesk_twinpaper_autonomy_workload.py --out-dir target/offdesk-workload-smoke/critique-anchor-v1 --duration-minutes 0.01 --max-iterations 5 --evidence-bundle target/twinpaper-evidence-smoke/evidence_bundle.json --evidence-review target/twinpaper-evidence-smoke/evidence_review.json --base-url http://172.16.0.37:11434 --model qwen3-coder-next:latest --temperature 0.0 --num-ctx 16384 --num-predict 4096
-scripts/offdesk_twinpaper_autonomy_workload.py --out-dir target/offdesk-workload-smoke/post-review-v2 --duration-minutes 0.01 --max-iterations 5 --evidence-bundle target/twinpaper-evidence-smoke/evidence_bundle.json --evidence-review target/twinpaper-evidence-smoke/evidence_review.json --base-url http://172.16.0.37:11434 --model qwen3-coder-next:latest --temperature 0.0 --num-ctx 16384 --num-predict 4096
+scripts/offdesk_twinpaper_autonomy_workload.py --out-dir target/offdesk-workload-smoke/critique-anchor-v1 --duration-minutes 0.01 --max-iterations 5 --evidence-bundle target/twinpaper-evidence-smoke/evidence_bundle.json --evidence-review target/twinpaper-evidence-smoke/evidence_review.json --base-url http://<gpu-server>:11434 --model qwen3-coder-next:latest --temperature 0.0 --num-ctx 16384 --num-predict 4096
+scripts/offdesk_twinpaper_autonomy_workload.py --out-dir target/offdesk-workload-smoke/post-review-v2 --duration-minutes 0.01 --max-iterations 5 --evidence-bundle target/twinpaper-evidence-smoke/evidence_bundle.json --evidence-review target/twinpaper-evidence-smoke/evidence_review.json --base-url http://<gpu-server>:11434 --model qwen3-coder-next:latest --temperature 0.0 --num-ctx 16384 --num-predict 4096
 scripts/prepare_twinpaper_offdesk_task.py --out-root target/offdesk-prepare-smoke --duration-minutes 0.1 --max-iterations 1 --role-gate-result latest --review-artifact latest
 scripts/prepare_twinpaper_offdesk_task.py --out-root target/offdesk-prepare-smoke --duration-minutes 0.1 --max-iterations 1 --role-gate-result latest --review-artifact generate
 scripts/offdesk_wiki_llm_harness.py --prompt-profile contract_v3 --iterations 1

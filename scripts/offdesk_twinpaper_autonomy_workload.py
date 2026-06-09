@@ -32,9 +32,10 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import offdesk_decision_records as decision_records
+from offdesk_llm_endpoint import default_ollama_base_url
 
 DEFAULT_REPO = pathlib.Path("/home/kimyoungjin06/Desktop/Workspace/1.2.8.TwinPaper")
-DEFAULT_BASE_URL = os.environ.get("OFFDESK_LLM_BASE_URL", "http://172.16.0.37:11434")
+DEFAULT_BASE_URL = default_ollama_base_url()
 DEFAULT_MODEL = os.environ.get("OFFDESK_LLM_MODEL", "qwen3-coder-next:latest")
 DEFAULT_TELEGRAM_ENV_FILE = pathlib.Path(
     os.environ.get(

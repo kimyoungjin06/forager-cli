@@ -31,7 +31,7 @@ scripts/prepare_twinpaper_offdesk_task.py \
   --duration-minutes 30 \
   --max-iterations 12 \
   --model qwen3-coder-next:latest \
-  --base-url http://172.16.0.37:11434 \
+  --base-url http://<gpu-server>:11434 \
   --role-gate-result latest \
   --module-preflight-artifact latest \
   --review-artifact generate \
@@ -53,7 +53,7 @@ scripts/prepare_twinpaper_offdesk_task.py \
   --run-until-kst 09:00 \
   --max-iterations 24 \
   --model qwen3-coder-next:latest \
-  --base-url http://172.16.0.37:11434 \
+  --base-url http://<gpu-server>:11434 \
   --role-gate-result latest \
   --module-preflight-artifact latest \
   --review-artifact generate \

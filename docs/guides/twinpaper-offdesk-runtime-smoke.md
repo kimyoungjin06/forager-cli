@@ -29,7 +29,7 @@ launch path.
 Check the model endpoint:
 
 ```bash
-curl -sS http://172.16.0.37:11434/api/tags
+curl -sS http://<gpu-server>:11434/api/tags
 ```
 
 Check pending approvals before starting:
@@ -69,7 +69,7 @@ scripts/prepare_twinpaper_offdesk_task.py \
   --duration-minutes 0.1 \
   --max-iterations 1 \
   --model qwen3-coder-next:latest \
-  --base-url http://172.16.0.37:11434 \
+  --base-url http://<gpu-server>:11434 \
   --role-gate-result latest \
   --module-preflight-artifact latest \
   --review-artifact generate
@@ -104,7 +104,7 @@ scripts/prepare_twinpaper_offdesk_task.py \
   --duration-minutes 0.1 \
   --max-iterations 1 \
   --model qwen3-coder-next:latest \
-  --base-url http://172.16.0.37:11434 \
+  --base-url http://<gpu-server>:11434 \
   --role-gate-result latest \
   --module-preflight-artifact latest \
   --review-artifact generate \

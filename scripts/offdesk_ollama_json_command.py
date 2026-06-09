@@ -17,8 +17,10 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from offdesk_llm_endpoint import default_ollama_base_url
 
-DEFAULT_BASE_URL = "http://172.16.0.37:11434"
+
+DEFAULT_BASE_URL = default_ollama_base_url()
 DEFAULT_MODEL = "qwen3-coder-next:latest"
 
 

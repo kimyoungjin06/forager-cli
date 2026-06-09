@@ -940,7 +940,7 @@ instead of basename-only or module-cwd-relative commands.
 Example:
 
 ```bash
-OFFDESK_LLM_BASE_URL=http://172.16.0.37:11434 \
+OFFDESK_LLM_BASE_URL=http://<gpu-server>:11434 \
 OFFDESK_LLM_MODEL=gemma4:26b \
 scripts/offdesk_wiki_llm_harness.py \
   --profile twinpaper-adaptive-debug \
@@ -1017,7 +1017,7 @@ scripts/prepare_twinpaper_offdesk_task.py \
   --duration-minutes 30 \
   --max-iterations 12 \
   --model qwen3-coder-next:latest \
-  --base-url http://172.16.0.37:11434 \
+  --base-url http://<gpu-server>:11434 \
   --role-gate-result latest \
   --module-preflight-artifact latest \
   --review-artifact generate \
@@ -1031,7 +1031,7 @@ scripts/prepare_twinpaper_offdesk_task.py \
   --run-until-kst 09:00 \
   --max-iterations 24 \
   --model qwen3-coder-next:latest \
-  --base-url http://172.16.0.37:11434 \
+  --base-url http://<gpu-server>:11434 \
   --role-gate-result latest \
   --module-preflight-artifact latest \
   --review-artifact generate \
@@ -1228,7 +1228,7 @@ Example:
 ```bash
 scripts/offdesk_role_llm_episode_harness.py \
   --model qwen3-coder-next:latest \
-  --base-url http://172.16.0.37:11434 \
+  --base-url http://<gpu-server>:11434 \
   --temperature 0.0 \
   --iterations 5 \
   --max-budget 2048 \
