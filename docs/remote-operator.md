@@ -595,6 +595,14 @@ the generated packet output for later Plan Mode review. This still does not
 register an Offdesk plan, approve anything, start runtime work, run shell
 commands outside the initialization command, or mutate git state.
 
+After the initialization packet exists, the listener offers `계획 초안 생성`.
+This writes a bounded `offdesk_multiturn_plan.v1` draft to the local
+plan-session cache, then validates it with
+`forager offdesk plan ... --dry-run --json`. The resulting
+`telegram_remote_plan_draft.v1` receipt records the dry-run validation output.
+This still does not register the plan, approve launch preparation, enqueue
+work, or start runtime execution.
+
 Project candidate discovery is read-only and generic. Configure scan roots with
 repeated `--workspace-root` flags or `OFFDESK_REMOTE_OPERATOR_WORKSPACE_ROOTS`.
 If neither is set, the adapter scans the nearest `Workspace` directory when one
@@ -630,8 +638,8 @@ systemctl --user status forager-telegram-operator.service
 - Convert `telegram_operator_plan_request` inbox items into bounded Plan Mode
   candidates. This closes the gap where an operator sends a Telegram request
   after leaving the desk but no local plan has been registered yet.
-- Promote `telegram_remote_project_init_run.v1` receipts into bounded
-  `forager offdesk plan` candidates only after local review.
+- Promote `telegram_remote_plan_draft.v1` receipts into registered
+  `forager offdesk plan` records only after local review.
 
 ### Phase 4: Plan Review Bridge
 
