@@ -60,6 +60,12 @@ DEFAULT_FEEDBACK_INGEST_DIR = pathlib.Path(
         str(pathlib.Path.home() / ".cache" / "forager" / "remote_operator_telegram_feedback_ingest"),
     )
 )
+DEFAULT_REMOTE_PLAN_ARTIFACT_DIR = pathlib.Path(
+    os.environ.get(
+        "OFFDESK_REMOTE_OPERATOR_TELEGRAM_PLAN_ARTIFACT_DIR",
+        str(pathlib.Path.home() / ".cache" / "forager" / "remote_operator_telegram_plan_sessions"),
+    )
+)
 DEFAULT_LOOP_STATUS_FILE = pathlib.Path(
     os.environ.get(
         "OFFDESK_REMOTE_OPERATOR_TELEGRAM_LOOP_STATUS",
@@ -81,7 +87,9 @@ HEALTH_SCHEMA = "remote_operator_telegram_health.v1"
 AGENT_INTENT_SCHEMA = "telegram_agent_intent.v1"
 REMOTE_PLAN_SESSION_SCHEMA = "telegram_remote_plan_session.v1"
 PROJECT_CANDIDATE_SCHEMA = "telegram_remote_project_candidate.v1"
+PROJECT_INIT_PREVIEW_SCHEMA = "telegram_remote_project_init_preview.v1"
 REMOTE_PLAN_SESSION_CONTEXT_KIND = "remote_plan_project_selection"
+REMOTE_PLAN_INIT_CONTEXT_KIND = "remote_plan_init_review"
 MOBILE_CARD_MAX_LINES = 5
 MOBILE_CARD_MAX_CHARS = 360
 DEFAULT_AGENT_BASE_URLS = (
@@ -141,6 +149,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--state-file", type=pathlib.Path, default=DEFAULT_STATE_FILE)
     parser.add_argument("--feedback-file", type=pathlib.Path, default=DEFAULT_FEEDBACK_FILE)
     parser.add_argument("--feedback-ingest-dir", type=pathlib.Path, default=DEFAULT_FEEDBACK_INGEST_DIR)
+    parser.add_argument("--remote-plan-artifact-dir", type=pathlib.Path, default=DEFAULT_REMOTE_PLAN_ARTIFACT_DIR)
     parser.add_argument("--loop-status-file", type=pathlib.Path, default=DEFAULT_LOOP_STATUS_FILE)
     parser.add_argument(
         "--no-decision-feedback-ingest",
@@ -1355,6 +1364,22 @@ def public_remote_plan_session(session: dict[str, Any]) -> dict[str, Any]:
     selected = session.get("selected_candidate")
     if isinstance(selected, dict):
         public["selected_candidate"] = public_project_candidate(selected)
+    preview = session.get("project_init_preview")
+    if isinstance(preview, dict):
+        public["project_init_preview"] = public_project_init_preview(preview)
+    return public
+
+
+def public_project_init_preview(preview: dict[str, Any]) -> dict[str, Any]:
+    public = dict(preview)
+    workspace_path = str(public.pop("workspace_path", "") or "")
+    if workspace_path:
+        public["workspace_path_hash"] = sha256_short(workspace_path)
+    if "recommended_next_command" in public:
+        public["recommended_next_command"] = [
+            "<workspace_path>" if workspace_path and str(item) == workspace_path else str(item)
+            for item in public.get("recommended_next_command", [])
+        ]
     return public
 
 
@@ -1380,6 +1405,21 @@ def remote_plan_selection_context(session: dict[str, Any]) -> dict[str, Any]:
         "focus_label": "계획 대상 선택",
         "next_command": None,
         "choice_labels": [remote_plan_choice_label(candidate) for candidate in candidates],
+    }
+
+
+def remote_plan_init_context(session: dict[str, Any]) -> dict[str, Any]:
+    candidate = session.get("selected_candidate") if isinstance(session.get("selected_candidate"), dict) else {}
+    return {
+        "schema": INTERACTION_CONTEXT_SCHEMA,
+        "command": "remote_plan_init_review",
+        "profile": session.get("profile") or "default",
+        "context_kind": REMOTE_PLAN_INIT_CONTEXT_KIND,
+        "focus_kind": "remote_plan_session",
+        "focus_ref": session.get("session_id"),
+        "focus_label": candidate.get("display_name") or "프로젝트",
+        "next_command": None,
+        "choice_labels": ["초기화 검토", "다시 선택", "보류"],
     }
 
 
@@ -1418,7 +1458,50 @@ def render_project_selected_message(*, profile: Any, session: dict[str, Any]) ->
             f"{html.escape(name)} · {readiness} · 위험 {risk}",
             "다음 단계는 초기화 검토입니다.",
             "아직 실행은 시작하지 않았습니다.",
-            "의견을 직접 입력할 수 있습니다.",
+            "버튼 또는 의견 직접 입력",
+        ]
+    )
+
+
+def render_project_init_preview_message(*, profile: Any, session: dict[str, Any]) -> str:
+    preview = session.get("project_init_preview") if isinstance(session.get("project_init_preview"), dict) else {}
+    candidate = session.get("selected_candidate") if isinstance(session.get("selected_candidate"), dict) else {}
+    name = truncate_label(candidate.get("display_name") or "프로젝트", max_chars=24)
+    marker_count = len(preview.get("root_markers") if isinstance(preview.get("root_markers"), list) else [])
+    doc_count = len(preview.get("documentation_sources") if isinstance(preview.get("documentation_sources"), list) else [])
+    return "\n".join(
+        [
+            title_with_profile("초기화 검토 준비", profile),
+            f"{html.escape(name)} · 문서 {doc_count} · 마커 {marker_count}",
+            "검토 receipt를 저장했습니다.",
+            "아직 실행은 시작하지 않았습니다.",
+            "로컬에서 project init 검토",
+        ]
+    )
+
+
+def render_project_path_required_message(*, profile: Any, session: dict[str, Any]) -> str:
+    candidate = session.get("selected_candidate") if isinstance(session.get("selected_candidate"), dict) else {}
+    name = truncate_label(candidate.get("display_name") or "직접 입력", max_chars=24)
+    return "\n".join(
+        [
+            title_with_profile("경로 확인 필요", profile),
+            f"{html.escape(name)} 위치를 아직 모릅니다.",
+            "프로젝트 경로를 직접 입력하세요.",
+            "아직 실행은 시작하지 않았습니다.",
+            "보류 또는 다시 선택 가능",
+        ]
+    )
+
+
+def render_remote_plan_note_message(*, profile: Any, session: dict[str, Any]) -> str:
+    return "\n".join(
+        [
+            title_with_profile("계획 의견 추가", profile),
+            "세션에 의견을 남겼습니다.",
+            "초기화 검토 전 참고합니다.",
+            "아직 실행은 시작하지 않았습니다.",
+            "버튼 또는 의견 직접 입력",
         ]
     )
 
@@ -1508,6 +1591,89 @@ def create_remote_plan_session(
     return session
 
 
+def root_marker_summary(path: pathlib.Path) -> list[str]:
+    return project_marker_names(path)
+
+
+def documentation_summary(path: pathlib.Path) -> list[str]:
+    names = (
+        "README.md",
+        "README_KO.md",
+        "AGENTS.md",
+        "CURRENT_STATE.md",
+        "NEXT_ACTIONS.md",
+        "DECISIONS.md",
+        "DELIVERABLES.md",
+    )
+    return [name for name in names if (path / name).exists()]
+
+
+def entrypoint_summary(path: pathlib.Path) -> list[str]:
+    names = ("Cargo.toml", "pyproject.toml", "package.json", "Makefile", "justfile", "uv.lock")
+    return [name for name in names if (path / name).exists()]
+
+
+def project_init_command_preview(args: argparse.Namespace, candidate: dict[str, Any]) -> list[str]:
+    workspace_path = str(candidate.get("workspace_path") or "").strip()
+    project_key = str(candidate.get("project_key") or "project").strip() or "project"
+    command = [args.forager_bin]
+    if args.profile:
+        command.extend(["--profile", args.profile])
+    command.extend(
+        [
+            "project",
+            "init",
+            workspace_path,
+            "--project-key",
+            project_key,
+            "--include-git",
+            "--json",
+        ]
+    )
+    return command
+
+
+def create_project_init_preview(
+    args: argparse.Namespace,
+    *,
+    session: dict[str, Any],
+    candidate: dict[str, Any],
+) -> dict[str, Any]:
+    workspace_path = pathlib.Path(str(candidate.get("workspace_path") or ""))
+    preview = {
+        "schema": PROJECT_INIT_PREVIEW_SCHEMA,
+        "created_at": utc_now(),
+        "session_id": session.get("session_id"),
+        "profile": args.profile,
+        "project_key": candidate.get("project_key"),
+        "display_name": candidate.get("display_name"),
+        "workspace_path": str(workspace_path),
+        "workspace_path_hint": candidate.get("workspace_path_hint"),
+        "path_exists": workspace_path.exists(),
+        "path_is_dir": workspace_path.is_dir(),
+        "root_markers": root_marker_summary(workspace_path) if workspace_path.is_dir() else [],
+        "documentation_sources": documentation_summary(workspace_path) if workspace_path.is_dir() else [],
+        "entrypoints": entrypoint_summary(workspace_path) if workspace_path.is_dir() else [],
+        "is_git_repo": is_git_repo(workspace_path) if workspace_path.is_dir() else False,
+        "dirty": candidate.get("dirty"),
+        "recommended_next_command": project_init_command_preview(args, candidate)
+        if workspace_path.is_dir()
+        else [],
+        "execution_authorized": False,
+        "approval_authorized": False,
+        "runtime_authorized": False,
+        "notes": [
+            "This preview does not run project init.",
+            "Telegram selection does not authorize launch, approval, shell, or git mutation.",
+        ],
+    }
+    artifact_dir = args.remote_plan_artifact_dir.expanduser() / str(session.get("session_id") or "session")
+    artifact_path = artifact_dir / "PROJECT_INIT_PREVIEW.json"
+    write_json(artifact_path, preview)
+    preview["artifact_path"] = str(artifact_path)
+    return preview
+
+
 def remote_plan_sessions_by_chat(state: dict[str, Any]) -> dict[str, Any]:
     sessions = state.setdefault("remote_plan_sessions_by_chat", {})
     if not isinstance(sessions, dict):
@@ -1520,7 +1686,13 @@ def active_remote_plan_session(state: dict[str, Any], chat_hash: str) -> dict[st
     session = remote_plan_sessions_by_chat(state).get(str(chat_hash or ""))
     if not isinstance(session, dict):
         return None
-    if str(session.get("stage") or "") in {"project_selection"}:
+    if str(session.get("stage") or "") in {
+        "project_selection",
+        "project_selected",
+        "project_manual_input",
+        "project_path_required",
+        "project_init_previewed",
+    }:
         return session
     return None
 
@@ -1532,7 +1704,79 @@ def store_remote_plan_session(state: dict[str, Any], chat_hash: str, session: di
 
 def is_core_or_slash_command_text(text: str) -> bool:
     stripped = str(text or "").strip()
-    return stripped.startswith("/") or stripped in BUTTON_COMMAND_ALIASES
+    if stripped in BUTTON_COMMAND_ALIASES:
+        return True
+    if not stripped.startswith("/"):
+        return False
+    try:
+        first = shlex.split(stripped)[0]
+    except (ValueError, IndexError):
+        first = stripped.split(maxsplit=1)[0]
+    return normalize_command_name(first) in {"start", "help", "status", "pending", "plans", "show"}
+
+
+def remote_plan_defer_text(text: str) -> bool:
+    return str(text or "").strip().lower() in {"보류", "취소", "나중에", "hold", "cancel"}
+
+
+def remote_plan_rescan_text(text: str) -> bool:
+    return str(text or "").strip().lower() in {"다시 스캔", "재스캔", "rescan", "scan again"}
+
+
+def remote_plan_reselect_text(text: str) -> bool:
+    return str(text or "").strip().lower() in {"다시 선택", "재선택", "reselect", "choose again"}
+
+
+def remote_plan_init_review_text(text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    return normalized in {
+        "초기화 검토",
+        "초기화",
+        "init review",
+        "project init",
+        "project init preview",
+    }
+
+
+def append_remote_plan_note(session: dict[str, Any], text: str) -> None:
+    notes = session.setdefault("operator_notes", [])
+    if not isinstance(notes, list):
+        notes = []
+        session["operator_notes"] = notes
+    notes.append(
+        {
+            "noted_at": utc_now(),
+            "text": sanitize_text(text, max_chars=800),
+        }
+    )
+
+
+def resolve_manual_project_path(args: argparse.Namespace, text: str) -> pathlib.Path | None:
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    direct = pathlib.Path(raw).expanduser()
+    if direct.is_absolute() and direct.exists() and direct.is_dir():
+        return direct.resolve()
+    for root in workspace_roots(args):
+        candidate = (root / raw).expanduser()
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            resolved = candidate
+        if resolved.exists() and resolved.is_dir():
+            return resolved
+    return None
+
+
+def candidate_from_manual_path(args: argparse.Namespace, path: pathlib.Path, text: str) -> dict[str, Any]:
+    roots = workspace_roots(args)
+    return build_project_candidate(
+        path,
+        roots=roots,
+        tokens=request_tokens(text, path.name),
+        rank=1,
+    )
 
 
 def candidate_matches_selection(candidate: dict[str, Any], text: str) -> bool:
@@ -1586,13 +1830,14 @@ def handle_remote_plan_session_input(
         "command_text": normalized,
         "session_id": session.get("session_id"),
     }
-    if lowered in {"보류", "취소", "나중에", "hold", "cancel"}:
+    stage = str(session.get("stage") or "")
+    if remote_plan_defer_text(normalized):
         session["stage"] = "deferred"
         store_remote_plan_session(state, chat_hash, session)
         result["parsed_command"] = {**parsed, "selection_status": "deferred"}
         message_preview = render_project_selection_deferred_message(profile=args.profile)
         attach_choice_surface(result, None)
-    elif lowered in {"다시 스캔", "재스캔", "rescan", "scan again"}:
+    elif remote_plan_rescan_text(normalized):
         agent_intent = session.get("agent_intent") if isinstance(session.get("agent_intent"), dict) else None
         session["candidates"] = scan_project_candidates(
             args,
@@ -1604,7 +1849,15 @@ def handle_remote_plan_session_input(
         result["parsed_command"] = {**parsed, "selection_status": "rescanned"}
         message_preview = render_project_selection_message(profile=args.profile, session=session)
         attach_choice_surface(result, remote_plan_selection_context(session))
-    else:
+    elif remote_plan_reselect_text(normalized):
+        session["stage"] = "project_selection"
+        session.pop("selected_candidate", None)
+        session.pop("project_init_preview", None)
+        store_remote_plan_session(state, chat_hash, session)
+        result["parsed_command"] = {**parsed, "selection_status": "reselect"}
+        message_preview = render_project_selection_message(profile=args.profile, session=session)
+        attach_choice_surface(result, remote_plan_selection_context(session))
+    elif stage == "project_selection":
         candidate = selected_candidate_for_text(session, normalized)
         if candidate:
             session["stage"] = "project_selected"
@@ -1616,7 +1869,7 @@ def handle_remote_plan_session_input(
                 "selected_project_key": candidate.get("project_key"),
             }
             message_preview = render_project_selected_message(profile=args.profile, session=session)
-            attach_choice_surface(result, None)
+            attach_choice_surface(result, remote_plan_init_context(session))
         else:
             manual_candidate = manual_project_candidate(normalized)
             session["stage"] = "project_manual_input"
@@ -1628,7 +1881,53 @@ def handle_remote_plan_session_input(
                 "selected_project_key": manual_candidate.get("project_key"),
             }
             message_preview = render_project_selected_message(profile=args.profile, session=session)
-            attach_choice_surface(result, None)
+            attach_choice_surface(result, remote_plan_init_context(session))
+    elif stage == "project_path_required":
+        resolved = resolve_manual_project_path(args, normalized)
+        if resolved:
+            candidate = candidate_from_manual_path(args, resolved, normalized)
+            session["stage"] = "project_selected"
+            session["selected_candidate"] = candidate
+            store_remote_plan_session(state, chat_hash, session)
+            result["parsed_command"] = {
+                **parsed,
+                "selection_status": "path_confirmed",
+                "selected_project_key": candidate.get("project_key"),
+            }
+            message_preview = render_project_selected_message(profile=args.profile, session=session)
+            attach_choice_surface(result, remote_plan_init_context(session))
+        else:
+            append_remote_plan_note(session, normalized)
+            store_remote_plan_session(state, chat_hash, session)
+            result["parsed_command"] = {**parsed, "selection_status": "path_unresolved"}
+            message_preview = render_project_path_required_message(profile=args.profile, session=session)
+            attach_choice_surface(result, remote_plan_init_context(session))
+    elif remote_plan_init_review_text(normalized):
+        selected = session.get("selected_candidate") if isinstance(session.get("selected_candidate"), dict) else {}
+        if selected.get("manual_input") and not selected.get("workspace_path"):
+            session["stage"] = "project_path_required"
+            store_remote_plan_session(state, chat_hash, session)
+            result["parsed_command"] = {**parsed, "selection_status": "path_required"}
+            message_preview = render_project_path_required_message(profile=args.profile, session=session)
+            attach_choice_surface(result, remote_plan_init_context(session))
+        else:
+            preview = create_project_init_preview(args, session=session, candidate=selected)
+            session["stage"] = "project_init_previewed"
+            session["project_init_preview"] = preview
+            store_remote_plan_session(state, chat_hash, session)
+            result["parsed_command"] = {
+                **parsed,
+                "selection_status": "init_previewed",
+                "selected_project_key": selected.get("project_key"),
+            }
+            message_preview = render_project_init_preview_message(profile=args.profile, session=session)
+            attach_choice_surface(result, remote_plan_init_context(session))
+    else:
+        append_remote_plan_note(session, normalized)
+        store_remote_plan_session(state, chat_hash, session)
+        result["parsed_command"] = {**parsed, "selection_status": "note_added"}
+        message_preview = render_remote_plan_note_message(profile=args.profile, session=session)
+        attach_choice_surface(result, remote_plan_init_context(session))
     result.update(
         {
             "status": "rendered",
@@ -1869,6 +2168,20 @@ def choice_keyboard(context: dict[str, Any] | None = None) -> dict[str, Any]:
             "resize_keyboard": True,
             "one_time_keyboard": False,
             "input_field_placeholder": "번호/프로젝트명 또는 의견을 직접 입력",
+        }
+    if context_kind == REMOTE_PLAN_INIT_CONTEXT_KIND:
+        add_row("초기화 검토", "다시 선택")
+        add_row("보류")
+        add_row("상태", "계획")
+        add_row("승인 대기", "도움말")
+        for label in CORE_BUTTON_LABELS:
+            if label not in seen:
+                add_row(label)
+        return {
+            "keyboard": rows,
+            "resize_keyboard": True,
+            "one_time_keyboard": False,
+            "input_field_placeholder": "의견이나 프로젝트 경로를 직접 입력",
         }
     if next_command and next_command not in {"/status", "/pending", "/plans --latest", "/help"}:
         add_row(next_command)
