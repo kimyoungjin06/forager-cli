@@ -1449,14 +1449,159 @@ fn remote_operator_telegram_replay_plan_session_builds_init_preview_receipt() ->
     assert!(preview.contains("<b>계획 초안 검증됨</b>"));
     assert!(preview.contains("계획 초안을 저장했습니다."));
     assert!(preview.contains("계획 등록/실행은 아직 하지 않았습니다."));
-    assert!(preview.contains("로컬에서 계획 등록 검토"));
+    assert!(preview.contains("아래 버튼으로 계획 등록"));
+    assert!(!preview.contains(workspace_root.to_str().expect("workspace path")));
+    assert!(button_texts(&result).contains(&"계획 등록".to_string()));
+    assert_mobile_contract(&result);
+
+    let sixth_update = temp.path().join("plan_register_update.json");
+    write_text_update(&sixth_update, 735, 915, "계획 등록")?;
+    let sixth_out = temp.path().join("plan_register_result.json");
+    let sixth_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&sixth_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--remote-plan-artifact-dir")
+        .arg(&plan_artifact_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&sixth_out)
+        .output()?;
+    assert!(
+        sixth_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&sixth_output.stdout),
+        String::from_utf8_lossy(&sixth_output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&sixth_out)?)?;
+    assert_eq!(result["parsed_command"]["command"], "remote_plan_selection");
+    assert_eq!(
+        result["parsed_command"]["selection_status"],
+        "plan_registered"
+    );
+    assert_eq!(result["remote_plan_session"]["stage"], "plan_registered");
+    assert_eq!(
+        result["remote_plan_session"]["plan_registration"]["schema"],
+        "telegram_remote_plan_registration.v1"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_registration"]["status"],
+        "registered"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_registration"]["execution_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_registration"]["runtime_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_registration"]["approval_authorized"],
+        false
+    );
+    assert!(result["remote_plan_session"]["plan_registration"]["plan_artifact_path"].is_null());
+    assert!(
+        result["remote_plan_session"]["plan_registration"]["plan_artifact_path_hash"].is_string()
+    );
+    let public_command = result["remote_plan_session"]["plan_registration"]["registration_command"]
+        .as_array()
+        .expect("registration command");
+    assert!(public_command
+        .iter()
+        .any(|item| item == "<plan_draft_path>"));
+    assert!(!public_command.iter().any(|item| {
+        item.as_str()
+            .unwrap_or_default()
+            .contains(workspace_root.to_str().expect("workspace path"))
+    }));
+    assert_eq!(
+        result["remote_plan_session"]["plan_registration"]["registration_output"]["schema"],
+        "offdesk_plan_registration.v1"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_registration"]["registration_output"]["dry_run"],
+        false
+    );
+    assert!(
+        result["remote_plan_session"]["plan_registration"]["registration_output"]["source_path"]
+            .is_null()
+    );
+    assert!(
+        result["remote_plan_session"]["plan_registration"]["registration_output"]
+            ["source_path_hash"]
+            .is_string()
+    );
+    assert!(
+        result["remote_plan_session"]["plan_registration"]["registration_output"]["artifacts"]
+            ["registration_json"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("sha256:")
+    );
+    assert!(
+        result["remote_plan_session"]["plan_registration"]["registration_output"]["artifacts"]
+            ["copied_source_json"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("sha256:")
+    );
+    let artifact_path = result["remote_plan_session"]["plan_registration"]["artifact_path"]
+        .as_str()
+        .expect("registration receipt path");
+    let artifact: Value = serde_json::from_slice(&fs::read(artifact_path)?)?;
+    assert_eq!(artifact["schema"], "telegram_remote_plan_registration.v1");
+    assert_eq!(artifact["status"], "registered");
+    assert_eq!(artifact["execution_authorized"], false);
+    assert_eq!(artifact["runtime_authorized"], false);
+    assert_eq!(artifact["approval_authorized"], false);
+    assert_eq!(
+        artifact["registration_output"]["schema"],
+        "offdesk_plan_registration.v1"
+    );
+    assert_eq!(artifact["registration_output"]["dry_run"], false);
+    assert_eq!(
+        artifact["registration_output"]["ready_for_operator_review"],
+        true
+    );
+    assert_eq!(
+        artifact["registration_output"]["ready_for_launch_preparation"],
+        false
+    );
+    assert_eq!(artifact["registration_output"]["ready_for_enqueue"], false);
+    let registration_path = artifact["registration_output"]["artifacts"]["registration_json"]
+        .as_str()
+        .expect("registration json path");
+    let copied_source_path = artifact["registration_output"]["artifacts"]["copied_source_json"]
+        .as_str()
+        .expect("copied source path");
+    assert!(Path::new(registration_path).exists());
+    assert!(Path::new(copied_source_path).exists());
+    assert!(profile_dir(temp.path()).join("offdesk_plans").exists());
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>계획 등록됨</b>"));
+    assert!(preview.contains("계획을 등록했습니다."));
+    assert!(preview.contains("아직 실행은 시작하지 않았습니다."));
+    assert!(preview.contains("로컬에서 계획 검토"));
     assert!(!preview.contains(workspace_root.to_str().expect("workspace path")));
     assert_mobile_contract(&result);
 
     let feedback_rows = fs::read_to_string(&feedback_file)?;
     assert_eq!(feedback_rows.lines().count(), 1);
     let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
-    assert_eq!(state["offset"], 735);
+    assert_eq!(state["offset"], 736);
     Ok(())
 }
 

@@ -603,6 +603,13 @@ plan-session cache, then validates it with
 This still does not register the plan, approve launch preparation, enqueue
 work, or start runtime execution.
 
+After the draft validates, the listener offers `계획 등록`. The listener first
+checks that the draft hash still matches the dry-run receipt, then runs
+`forager offdesk plan ... --json` without `--dry-run` and stores a
+`telegram_remote_plan_registration.v1` receipt. Registration writes the local
+Offdesk plan registry only. It still does not record a plan-review approval,
+build launch-preparation packets, enqueue work, or start runtime execution.
+
 Project candidate discovery is read-only and generic. Configure scan roots with
 repeated `--workspace-root` flags or `OFFDESK_REMOTE_OPERATOR_WORKSPACE_ROOTS`.
 If neither is set, the adapter scans the nearest `Workspace` directory when one
@@ -638,8 +645,8 @@ systemctl --user status forager-telegram-operator.service
 - Convert `telegram_operator_plan_request` inbox items into bounded Plan Mode
   candidates. This closes the gap where an operator sends a Telegram request
   after leaving the desk but no local plan has been registered yet.
-- Promote `telegram_remote_plan_draft.v1` receipts into registered
-  `forager offdesk plan` records only after local review.
+- Promote `telegram_remote_plan_registration.v1` receipts into plan-review
+  candidates only after local review.
 
 ### Phase 4: Plan Review Bridge
 
