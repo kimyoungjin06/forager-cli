@@ -88,6 +88,7 @@ AGENT_INTENT_SCHEMA = "telegram_agent_intent.v1"
 REMOTE_PLAN_SESSION_SCHEMA = "telegram_remote_plan_session.v1"
 PROJECT_CANDIDATE_SCHEMA = "telegram_remote_project_candidate.v1"
 PROJECT_INIT_PREVIEW_SCHEMA = "telegram_remote_project_init_preview.v1"
+PROJECT_INIT_RUN_SCHEMA = "telegram_remote_project_init_run.v1"
 REMOTE_PLAN_SESSION_CONTEXT_KIND = "remote_plan_project_selection"
 REMOTE_PLAN_INIT_CONTEXT_KIND = "remote_plan_init_review"
 MOBILE_CARD_MAX_LINES = 5
@@ -185,6 +186,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--agent-timeout-sec", type=int, default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_AGENT_TIMEOUT_SEC", "20")))
     parser.add_argument("--agent-num-ctx", type=int, default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_AGENT_NUM_CTX", "8192")))
     parser.add_argument("--agent-num-predict", type=int, default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_AGENT_NUM_PREDICT", "768")))
+    parser.add_argument(
+        "--project-init-timeout-sec",
+        type=int,
+        default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_PROJECT_INIT_TIMEOUT_SEC", "60")),
+    )
     parser.add_argument(
         "--workspace-root",
         action="append",
@@ -1367,6 +1373,9 @@ def public_remote_plan_session(session: dict[str, Any]) -> dict[str, Any]:
     preview = session.get("project_init_preview")
     if isinstance(preview, dict):
         public["project_init_preview"] = public_project_init_preview(preview)
+    run = session.get("project_init_run")
+    if isinstance(run, dict):
+        public["project_init_run"] = public_project_init_run(run)
     return public
 
 
@@ -1380,6 +1389,39 @@ def public_project_init_preview(preview: dict[str, Any]) -> dict[str, Any]:
             "<workspace_path>" if workspace_path and str(item) == workspace_path else str(item)
             for item in public.get("recommended_next_command", [])
         ]
+    return public
+
+
+def public_project_init_run(run: dict[str, Any]) -> dict[str, Any]:
+    public = dict(run)
+    workspace_path = str(public.pop("workspace_path", "") or "")
+    if workspace_path:
+        public["workspace_path_hash"] = sha256_short(workspace_path)
+    command = public.get("command")
+    if isinstance(command, list):
+        public["command"] = [
+            "<workspace_path>" if workspace_path and str(item) == workspace_path else str(item)
+            for item in command
+        ]
+    output = public.get("project_init_output")
+    if isinstance(output, dict):
+        public["project_init_output"] = public_project_init_output(output)
+    return public
+
+
+def public_project_init_output(output: dict[str, Any]) -> dict[str, Any]:
+    public = dict(output)
+    for key in ("project_root", "artifact_dir"):
+        value = str(public.pop(key, "") or "")
+        if value:
+            public[f"{key}_hash"] = sha256_short(value)
+    artifacts = public.get("artifacts")
+    if isinstance(artifacts, dict):
+        public["artifacts"] = {
+            key: sha256_short(str(value))
+            for key, value in artifacts.items()
+            if str(value or "").strip()
+        }
     return public
 
 
@@ -1410,6 +1452,8 @@ def remote_plan_selection_context(session: dict[str, Any]) -> dict[str, Any]:
 
 def remote_plan_init_context(session: dict[str, Any]) -> dict[str, Any]:
     candidate = session.get("selected_candidate") if isinstance(session.get("selected_candidate"), dict) else {}
+    stage = str(session.get("stage") or "")
+    primary = "초기화 생성" if stage == "project_init_previewed" else "초기화 검토"
     return {
         "schema": INTERACTION_CONTEXT_SCHEMA,
         "command": "remote_plan_init_review",
@@ -1419,7 +1463,7 @@ def remote_plan_init_context(session: dict[str, Any]) -> dict[str, Any]:
         "focus_ref": session.get("session_id"),
         "focus_label": candidate.get("display_name") or "프로젝트",
         "next_command": None,
-        "choice_labels": ["초기화 검토", "다시 선택", "보류"],
+        "choice_labels": [primary, "다시 선택", "보류"],
     }
 
 
@@ -1473,9 +1517,53 @@ def render_project_init_preview_message(*, profile: Any, session: dict[str, Any]
         [
             title_with_profile("초기화 검토 준비", profile),
             f"{html.escape(name)} · 문서 {doc_count} · 마커 {marker_count}",
-            "검토 receipt를 저장했습니다.",
+            "초기화 검토 기록을 저장했습니다.",
             "아직 실행은 시작하지 않았습니다.",
-            "로컬에서 project init 검토",
+            "로컬에서 초기화 명령 검토",
+        ]
+    )
+
+
+def render_project_init_preview_required_message(*, profile: Any) -> str:
+    return "\n".join(
+        [
+            title_with_profile("초기화 검토 필요", profile),
+            "먼저 초기화 검토가 필요합니다.",
+            "초기화 검토를 먼저 선택하세요.",
+            "아직 실행은 시작하지 않았습니다.",
+            "버튼 또는 의견 직접 입력",
+        ]
+    )
+
+
+def render_project_init_created_message(*, profile: Any, session: dict[str, Any]) -> str:
+    run = session.get("project_init_run") if isinstance(session.get("project_init_run"), dict) else {}
+    output = run.get("project_init_output") if isinstance(run.get("project_init_output"), dict) else {}
+    summary = output.get("summary") if isinstance(output.get("summary"), dict) else {}
+    name = truncate_label(output.get("project_key") or run.get("project_key") or "프로젝트", max_chars=24)
+    module_count = int(summary.get("module_candidate_count") or 0)
+    review_required = bool(output.get("requires_operator_review", True))
+    return "\n".join(
+        [
+            title_with_profile("초기화 패킷 생성됨", profile),
+            f"{html.escape(name)} · 모듈 {module_count} · 검토 {'필요' if review_required else '확인'}",
+            "초기화 패킷을 저장했습니다.",
+            "아직 실행은 시작하지 않았습니다.",
+            "로컬에서 계획 근거 검토",
+        ]
+    )
+
+
+def render_project_init_failed_message(*, profile: Any, session: dict[str, Any]) -> str:
+    run = session.get("project_init_run") if isinstance(session.get("project_init_run"), dict) else {}
+    reason = truncate_label(run.get("error") or "생성 실패", max_chars=42)
+    return "\n".join(
+        [
+            title_with_profile("초기화 생성 실패", profile),
+            html.escape(reason),
+            "초기화 패킷을 만들지 못했습니다.",
+            "아직 실행은 시작하지 않았습니다.",
+            "로컬에서 원인 확인",
         ]
     )
 
@@ -1674,6 +1762,95 @@ def create_project_init_preview(
     return preview
 
 
+def project_init_create_text(text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    return normalized in {
+        "초기화 생성",
+        "초기화 패킷 생성",
+        "project init 생성",
+        "project init run",
+        "create init",
+        "create project init",
+    }
+
+
+def run_project_init_packet(
+    args: argparse.Namespace,
+    *,
+    session: dict[str, Any],
+    candidate: dict[str, Any],
+) -> dict[str, Any]:
+    workspace_path = pathlib.Path(str(candidate.get("workspace_path") or ""))
+    command = project_init_command_preview(args, candidate)
+    run = {
+        "schema": PROJECT_INIT_RUN_SCHEMA,
+        "created_at": utc_now(),
+        "session_id": session.get("session_id"),
+        "profile": args.profile,
+        "project_key": candidate.get("project_key"),
+        "display_name": candidate.get("display_name"),
+        "workspace_path": str(workspace_path),
+        "workspace_path_hint": candidate.get("workspace_path_hint"),
+        "command": command,
+        "execution_authorized": False,
+        "approval_authorized": False,
+        "runtime_authorized": False,
+    }
+    artifact_dir = args.remote_plan_artifact_dir.expanduser() / str(session.get("session_id") or "session")
+    artifact_path = artifact_dir / "PROJECT_INIT_RUN.json"
+    try:
+        process = subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=max(1, int(args.project_init_timeout_sec)),
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        run.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"{type(error).__name__}: {error}", max_chars=400),
+                "artifact_path": str(artifact_path),
+            }
+        )
+        write_json(artifact_path, run)
+        return run
+    run["returncode"] = process.returncode
+    if process.returncode != 0:
+        run.update(
+            {
+                "status": "error",
+                "error": sanitize_text(process.stderr.strip() or process.stdout.strip(), max_chars=600),
+                "artifact_path": str(artifact_path),
+            }
+        )
+        write_json(artifact_path, run)
+        return run
+    try:
+        output = json.loads(process.stdout)
+    except json.JSONDecodeError as error:
+        run.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"project init did not return JSON: {error}", max_chars=400),
+                "artifact_path": str(artifact_path),
+            }
+        )
+        write_json(artifact_path, run)
+        return run
+    run.update(
+        {
+            "status": "created",
+            "project_init_output": output,
+            "artifact_path": str(artifact_path),
+        }
+    )
+    write_json(artifact_path, run)
+    return run
+
+
 def remote_plan_sessions_by_chat(state: dict[str, Any]) -> dict[str, Any]:
     sessions = state.setdefault("remote_plan_sessions_by_chat", {})
     if not isinstance(sessions, dict):
@@ -1692,6 +1869,8 @@ def active_remote_plan_session(state: dict[str, Any], chat_hash: str) -> dict[st
         "project_manual_input",
         "project_path_required",
         "project_init_previewed",
+        "project_init_created",
+        "project_init_failed",
     }:
         return session
     return None
@@ -1822,7 +2001,6 @@ def handle_remote_plan_session_input(
     result = result_base(args, config, mode)
     result["command_text"] = sanitize_text(text, max_chars=400)
     normalized = str(text or "").strip()
-    lowered = normalized.lower()
     parsed = {
         "supported": True,
         "command": "remote_plan_selection",
@@ -1901,6 +2079,30 @@ def handle_remote_plan_session_input(
             store_remote_plan_session(state, chat_hash, session)
             result["parsed_command"] = {**parsed, "selection_status": "path_unresolved"}
             message_preview = render_project_path_required_message(profile=args.profile, session=session)
+            attach_choice_surface(result, remote_plan_init_context(session))
+    elif project_init_create_text(normalized):
+        selected = session.get("selected_candidate") if isinstance(session.get("selected_candidate"), dict) else {}
+        if stage != "project_init_previewed" or not isinstance(session.get("project_init_preview"), dict):
+            result["parsed_command"] = {**parsed, "selection_status": "preview_required"}
+            message_preview = render_project_init_preview_required_message(profile=args.profile)
+            attach_choice_surface(result, remote_plan_init_context(session))
+        else:
+            run = run_project_init_packet(args, session=session, candidate=selected)
+            session["project_init_run"] = run
+            if run.get("status") == "created":
+                session["stage"] = "project_init_created"
+                message_preview = render_project_init_created_message(profile=args.profile, session=session)
+                selection_status = "init_created"
+            else:
+                session["stage"] = "project_init_failed"
+                message_preview = render_project_init_failed_message(profile=args.profile, session=session)
+                selection_status = "init_failed"
+            store_remote_plan_session(state, chat_hash, session)
+            result["parsed_command"] = {
+                **parsed,
+                "selection_status": selection_status,
+                "selected_project_key": selected.get("project_key"),
+            }
             attach_choice_surface(result, remote_plan_init_context(session))
     elif remote_plan_init_review_text(normalized):
         selected = session.get("selected_candidate") if isinstance(session.get("selected_candidate"), dict) else {}
@@ -2170,8 +2372,14 @@ def choice_keyboard(context: dict[str, Any] | None = None) -> dict[str, Any]:
             "input_field_placeholder": "번호/프로젝트명 또는 의견을 직접 입력",
         }
     if context_kind == REMOTE_PLAN_INIT_CONTEXT_KIND:
-        add_row("초기화 검토", "다시 선택")
-        add_row("보류")
+        choice_labels = context.get("choice_labels") if isinstance(context, dict) else []
+        labels = [str(label or "").strip() for label in choice_labels if str(label or "").strip()] if isinstance(choice_labels, list) else []
+        if labels:
+            add_row(*labels[:2])
+            add_row(*labels[2:4])
+        else:
+            add_row("초기화 검토", "다시 선택")
+            add_row("보류")
         add_row("상태", "계획")
         add_row("승인 대기", "도움말")
         for label in CORE_BUTTON_LABELS:

@@ -226,6 +226,10 @@ fn assert_mobile_contract(result: &Value) {
         "기준 ",
         "검증:",
         "sha256:",
+        "receipt",
+        "preview",
+        "project init",
+        "plan evidence",
         "dispatch",
         "shell",
         "launch-prep",
@@ -1187,7 +1191,113 @@ fn remote_operator_telegram_replay_plan_session_builds_init_preview_receipt() ->
         .any(|item| item == "README.md"));
     let preview = result["message_preview"].as_str().expect("message preview");
     assert!(preview.contains("<b>초기화 검토 준비</b>"));
-    assert!(preview.contains("receipt를 저장했습니다."));
+    assert!(preview.contains("초기화 검토 기록을 저장했습니다."));
+    assert!(preview.contains("아직 실행은 시작하지 않았습니다."));
+    assert!(!preview.contains(workspace_root.to_str().expect("workspace path")));
+    assert!(button_texts(&result).contains(&"초기화 생성".to_string()));
+    assert_mobile_contract(&result);
+
+    let fourth_update = temp.path().join("init_create_update.json");
+    write_text_update(&fourth_update, 733, 913, "초기화 생성")?;
+    let fourth_out = temp.path().join("init_create_result.json");
+    let fourth_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&fourth_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--remote-plan-artifact-dir")
+        .arg(&plan_artifact_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&fourth_out)
+        .output()?;
+    assert!(
+        fourth_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&fourth_output.stdout),
+        String::from_utf8_lossy(&fourth_output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&fourth_out)?)?;
+    assert_eq!(result["parsed_command"]["command"], "remote_plan_selection");
+    assert_eq!(result["parsed_command"]["selection_status"], "init_created");
+    assert_eq!(
+        result["remote_plan_session"]["stage"],
+        "project_init_created"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["project_init_run"]["schema"],
+        "telegram_remote_project_init_run.v1"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["project_init_run"]["status"],
+        "created"
+    );
+    let public_command = result["remote_plan_session"]["project_init_run"]["command"]
+        .as_array()
+        .expect("public command");
+    assert!(public_command.iter().any(|item| item == "<workspace_path>"));
+    assert!(!public_command.iter().any(|item| {
+        item.as_str()
+            .unwrap_or_default()
+            .contains(workspace_root.to_str().expect("workspace path"))
+    }));
+    assert!(
+        result["remote_plan_session"]["project_init_run"]["project_init_output"]["project_root"]
+            .is_null()
+    );
+    assert!(
+        result["remote_plan_session"]["project_init_run"]["project_init_output"]["artifact_dir"]
+            .is_null()
+    );
+    assert!(
+        result["remote_plan_session"]["project_init_run"]["project_init_output"]
+            ["project_root_hash"]
+            .is_string()
+    );
+    assert!(
+        result["remote_plan_session"]["project_init_run"]["project_init_output"]
+            ["artifact_dir_hash"]
+            .is_string()
+    );
+    let artifact_path = result["remote_plan_session"]["project_init_run"]["artifact_path"]
+        .as_str()
+        .expect("run artifact path");
+    let artifact: Value = serde_json::from_slice(&fs::read(artifact_path)?)?;
+    assert_eq!(artifact["schema"], "telegram_remote_project_init_run.v1");
+    assert_eq!(artifact["status"], "created");
+    assert_eq!(artifact["execution_authorized"], false);
+    assert_eq!(artifact["runtime_authorized"], false);
+    assert_eq!(
+        artifact["project_init_output"]["kind"],
+        "forager_project_initialization"
+    );
+    assert_eq!(
+        artifact["project_init_output"]["read_only_project_state"],
+        true
+    );
+    assert_eq!(
+        artifact["project_init_output"]["requires_operator_review"],
+        true
+    );
+    let package_path = artifact["project_init_output"]["artifacts"]
+        ["ondesk_start_package_markdown"]
+        .as_str()
+        .expect("ondesk package path");
+    assert!(Path::new(package_path).exists());
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>초기화 패킷 생성됨</b>"));
+    assert!(preview.contains("초기화 패킷을 저장했습니다."));
     assert!(preview.contains("아직 실행은 시작하지 않았습니다."));
     assert!(!preview.contains(workspace_root.to_str().expect("workspace path")));
     assert_mobile_contract(&result);
@@ -1195,7 +1305,7 @@ fn remote_operator_telegram_replay_plan_session_builds_init_preview_receipt() ->
     let feedback_rows = fs::read_to_string(&feedback_file)?;
     assert_eq!(feedback_rows.lines().count(), 1);
     let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
-    assert_eq!(state["offset"], 733);
+    assert_eq!(state["offset"], 734);
     Ok(())
 }
 

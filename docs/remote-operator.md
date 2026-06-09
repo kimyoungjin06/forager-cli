@@ -586,6 +586,15 @@ command to review. It does not run `project init`, does not register an
 Offdesk plan, and does not start work. Manual project hints must first be
 resolved to a real project path before this preview receipt can be created.
 
+After that preview receipt exists, the listener offers `초기화 생성`.
+This runs only the local `forager project init ... --include-git --json`
+initialization packet command and stores a
+`telegram_remote_project_init_run.v1` receipt in the same plan-session cache.
+The Telegram message stays path-free and short, while the local receipt records
+the generated packet output for later Plan Mode review. This still does not
+register an Offdesk plan, approve anything, start runtime work, run shell
+commands outside the initialization command, or mutate git state.
+
 Project candidate discovery is read-only and generic. Configure scan roots with
 repeated `--workspace-root` flags or `OFFDESK_REMOTE_OPERATOR_WORKSPACE_ROOTS`.
 If neither is set, the adapter scans the nearest `Workspace` directory when one
@@ -621,8 +630,8 @@ systemctl --user status forager-telegram-operator.service
 - Convert `telegram_operator_plan_request` inbox items into bounded Plan Mode
   candidates. This closes the gap where an operator sends a Telegram request
   after leaving the desk but no local plan has been registered yet.
-- Promote `telegram_remote_project_init_preview.v1` receipts into actual
-  `forager project init` packets only after local review.
+- Promote `telegram_remote_project_init_run.v1` receipts into bounded
+  `forager offdesk plan` candidates only after local review.
 
 ### Phase 4: Plan Review Bridge
 
