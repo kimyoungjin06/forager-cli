@@ -62,6 +62,39 @@ Transport adapters receive messages and callbacks. They do not decide whether a
 mutation is allowed. The Remote Operator core normalizes input, validates
 identity and staleness, and then calls existing Forager surfaces.
 
+Telegram freeform text is routed through a local intent agent when one is
+available. The agent is a classifier only: it may label a message as feedback,
+a Plan Mode request, an execution request, an approval attempt, or an unsafe
+mutation attempt, but it cannot authorize execution, approval resolution, shell
+access, git mutation, provider retargeting, or background dispatch. If no local
+agent is available in `auto` mode, the adapter falls back to the deterministic
+keyword classifier and still records the message as review input only.
+
+The current default provider is local Ollama, preferring configured models and
+then local Qwen Coder candidates. A typical configuration is:
+
+```toml
+[remote_operator.telegram.agent]
+intent_mode = "auto"
+provider = "ollama"
+base_urls = [
+  "http://127.0.0.1:11434",
+  "http://172.16.0.37:11434"
+]
+models = [
+  "qwen3-coder-next:latest",
+  "qwen3-coder:30b"
+]
+timeout_sec = 20
+num_ctx = 8192
+num_predict = 768
+```
+
+The same values can be overridden by CLI arguments or environment variables
+such as `OFFDESK_REMOTE_OPERATOR_AGENT_INTENT_MODE`,
+`OFFDESK_REMOTE_OPERATOR_AGENT_BASE_URL`, `OFFDESK_REMOTE_OPERATOR_AGENT_MODELS`,
+`OLLAMA_BASE_URL`, and `OFFDESK_OLLAMA_MODEL`.
+
 The durable path is:
 
 ```text

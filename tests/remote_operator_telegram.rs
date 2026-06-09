@@ -2,8 +2,12 @@ use anyhow::Result;
 use serde_json::{json, Map, Value};
 use serial_test::serial;
 use std::fs;
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::thread;
+use std::time::{Duration, Instant};
 use tempfile::tempdir;
 
 fn script_path(name: &str) -> PathBuf {
@@ -66,9 +70,116 @@ fn remote_operator_command(home: &Path) -> Command {
     command.arg(script_path("offdesk_remote_operator_telegram.py"));
     command.env("HOME", home);
     command.env("XDG_CONFIG_HOME", home.join(".config"));
+    command.env("OFFDESK_REMOTE_OPERATOR_AGENT_INTENT_MODE", "off");
     command.env_remove("FORAGER_PROFILE");
     command.env_remove("AGENT_OF_EMPIRES_PROFILE");
     command
+}
+
+fn find_header_end(data: &[u8]) -> Option<usize> {
+    data.windows(4).position(|window| window == b"\r\n\r\n")
+}
+
+fn parse_content_length(headers: &str) -> usize {
+    headers
+        .lines()
+        .find_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            if key.trim().eq_ignore_ascii_case("content-length") {
+                value.trim().parse::<usize>().ok()
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0)
+}
+
+fn read_http_request(stream: &mut TcpStream) -> Result<(String, Vec<u8>)> {
+    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+    let mut data = Vec::new();
+    let mut buffer = [0_u8; 4096];
+    loop {
+        let read = stream.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        data.extend_from_slice(&buffer[..read]);
+        if let Some(header_end) = find_header_end(&data) {
+            let headers = String::from_utf8_lossy(&data[..header_end]).to_string();
+            let body_start = header_end + 4;
+            let content_length = parse_content_length(&headers);
+            if data.len() >= body_start + content_length {
+                let line = headers.lines().next().unwrap_or_default().to_string();
+                let body = data[body_start..body_start + content_length].to_vec();
+                return Ok((line, body));
+            }
+        }
+    }
+    anyhow::bail!("incomplete HTTP request")
+}
+
+fn write_http_json(stream: &mut TcpStream, value: Value) -> Result<()> {
+    let body = serde_json::to_vec(&value)?;
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+        body.len()
+    )?;
+    stream.write_all(&body)?;
+    Ok(())
+}
+
+fn spawn_fake_ollama(body_path: PathBuf) -> Result<(String, thread::JoinHandle<Result<()>>)> {
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    let port = listener.local_addr()?.port();
+    listener.set_nonblocking(true)?;
+    let handle = thread::spawn(move || -> Result<()> {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut handled = 0;
+        while handled < 2 {
+            let (mut stream, _) = match listener.accept() {
+                Ok(value) => value,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    if Instant::now() > deadline {
+                        anyhow::bail!("fake Ollama timed out waiting for requests");
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
+                Err(error) => return Err(error.into()),
+            };
+            let (request_line, body) = read_http_request(&mut stream)?;
+            if request_line.starts_with("GET /api/tags ") {
+                write_http_json(
+                    &mut stream,
+                    json!({"models": [{"name": "qwen3-coder-next:latest"}]}),
+                )?;
+            } else if request_line.starts_with("POST /api/generate ") {
+                fs::write(&body_path, &body)?;
+                let classified = json!({
+                    "intent": "plan_request",
+                    "feedback_kind": "planning_request",
+                    "confidence": 0.91,
+                    "project_hint": "NanoClustering",
+                    "goal": "Assess Fractal tree work",
+                    "timebox": "tomorrow night",
+                    "requires_clarification": false,
+                    "clarifying_question": null,
+                    "reason": "The operator is asking whether this work should become a plan candidate.",
+                    "non_authorized": ["execution", "approval", "shell"]
+                });
+                write_http_json(
+                    &mut stream,
+                    json!({"response": serde_json::to_string(&classified)?}),
+                )?;
+            } else {
+                write_http_json(&mut stream, json!({"error": request_line}))?;
+            }
+            handled += 1;
+        }
+        Ok(())
+    });
+    Ok((format!("http://127.0.0.1:{port}"), handle))
 }
 
 fn assert_mobile_contract(result: &Value) {
@@ -353,6 +464,74 @@ fn remote_operator_telegram_planning_request_makes_non_execution_receipt_explici
     assert!(preview.contains("로컬에서 계획으로 바꾸세요."));
     assert!(!preview.contains("Fractal tree"));
     assert_mobile_contract(&result);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_agent_classifies_freeform_plan_request() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let out = temp.path().join("remote_agent_plan_request.json");
+    let agent_request_path = temp.path().join("ollama_generate_request.json");
+    let (base_url, server) = spawn_fake_ollama(agent_request_path.clone())?;
+    let telegram_text = "Please assess NanoClustering Fractal tree work for tomorrow night";
+
+    let output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--command-text")
+        .arg(telegram_text)
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--out")
+        .arg(&out)
+        .arg("--agent-intent-mode")
+        .arg("required")
+        .arg("--agent-base-url")
+        .arg(&base_url)
+        .arg("--agent-model")
+        .arg("qwen3-coder-next:latest")
+        .output()?;
+
+    server.join().expect("fake ollama server panicked")?;
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["status"], "rendered");
+    assert_eq!(result["parsed_command"]["command"], "feedback");
+    assert_eq!(
+        result["parsed_command"]["feedback_kind"],
+        "planning_request"
+    );
+    assert_eq!(result["parsed_command"]["agent_intent"]["source"], "ollama");
+    assert_eq!(
+        result["parsed_command"]["agent_intent"]["model"],
+        "qwen3-coder-next:latest"
+    );
+    assert_eq!(
+        result["parsed_command"]["agent_intent"]["intent"],
+        "plan_request"
+    );
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>계획 요청 접수</b>"));
+    assert!(preview.contains("아직 실행은 시작하지 않았습니다."));
+    assert!(!preview.contains("NanoClustering"));
+    assert_mobile_contract(&result);
+
+    let agent_request: Value = serde_json::from_slice(&fs::read(&agent_request_path)?)?;
+    assert_eq!(agent_request["model"], "qwen3-coder-next:latest");
+    assert!(agent_request["prompt"]
+        .as_str()
+        .expect("agent prompt")
+        .contains(telegram_text));
+    assert_eq!(agent_request["stream"], false);
+    assert_eq!(agent_request["think"], false);
+    assert_eq!(agent_request["format"], "json");
     Ok(())
 }
 

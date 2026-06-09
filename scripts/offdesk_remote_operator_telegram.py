@@ -20,6 +20,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tomllib
 import urllib.error
 import urllib.request
 from typing import Any
@@ -56,14 +57,32 @@ DEFAULT_LOOP_STATUS_FILE = pathlib.Path(
         str(pathlib.Path.home() / ".cache" / "forager" / "remote_operator_telegram_loop.json"),
     )
 )
+DEFAULT_AGENT_CONFIG_FILE = pathlib.Path(
+    os.environ.get(
+        "OFFDESK_REMOTE_OPERATOR_AGENT_CONFIG",
+        str(pathlib.Path(os.environ.get("XDG_CONFIG_HOME", pathlib.Path.home() / ".config")) / "forager" / "config.toml"),
+    )
+)
 
 RESULT_SCHEMA = "remote_operator_telegram_adapter_result.v1"
 MOBILE_CARD_CONTRACT_SCHEMA = "telegram_mobile_card_contract.v1"
 CHOICE_SURFACE_CONTRACT_SCHEMA = "telegram_choice_surface_contract.v1"
 INTERACTION_CONTEXT_SCHEMA = "telegram_interaction_context.v1"
 HEALTH_SCHEMA = "remote_operator_telegram_health.v1"
+AGENT_INTENT_SCHEMA = "telegram_agent_intent.v1"
 MOBILE_CARD_MAX_LINES = 5
 MOBILE_CARD_MAX_CHARS = 360
+DEFAULT_AGENT_BASE_URLS = (
+    "http://127.0.0.1:11434",
+    "http://localhost:11434",
+    "http://172.16.0.37:11434",
+)
+DEFAULT_AGENT_MODEL_CANDIDATES = (
+    "qwen3-coder-next:latest",
+    "qwen3-coder:30b",
+    "qwen2.5-coder:32b",
+    "qwen2.5-coder:14b",
+)
 MOBILE_CARD_FORBIDDEN_TERMS = (
     "Forager Remote Status",
     "Read-only",
@@ -134,6 +153,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--once", action="store_true", help="Poll Telegram once and answer at most one update.")
     parser.add_argument("--health", action="store_true", help="Report local Telegram listener health and exit.")
     parser.add_argument("--health-max-age-sec", type=int, default=120)
+    parser.add_argument(
+        "--agent-intent-mode",
+        choices=("auto", "off", "required"),
+        default=os.environ.get("OFFDESK_REMOTE_OPERATOR_AGENT_INTENT_MODE", "auto"),
+        help="Classify freeform Telegram text with a local agent when available.",
+    )
+    parser.add_argument("--agent-config-file", type=pathlib.Path, default=DEFAULT_AGENT_CONFIG_FILE)
+    parser.add_argument("--agent-provider", default=os.environ.get("OFFDESK_REMOTE_OPERATOR_AGENT_PROVIDER"))
+    parser.add_argument("--agent-base-url", action="append", default=[])
+    parser.add_argument("--agent-model", action="append", default=[])
+    parser.add_argument(
+        "--agent-model-candidates",
+        default=os.environ.get("OFFDESK_REMOTE_OPERATOR_AGENT_MODELS", ""),
+        help="Comma-separated model preference list for Telegram intent classification.",
+    )
+    parser.add_argument("--agent-timeout-sec", type=int, default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_AGENT_TIMEOUT_SEC", "20")))
+    parser.add_argument("--agent-num-ctx", type=int, default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_AGENT_NUM_CTX", "8192")))
+    parser.add_argument("--agent-num-predict", type=int, default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_AGENT_NUM_PREDICT", "768")))
     parser.add_argument("--max-polls", type=int, help="Stop after this many polls; useful for smoke tests.")
     parser.add_argument("--poll-timeout-sec", type=int, default=5)
     parser.add_argument("--api-timeout-sec", type=int, default=20)
@@ -180,6 +217,432 @@ def parse_env_file(path: pathlib.Path, *, required: bool) -> dict[str, str]:
 
 def csv_values(raw: str) -> list[str]:
     return [item.strip() for item in str(raw or "").split(",") if item.strip()]
+
+
+def unique_nonempty(values: list[Any]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
+
+
+def arg_was_provided(flag: str) -> bool:
+    return any(raw == flag or raw.startswith(flag + "=") for raw in sys.argv[1:])
+
+
+def safe_config_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def config_section(config: dict[str, Any], path: tuple[str, ...]) -> dict[str, Any]:
+    current: Any = config
+    for key in path:
+        if not isinstance(current, dict):
+            return {}
+        current = current.get(key)
+    return safe_config_dict(current)
+
+
+def load_agent_config_file(path: pathlib.Path) -> tuple[dict[str, Any], list[str]]:
+    if not path.exists():
+        return {}, []
+    try:
+        raw = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        raise RemoteOperatorTelegramError(f"agent config cannot be read: {path}: {error}") from error
+    if not isinstance(raw, dict):
+        return {}, []
+    merged: dict[str, Any] = {}
+    sources: list[str] = []
+    for section_path in (
+        ("offdesk", "remote_operator", "agent"),
+        ("remote_operator", "agent"),
+        ("remote_operator", "telegram", "agent"),
+    ):
+        section = config_section(raw, section_path)
+        if section:
+            merged.update(section)
+            sources.append(".".join(section_path))
+    return merged, sources
+
+
+def config_string(config: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = config.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def config_string_list(config: dict[str, Any], *keys: str) -> list[str]:
+    values: list[Any] = []
+    for key in keys:
+        value = config.get(key)
+        if isinstance(value, list):
+            values.extend(value)
+        elif isinstance(value, tuple):
+            values.extend(list(value))
+        elif isinstance(value, str):
+            values.extend(csv_values(value) if "," in value else [value])
+    return unique_nonempty(values)
+
+
+def config_int(config: dict[str, Any], key: str, default: int) -> int:
+    value = config.get(key)
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+def resolve_agent_config(args: argparse.Namespace) -> dict[str, Any]:
+    file_config, config_sources = load_agent_config_file(args.agent_config_file)
+    cli_mode = arg_was_provided("--agent-intent-mode")
+    env_mode = "OFFDESK_REMOTE_OPERATOR_AGENT_INTENT_MODE" in os.environ
+    mode = str(args.agent_intent_mode or "").strip().lower()
+    if not cli_mode and not env_mode:
+        mode = config_string(file_config, "intent_mode", "mode") or mode or "auto"
+    if mode not in {"auto", "off", "required"}:
+        raise RemoteOperatorTelegramError(f"unsupported agent intent mode: {mode}")
+
+    provider = ""
+    if arg_was_provided("--agent-provider") or "OFFDESK_REMOTE_OPERATOR_AGENT_PROVIDER" in os.environ:
+        provider = str(args.agent_provider or "").strip()
+    provider = provider or config_string(file_config, "provider") or "ollama"
+    provider = provider.strip().lower()
+
+    cli_base_urls = unique_nonempty(args.agent_base_url)
+    env_base_urls = unique_nonempty(
+        [
+            os.environ.get("OFFDESK_REMOTE_OPERATOR_AGENT_BASE_URL"),
+            os.environ.get("OFFDESK_LLM_BASE_URL"),
+            os.environ.get("OLLAMA_BASE_URL"),
+        ]
+    )
+    config_base_urls = config_string_list(file_config, "base_urls", "base_url")
+    base_urls = unique_nonempty(
+        cli_base_urls + env_base_urls + config_base_urls + list(DEFAULT_AGENT_BASE_URLS)
+    )
+
+    model_values: list[Any] = []
+    model_values.extend(args.agent_model)
+    if args.agent_model_candidates:
+        model_values.extend(csv_values(args.agent_model_candidates))
+    model_values.extend(
+        [
+            os.environ.get("OFFDESK_OLLAMA_MODEL"),
+            os.environ.get("OFFDESK_LLM_MODEL"),
+        ]
+    )
+    model_values.extend(config_string_list(file_config, "models", "model"))
+    model_values.extend(DEFAULT_AGENT_MODEL_CANDIDATES)
+    models = unique_nonempty(model_values)
+
+    timeout_sec = args.agent_timeout_sec
+    if not arg_was_provided("--agent-timeout-sec") and "OFFDESK_REMOTE_OPERATOR_AGENT_TIMEOUT_SEC" not in os.environ:
+        timeout_sec = config_int(file_config, "timeout_sec", timeout_sec)
+    num_ctx = args.agent_num_ctx
+    if not arg_was_provided("--agent-num-ctx") and "OFFDESK_REMOTE_OPERATOR_AGENT_NUM_CTX" not in os.environ:
+        num_ctx = config_int(file_config, "num_ctx", num_ctx)
+    num_predict = args.agent_num_predict
+    if not arg_was_provided("--agent-num-predict") and "OFFDESK_REMOTE_OPERATOR_AGENT_NUM_PREDICT" not in os.environ:
+        num_predict = config_int(file_config, "num_predict", num_predict)
+
+    return {
+        "mode": mode,
+        "provider": provider,
+        "base_urls": base_urls,
+        "models": models,
+        "timeout_sec": max(1, int(timeout_sec)),
+        "num_ctx": max(512, int(num_ctx)),
+        "num_predict": max(64, int(num_predict)),
+        "config_file": str(args.agent_config_file),
+        "config_sources": config_sources,
+    }
+
+
+def parse_json_object_response(text: str) -> dict[str, Any]:
+    stripped = str(text or "").strip()
+    if stripped.startswith("```"):
+        stripped = stripped.removeprefix("```json").removeprefix("```").strip()
+        if stripped.endswith("```"):
+            stripped = stripped[:-3].strip()
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        start = stripped.find("{")
+        end = stripped.rfind("}")
+        if start < 0 or end <= start:
+            raise
+        parsed = json.loads(stripped[start : end + 1])
+    if not isinstance(parsed, dict):
+        raise ValueError("agent response was not a JSON object")
+    return parsed
+
+
+def ollama_available_models(base_url: str, timeout_sec: int) -> list[str]:
+    request = urllib.request.Request(
+        base_url.rstrip("/") + "/api/tags",
+        headers={"Content-Type": "application/json"},
+        method="GET",
+    )
+    with urllib.request.urlopen(request, timeout=max(1, int(timeout_sec))) as response:
+        raw = json.loads(response.read().decode("utf-8"))
+    models = raw.get("models") if isinstance(raw, dict) else None
+    if not isinstance(models, list):
+        return []
+    return unique_nonempty(
+        [item.get("name") for item in models if isinstance(item, dict)]
+    )
+
+
+def select_agent_runtime(agent_config: dict[str, Any]) -> dict[str, Any] | None:
+    if agent_config.get("mode") == "off":
+        return None
+    provider = str(agent_config.get("provider") or "").strip().lower()
+    if provider != "ollama":
+        if agent_config.get("mode") == "required":
+            raise RemoteOperatorTelegramError(f"unsupported agent provider: {provider}")
+        return None
+    timeout_sec = int(agent_config.get("timeout_sec") or 20)
+    candidates = unique_nonempty(list(agent_config.get("models") or []))
+    errors: list[str] = []
+    for base_url in unique_nonempty(list(agent_config.get("base_urls") or [])):
+        try:
+            available = ollama_available_models(base_url, min(timeout_sec, 10))
+        except (OSError, TimeoutError, urllib.error.URLError, json.JSONDecodeError) as error:
+            errors.append(f"{base_url}:{type(error).__name__}")
+            continue
+        if not available:
+            continue
+        model = next((item for item in candidates if item in available), "")
+        if not model:
+            model = next(
+                (
+                    item
+                    for item in available
+                    if "qwen" in item.lower() and "coder" in item.lower()
+                ),
+                "",
+            )
+        if not model:
+            model = available[0]
+        return {
+            "provider": provider,
+            "base_url": base_url,
+            "model": model,
+            "available_models": available,
+            "timeout_sec": timeout_sec,
+            "num_ctx": int(agent_config.get("num_ctx") or 8192),
+            "num_predict": int(agent_config.get("num_predict") or 768),
+            "config_sources": list(agent_config.get("config_sources") or []),
+        }
+    if agent_config.get("mode") == "required":
+        detail = ", ".join(errors[:3]) if errors else "no available Ollama model"
+        raise RemoteOperatorTelegramError(f"local agent runtime unavailable: {detail}")
+    return None
+
+
+def build_agent_intent_prompt(
+    *,
+    feedback_text: str,
+    deterministic_feedback_kind: str,
+    feedback_context: dict[str, Any] | None,
+) -> str:
+    context = feedback_context if isinstance(feedback_context, dict) else {}
+    payload = {
+        "telegram_text": sanitize_text(feedback_text, max_chars=1200),
+        "deterministic_hint": deterministic_feedback_kind,
+        "last_interaction_context": context,
+    }
+    return "\n".join(
+        [
+            "You are the Telegram intent classifier for a generic Offdesk remote operator harness.",
+            "Classify the operator's freeform Telegram message. You are not allowed to approve, launch, dispatch, run shell commands, mutate files, resolve approvals, or retarget providers.",
+            "Return exactly one JSON object. Do not include markdown.",
+            "Allowed intent values: feedback, plan_request, execution_request, approval_attempt, unsafe_mutation, clarification, unknown.",
+            "Use feedback_kind=planning_request only when the text should become a Plan Mode candidate. Otherwise use feedback_kind=freeform_feedback.",
+            "If execution is requested, classify intent as execution_request but do not imply authorization.",
+            "JSON schema:",
+            json.dumps(
+                {
+                    "intent": "feedback",
+                    "feedback_kind": "freeform_feedback",
+                    "confidence": 0.0,
+                    "project_hint": None,
+                    "goal": None,
+                    "timebox": None,
+                    "requires_clarification": False,
+                    "clarifying_question": None,
+                    "reason": "short reason",
+                    "non_authorized": [
+                        "execution",
+                        "approval",
+                        "shell",
+                        "git mutation",
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            "Input:",
+            json.dumps(payload, ensure_ascii=False, sort_keys=True),
+        ]
+    )
+
+
+def call_ollama_intent_agent(runtime: dict[str, Any], prompt: str) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "model": runtime["model"],
+        "prompt": prompt,
+        "stream": False,
+        "think": False,
+        "format": "json",
+        "options": {
+            "temperature": 0.1,
+            "top_p": 0.9,
+            "num_ctx": int(runtime.get("num_ctx") or 8192),
+            "num_predict": int(runtime.get("num_predict") or 768),
+        },
+    }
+    request = urllib.request.Request(
+        str(runtime["base_url"]).rstrip("/") + "/api/generate",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=int(runtime.get("timeout_sec") or 20)) as response:
+        raw = json.loads(response.read().decode("utf-8"))
+    return parse_json_object_response(str(raw.get("response") or ""))
+
+
+def clamp_float(value: Any, default: float = 0.0) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(0.0, min(1.0, parsed))
+
+
+def short_optional_text(value: Any, max_chars: int = 240) -> str | None:
+    text = sanitize_text(str(value or "").strip(), max_chars=max_chars)
+    return text or None
+
+
+def normalize_agent_intent(
+    parsed: dict[str, Any],
+    *,
+    runtime: dict[str, Any],
+    deterministic_feedback_kind: str,
+) -> dict[str, Any]:
+    allowed_intents = {
+        "feedback",
+        "plan_request",
+        "execution_request",
+        "approval_attempt",
+        "unsafe_mutation",
+        "clarification",
+        "unknown",
+    }
+    intent = str(parsed.get("intent") or "").strip().lower()
+    if intent not in allowed_intents:
+        intent = "unknown"
+    requested_kind = str(parsed.get("feedback_kind") or "").strip()
+    if requested_kind not in {"freeform_feedback", "planning_request"}:
+        requested_kind = (
+            "planning_request"
+            if intent in {"plan_request", "execution_request"}
+            else deterministic_feedback_kind
+        )
+    non_authorized = unique_nonempty(
+        list(parsed.get("non_authorized") if isinstance(parsed.get("non_authorized"), list) else [])
+        + ["execution", "approval", "shell", "git mutation"]
+    )
+    return {
+        "schema": AGENT_INTENT_SCHEMA,
+        "status": "classified",
+        "source": "ollama",
+        "provider": runtime.get("provider"),
+        "base_url": runtime.get("base_url"),
+        "model": runtime.get("model"),
+        "intent": intent,
+        "feedback_kind": requested_kind,
+        "confidence": clamp_float(parsed.get("confidence")),
+        "project_hint": short_optional_text(parsed.get("project_hint"), max_chars=120),
+        "goal": short_optional_text(parsed.get("goal"), max_chars=240),
+        "timebox": short_optional_text(parsed.get("timebox"), max_chars=120),
+        "requires_clarification": bool(parsed.get("requires_clarification")),
+        "clarifying_question": short_optional_text(parsed.get("clarifying_question"), max_chars=240),
+        "reason": short_optional_text(parsed.get("reason"), max_chars=240),
+        "non_authorized": non_authorized,
+        "config_sources": list(runtime.get("config_sources") or []),
+    }
+
+
+def fallback_agent_intent(
+    *,
+    reason: str,
+    deterministic_feedback_kind: str,
+    agent_config: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "schema": AGENT_INTENT_SCHEMA,
+        "status": "fallback",
+        "source": "deterministic",
+        "reason": sanitize_text(reason, max_chars=240),
+        "intent": "plan_request"
+        if deterministic_feedback_kind == "planning_request"
+        else "feedback",
+        "feedback_kind": deterministic_feedback_kind,
+        "confidence": 0.25,
+        "provider": agent_config.get("provider"),
+        "configured_models": list(agent_config.get("models") or [])[:4],
+        "non_authorized": ["execution", "approval", "shell", "git mutation"],
+    }
+
+
+def classify_feedback_with_agent(
+    args: argparse.Namespace,
+    feedback_text: str,
+    *,
+    feedback_context: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    deterministic_feedback_kind = classify_feedback_kind(feedback_text)
+    agent_config = resolve_agent_config(args)
+    if agent_config.get("mode") == "off":
+        return None
+    runtime = select_agent_runtime(agent_config)
+    if not runtime:
+        return fallback_agent_intent(
+            reason="local_agent_unavailable",
+            deterministic_feedback_kind=deterministic_feedback_kind,
+            agent_config=agent_config,
+        )
+    prompt = build_agent_intent_prompt(
+        feedback_text=feedback_text,
+        deterministic_feedback_kind=deterministic_feedback_kind,
+        feedback_context=feedback_context,
+    )
+    try:
+        parsed = call_ollama_intent_agent(runtime, prompt)
+    except (OSError, TimeoutError, urllib.error.URLError, json.JSONDecodeError, ValueError) as error:
+        if agent_config.get("mode") == "required":
+            raise RemoteOperatorTelegramError(f"local agent intent classification failed: {error}") from error
+        return fallback_agent_intent(
+            reason=f"local_agent_failed:{type(error).__name__}",
+            deterministic_feedback_kind=deterministic_feedback_kind,
+            agent_config=agent_config,
+        )
+    return normalize_agent_intent(
+        parsed,
+        runtime=runtime,
+        deterministic_feedback_kind=deterministic_feedback_kind,
+    )
 
 
 def sha256_short(value: str) -> str:
@@ -1124,8 +1587,8 @@ def render_command_result(
     result = result_base(args, config, mode)
     result["command_text"] = sanitize_text(command_text, max_chars=400)
     parsed = parse_remote_command(command_text)
-    result["parsed_command"] = parsed
     if not parsed.get("supported"):
+        result["parsed_command"] = parsed
         message_preview = help_message(profile=args.profile, generated_at=result["generated_at"])
         attach_choice_surface(result, None)
         result.update(
@@ -1139,6 +1602,7 @@ def render_command_result(
         )
         return result
     if parsed.get("command") == "help":
+        result["parsed_command"] = parsed
         message_preview = help_message(profile=args.profile, generated_at=result["generated_at"])
         attach_choice_surface(result, None)
         result.update(
@@ -1151,6 +1615,18 @@ def render_command_result(
         )
         return result
     if parsed.get("command") == "feedback":
+        agent_intent = classify_feedback_with_agent(
+            args,
+            str(parsed.get("feedback_text") or command_text),
+            feedback_context=feedback_context,
+        )
+        if isinstance(agent_intent, dict):
+            parsed["agent_intent"] = agent_intent
+            parsed["feedback_kind"] = str(
+                agent_intent.get("feedback_kind") or parsed.get("feedback_kind") or "freeform_feedback"
+            )
+            parsed["reason"] = f"agent_intent:{agent_intent.get('intent') or 'unknown'}"
+        result["parsed_command"] = parsed
         message_preview = render_feedback_message(
             profile=args.profile,
             generated_at=result["generated_at"],
@@ -1170,6 +1646,7 @@ def render_command_result(
             }
         )
         return result
+    result["parsed_command"] = parsed
     if args.projection_file:
         projection = load_projection_file(args.projection_file, parsed)
     else:
@@ -1369,7 +1846,17 @@ def record_feedback(
     text: str,
     *,
     feedback_context: dict[str, Any] | None = None,
+    parsed_command: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    feedback_kind = classify_feedback_kind(text)
+    agent_intent = None
+    if isinstance(parsed_command, dict):
+        parsed_kind = str(parsed_command.get("feedback_kind") or "").strip()
+        if parsed_kind in {"freeform_feedback", "planning_request"}:
+            feedback_kind = parsed_kind
+        parsed_agent = parsed_command.get("agent_intent")
+        if isinstance(parsed_agent, dict):
+            agent_intent = parsed_agent
     record = {
         "schema": "remote_operator_telegram_feedback.v1",
         "received_at": utc_now(),
@@ -1378,10 +1865,12 @@ def record_feedback(
         "user_id_hash": sha256_short(user_id_for(message)),
         "message_id": message_id_for(message),
         "feedback_text": sanitize_text(text, max_chars=2000),
-        "feedback_kind": classify_feedback_kind(text),
+        "feedback_kind": feedback_kind,
         "target_chat_id_hash": config.get("target_chat_id_hash"),
         "feedback_context": feedback_context,
     }
+    if agent_intent:
+        record["agent_intent"] = agent_intent
     append_jsonl(args.feedback_file, record)
     return {
         "feedback_recorded": True,
@@ -1451,6 +1940,7 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                 message,
                 text,
                 feedback_context=feedback_context,
+                parsed_command=parsed_command,
             )
             feedback_record = feedback_result.pop("feedback_record", None)
             rendered.update(feedback_result)
