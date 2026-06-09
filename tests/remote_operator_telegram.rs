@@ -537,6 +537,74 @@ fn remote_operator_telegram_agent_classifies_freeform_plan_request() -> Result<(
 
 #[test]
 #[serial]
+fn remote_operator_telegram_agent_uses_generic_provider_config() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let out = temp
+        .path()
+        .join("remote_generic_provider_plan_request.json");
+    let agent_request_path = temp.path().join("ollama_generic_provider_request.json");
+    let (base_url, server) = spawn_fake_ollama(agent_request_path.clone())?;
+    let config_path = temp.path().join("forager_config.toml");
+    fs::write(
+        &config_path,
+        format!(
+            r#"
+[llm.provider]
+provider = "ollama"
+base_urls = ["{base_url}"]
+models = ["qwen3-coder-next:latest"]
+timeout_sec = 20
+num_ctx = 4096
+num_predict = 512
+"#
+        ),
+    )?;
+
+    let output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--command-text")
+        .arg("Please assess generic product telemetry cleanup for tonight")
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--out")
+        .arg(&out)
+        .arg("--agent-intent-mode")
+        .arg("required")
+        .arg("--agent-config-file")
+        .arg(&config_path)
+        .output()?;
+
+    server.join().expect("fake ollama server panicked")?;
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(
+        result["parsed_command"]["agent_intent"]["base_url"],
+        base_url
+    );
+    assert_eq!(
+        result["parsed_command"]["agent_intent"]["config_sources"],
+        json!(["llm.provider"])
+    );
+    assert_eq!(
+        result["parsed_command"]["feedback_kind"],
+        "planning_request"
+    );
+    assert_mobile_contract(&result);
+    let agent_request: Value = serde_json::from_slice(&fs::read(&agent_request_path)?)?;
+    assert_eq!(agent_request["options"]["num_ctx"], 4096);
+    assert_eq!(agent_request["options"]["num_predict"], 512);
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn remote_operator_telegram_feedback_uses_last_card_context() -> Result<()> {
     let temp = tempdir()?;
     let env_path = temp.path().join("telegram.env");
@@ -839,6 +907,7 @@ fn remote_operator_telegram_health_reports_fresh_listener_status() -> Result<()>
     assert_eq!(result["listener_status"], "polling");
     assert_eq!(result["poll_count"], 7);
     assert_eq!(result["handled_result_count"], 1);
+    assert_eq!(result["agent_runtime_status"]["status"], "disabled");
     let serialized = serde_json::to_string(&result)?;
     assert!(!serialized.contains("fake-token-for-test"));
     assert!(!serialized.contains("999999:"));

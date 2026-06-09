@@ -71,7 +71,27 @@ agent is available in `auto` mode, the adapter falls back to the deterministic
 keyword classifier and still records the message as review input only.
 
 The current default provider is local Ollama, preferring configured models and
-then local Qwen Coder candidates. A typical configuration is:
+then local Qwen Coder candidates. Product deployments should use a generic LLM
+provider section when the same runtime is shared across transports and scripts:
+
+```toml
+[llm.provider]
+provider = "ollama"
+base_urls = [
+  "http://127.0.0.1:11434",
+  "http://<gpu-server>:11434"
+]
+models = [
+  "qwen3-coder-next:latest",
+  "qwen3-coder:30b"
+]
+timeout_sec = 20
+num_ctx = 8192
+num_predict = 768
+```
+
+Telegram can still override the shared provider when the remote operator needs
+a distinct intent classifier:
 
 ```toml
 [remote_operator.telegram.agent]

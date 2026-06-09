@@ -20,12 +20,19 @@ import re
 import shlex
 import subprocess
 import sys
-import tomllib
 import urllib.error
 import urllib.request
 from typing import Any
 
-from offdesk_llm_endpoint import default_ollama_base_url
+from offdesk_llm_endpoint import (
+    DEFAULT_CODING_MODEL_CANDIDATES,
+    LlmProviderError,
+    call_ollama_json,
+    default_ollama_base_urls,
+    provider_status,
+    resolve_provider_config,
+    select_provider_runtime as select_llm_provider_runtime,
+)
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -75,16 +82,9 @@ AGENT_INTENT_SCHEMA = "telegram_agent_intent.v1"
 MOBILE_CARD_MAX_LINES = 5
 MOBILE_CARD_MAX_CHARS = 360
 DEFAULT_AGENT_BASE_URLS = (
-    default_ollama_base_url(),
-    "http://127.0.0.1:11434",
-    "http://localhost:11434",
+    *default_ollama_base_urls(),
 )
-DEFAULT_AGENT_MODEL_CANDIDATES = (
-    "qwen3-coder-next:latest",
-    "qwen3-coder:30b",
-    "qwen2.5-coder:32b",
-    "qwen2.5-coder:14b",
-)
+DEFAULT_AGENT_MODEL_CANDIDATES = DEFAULT_CODING_MODEL_CANDIDATES
 MOBILE_CARD_FORBIDDEN_TERMS = (
     "Forager Remote Status",
     "Read-only",
@@ -237,218 +237,60 @@ def arg_was_provided(flag: str) -> bool:
     return any(raw == flag or raw.startswith(flag + "=") for raw in sys.argv[1:])
 
 
-def safe_config_dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def config_section(config: dict[str, Any], path: tuple[str, ...]) -> dict[str, Any]:
-    current: Any = config
-    for key in path:
-        if not isinstance(current, dict):
-            return {}
-        current = current.get(key)
-    return safe_config_dict(current)
-
-
-def load_agent_config_file(path: pathlib.Path) -> tuple[dict[str, Any], list[str]]:
-    if not path.exists():
-        return {}, []
-    try:
-        raw = tomllib.loads(path.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError) as error:
-        raise RemoteOperatorTelegramError(f"agent config cannot be read: {path}: {error}") from error
-    if not isinstance(raw, dict):
-        return {}, []
-    merged: dict[str, Any] = {}
-    sources: list[str] = []
-    for section_path in (
-        ("offdesk", "remote_operator", "agent"),
-        ("remote_operator", "agent"),
-        ("remote_operator", "telegram", "agent"),
-    ):
-        section = config_section(raw, section_path)
-        if section:
-            merged.update(section)
-            sources.append(".".join(section_path))
-    return merged, sources
-
-
-def config_string(config: dict[str, Any], *keys: str) -> str:
-    for key in keys:
-        value = config.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return ""
-
-
-def config_string_list(config: dict[str, Any], *keys: str) -> list[str]:
-    values: list[Any] = []
-    for key in keys:
-        value = config.get(key)
-        if isinstance(value, list):
-            values.extend(value)
-        elif isinstance(value, tuple):
-            values.extend(list(value))
-        elif isinstance(value, str):
-            values.extend(csv_values(value) if "," in value else [value])
-    return unique_nonempty(values)
-
-
-def config_int(config: dict[str, Any], key: str, default: int) -> int:
-    value = config.get(key)
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return default
-    return parsed if parsed > 0 else default
-
-
 def resolve_agent_config(args: argparse.Namespace) -> dict[str, Any]:
-    file_config, config_sources = load_agent_config_file(args.agent_config_file)
-    cli_mode = arg_was_provided("--agent-intent-mode")
-    env_mode = "OFFDESK_REMOTE_OPERATOR_AGENT_INTENT_MODE" in os.environ
-    mode = str(args.agent_intent_mode or "").strip().lower()
-    if not cli_mode and not env_mode:
-        mode = config_string(file_config, "intent_mode", "mode") or mode or "auto"
-    if mode not in {"auto", "off", "required"}:
-        raise RemoteOperatorTelegramError(f"unsupported agent intent mode: {mode}")
-
-    provider = ""
-    if arg_was_provided("--agent-provider") or "OFFDESK_REMOTE_OPERATOR_AGENT_PROVIDER" in os.environ:
-        provider = str(args.agent_provider or "").strip()
-    provider = provider or config_string(file_config, "provider") or "ollama"
-    provider = provider.strip().lower()
-
-    cli_base_urls = unique_nonempty(args.agent_base_url)
-    env_base_urls = unique_nonempty(
-        [
-            os.environ.get("OFFDESK_REMOTE_OPERATOR_AGENT_BASE_URL"),
-            os.environ.get("OFFDESK_LLM_BASE_URL"),
-            os.environ.get("OLLAMA_BASE_URL"),
-        ]
-    )
-    config_base_urls = config_string_list(file_config, "base_urls", "base_url")
-    base_urls = unique_nonempty(
-        cli_base_urls + env_base_urls + config_base_urls + list(DEFAULT_AGENT_BASE_URLS)
-    )
-
-    model_values: list[Any] = []
-    model_values.extend(args.agent_model)
-    if args.agent_model_candidates:
-        model_values.extend(csv_values(args.agent_model_candidates))
-    model_values.extend(
-        [
-            os.environ.get("OFFDESK_OLLAMA_MODEL"),
-            os.environ.get("OFFDESK_LLM_MODEL"),
-        ]
-    )
-    model_values.extend(config_string_list(file_config, "models", "model"))
-    model_values.extend(DEFAULT_AGENT_MODEL_CANDIDATES)
-    models = unique_nonempty(model_values)
-
-    timeout_sec = args.agent_timeout_sec
-    if not arg_was_provided("--agent-timeout-sec") and "OFFDESK_REMOTE_OPERATOR_AGENT_TIMEOUT_SEC" not in os.environ:
-        timeout_sec = config_int(file_config, "timeout_sec", timeout_sec)
-    num_ctx = args.agent_num_ctx
-    if not arg_was_provided("--agent-num-ctx") and "OFFDESK_REMOTE_OPERATOR_AGENT_NUM_CTX" not in os.environ:
-        num_ctx = config_int(file_config, "num_ctx", num_ctx)
-    num_predict = args.agent_num_predict
-    if not arg_was_provided("--agent-num-predict") and "OFFDESK_REMOTE_OPERATOR_AGENT_NUM_PREDICT" not in os.environ:
-        num_predict = config_int(file_config, "num_predict", num_predict)
-
-    return {
-        "mode": mode,
-        "provider": provider,
-        "base_urls": base_urls,
-        "models": models,
-        "timeout_sec": max(1, int(timeout_sec)),
-        "num_ctx": max(512, int(num_ctx)),
-        "num_predict": max(64, int(num_predict)),
-        "config_file": str(args.agent_config_file),
-        "config_sources": config_sources,
-    }
-
-
-def parse_json_object_response(text: str) -> dict[str, Any]:
-    stripped = str(text or "").strip()
-    if stripped.startswith("```"):
-        stripped = stripped.removeprefix("```json").removeprefix("```").strip()
-        if stripped.endswith("```"):
-            stripped = stripped[:-3].strip()
     try:
-        parsed = json.loads(stripped)
-    except json.JSONDecodeError:
-        start = stripped.find("{")
-        end = stripped.rfind("}")
-        if start < 0 or end <= start:
-            raise
-        parsed = json.loads(stripped[start : end + 1])
-    if not isinstance(parsed, dict):
-        raise ValueError("agent response was not a JSON object")
-    return parsed
-
-
-def ollama_available_models(base_url: str, timeout_sec: int) -> list[str]:
-    request = urllib.request.Request(
-        base_url.rstrip("/") + "/api/tags",
-        headers={"Content-Type": "application/json"},
-        method="GET",
-    )
-    with urllib.request.urlopen(request, timeout=max(1, int(timeout_sec))) as response:
-        raw = json.loads(response.read().decode("utf-8"))
-    models = raw.get("models") if isinstance(raw, dict) else None
-    if not isinstance(models, list):
-        return []
-    return unique_nonempty(
-        [item.get("name") for item in models if isinstance(item, dict)]
-    )
+        return resolve_provider_config(
+            config_file=args.agent_config_file,
+            section_paths=(
+                ("offdesk", "remote_operator", "agent"),
+                ("remote_operator", "agent"),
+                ("remote_operator", "telegram", "agent"),
+                ("offdesk", "llm", "provider"),
+                ("llm", "provider"),
+            ),
+            mode=str(args.agent_intent_mode or "auto"),
+            mode_explicit=arg_was_provided("--agent-intent-mode"),
+            provider=args.agent_provider,
+            provider_explicit=arg_was_provided("--agent-provider"),
+            base_urls=args.agent_base_url,
+            models=args.agent_model,
+            model_candidates=csv_values(args.agent_model_candidates)
+            + list(DEFAULT_AGENT_MODEL_CANDIDATES),
+            timeout_sec=int(args.agent_timeout_sec),
+            timeout_explicit=arg_was_provided("--agent-timeout-sec"),
+            num_ctx=int(args.agent_num_ctx),
+            num_ctx_explicit=arg_was_provided("--agent-num-ctx"),
+            num_predict=int(args.agent_num_predict),
+            num_predict_explicit=arg_was_provided("--agent-num-predict"),
+            env_mode_key="OFFDESK_REMOTE_OPERATOR_AGENT_INTENT_MODE",
+            env_provider_key="OFFDESK_REMOTE_OPERATOR_AGENT_PROVIDER",
+            env_base_url_keys=(
+                "OFFDESK_REMOTE_OPERATOR_AGENT_BASE_URL",
+                "OFFDESK_LLM_BASE_URL",
+                "OLLAMA_BASE_URL",
+            ),
+            env_model_keys=(
+                "OFFDESK_REMOTE_OPERATOR_AGENT_MODELS",
+                "OFFDESK_LLM_MODELS",
+                "OFFDESK_OLLAMA_MODEL",
+                "OFFDESK_LLM_MODEL",
+            ),
+            env_timeout_key="OFFDESK_REMOTE_OPERATOR_AGENT_TIMEOUT_SEC",
+            env_num_ctx_key="OFFDESK_REMOTE_OPERATOR_AGENT_NUM_CTX",
+            env_num_predict_key="OFFDESK_REMOTE_OPERATOR_AGENT_NUM_PREDICT",
+            default_provider="ollama",
+            default_base_urls=list(DEFAULT_AGENT_BASE_URLS),
+            default_models=list(DEFAULT_AGENT_MODEL_CANDIDATES),
+        )
+    except LlmProviderError as error:
+        raise RemoteOperatorTelegramError(str(error)) from error
 
 
 def select_agent_runtime(agent_config: dict[str, Any]) -> dict[str, Any] | None:
-    if agent_config.get("mode") == "off":
-        return None
-    provider = str(agent_config.get("provider") or "").strip().lower()
-    if provider != "ollama":
-        if agent_config.get("mode") == "required":
-            raise RemoteOperatorTelegramError(f"unsupported agent provider: {provider}")
-        return None
-    timeout_sec = int(agent_config.get("timeout_sec") or 20)
-    candidates = unique_nonempty(list(agent_config.get("models") or []))
-    errors: list[str] = []
-    for base_url in unique_nonempty(list(agent_config.get("base_urls") or [])):
-        try:
-            available = ollama_available_models(base_url, min(timeout_sec, 10))
-        except (OSError, TimeoutError, urllib.error.URLError, json.JSONDecodeError) as error:
-            errors.append(f"{base_url}:{type(error).__name__}")
-            continue
-        if not available:
-            continue
-        model = next((item for item in candidates if item in available), "")
-        if not model:
-            model = next(
-                (
-                    item
-                    for item in available
-                    if "qwen" in item.lower() and "coder" in item.lower()
-                ),
-                "",
-            )
-        if not model:
-            model = available[0]
-        return {
-            "provider": provider,
-            "base_url": base_url,
-            "model": model,
-            "available_models": available,
-            "timeout_sec": timeout_sec,
-            "num_ctx": int(agent_config.get("num_ctx") or 8192),
-            "num_predict": int(agent_config.get("num_predict") or 768),
-            "config_sources": list(agent_config.get("config_sources") or []),
-        }
-    if agent_config.get("mode") == "required":
-        detail = ", ".join(errors[:3]) if errors else "no available Ollama model"
-        raise RemoteOperatorTelegramError(f"local agent runtime unavailable: {detail}")
-    return None
+    try:
+        return select_llm_provider_runtime(agent_config)
+    except LlmProviderError as error:
+        raise RemoteOperatorTelegramError(str(error)) from error
 
 
 def build_agent_intent_prompt(
@@ -499,28 +341,7 @@ def build_agent_intent_prompt(
 
 
 def call_ollama_intent_agent(runtime: dict[str, Any], prompt: str) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "model": runtime["model"],
-        "prompt": prompt,
-        "stream": False,
-        "think": False,
-        "format": "json",
-        "options": {
-            "temperature": 0.1,
-            "top_p": 0.9,
-            "num_ctx": int(runtime.get("num_ctx") or 8192),
-            "num_predict": int(runtime.get("num_predict") or 768),
-        },
-    }
-    request = urllib.request.Request(
-        str(runtime["base_url"]).rstrip("/") + "/api/generate",
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=int(runtime.get("timeout_sec") or 20)) as response:
-        raw = json.loads(response.read().decode("utf-8"))
-    return parse_json_object_response(str(raw.get("response") or ""))
+    return call_ollama_json(runtime, prompt, temperature=0.1)
 
 
 def clamp_float(value: Any, default: float = 0.0) -> float:
@@ -2074,6 +1895,15 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
         issues.append("last_poll_missing")
     if str(loop_status.get("status") or "") not in {"polling", "max_polls_reached"} and loop_status:
         issues.append("listener_not_polling")
+    try:
+        agent_runtime_status = provider_status(resolve_agent_config(args))
+    except RemoteOperatorTelegramError as error:
+        agent_runtime_status = {
+            "schema": "offdesk_llm_provider_resolution.v1",
+            "status": "error",
+            "error": sanitize_text(str(error), max_chars=240),
+        }
+        issues.append("agent_runtime_status_error")
     health_status = "healthy" if not issues else "unhealthy"
     return {
         "schema": HEALTH_SCHEMA,
@@ -2098,6 +1928,7 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
             if isinstance(loop_status.get("last_handled_result"), dict)
             else None
         ),
+        "agent_runtime_status": agent_runtime_status,
         "read_only": True,
         "mutation_authorized": False,
         "approval_authorized": False,
