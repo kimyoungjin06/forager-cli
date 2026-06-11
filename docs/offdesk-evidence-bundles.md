@@ -18,6 +18,8 @@ A separate reviewer may add:
 - `evidence_review.json`: sufficient/insufficient/conflicting decision with
   missing evidence and warnings.
 - `EVIDENCE_REVIEW.md`: operator-readable review summary.
+- `*.marp.md`: optional Marp review deck generated from a JSON artifact for
+  morning review, closeout handoff, or incident triage.
 
 The collector must be deterministic and read-only for the target project. It
 may write only to the selected Offdesk output directory. It must not call an
@@ -35,6 +37,28 @@ project experiments.
 The collector does not decide the final answer. The reviewer does not execute
 the plan. Mode agents must treat facts outside the bundle as unverified unless
 they gather additional evidence and record it.
+
+## Marp Review Decks
+
+Marp decks are a presentation surface for already-written Offdesk artifacts.
+They are not a control plane, approval channel, or source of truth. The source
+JSON remains authoritative.
+
+Generate a deck without requiring Marp CLI:
+
+```bash
+forager offdesk deck --from closeout_plan.json --out closeout.marp.md
+```
+
+Render only when Marp CLI is available in the runtime:
+
+```bash
+forager offdesk deck --from closeout_plan.json --out closeout.marp.md --render pdf --marp-bin marp --force
+```
+
+Use decks for compact human review: closeout summaries, plan readiness, runtime
+status, and incident packets. Do not use decks to authorize work, mutate project
+state, or bypass the original JSON artifact and linked evidence.
 
 ## TwinPaper V1
 

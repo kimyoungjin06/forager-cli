@@ -1469,6 +1469,118 @@ fn offdesk_gate_json_includes_adaptive_wiki_projection() -> Result<()> {
 }
 
 #[test]
+fn offdesk_deck_writes_marp_markdown_from_closeout_json() -> Result<()> {
+    let temp = tempdir()?;
+    let source = temp.path().join("closeout_plan.json");
+    let deck = temp.path().join("closeout.marp.md");
+    fs::write(
+        &source,
+        serde_json::to_string_pretty(&json!({
+            "generated_at": "2026-06-11T00:00:00Z",
+            "closeout_id": "closeout_alpha",
+            "profile": "default",
+            "artifact_dir": temp.path().join("closeout_alpha"),
+            "summary": {
+                "completed_tasks": 3,
+                "active_or_blocked_tasks": 1,
+                "missing_artifacts": 0,
+                "return_package_required": true
+            },
+            "open_decisions": [
+                {
+                    "kind": "archive_review",
+                    "detail": "Review generated logs before archive."
+                }
+            ],
+            "verification_commands": [
+                "forager offdesk tasks --json"
+            ],
+            "required_first_reads": [
+                {
+                    "path": "REPORT.md",
+                    "reason": "Review result summary first."
+                }
+            ],
+            "artifacts": {
+                "closeout_plan_json": "closeout_plan.json",
+                "return_package_markdown": "RETURN_PACKAGE.md"
+            }
+        }))?,
+    )?;
+
+    let output = forager_command(temp.path())
+        .args(["offdesk", "deck", "--from"])
+        .arg(&source)
+        .args(["--out"])
+        .arg(&deck)
+        .arg("--json")
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "deck command failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(report["schema"], "offdesk_marp_deck.v1");
+    assert_eq!(report["source_kind"], "closeout");
+    assert_eq!(report["render_status"], "not_requested");
+    assert_eq!(
+        reported_path(&report["marp_markdown_path"]),
+        expected_path(&deck)
+    );
+
+    let markdown = fs::read_to_string(&deck)?;
+    assert!(markdown.contains("marp: true"));
+    assert!(markdown.contains("source JSON remains authoritative"));
+    assert!(markdown.contains("closeout_alpha"));
+    assert!(markdown.contains("forager offdesk tasks --json"));
+    assert!(markdown.contains("review surface only"));
+    Ok(())
+}
+
+#[test]
+fn offdesk_deck_without_render_does_not_require_marp_cli() -> Result<()> {
+    let temp = tempdir()?;
+    let source = temp.path().join("status.json");
+    let deck = temp.path().join("status.marp.md");
+    fs::write(
+        &source,
+        serde_json::to_string_pretty(&json!({
+            "status": "healthy",
+            "agent_runtime_status": "available",
+            "listener_status": "polling",
+            "model": "local-coder",
+            "pending_approvals": [],
+            "queued_offdesk_tasks": [],
+            "active_offdesk_tasks": []
+        }))?,
+    )?;
+
+    let output = forager_command(temp.path())
+        .args(["offdesk", "deck", "--from"])
+        .arg(&source)
+        .args(["--out"])
+        .arg(&deck)
+        .args(["--marp-bin", "definitely-missing-marp-bin"])
+        .arg("--json")
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "deck command unexpectedly required Marp CLI\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(report["source_kind"], "status");
+    assert_eq!(report["render_status"], "not_requested");
+    assert!(deck.exists());
+    Ok(())
+}
+
+#[test]
 #[serial]
 fn offdesk_gate_json_filters_adaptive_wiki_projection_by_agent_mode() -> Result<()> {
     let temp = tempdir()?;
