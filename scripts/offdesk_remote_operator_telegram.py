@@ -84,6 +84,7 @@ MOBILE_CARD_CONTRACT_SCHEMA = "telegram_mobile_card_contract.v1"
 CHOICE_SURFACE_CONTRACT_SCHEMA = "telegram_choice_surface_contract.v1"
 INTERACTION_CONTEXT_SCHEMA = "telegram_interaction_context.v1"
 HEALTH_SCHEMA = "remote_operator_telegram_health.v1"
+ACTION_READINESS_SCHEMA = "telegram_action_readiness.v1"
 AGENT_INTENT_SCHEMA = "telegram_agent_intent.v1"
 REMOTE_PLAN_SESSION_SCHEMA = "telegram_remote_plan_session.v1"
 PROJECT_CANDIDATE_SCHEMA = "telegram_remote_project_candidate.v1"
@@ -488,6 +489,131 @@ def fallback_agent_intent(
     }
 
 
+def action_readiness(
+    action: str,
+    status: str,
+    *,
+    reason: str,
+    allowed_actions: list[str] | None = None,
+    blocked_actions: list[str] | None = None,
+    recovery_hint: str | None = None,
+    evidence: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "schema": ACTION_READINESS_SCHEMA,
+        "action": action,
+        "status": status,
+        "reason": sanitize_text(reason, max_chars=160),
+        "allowed_actions": unique_nonempty(list(allowed_actions or [])),
+        "blocked_actions": unique_nonempty(list(blocked_actions or [])),
+        "recovery_hint": sanitize_text(recovery_hint or "", max_chars=160) or None,
+        "evidence": unique_nonempty(list(evidence or [])),
+    }
+
+
+def agent_runtime_issue(agent_runtime_status: dict[str, Any]) -> str | None:
+    status = str(agent_runtime_status.get("status") or "").strip().lower()
+    if status in {"available", "disabled"}:
+        return None
+    if status == "unavailable":
+        return "agent_runtime_unavailable"
+    if status == "error":
+        return "agent_runtime_error"
+    return "agent_runtime_unknown"
+
+
+def readiness_from_agent_intent(agent_intent: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(agent_intent, dict):
+        return None
+    reason = str(agent_intent.get("reason") or "").strip()
+    status = str(agent_intent.get("status") or "").strip()
+    if status == "fallback" and reason.startswith(("local_agent_unavailable", "local_agent_failed")):
+        return action_readiness(
+            "build_plan",
+            "blocked",
+            reason="local_agent_unavailable",
+            allowed_actions=["status", "project_scan", "existing_plans"],
+            blocked_actions=["new_plan", "start_offdesk"],
+            recovery_hint="로컬 모델 연결을 복구한 뒤 다시 시작",
+            evidence=[reason],
+        )
+    return action_readiness(
+        "build_plan",
+        "healthy",
+        reason="agent_intent_available",
+        allowed_actions=["project_scan", "plan_draft"],
+        blocked_actions=["start_offdesk"],
+        recovery_hint="실행은 별도 로컬 승인 필요",
+    )
+
+
+def health_action_readiness(
+    *,
+    transport_issues: list[str],
+    agent_runtime_status: dict[str, Any],
+) -> list[dict[str, Any]]:
+    transport_blocked = bool(transport_issues)
+    agent_issue = agent_runtime_issue(agent_runtime_status)
+    status_readiness = action_readiness(
+        "status",
+        "blocked" if transport_blocked else "healthy",
+        reason=transport_issues[0] if transport_issues else "listener_status_available",
+        allowed_actions=[] if transport_blocked else ["status", "pending", "plans"],
+        blocked_actions=["remote_commands"] if transport_blocked else [],
+        recovery_hint="텔레그램 설정과 listener 상태 확인" if transport_blocked else None,
+        evidence=transport_issues,
+    )
+    project_scan_readiness = action_readiness(
+        "project_scan",
+        "blocked" if transport_blocked else "healthy",
+        reason=transport_issues[0] if transport_issues else "workspace_scan_available",
+        allowed_actions=[] if transport_blocked else ["project_scan", "manual_path_check"],
+        blocked_actions=["project_selection"] if transport_blocked else [],
+        recovery_hint="텔레그램 수신 복구 후 다시 시도" if transport_blocked else None,
+        evidence=transport_issues,
+    )
+    if transport_blocked:
+        build_plan = action_readiness(
+            "build_plan",
+            "blocked",
+            reason=transport_issues[0],
+            allowed_actions=[],
+            blocked_actions=["new_plan", "start_offdesk"],
+            recovery_hint="텔레그램 수신 복구 필요",
+            evidence=transport_issues,
+        )
+    elif agent_issue:
+        build_plan = action_readiness(
+            "build_plan",
+            "blocked",
+            reason=agent_issue,
+            allowed_actions=["status", "project_scan", "existing_plans"],
+            blocked_actions=["new_plan", "start_offdesk"],
+            recovery_hint="로컬 모델 연결을 복구한 뒤 다시 시작",
+            evidence=[agent_issue],
+        )
+    else:
+        build_plan = action_readiness(
+            "build_plan",
+            "healthy",
+            reason="agent_runtime_available"
+            if str(agent_runtime_status.get("status") or "") == "available"
+            else "agent_runtime_disabled",
+            allowed_actions=["project_scan", "plan_draft"],
+            blocked_actions=["start_offdesk"],
+            recovery_hint="실행은 별도 로컬 승인 필요",
+        )
+    start_offdesk = action_readiness(
+        "start_offdesk",
+        "blocked",
+        reason="remote_launch_not_authorized",
+        allowed_actions=["status", "plans"],
+        blocked_actions=["launch", "dispatch", "shell"],
+        recovery_hint="로컬에서 승인 및 실행 준비 검토",
+    )
+    return [status_readiness, project_scan_readiness, build_plan, start_offdesk]
+
+
 def classify_feedback_with_agent(
     args: argparse.Namespace,
     feedback_text: str,
@@ -663,6 +789,11 @@ def classify_feedback_kind(text: str) -> str:
     normalized = str(text or "").strip().lower()
     planning_markers = (
         "자율주행",
+        "야간주행",
+        "야간 주행",
+        "밤샘",
+        "overnight",
+        "night run",
         "계획",
         "plan",
         "offdesk",
@@ -1361,7 +1492,7 @@ def build_project_candidate(
     }
 
 
-def scan_project_candidates(
+def ranked_project_candidates(
     args: argparse.Namespace,
     *,
     request_text: str,
@@ -1382,6 +1513,22 @@ def scan_project_candidates(
             -int(item.get("score") or 0),
             str(item.get("workspace_path_hint") or "").lower(),
         )
+    )
+    for index, candidate in enumerate(candidates, start=1):
+        candidate["rank"] = index
+    return candidates
+
+
+def scan_project_candidates(
+    args: argparse.Namespace,
+    *,
+    request_text: str,
+    agent_intent: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    candidates = ranked_project_candidates(
+        args,
+        request_text=request_text,
+        agent_intent=agent_intent,
     )
     limited = candidates[: max(1, int(args.max_project_candidates))]
     for index, candidate in enumerate(limited, start=1):
@@ -1618,20 +1765,35 @@ def render_project_selection_message(*, profile: Any, session: dict[str, Any]) -
         for candidate in session.get("candidates", [])
         if isinstance(candidate, dict)
     ]
+    action_readiness_value = (
+        session.get("action_readiness") if isinstance(session.get("action_readiness"), dict) else {}
+    )
+    build_plan_readiness = (
+        action_readiness_value.get("build_plan")
+        if isinstance(action_readiness_value.get("build_plan"), dict)
+        else {}
+    )
+    build_plan_blocked = str(build_plan_readiness.get("status") or "") == "blocked"
     lines = [title_with_profile("계획 대상 선택", profile)]
     if not candidates:
         lines.append("후보 프로젝트를 찾지 못했습니다.")
         lines.append("프로젝트명을 직접 입력하세요.")
         lines.append("아직 실행은 시작하지 않았습니다.")
         return "\n".join(lines)
-    lines.append(f"후보 {len(candidates)}개를 찾았습니다.")
-    for candidate in candidates[:2]:
+    if build_plan_blocked:
+        lines.append("부분 장애: 로컬 에이전트 연결 실패")
+        lines.append("막힘: 새 계획/야간주행 시작")
+        shown_candidates = candidates[:1]
+    else:
+        lines.append(f"후보 {len(candidates)}개를 찾았습니다.")
+        shown_candidates = candidates[:2]
+    for candidate in shown_candidates:
         name = truncate_label(candidate.get("display_name"), max_chars=22)
         lines.append(
             f"{candidate.get('rank')}. {html.escape(name)} · {display_project_readiness(candidate.get('readiness'))}"
         )
-    if len(candidates) > 2:
-        lines[-1] = lines[-1] + f" 외 {len(candidates) - 2}"
+    if len(candidates) > len(shown_candidates):
+        lines[-1] = lines[-1] + f" 외 {len(candidates) - len(shown_candidates)}"
     lines.append("버튼 또는 번호/이름 직접 입력")
     return "\n".join(lines[:MOBILE_CARD_MAX_LINES])
 
@@ -1935,6 +2097,7 @@ def create_remote_plan_session(
     decision_id: Any = None,
 ) -> dict[str, Any]:
     agent_intent = parsed_command.get("agent_intent") if isinstance(parsed_command.get("agent_intent"), dict) else None
+    build_plan_readiness = readiness_from_agent_intent(agent_intent)
     seed = f"{utc_now()}|{chat_hash}|{request_text}"
     session = {
         "schema": REMOTE_PLAN_SESSION_SCHEMA,
@@ -1951,6 +2114,32 @@ def create_remote_plan_session(
         "decision_feedback_decision_id": decision_id,
         "execution_authorized": False,
         "approval_authorized": False,
+        "action_readiness": {
+            "project_scan": action_readiness(
+                "project_scan",
+                "healthy",
+                reason="workspace_scan_available",
+                allowed_actions=["project_selection", "manual_path_check"],
+            ),
+            "build_plan": build_plan_readiness
+            if isinstance(build_plan_readiness, dict)
+            else action_readiness(
+                "build_plan",
+                "healthy",
+                reason="agent_intent_not_required",
+                allowed_actions=["project_scan", "plan_draft"],
+                blocked_actions=["start_offdesk"],
+                recovery_hint="실행은 별도 로컬 승인 필요",
+            ),
+            "start_offdesk": action_readiness(
+                "start_offdesk",
+                "blocked",
+                reason="remote_launch_not_authorized",
+                allowed_actions=["status", "plans"],
+                blocked_actions=["launch", "dispatch", "shell"],
+                recovery_hint="로컬에서 승인 및 실행 준비 검토",
+            ),
+        },
         "candidates": scan_project_candidates(
             args,
             request_text=request_text,
@@ -2643,6 +2832,11 @@ def remote_plan_rescan_text(text: str) -> bool:
     return str(text or "").strip().lower() in {"다시 스캔", "재스캔", "rescan", "scan again"}
 
 
+def remote_plan_search_request_text(text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    return any(marker in normalized for marker in ("검색", "찾아", "찾아봐", "search", "scan"))
+
+
 def remote_plan_reselect_text(text: str) -> bool:
     return str(text or "").strip().lower() in {"다시 선택", "재선택", "reselect", "choose again"}
 
@@ -2714,6 +2908,9 @@ def candidate_matches_selection(candidate: dict[str, Any], text: str) -> bool:
         option = str(value or "").strip().lower()
         if option and (normalized == option or option in normalized or normalized in option):
             return True
+        option_tokens = re.findall(r"[a-z0-9]{3,}|[가-힣]{2,}", option)
+        if any(token in normalized for token in option_tokens if len(token) >= 3):
+            return True
     return False
 
 
@@ -2725,6 +2922,30 @@ def selected_candidate_for_text(session: dict[str, Any], text: str) -> dict[str,
     ]
     for candidate in candidates:
         if candidate_matches_selection(candidate, text):
+            return candidate
+    return None
+
+
+def workspace_candidate_for_text(
+    args: argparse.Namespace,
+    *,
+    text: str,
+    request_text: str,
+    agent_intent: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    resolved = resolve_manual_project_path(args, text)
+    if resolved:
+        candidate = candidate_from_manual_path(args, resolved, text)
+        candidate["resolved_by"] = "workspace_search"
+        return candidate
+    candidates = ranked_project_candidates(
+        args,
+        request_text=" ".join([str(request_text or ""), str(text or "")]),
+        agent_intent=agent_intent,
+    )
+    for candidate in candidates:
+        if candidate_matches_selection(candidate, text):
+            candidate["resolved_by"] = "workspace_search"
             return candidate
     return None
 
@@ -2782,13 +3003,23 @@ def handle_remote_plan_session_input(
         attach_choice_surface(result, remote_plan_selection_context(session))
     elif stage == "project_selection":
         candidate = selected_candidate_for_text(session, normalized)
+        if not candidate:
+            agent_intent = session.get("agent_intent") if isinstance(session.get("agent_intent"), dict) else None
+            candidate = workspace_candidate_for_text(
+                args,
+                text=normalized,
+                request_text=str(session.get("request_text") or ""),
+                agent_intent=agent_intent,
+            )
         if candidate:
             session["stage"] = "project_selected"
             session["selected_candidate"] = candidate
             store_remote_plan_session(state, chat_hash, session)
             result["parsed_command"] = {
                 **parsed,
-                "selection_status": "selected",
+                "selection_status": "selected_by_search"
+                if candidate.get("resolved_by") == "workspace_search"
+                else "selected",
                 "selected_project_key": candidate.get("project_key"),
             }
             message_preview = render_project_selected_message(profile=args.profile, session=session)
@@ -2819,6 +3050,38 @@ def handle_remote_plan_session_input(
             }
             message_preview = render_project_selected_message(profile=args.profile, session=session)
             attach_choice_surface(result, remote_plan_init_context(session))
+        elif remote_plan_search_request_text(normalized):
+            selected = session.get("selected_candidate") if isinstance(session.get("selected_candidate"), dict) else {}
+            agent_intent = session.get("agent_intent") if isinstance(session.get("agent_intent"), dict) else None
+            search_text = " ".join(
+                [
+                    str(selected.get("display_name") or selected.get("project_key") or ""),
+                    str(session.get("request_text") or ""),
+                ]
+            )
+            candidate = workspace_candidate_for_text(
+                args,
+                text=search_text,
+                request_text=str(session.get("request_text") or ""),
+                agent_intent=agent_intent,
+            )
+            if candidate:
+                session["stage"] = "project_selected"
+                session["selected_candidate"] = candidate
+                store_remote_plan_session(state, chat_hash, session)
+                result["parsed_command"] = {
+                    **parsed,
+                    "selection_status": "path_resolved_by_search",
+                    "selected_project_key": candidate.get("project_key"),
+                }
+                message_preview = render_project_selected_message(profile=args.profile, session=session)
+                attach_choice_surface(result, remote_plan_init_context(session))
+            else:
+                append_remote_plan_note(session, normalized)
+                store_remote_plan_session(state, chat_hash, session)
+                result["parsed_command"] = {**parsed, "selection_status": "path_unresolved"}
+                message_preview = render_project_path_required_message(profile=args.profile, session=session)
+                attach_choice_surface(result, remote_plan_init_context(session))
         else:
             append_remote_plan_note(session, normalized)
             store_remote_plan_session(state, chat_hash, session)
@@ -3868,20 +4131,21 @@ def parse_timestamp(value: Any) -> dt.datetime | None:
 def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]:
     status_path = args.loop_status_file
     issues: list[str] = []
+    transport_issues: list[str] = []
     token_configured = bool(config.get("token"))
     if not token_configured:
-        issues.append("telegram_bot_token_missing")
+        transport_issues.append("telegram_bot_token_missing")
     if not config.get("chat_allowlist_configured"):
-        issues.append("telegram_chat_allowlist_missing")
+        transport_issues.append("telegram_chat_allowlist_missing")
     loop_status: dict[str, Any] = {}
     if status_path.exists():
         try:
             loaded = load_json(status_path)
             loop_status = loaded if isinstance(loaded, dict) else {}
         except (OSError, json.JSONDecodeError):
-            issues.append("loop_status_unreadable")
+            transport_issues.append("loop_status_unreadable")
     else:
-        issues.append("loop_status_missing")
+        transport_issues.append("loop_status_missing")
     last_result = loop_status.get("last_result") if isinstance(loop_status.get("last_result"), dict) else {}
     last_poll_at = parse_timestamp(last_result.get("generated_at") or loop_status.get("generated_at"))
     last_poll_age_sec = None
@@ -3891,11 +4155,11 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
             int((dt.datetime.now(dt.timezone.utc) - last_poll_at).total_seconds()),
         )
         if last_poll_age_sec > max(1, int(args.health_max_age_sec)):
-            issues.append("last_poll_stale")
+            transport_issues.append("last_poll_stale")
     elif loop_status:
-        issues.append("last_poll_missing")
+        transport_issues.append("last_poll_missing")
     if str(loop_status.get("status") or "") not in {"polling", "max_polls_reached"} and loop_status:
-        issues.append("listener_not_polling")
+        transport_issues.append("listener_not_polling")
     try:
         agent_runtime_status = provider_status(resolve_agent_config(args))
     except RemoteOperatorTelegramError as error:
@@ -3904,14 +4168,27 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
             "status": "error",
             "error": sanitize_text(str(error), max_chars=240),
         }
-        issues.append("agent_runtime_status_error")
-    health_status = "healthy" if not issues else "unhealthy"
+    issues.extend(transport_issues)
+    agent_issue = agent_runtime_issue(agent_runtime_status)
+    if agent_issue:
+        issues.append(agent_issue)
+    if transport_issues:
+        health_status = "unhealthy"
+    elif agent_issue:
+        health_status = "degraded"
+    else:
+        health_status = "healthy"
+    readiness = health_action_readiness(
+        transport_issues=transport_issues,
+        agent_runtime_status=agent_runtime_status,
+    )
     return {
         "schema": HEALTH_SCHEMA,
         "generated_at": utc_now(),
         "profile": args.profile,
         "health_status": health_status,
         "issues": issues,
+        "transport_issues": transport_issues,
         "env_file": str(args.env_file),
         "status_file": str(status_path),
         "state_file": str(args.state_file),
@@ -3930,6 +4207,7 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
             else None
         ),
         "agent_runtime_status": agent_runtime_status,
+        "action_readiness": readiness,
         "read_only": True,
         "mutation_authorized": False,
         "approval_authorized": False,

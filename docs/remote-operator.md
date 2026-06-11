@@ -504,6 +504,48 @@ Remote Operator must handle:
 Recovery should prefer read-only status and fresh approval requests over
 implicit mutation.
 
+### Action Readiness
+
+Remote health is not a single global truth. A listener can be healthy while
+freeform planning, launch preparation, or execution is blocked. Every remote
+surface should therefore report readiness per requested action.
+
+Status vocabulary:
+
+- `healthy`: all dependencies required for the action are available;
+- `degraded`: the transport works, but quality or judgment is reduced;
+- `blocked`: the requested action cannot proceed;
+- `unsafe`: the request would cross an authority, freshness, or approval
+  boundary;
+- `unknown`: the surface cannot prove the state, so mutations stay blocked.
+
+Initial action gates:
+
+| Action | Required proof | Failure response |
+| --- | --- | --- |
+| `status` | Telegram config, listener loop status | Keep read-only status if possible; otherwise report transport outage. |
+| `project_scan` | Workspace roots and readable project markers | Allow deterministic search; ask for a path if unresolved. |
+| `build_plan` | Resolved project and available local agent/model for freeform judgment | Block new plan/night-run starts; allow status, project scan, and existing plan review. |
+| `start_offdesk` | Approved plan, launch prep, provider capacity, runner heartbeat | Always fail closed from Telegram; require local approval and launch prep. |
+
+When local agent/model resolution fails, Telegram should not imply that a new
+night run is ready. It may still show deterministic project candidates, but the
+mobile message must say that new plan/night-run start is blocked and include a
+short recovery hint.
+
+### Common Degraded States
+
+| Class | Examples | User-visible response |
+| --- | --- | --- |
+| Transport outage | missing token, chat allowlist, stale poll loop | Block remote commands; point to local CLI recovery. |
+| Agent outage | stale Ollama/GPU URL, missing model, provider error | Mark `build_plan` blocked; keep status and project scan available. |
+| Runtime/provider outage | no provider capacity, model cooldown, runner unavailable | Permit read-only plan review; hide launch/start actions. |
+| Project resolution failure | project hint not in top candidates, path missing | Search the full workspace first, then ask for an exact path. |
+| Project state risk | dirty tree, branch drift, missing project markers | Produce a preview or blocker list; do not start autonomy. |
+| Stale artifact | changed plan draft, old approval button, source hash mismatch | Mark unsafe and require fresh review. |
+| Runner uncertainty | stale heartbeat, missing progress, unreadable closeout | Stop claiming active execution; surface recovery commands. |
+| Config drift | service uses old script/config or stale provider URL | Report the concrete stale dependency and require restart/recheck. |
+
 ## Implementation Phases
 
 ### Phase 1: Read-Only Remote Surface
@@ -511,7 +553,11 @@ implicit mutation.
 - Implement transport allowlist.
 - Implement `/status`, `/pending`, `/plans`, and `/show`.
 - Return operator-safe summaries only.
-- No remote approval, launch, enqueue, or mutation.
+- No remote launch, enqueue, shell execution, provider retargeting, or file
+  mutation.
+- Remote plan review receipts may be recorded only against registered plan
+  artifacts. They do not authorize launch preparation, enqueue, runtime
+  execution, or project mutation.
 
 Current CLI projection surface:
 
@@ -523,10 +569,10 @@ forager offdesk remote-operator show <plan-id> --json
 ```
 
 These commands emit `remote_operator_readonly_projection.v1` with
-`read_only=true`, `mutation_authorized=false`, and
-`approval_authorized=false`. They are intended for Telegram or another
-transport adapter to render. The `pending` projection reads approval rows
-without resolving or expiring them.
+`read_only=true`, `mutation_authorized=false`, and execution authorization set
+to false. They are intended for Telegram or another transport adapter to
+render. The `pending` projection reads approval rows without resolving or
+expiring them.
 
 The first Telegram adapter is also read-only:
 

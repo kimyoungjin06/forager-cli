@@ -9531,7 +9531,7 @@ fn remote_operator_pending_card(
         vec![
             format!("approvals: {}", payload.approval_count),
             format!("expired pending approvals: {expired}"),
-            "remote approval is disabled in Phase 1".to_string(),
+            "remote launch and mutation remain disabled".to_string(),
         ],
         detail_lines,
         observed_hash,
@@ -9558,7 +9558,7 @@ fn remote_operator_plans_card(
                 "filter project: {}",
                 payload.filters.project_key.as_deref().unwrap_or("any")
             ),
-            "remote plan approval is disabled in Phase 1".to_string(),
+            "remote plan review requires a registered artifact".to_string(),
         ],
         detail_lines,
         observed_hash,
@@ -9583,7 +9583,7 @@ fn remote_operator_show_card(
         ],
         vec![
             format!("reviews: {}", payload.reviews.len()),
-            "remote approval and launch are disabled in Phase 1".to_string(),
+            "remote launch and mutation remain disabled".to_string(),
         ],
         observed_hash,
         vec!["inspect_plan".to_string()],
@@ -9641,7 +9641,7 @@ where
             println!("  - {line}");
         }
     }
-    println!("  note: remote approval, launch, dispatch, and shell execution are disabled");
+    println!("  note: remote launch, dispatch, shell execution, and mutation are disabled");
     Ok(())
 }
 

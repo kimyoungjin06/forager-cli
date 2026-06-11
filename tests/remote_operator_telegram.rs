@@ -504,6 +504,43 @@ fn remote_operator_telegram_planning_request_makes_non_execution_receipt_explici
 
 #[test]
 #[serial]
+fn remote_operator_telegram_classifies_korean_night_run_as_planning_request() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let out = temp.path().join("night_run_request.json");
+
+    let output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--command-text")
+        .arg("TwinPaper쪽에서 야간주행을 하고 싶어")
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--out")
+        .arg(&out)
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["parsed_command"]["command"], "feedback");
+    assert_eq!(
+        result["parsed_command"]["feedback_kind"],
+        "planning_request"
+    );
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>계획 요청 접수</b>"));
+    assert!(preview.contains("아직 실행은 시작하지 않았습니다."));
+    assert_mobile_contract(&result);
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn remote_operator_telegram_agent_classifies_freeform_plan_request() -> Result<()> {
     let temp = tempdir()?;
     let env_path = temp.path().join("telegram.env");
@@ -1043,6 +1080,121 @@ fn remote_operator_telegram_replay_plan_session_accepts_direct_project_input() -
     assert_eq!(feedback_rows.lines().count(), 1);
     let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
     assert_eq!(state["offset"], 712);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_replay_plan_session_searches_workspace_before_manual_fallback(
+) -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let workspace_root = temp.path().join("workspace");
+    for name in ["Alpha", "Beta", "Gamma", "TwinPaper"] {
+        fs::create_dir_all(workspace_root.join(name))?;
+        fs::write(
+            workspace_root.join(name).join("README.md"),
+            format!("{name} project\n"),
+        )?;
+    }
+    fs::write(
+        workspace_root.join("Alpha").join("Cargo.toml"),
+        "[package]\nname = \"alpha\"\n",
+    )?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+    let first_update = temp.path().join("plan_update.json");
+    write_text_update(
+        &first_update,
+        713,
+        892,
+        "Alpha 프로젝트를 오늘 밤 자율주행 계획으로 잡아줘",
+    )?;
+    let first_out = temp.path().join("plan_replay_result.json");
+    let first_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&first_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&first_out)
+        .output()?;
+    assert!(
+        first_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&first_output.stdout),
+        String::from_utf8_lossy(&first_output.stderr)
+    );
+    let first_result: Value = serde_json::from_slice(&fs::read(&first_out)?)?;
+    let first_buttons = button_texts(&first_result);
+    assert!(!first_buttons
+        .iter()
+        .any(|button| button.contains("TwinPaper")));
+
+    let second_update = temp.path().join("workspace_search_selection_update.json");
+    write_text_update(&second_update, 714, 893, "TwinPaper")?;
+    let second_out = temp.path().join("workspace_search_selection_result.json");
+    let second_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&second_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&second_out)
+        .output()?;
+
+    assert!(
+        second_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&second_output.stdout),
+        String::from_utf8_lossy(&second_output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&second_out)?)?;
+    assert_eq!(result["parsed_command"]["command"], "remote_plan_selection");
+    assert_eq!(
+        result["parsed_command"]["selection_status"],
+        "selected_by_search"
+    );
+    assert_eq!(result["remote_plan_session"]["stage"], "project_selected");
+    assert_eq!(
+        result["remote_plan_session"]["selected_candidate"]["display_name"],
+        "TwinPaper"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["selected_candidate"]["resolved_by"],
+        "workspace_search"
+    );
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>계획 대상 선택됨</b>"));
+    assert!(preview.contains("TwinPaper"));
+    assert!(!preview.contains(workspace_root.to_str().expect("workspace path")));
+    assert_mobile_contract(&result);
     Ok(())
 }
 
@@ -2054,9 +2206,86 @@ fn remote_operator_telegram_health_reports_fresh_listener_status() -> Result<()>
     assert_eq!(result["poll_count"], 7);
     assert_eq!(result["handled_result_count"], 1);
     assert_eq!(result["agent_runtime_status"]["status"], "disabled");
+    assert_eq!(result["transport_issues"], json!([]));
+    assert_eq!(result["action_readiness"][0]["action"], "status");
+    assert_eq!(result["action_readiness"][0]["status"], "healthy");
+    assert_eq!(result["action_readiness"][2]["action"], "build_plan");
+    assert_eq!(result["action_readiness"][2]["status"], "healthy");
     let serialized = serde_json::to_string(&result)?;
     assert!(!serialized.contains("fake-token-for-test"));
     assert!(!serialized.contains("999999:"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_health_degrades_when_agent_runtime_unavailable() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let status_path = temp.path().join("loop_status.json");
+    fs::write(
+        &status_path,
+        serde_json::to_string_pretty(&json!({
+            "schema": "remote_operator_telegram_adapter_result.v1",
+            "mode": "live_loop",
+            "status": "polling",
+            "poll_count": 7,
+            "updates_seen": 2,
+            "handled_result_count": 1,
+            "last_result": {
+                "generated_at": "2099-01-01T00:00:00+00:00",
+                "status": "no_update"
+            },
+            "last_handled_result": {
+                "status": "rendered"
+            }
+        }))?,
+    )?;
+    let out = temp.path().join("health_degraded.json");
+
+    let output = remote_operator_command(temp.path())
+        .arg("--health")
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--loop-status-file")
+        .arg(&status_path)
+        .arg("--health-max-age-sec")
+        .arg("999999999")
+        .arg("--agent-intent-mode")
+        .arg("auto")
+        .arg("--agent-base-url")
+        .arg("http://127.0.0.1:9")
+        .arg("--agent-model")
+        .arg("qwen3-coder-next:latest")
+        .arg("--agent-timeout-sec")
+        .arg("1")
+        .arg("--out")
+        .arg(&out)
+        .output()?;
+
+    assert!(
+        !output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["health_status"], "degraded");
+    assert_eq!(result["transport_issues"], json!([]));
+    assert_eq!(result["agent_runtime_status"]["status"], "unavailable");
+    assert!(result["issues"]
+        .as_array()
+        .expect("issues")
+        .contains(&json!("agent_runtime_unavailable")));
+    assert_eq!(result["action_readiness"][0]["action"], "status");
+    assert_eq!(result["action_readiness"][0]["status"], "healthy");
+    assert_eq!(result["action_readiness"][2]["action"], "build_plan");
+    assert_eq!(result["action_readiness"][2]["status"], "blocked");
+    assert_eq!(
+        result["action_readiness"][2]["blocked_actions"],
+        json!(["new_plan", "start_offdesk"])
+    );
     Ok(())
 }
 
