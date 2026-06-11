@@ -346,6 +346,66 @@ fn remote_operator_telegram_dry_run_status_renders_read_only_projection() -> Res
 
 #[test]
 #[serial]
+fn remote_operator_telegram_status_includes_adapter_readiness_when_loop_status_exists() -> Result<()>
+{
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let status_path = temp.path().join("loop_status.json");
+    fs::write(
+        &status_path,
+        serde_json::to_string_pretty(&json!({
+            "schema": "remote_operator_telegram_adapter_result.v1",
+            "mode": "live_loop",
+            "status": "polling",
+            "poll_count": 3,
+            "updates_seen": 0,
+            "handled_result_count": 0,
+            "last_result": {
+                "generated_at": "2099-01-01T00:00:00+00:00",
+                "status": "no_update"
+            }
+        }))?,
+    )?;
+    let out = temp.path().join("remote_status_with_adapter.json");
+
+    let output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--send-command-text")
+        .arg("/status")
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--loop-status-file")
+        .arg(&status_path)
+        .arg("--out")
+        .arg(&out)
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["status"], "rendered");
+    assert_eq!(result["adapter_health"]["health_status"], "healthy");
+    assert_eq!(
+        result["adapter_health"]["action_readiness"][2]["action"],
+        "build_plan"
+    );
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>Forager 점검</b>"));
+    assert!(preview.contains("원격 정상 · 계획 준비 가능"));
+    assert!(preview.contains("새 알림이 오면 다시 확인하세요."));
+    assert_mobile_contract(&result);
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn remote_operator_telegram_rejects_approval_command_without_projection() -> Result<()> {
     let temp = tempdir()?;
     let env_path = temp.path().join("telegram.env");

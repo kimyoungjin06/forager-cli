@@ -978,10 +978,15 @@ def title_with_profile(title: str, profile: Any) -> str:
     return f"<b>{html.escape(str(title))}</b>"
 
 
-def render_projection_message(projection: dict[str, Any], *, max_chars: int) -> str:
+def render_projection_message(
+    projection: dict[str, Any],
+    *,
+    max_chars: int,
+    adapter_health: dict[str, Any] | None = None,
+) -> str:
     command = str(projection.get("command") or "").strip()
     if command == "status":
-        message = render_status_message(projection)
+        message = render_status_message(projection, adapter_health=adapter_health)
     elif command == "pending":
         message = render_pending_message(projection)
     elif command == "plans":
@@ -995,7 +1000,11 @@ def render_projection_message(projection: dict[str, Any], *, max_chars: int) -> 
     return message
 
 
-def render_status_message(projection: dict[str, Any]) -> str:
+def render_status_message(
+    projection: dict[str, Any],
+    *,
+    adapter_health: dict[str, Any] | None = None,
+) -> str:
     payload = projection_payload(projection)
     profile = profile_label_from_projection(projection)
     lines = [
@@ -1005,8 +1014,38 @@ def render_status_message(projection: dict[str, Any]) -> str:
     summary = status_summary(payload, primary_status_kind(payload))
     if summary:
         lines.append(summary)
+    adapter_line = adapter_status_line(adapter_health)
+    if adapter_line:
+        lines.append(adapter_line)
     lines.append(status_next_action(payload))
     return "\n".join(lines)
+
+
+def readiness_for_action(adapter_health: dict[str, Any] | None, action: str) -> dict[str, Any] | None:
+    if not isinstance(adapter_health, dict):
+        return None
+    readiness = adapter_health.get("action_readiness")
+    if not isinstance(readiness, list):
+        return None
+    for item in readiness:
+        if isinstance(item, dict) and str(item.get("action") or "") == action:
+            return item
+    return None
+
+
+def adapter_status_line(adapter_health: dict[str, Any] | None) -> str:
+    if not isinstance(adapter_health, dict):
+        return ""
+    health_status = str(adapter_health.get("health_status") or "").strip()
+    build_plan = readiness_for_action(adapter_health, "build_plan") or {}
+    build_plan_status = str(build_plan.get("status") or "").strip()
+    if health_status == "healthy" and build_plan_status == "healthy":
+        return "원격 정상 · 계획 준비 가능"
+    if health_status == "degraded" or build_plan_status == "blocked":
+        return "부분 장애: 새 계획/야간주행 막힘"
+    if health_status == "unhealthy":
+        return "원격 수신 장애: 로컬 CLI 확인"
+    return ""
 
 
 def render_pending_message(projection: dict[str, Any]) -> str:
@@ -3707,9 +3746,13 @@ def render_command_result(
         projection = load_projection_file(args.projection_file, parsed)
     else:
         projection = run_projection(args.forager_bin, args.profile, parsed)
+    adapter_health = None
+    if parsed.get("command") == "status" and (not args.dry_run or args.loop_status_file.exists()):
+        adapter_health = listener_health(args, config)
     message_preview = render_projection_message(
         projection,
         max_chars=max(200, int(args.max_message_chars)),
+        adapter_health=adapter_health,
     )
     interaction_context = interaction_context_from_projection(projection)
     attach_choice_surface(result, interaction_context)
@@ -3718,6 +3761,7 @@ def render_command_result(
             "status": "rendered",
             "projection_schema": projection.get("schema"),
             "projection": projection,
+            "adapter_health": adapter_health,
             "message_preview": message_preview,
             "mobile_card_contract": mobile_card_contract(message_preview),
         }
