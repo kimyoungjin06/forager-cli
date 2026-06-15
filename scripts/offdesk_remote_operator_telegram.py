@@ -373,6 +373,7 @@ def build_agent_intent_prompt(
             "Allowed intent values: feedback, plan_request, execution_request, approval_attempt, unsafe_mutation, clarification, unknown.",
             "Use feedback_kind=planning_request only when the text should become a Plan Mode candidate. Otherwise use feedback_kind=freeform_feedback.",
             "If execution is requested, classify intent as execution_request but do not imply authorization.",
+            "When you set requires_clarification=true, write clarifying_question in the same language as telegram_text and keep it short enough for a mobile chat card.",
             "JSON schema:",
             json.dumps(
                 {
@@ -3624,8 +3625,19 @@ def render_feedback_message(
     feedback_kind: str = "freeform_feedback",
     feedback_context: dict[str, Any] | None = None,
     inbox_status: str | None = None,
+    agent_intent: dict[str, Any] | None = None,
 ) -> str:
     is_planning_request = feedback_kind == "planning_request"
+    clarifying_question = agent_clarifying_question(agent_intent)
+    if clarifying_question:
+        return "\n".join(
+            [
+                title_with_profile("확인 필요", profile),
+                "모델이 범위 확인을 요청했습니다.",
+                html.escape(clarifying_question),
+                "직접 입력으로 범위만 알려주세요.",
+            ]
+        )
     if inbox_status in {"recorded", "existing"}:
         status_line = "검토 목록에 넣었습니다." if is_planning_request else "의견을 검토 목록에 넣었습니다."
     elif inbox_status == "error":
@@ -3645,6 +3657,15 @@ def render_feedback_message(
     else:
         lines.append("로컬에서 검토합니다.")
     return "\n".join(lines)
+
+
+def agent_clarifying_question(agent_intent: dict[str, Any] | None) -> str | None:
+    if not isinstance(agent_intent, dict):
+        return None
+    if not bool(agent_intent.get("requires_clarification")):
+        return None
+    question = sanitize_text(str(agent_intent.get("clarifying_question") or "").strip(), max_chars=180)
+    return question or None
 
 
 def result_base(args: argparse.Namespace, config: dict[str, Any], mode: str) -> dict[str, Any]:
@@ -3728,6 +3749,7 @@ def render_command_result(
             feedback_text=str(parsed.get("feedback_text") or command_text),
             feedback_kind=str(parsed.get("feedback_kind") or "freeform_feedback"),
             feedback_context=feedback_context,
+            agent_intent=agent_intent if isinstance(agent_intent, dict) else None,
         )
         attach_choice_surface(result, feedback_context)
         if isinstance(feedback_context, dict):
@@ -4068,6 +4090,9 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                     feedback_kind=str(parsed_command.get("feedback_kind") or "freeform_feedback"),
                     feedback_context=feedback_context,
                     inbox_status=str(ingest_result.get("decision_feedback_ingest_status") or ""),
+                    agent_intent=parsed_command.get("agent_intent")
+                    if isinstance(parsed_command.get("agent_intent"), dict)
+                    else None,
                 )
                 rendered["mobile_card_contract"] = mobile_card_contract(rendered["message_preview"])
                 if str(parsed_command.get("feedback_kind") or "") == "planning_request":

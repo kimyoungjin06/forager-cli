@@ -143,7 +143,10 @@ fn write_http_json(stream: &mut TcpStream, value: Value) -> Result<()> {
     Ok(())
 }
 
-fn spawn_fake_ollama(body_path: PathBuf) -> Result<(String, thread::JoinHandle<Result<()>>)> {
+fn spawn_fake_ollama_with_classification(
+    body_path: PathBuf,
+    classified: Value,
+) -> Result<(String, thread::JoinHandle<Result<()>>)> {
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
     let port = listener.local_addr()?.port();
     listener.set_nonblocking(true)?;
@@ -170,18 +173,6 @@ fn spawn_fake_ollama(body_path: PathBuf) -> Result<(String, thread::JoinHandle<R
                 )?;
             } else if request_line.starts_with("POST /api/generate ") {
                 fs::write(&body_path, &body)?;
-                let classified = json!({
-                    "intent": "plan_request",
-                    "feedback_kind": "planning_request",
-                    "confidence": 0.91,
-                    "project_hint": "NanoClustering",
-                    "goal": "Assess Fractal tree work",
-                    "timebox": "tomorrow night",
-                    "requires_clarification": false,
-                    "clarifying_question": null,
-                    "reason": "The operator is asking whether this work should become a plan candidate.",
-                    "non_authorized": ["execution", "approval", "shell"]
-                });
                 write_http_json(
                     &mut stream,
                     json!({"response": serde_json::to_string(&classified)?}),
@@ -194,6 +185,24 @@ fn spawn_fake_ollama(body_path: PathBuf) -> Result<(String, thread::JoinHandle<R
         Ok(())
     });
     Ok((format!("http://127.0.0.1:{port}"), handle))
+}
+
+fn spawn_fake_ollama(body_path: PathBuf) -> Result<(String, thread::JoinHandle<Result<()>>)> {
+    spawn_fake_ollama_with_classification(
+        body_path,
+        json!({
+            "intent": "plan_request",
+            "feedback_kind": "planning_request",
+            "confidence": 0.91,
+            "project_hint": "NanoClustering",
+            "goal": "Assess Fractal tree work",
+            "timebox": "tomorrow night",
+            "requires_clarification": false,
+            "clarifying_question": null,
+            "reason": "The operator is asking whether this work should become a plan candidate.",
+            "non_authorized": ["execution", "approval", "shell"]
+        }),
+    )
 }
 
 fn assert_mobile_contract(result: &Value) {
@@ -664,6 +673,77 @@ fn remote_operator_telegram_agent_classifies_freeform_plan_request() -> Result<(
     assert_eq!(agent_request["stream"], false);
     assert_eq!(agent_request["think"], false);
     assert_eq!(agent_request["format"], "json");
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_agent_clarification_is_visible_in_mobile_receipt() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let out = temp.path().join("remote_agent_clarification.json");
+    let agent_request_path = temp.path().join("ollama_clarification_request.json");
+    let (base_url, server) = spawn_fake_ollama_with_classification(
+        agent_request_path.clone(),
+        json!({
+            "intent": "clarification",
+            "feedback_kind": "freeform_feedback",
+            "confidence": 0.95,
+            "project_hint": "nims",
+            "goal": null,
+            "timebox": null,
+            "requires_clarification": true,
+            "clarifying_question": "NIMS 안의 EPIMS 파일을 말하는지, 별도 EPIMS 프로젝트를 말하는지 확인해 주세요.",
+            "reason": "The project scope is ambiguous.",
+            "non_authorized": ["execution", "approval", "shell"]
+        }),
+    )?;
+
+    let output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--command-text")
+        .arg("nims 프로젝트 내에 epims 프로젝트에서 지역별 클러스터링 파일 확인해줘")
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--out")
+        .arg(&out)
+        .arg("--agent-intent-mode")
+        .arg("required")
+        .arg("--agent-base-url")
+        .arg(&base_url)
+        .arg("--agent-model")
+        .arg("qwen3-coder-next:latest")
+        .output()?;
+
+    server.join().expect("fake ollama server panicked")?;
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(
+        result["parsed_command"]["agent_intent"]["intent"],
+        "clarification"
+    );
+    assert_eq!(
+        result["parsed_command"]["agent_intent"]["requires_clarification"],
+        true
+    );
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>확인 필요</b>"));
+    assert!(preview.contains("NIMS 안의 EPIMS 파일"));
+    assert!(preview.contains("직접 입력으로 범위만 알려주세요."));
+    assert!(!preview.contains("<b>의견 접수</b>"));
+    assert_mobile_contract(&result);
+
+    let agent_request: Value = serde_json::from_slice(&fs::read(&agent_request_path)?)?;
+    assert!(agent_request["prompt"]
+        .as_str()
+        .expect("agent prompt")
+        .contains("same language as telegram_text"));
     Ok(())
 }
 
