@@ -2431,6 +2431,64 @@ fn remote_operator_telegram_health_degrades_when_agent_runtime_unavailable() -> 
 
 #[test]
 #[serial]
+fn remote_operator_telegram_health_reports_recent_poll_transport_error() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let status_path = temp.path().join("loop_status.json");
+    fs::write(
+        &status_path,
+        serde_json::to_string_pretty(&json!({
+            "schema": "remote_operator_telegram_adapter_result.v1",
+            "mode": "live_loop",
+            "status": "polling",
+            "poll_count": 8,
+            "updates_seen": 2,
+            "handled_result_count": 1,
+            "last_result": {
+                "generated_at": "2099-01-01T00:00:00+00:00",
+                "status": "poll_error",
+                "reason": "telegram_transport_error",
+                "error": "Telegram API transport error (getUpdates): TimeoutError"
+            },
+            "last_handled_result": {
+                "status": "rendered"
+            }
+        }))?,
+    )?;
+    let out = temp.path().join("health_poll_error.json");
+
+    let output = remote_operator_command(temp.path())
+        .arg("--health")
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--loop-status-file")
+        .arg(&status_path)
+        .arg("--health-max-age-sec")
+        .arg("999999999")
+        .arg("--out")
+        .arg(&out)
+        .output()?;
+
+    assert!(
+        !output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["health_status"], "unhealthy");
+    assert_eq!(result["last_result_status"], "poll_error");
+    assert!(result["transport_issues"]
+        .as_array()
+        .expect("transport issues")
+        .contains(&json!("last_poll_transport_error")));
+    assert_eq!(result["action_readiness"][0]["status"], "blocked");
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn telegram_operator_systemd_installer_dry_run_renders_unit() -> Result<()> {
     let temp = tempdir()?;
     let env_path = temp.path().join("telegram.env");

@@ -13,6 +13,7 @@ import argparse
 import datetime as dt
 import hashlib
 import html
+import http.client
 import json
 import os
 import pathlib
@@ -3805,6 +3806,10 @@ def telegram_api(token: str, method: str, payload: dict[str, Any], timeout_sec: 
     except urllib.error.HTTPError as error:
         detail = error.read().decode("utf-8", errors="replace") if hasattr(error, "read") else str(error)
         raise RemoteOperatorTelegramError(f"Telegram API HTTP error ({method}): {detail}") from error
+    except (TimeoutError, http.client.RemoteDisconnected, ConnectionError) as error:
+        raise RemoteOperatorTelegramError(
+            f"Telegram API transport error ({method}): {type(error).__name__}: {error}"
+        ) from error
     except urllib.error.URLError as error:
         raise RemoteOperatorTelegramError(f"Telegram API URL error ({method}): {error}") from error
     except json.JSONDecodeError as error:
@@ -4150,9 +4155,26 @@ def update_loop_summary(summary: dict[str, Any], result: dict[str, Any]) -> None
     summary["poll_count"] = int(summary.get("poll_count") or 0) + 1
     summary["updates_seen"] = int(summary.get("updates_seen") or 0) + int(result.get("updates_seen") or 0)
     summary["last_result"] = result
-    if result.get("status") != "no_update":
+    if result.get("status") not in {"no_update", "poll_error"}:
         summary["handled_result_count"] = int(summary.get("handled_result_count") or 0) + 1
         summary["last_handled_result"] = result
+
+
+def loop_transport_error_result(
+    args: argparse.Namespace,
+    config: dict[str, Any],
+    error: RemoteOperatorTelegramError,
+) -> dict[str, Any]:
+    result = result_base(args, config, "live_once")
+    result.update(
+        {
+            "status": "poll_error",
+            "updates_seen": 0,
+            "reason": "telegram_transport_error",
+            "error": sanitize_text(str(error), max_chars=240),
+        }
+    )
+    return result
 
 
 def loop_status_path(args: argparse.Namespace) -> pathlib.Path | None:
@@ -4167,7 +4189,12 @@ def run_loop(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
     status_path = loop_status_path(args)
     try:
         while max_polls is None or int(summary["poll_count"]) < max_polls:
-            result = run_once(args, config)
+            try:
+                result = run_once(args, config)
+            except RemoteOperatorTelegramError as error:
+                if "Telegram API" not in str(error):
+                    raise
+                result = loop_transport_error_result(args, config, error)
             update_loop_summary(summary, result)
             if status_path:
                 write_json(status_path, summary)
@@ -4229,6 +4256,8 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
         transport_issues.append("last_poll_missing")
     if str(loop_status.get("status") or "") not in {"polling", "max_polls_reached"} and loop_status:
         transport_issues.append("listener_not_polling")
+    if str(last_result.get("status") or "") == "poll_error":
+        transport_issues.append("last_poll_transport_error")
     try:
         agent_runtime_status = provider_status(resolve_agent_config(args))
     except RemoteOperatorTelegramError as error:
