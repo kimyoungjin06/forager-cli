@@ -2526,7 +2526,9 @@ fn telegram_operator_systemd_installer_dry_run_renders_unit() -> Result<()> {
     assert!(unit.contains("ExecStart="));
     assert!(unit.contains("offdesk_remote_operator_telegram.py"));
     assert!(unit.contains("--poll-timeout-sec 30"));
-    assert!(unit.contains("Restart=on-failure"));
+    assert!(unit.contains("--poll-error-backoff-sec 5"));
+    assert!(unit.contains("StartLimitIntervalSec=0"));
+    assert!(unit.contains("Restart=always"));
     assert!(!unit.contains("fake-token-for-test"));
     Ok(())
 }

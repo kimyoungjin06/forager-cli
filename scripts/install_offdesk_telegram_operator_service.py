@@ -37,6 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--loop-status-file", type=pathlib.Path, default=DEFAULT_CACHE_DIR / "remote_operator_telegram_loop.json")
     parser.add_argument("--poll-timeout-sec", type=int, default=30)
     parser.add_argument("--api-timeout-sec", type=int, default=45)
+    parser.add_argument("--poll-error-backoff-sec", type=int, default=5)
     parser.add_argument("--install", action="store_true", help="Write the unit into ~/.config/systemd/user.")
     parser.add_argument("--enable", action="store_true", help="Enable the service after installing it.")
     parser.add_argument("--start", action="store_true", help="Start the service after installing it.")
@@ -83,6 +84,8 @@ def render_unit(args: argparse.Namespace) -> str:
         args.poll_timeout_sec,
         "--api-timeout-sec",
         args.api_timeout_sec,
+        "--poll-error-backoff-sec",
+        args.poll_error_backoff_sec,
     ]
     exec_start = " ".join(systemd_arg(item) for item in command)
     return "\n".join(
@@ -91,12 +94,13 @@ def render_unit(args: argparse.Namespace) -> str:
             "Description=Forager Telegram remote operator",
             "After=network-online.target",
             "Wants=network-online.target",
+            "StartLimitIntervalSec=0",
             "",
             "[Service]",
             "Type=simple",
             f"WorkingDirectory={systemd_arg(args.repo_root)}",
             f"ExecStart={exec_start}",
-            "Restart=on-failure",
+            "Restart=always",
             "RestartSec=5",
             "NoNewPrivileges=true",
             "PrivateTmp=true",

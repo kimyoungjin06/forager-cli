@@ -21,6 +21,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from typing import Any
@@ -237,6 +238,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-polls", type=int, help="Stop after this many polls; useful for smoke tests.")
     parser.add_argument("--poll-timeout-sec", type=int, default=5)
     parser.add_argument("--api-timeout-sec", type=int, default=20)
+    parser.add_argument("--poll-error-backoff-sec", type=int, default=5)
     parser.add_argument("--max-message-chars", type=int, default=3500)
     return parser.parse_args()
 
@@ -4117,15 +4119,24 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                     )
                     attach_choice_surface(rendered, remote_plan_selection_context(session))
                     rendered["mobile_card_contract"] = mobile_card_contract(rendered["message_preview"])
-        message_id = send_message(
-            config,
-            chat_id_for(message),
-            rendered["message_preview"],
-            args,
-            reply_markup=rendered.get("reply_markup_preview")
-            if isinstance(rendered.get("reply_markup_preview"), dict)
-            else None,
-        )
+        try:
+            message_id = send_message(
+                config,
+                chat_id_for(message),
+                rendered["message_preview"],
+                args,
+                reply_markup=rendered.get("reply_markup_preview")
+                if isinstance(rendered.get("reply_markup_preview"), dict)
+                else None,
+            )
+            rendered["send_status"] = "dry_run" if args.dry_run else "sent"
+        except RemoteOperatorTelegramError as error:
+            if "Telegram API" not in str(error):
+                raise
+            message_id = None
+            rendered["status"] = "send_failed"
+            rendered["send_status"] = "failed"
+            rendered["send_error"] = sanitize_text(str(error), max_chars=240)
         rendered["sent_message_id"] = message_id
         remember_context_for_message(state, message, rendered)
         result = rendered
@@ -4155,7 +4166,7 @@ def update_loop_summary(summary: dict[str, Any], result: dict[str, Any]) -> None
     summary["poll_count"] = int(summary.get("poll_count") or 0) + 1
     summary["updates_seen"] = int(summary.get("updates_seen") or 0) + int(result.get("updates_seen") or 0)
     summary["last_result"] = result
-    if result.get("status") not in {"no_update", "poll_error"}:
+    if result.get("status") not in {"no_update", "poll_error", "loop_error"}:
         summary["handled_result_count"] = int(summary.get("handled_result_count") or 0) + 1
         summary["last_handled_result"] = result
 
@@ -4177,6 +4188,39 @@ def loop_transport_error_result(
     return result
 
 
+def loop_internal_error_result(
+    args: argparse.Namespace,
+    config: dict[str, Any],
+    error: Exception,
+) -> dict[str, Any]:
+    result = result_base(args, config, "live_once")
+    result.update(
+        {
+            "status": "loop_error",
+            "updates_seen": 0,
+            "reason": "unexpected_loop_exception",
+            "error": sanitize_text(f"{type(error).__name__}: {error}", max_chars=240),
+        }
+    )
+    return result
+
+
+def loop_backoff_if_needed(
+    args: argparse.Namespace,
+    result: dict[str, Any],
+    consecutive_errors: int,
+) -> int:
+    status = str(result.get("status") or "")
+    if status not in {"poll_error", "send_failed", "loop_error"}:
+        return 0
+    consecutive_errors += 1
+    if args.max_polls is None:
+        sleep_sec = min(max(0, int(args.poll_error_backoff_sec)) * consecutive_errors, 60)
+        if sleep_sec > 0:
+            time.sleep(sleep_sec)
+    return consecutive_errors
+
+
 def loop_status_path(args: argparse.Namespace) -> pathlib.Path | None:
     if args.out:
         return args.out
@@ -4187,19 +4231,24 @@ def run_loop(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
     summary = loop_summary_base(args, config)
     max_polls = args.max_polls
     status_path = loop_status_path(args)
+    consecutive_errors = 0
     try:
         while max_polls is None or int(summary["poll_count"]) < max_polls:
             try:
                 result = run_once(args, config)
             except RemoteOperatorTelegramError as error:
                 if "Telegram API" not in str(error):
-                    raise
-                result = loop_transport_error_result(args, config, error)
+                    result = loop_internal_error_result(args, config, error)
+                else:
+                    result = loop_transport_error_result(args, config, error)
+            except Exception as error:
+                result = loop_internal_error_result(args, config, error)
             update_loop_summary(summary, result)
             if status_path:
                 write_json(status_path, summary)
             if max_polls is None and result.get("status") != "no_update":
                 print(json.dumps(result, ensure_ascii=False), flush=True)
+            consecutive_errors = loop_backoff_if_needed(args, result, consecutive_errors)
     except KeyboardInterrupt:
         summary["status"] = "interrupted"
         if status_path:
@@ -4258,6 +4307,10 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
         transport_issues.append("listener_not_polling")
     if str(last_result.get("status") or "") == "poll_error":
         transport_issues.append("last_poll_transport_error")
+    if str(last_result.get("status") or "") == "send_failed":
+        transport_issues.append("last_send_transport_error")
+    if str(last_result.get("status") or "") == "loop_error":
+        transport_issues.append("last_loop_internal_error")
     try:
         agent_runtime_status = provider_status(resolve_agent_config(args))
     except RemoteOperatorTelegramError as error:
