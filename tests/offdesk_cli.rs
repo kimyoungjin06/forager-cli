@@ -10557,3 +10557,88 @@ fn workload_review_allows_wiki_candidate_queue_exception() -> Result<()> {
     );
     Ok(())
 }
+
+#[test]
+fn generic_prepare_offdesk_workload_writes_reviewed_launch_packet() -> Result<()> {
+    let temp = tempdir()?;
+    let repo_dir = temp.path().join("repo");
+    let out_root = temp.path().join("prepared");
+    fs::create_dir_all(&repo_dir)?;
+    fs::write(repo_dir.join("README.md"), "# Generic Project\n")?;
+
+    let script_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join("prepare_offdesk_workload.py");
+    let output = Command::new("python3")
+        .env("HOME", temp.path())
+        .env("XDG_CONFIG_HOME", temp.path().join(".config"))
+        .arg(script_path)
+        .arg("--profile")
+        .arg("generic-profile")
+        .arg("--project-key")
+        .arg("generic-project")
+        .arg("--repo")
+        .arg(&repo_dir)
+        .arg("--out-root")
+        .arg(&out_root)
+        .arg("--duration-minutes")
+        .arg("0.1")
+        .arg("--max-iterations")
+        .arg("1")
+        .arg("--workload-command")
+        .arg("printf 'ok\\n'")
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "prepare generic workload failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let prepared: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(prepared["ready_for_enqueue"], true);
+    assert_eq!(prepared["blocking_reasons"], json!([]));
+    let manifest_path = PathBuf::from(prepared["manifest"].as_str().expect("manifest path"));
+    let preflight_path = PathBuf::from(prepared["preflight"].as_str().expect("preflight path"));
+    let launch_path = PathBuf::from(
+        prepared["launch_dry_run_report"]
+            .as_str()
+            .expect("launch packet path"),
+    );
+    let validation_path = PathBuf::from(
+        prepared["long_run_validation_packet"]
+            .as_str()
+            .expect("validation packet path"),
+    );
+    assert!(manifest_path.exists());
+    assert!(preflight_path.exists());
+    assert!(launch_path.exists());
+    assert!(validation_path.exists());
+    assert!(manifest_path.with_file_name("preflight_ready").exists());
+
+    let manifest: serde_json::Value = serde_json::from_slice(&fs::read(&manifest_path)?)?;
+    assert_eq!(manifest["kind"], "forager_offdesk_prepared_workload");
+    assert_eq!(manifest["project_key"], "generic-project");
+    assert_eq!(manifest["preflight"]["ready_for_enqueue"], true);
+    assert_eq!(
+        manifest["review_contract"]["schema"],
+        "forager_workload_review_contract.v1"
+    );
+    assert_eq!(
+        manifest["artifacts"]["review_artifact"]
+            .as_str()
+            .map(PathBuf::from)
+            .filter(|path| path.exists())
+            .is_some(),
+        true
+    );
+    let launch = fs::read_to_string(&launch_path)?;
+    let validation = fs::read_to_string(&validation_path)?;
+    let manifest_text = fs::read_to_string(&manifest_path)?;
+    assert!(launch.contains("Offdesk Launch Dry Run"));
+    assert!(validation.contains("Offdesk Long-Run Validation Packet"));
+    assert!(!launch.contains("TwinPaper"));
+    assert!(!validation.contains("TwinPaper"));
+    assert!(!manifest_text.contains("TwinPaper"));
+    Ok(())
+}

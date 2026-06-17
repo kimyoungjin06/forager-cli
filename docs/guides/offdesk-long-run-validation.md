@@ -22,8 +22,10 @@ Build the local binary first:
 cargo build
 ```
 
-Prepare a dry-run package with the chosen long-run workload. The concrete
-prepare command is workload-specific, but it should write:
+Prepare a dry-run package with the chosen long-run workload. Use
+`scripts/prepare_offdesk_workload.py` for generic bounded commands, or a
+project-specific producer when the workload needs custom evidence bundles,
+module profiles, or post-run reviewers. The prepare step should write:
 
 ```text
 prepared_task.json

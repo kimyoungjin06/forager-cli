@@ -50,12 +50,25 @@ Expected properties:
 ## Prepare A No-Enqueue Dry Run
 
 Create a launch packet without enqueueing the task first. The concrete prepare
-command depends on the workload. The output should include:
+command depends on the workload. For a generic bounded command, use:
+
+```bash
+scripts/prepare_offdesk_workload.py \
+  --profile <profile> \
+  --project-key <project-key> \
+  --repo /path/to/project \
+  --out-root <workload-output-root> \
+  --duration-minutes 5 \
+  --workload-command "<bounded-read-only-command>"
+```
+
+The output should include:
 
 ```text
 prepared_task.json
 preflight.json
 LAUNCH_DRY_RUN.md
+LONG_RUN_VALIDATION.md
 offdesk_enqueue_command.sh
 run_workload.sh
 ```

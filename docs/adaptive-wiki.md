@@ -996,6 +996,12 @@ dispatch packet only after recording preflight evidence:
   are recognized before runtime preparation;
 - a review decision that allows enqueue: `proceed` or `needs_approval`.
 
+For generic bounded commands, `scripts/prepare_offdesk_workload.py` produces
+the prepared manifest, workload review, launch packet, validation packet, and
+approval-gated enqueue script. Domain-specific producers should reuse the same
+manifest shape and add stricter `review_contract` requirements when they need
+custom evidence bundles or post-run reviewers.
+
 The final runtime dispatch should preserve the same scope and artifacts:
 
 ```bash

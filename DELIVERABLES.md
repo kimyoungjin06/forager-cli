@@ -33,6 +33,12 @@ folders.
 - `docs/guides/offdesk-closeout.md`: closeout and review packet contract.
 - `docs/guides/module-operation-profile.md`: generic module-operation profile
   contract.
+- `scripts/prepare_offdesk_workload.py`: generic workload producer for a
+  bounded command, reviewed manifest, launch dry-run packet, validation packet,
+  and approval-gated enqueue script.
+- `scripts/offdesk_workload_review_harness.py`: generic prepared-workload
+  manifest reviewer. Domain-specific producers can tighten it with
+  `review_contract` requirements.
 
 ## Visual Assets
 
