@@ -27,6 +27,8 @@
 
 - [Workflow](guides/workflow.md)
 - [Operation Cycle](guides/operation-cycle.md)
+- [Offdesk Runtime Smoke](guides/offdesk-runtime-smoke.md)
+- [Offdesk Long-Run Validation](guides/offdesk-long-run-validation.md)
 - [Project Initialization](guides/project-initialization.md)
 - [Documentation And Artifact Governance](guides/documentation-artifact-governance.md)
 - [Ondesk Handoff](guides/ondesk-handoff.md)
@@ -44,16 +46,12 @@
 - [CLI Reference](cli/reference.md)
 - [Configuration Reference](guides/configuration.md)
 - [Brand System](brand-system.md)
-- [Offdesk Stabilization Patch Set](offdesk-stabilization-patchset.md)
-- [Offdesk Stabilization Review Note](offdesk-stabilization-review.md)
 - [Offdesk Safety Rail Baseline](offdesk-safety-rail-baseline.md)
 - [Offdesk Operation Status](offdesk-operation-status.md)
 - [Offdesk Agent Modes](offdesk-agent-modes.md)
 - [Forager And Orchestrator Boundary](forager-orchestrator-boundary.md)
 - [Adaptive Wiki](adaptive-wiki.md)
 - [Adaptive Wiki Tag Graph](adaptive-wiki-tag-graph.md)
-- [Adaptive Wiki Execution Plan](adaptive-wiki-execution-plan.md)
-- [Hermes Adaptive Knowledge Benchmark](hermes-adaptive-knowledge-benchmark.md)
 
 # Contributing
 

@@ -1,6 +1,6 @@
 # Decisions
 
-Updated: 2026-06-01
+Updated: 2026-06-17
 
 This is the compact development decision index for Forager. It points to the
 decisions that currently shape implementation, documentation, and operator
@@ -14,9 +14,9 @@ surfaces.
 | Closeout review should produce a receipt that separates approved review from accepted truth. | active | `docs/guides/offdesk-closeout.md`, `docs/gajae-benchmarking.md` | `closeout-review` writes `closeout_receipt.v1`; `accepted` means no tracked follow-ups, while `approved_with_followups` keeps remaining review visible in `RETURN_PACKAGE.md` and Ondesk prompt packages. |
 | Forager owns offdesk queue state, approvals, recovery, and audit artifacts. | active | `docs/forager-orchestrator-boundary.md`, `docs/hermes-pattern-review.md` | External harnesses can run agent loops, but durable control state stays in Forager-owned stores. |
 | Raw chat history is not the source of truth for offdesk transitions. | active | `docs/guides/operation-cycle.md` | Each handoff stage should produce a bounded artifact. |
-| Adaptive wiki canonical state remains JSON, with markdown as a human projection. | active | `docs/adaptive-wiki.md`, `docs/adaptive-wiki-execution-plan.md` | Runtime receives compact scoped projections, not raw human wiki pages. |
+| Adaptive wiki canonical state remains JSON, with markdown as a human projection. | active | `docs/adaptive-wiki.md`, `archive/domain-history/adaptive-wiki-execution-plan.md` | Runtime receives compact scoped projections, not raw human wiki pages. |
 | Candidate wiki observations do not change runtime behavior by themselves. | active | `docs/adaptive-wiki.md` | Promotion and durable behavior changes require reviewable commands or operator decisions. |
-| Long Python offdesk workloads should use `local-tmux` when they need live inspection. | active | `docs/guides/twinpaper-offdesk-long-run-validation.md`, `docs/offdesk-operation-status.md` | Health is checked through tmux, heartbeat, progress, logs, and result artifacts. |
+| Long Python offdesk workloads should use `local-tmux` when they need live inspection. | active | `docs/guides/offdesk-long-run-validation.md`, `docs/offdesk-operation-status.md` | Health is checked through tmux, heartbeat, progress, logs, and result artifacts. |
 | Documentation and artifact governance uses small current surfaces over large logs. | active | `docs/guides/documentation-artifact-governance.md`, `PROJECT_STATE.md` | New long-running projects should expose current state, decisions, next actions, and deliverables before raw logs. |
 | Documentation governance checks should be available through `forager project audit-docs`. | active | `docs/guides/documentation-artifact-governance.md`, `src/cli/project_audit.rs` | Operators can run the same audit contract from Forager instead of depending on a repo-local Python script. |
 | Project initialization may generate governance surface hints as packet artifacts only. | active | `docs/guides/project-initialization.md`, `src/cli/project.rs` | Template sketches help bootstrap docs without mutating the target project or granting cleanup/runtime authority. |

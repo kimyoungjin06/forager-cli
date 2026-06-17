@@ -350,7 +350,7 @@ Reports should include:
 2. Extend Python live harness cases to cover all target modes.
    Implemented in `scripts/offdesk_wiki_llm_harness.py` with separate target
    and projection modes.
-3. Extend the TwinPaper autonomy workload to report `mode_coverage` and
+3. Extend prepared autonomy workloads to report `mode_coverage` and
    `mode_failures`.
 4. Add a Rust-side mode registry and parser aliases without changing old
    persisted data. Implemented in the adaptive-wiki mode enum and CLI parser.

@@ -74,8 +74,8 @@ forager ondesk note --project-key <project> --mode planning \
 forager ondesk prompt-package --project-key <project>
 ```
 
-Then prepare the Offdesk task. For TwinPaper this is the dedicated prepare
-script, but the general rule is the same for other projects:
+Then prepare the Offdesk task. The exact producer can be a CLI flow or a
+project-specific helper, but the contract is the same for every project:
 
 - write a deterministic evidence bundle;
 - review the exact prepared manifest;
@@ -175,9 +175,9 @@ Stop and inspect before continuing when:
 - closeout proposes file movement or deletion;
 - a wiki change would promote candidate knowledge without review.
 
-For the concrete TwinPaper validation flow, see
-[`TwinPaper Offdesk Runtime Smoke`](twinpaper-offdesk-runtime-smoke.md). For
-the realistic long-run validation sequence, see
-[`TwinPaper Offdesk Long-Run Validation`](twinpaper-offdesk-long-run-validation.md).
+For the concrete validation flow, see
+[`Offdesk Runtime Smoke`](offdesk-runtime-smoke.md). For the realistic long-run
+validation sequence, see
+[`Offdesk Long-Run Validation`](offdesk-long-run-validation.md).
 For the current baseline and remaining work queue, see
 [`Offdesk Operation Status`](../offdesk-operation-status.md).

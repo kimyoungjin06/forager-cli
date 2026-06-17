@@ -15,8 +15,8 @@ while the AI and human surfaces are generated as separate projections.
 - Preserve evidence refs so operators can audit why an entry exists.
 - Benchmark adaptive behavior, not just memory recall.
 
-The detailed implementation sequence lives in
-[`adaptive-wiki-execution-plan.md`](adaptive-wiki-execution-plan.md).
+Historical implementation notes are archived under `archive/domain-history/`.
+This page is the active product contract.
 
 ## Overnight Candidate Learning
 
@@ -24,13 +24,11 @@ Overnight Offdesk runs can improve the adaptive wiki, but only by adding
 reviewable candidates. They must not promote, reject, rescope, deprecate, or
 rewrite governed wiki entries while the operator is away.
 
-For TwinPaper workloads, `scripts/offdesk_twinpaper_autonomy_workload.py` runs
-the deterministic post-run reviewer and, when `--wiki-candidate-mode candidate`
-is enabled, calls `scripts/ingest_twinpaper_review_candidates.py`. The ingest
-step converts `result_review/results.json` learning candidates into
-`adaptive_wiki_candidates.json`, records
-`result_review/wiki_candidate_ingest.json`, and leaves `promotion_allowed` set
-to `false` in the run summary.
+Workload producers may run a deterministic post-run reviewer and, when
+candidate capture is enabled, convert review output into
+`adaptive_wiki_candidates.json`. The ingest step should record a
+`wiki_candidate_ingest.json` sidecar and leave `promotion_allowed` set to
+`false` in the run summary.
 
 The morning review loop remains explicit:
 
@@ -67,20 +65,11 @@ trial usage, follow-up evidence, counterexamples, and lint/review reports
 before deciding `promote`, `merge`, `rescope`, `reject`, or
 `needs_more_evidence`.
 
-`scripts/review_twinpaper_morning_wiki.py` builds this read-only queue from a
-completed workload result:
-
-```bash
-scripts/review_twinpaper_morning_wiki.py \
-  --result <workload>/result.json \
-  --profile-dir <profile-dir>
-```
-
-The report unifies candidate and provisional rows into one lifecycle view. It
-may recommend low-confidence `context_only` promotion without effect
-evaluation, but it does not mutate canonical wiki files; final promotion still
-runs through Ondesk review and the normal `forager offdesk wiki promote`
-surface.
+A morning review report can unify candidate and provisional rows into one
+lifecycle view. It may recommend low-confidence `context_only` promotion
+without effect evaluation, but it does not mutate canonical wiki files; final
+promotion still runs through Ondesk review and the normal
+`forager offdesk wiki promote` surface.
 
 ## Storage Shape
 
@@ -863,16 +852,15 @@ separate so legacy profiles can still be tested explicitly, but canonical
 - writing reportability with missing or supplied evidence;
 - critique of open-explore-only direction changes;
 - maintenance reports that keep cleanup and system changes approval-gated;
-- repo-root Module03 entrypoint commands from supplied repository facts;
+- repo-root module entrypoint commands from supplied repository facts;
 - JSON-only reportability verdicts;
 - JSON-only target-mode classification.
 
-TwinPaper critique guidance now treats open-explore results as exploratory
-signals unless they are paired with promotion-comparable gate evidence. A model
-must not say open-explore has no `validated_candidate` or no `p/q` evidence
-when the bundle contains exploratory signals; it should instead say those
-signals are not yet comparable to `primary_objective_gate` and restart-stable
-promotion evidence.
+Critique fixtures should treat exploratory results as exploratory signals
+unless they are paired with promotion-comparable gate evidence. A model must
+not report that evidence is absent when the bundle contains weaker exploratory
+signals; it should instead explain which signals are not yet comparable to the
+required promotion evidence.
 
 It grades anchors, forbidden completion claims, strict JSON parseability, and
 case-specific JSON schemas. It does not grade exact prose. Domain anchors are
@@ -943,7 +931,7 @@ Example:
 OFFDESK_LLM_BASE_URL=http://<gpu-server>:11434 \
 OFFDESK_LLM_MODEL=gemma4:26b \
 scripts/offdesk_wiki_llm_harness.py \
-  --profile twinpaper-adaptive-debug \
+  --profile adaptive-debug \
   --prompt-profile contract_v3 \
   --why-depth-sweep 0,3,6 \
   --temperature 0.2 \
@@ -951,9 +939,9 @@ scripts/offdesk_wiki_llm_harness.py \
 ```
 
 For `qwen3-coder-next:latest`, the harness has been validated with
-`--max-budget 12288 --num-ctx 16384` while keeping `think:false`. Live
-TwinPaper workload probes also showed that JSON-contract outputs should use
-API-level JSON mode rather than relying on prompt wording alone.
+`--max-budget 12288 --num-ctx 16384` while keeping `think:false`. Live workload
+probes also showed that JSON-contract outputs should use API-level JSON mode
+rather than relying on prompt wording alone.
 
 Results are preserved by default under the selected profile in
 `wiki_llm_harness_runs/<timestamp>/results.json`. The summary includes
@@ -963,15 +951,15 @@ questioning improved semantic quality rather than only increasing answer
 length. The depth summary includes average response length, latency, ladder
 score, observed row count, and semantic quality score when available.
 
-## TwinPaper Offdesk Autonomy Workload
+## Prepared Offdesk Autonomy Workload
 
-`scripts/offdesk_twinpaper_autonomy_workload.py` is a read-only, medium-length
-workload for testing Offdesk autonomous mode on a real TwinPaper task. It reads
-TwinPaper guidance, Module03 snippets, and a deterministic evidence bundle,
-then repeats operator-command, evidence-state, writing, code-planning,
-and critique cases against an Ollama-compatible model. The default
-configuration is paced for about 30 minutes with 12 iterations. It writes only
-to the selected workload output directory:
+A prepared Offdesk autonomy workload is a read-only, bounded workload for
+testing autonomous execution on a real project task. It reads project guidance,
+module facts, and a deterministic evidence bundle, then repeats
+operator-command, evidence-state, writing, code-planning, and critique cases
+against the configured model. The default configuration should be paced and
+bounded by either iteration count or wall-clock stop time. It writes only to
+the selected workload output directory:
 
 - `manifest.json`
 - `evidence/evidence_bundle.json`
@@ -987,57 +975,50 @@ to the selected workload output directory:
 
 The evidence bundle contract is defined in
 [`offdesk-evidence-bundles.md`](offdesk-evidence-bundles.md). The workload uses
-the bundle instead of a fixed `RunLog.md` prefix so current Module03
-direction-review evidence, recent run summaries, and targeted excerpts stay in
-the model's context.
+the bundle instead of a fixed log prefix so current project evidence, recent
+run summaries, and targeted excerpts stay in the model's context.
 
-The bundle also embeds
-`module_operation_profiles.module03_regspec_machine`, generated by
-`scripts/build_twinpaper_module03_operation_profile.py`. That profile turns
-Module03 into an explicit operating unit with canonical commands, approval
-requirements, forbidden actions, reportability vocabulary, and Ondesk return
-requirements. See
+The bundle may also embed a `module_operation_profiles.<module_key>` entry.
+That profile turns the module into an explicit operating unit with canonical
+commands, approval requirements, forbidden actions, reportability vocabulary,
+and Ondesk return requirements. See
 [`Module Operation Profiles`](guides/module-operation-profile.md) for the
 operator-facing contract.
 
-Use `scripts/prepare_twinpaper_offdesk_task.py` to create the workload
-directory and enqueue a guarded Offdesk task. The prepared workload now records
-preflight evidence before enqueue:
+Preparation must create the workload directory and produce a guarded runtime
+dispatch packet only after recording preflight evidence:
 
 - a clean live role-gate result from
   `scripts/offdesk_role_llm_episode_harness.py`;
 - a separate review artifact for the exact prepared manifest;
 - the latest matching `MODULE_OPERATION_PREFLIGHT.json`, or an explicit
-  `--module-preflight-artifact`, proving that Module03 profile/evidence
-  builders are recognized before runtime preparation;
+  module preflight artifact, proving that module profile and evidence builders
+  are recognized before runtime preparation;
 - a review decision that allows enqueue: `proceed` or `needs_approval`.
 
+The final runtime dispatch should preserve the same scope and artifacts:
+
 ```bash
-scripts/prepare_twinpaper_offdesk_task.py \
-  --duration-minutes 30 \
-  --max-iterations 12 \
-  --model qwen3-coder-next:latest \
-  --base-url http://<gpu-server>:11434 \
-  --role-gate-result latest \
-  --module-preflight-artifact latest \
-  --review-artifact generate \
-  --enqueue
+forager offdesk launch \
+  --runner local-tmux \
+  --project-key <project-key> \
+  --request-id <request-id> \
+  --task-id <task-id> \
+  --cmd "<bounded-workload-command>" \
+  --workdir /path/to/project \
+  --result-artifact <workload-output>/result.json \
+  --artifact manifest=<workload-output>/manifest.json \
+  --artifact preflight=<workload-output>/preflight.json \
+  dispatch.runtime
 ```
 
 For overnight runs, prefer a wall-clock stop time over a fixed duration:
 
 ```bash
-scripts/prepare_twinpaper_offdesk_task.py \
-  --run-until-kst 09:00 \
-  --max-iterations 24 \
-  --model qwen3-coder-next:latest \
-  --base-url http://<gpu-server>:11434 \
-  --role-gate-result latest \
-  --module-preflight-artifact latest \
-  --review-artifact generate \
-  --council-mode command \
-  --gpt-council-command "$OFFDESK_GPT_COUNCIL_CMD" \
-  --claude-council-command "$OFFDESK_CLAUDE_COUNCIL_CMD"
+OFFDESK_RUN_UNTIL_KST=09:00 \
+OFFDESK_LLM_BASE_URL=http://<gpu-server>:11434 \
+OFFDESK_LLM_MODEL=qwen3-coder-next:latest \
+<bounded-workload-command>
 ```
 
 The prepared manifest records the estimated duration and target timestamp, but
@@ -1055,23 +1036,21 @@ the workload directory. The generated `offdesk_enqueue_command.sh` also checks
 for `preflight_ready` unless `FORAGER_ALLOW_PREFLIGHT_BLOCKERS=1` is set
 deliberately.
 
-`--review-artifact generate` runs
-`scripts/offdesk_workload_review_harness.py` against the exact
-`prepared_task.json` in the workload directory. A clean deterministic review
-returns `needs_approval`, not `proceed`, because `dispatch.runtime` still
-requires separate operator approval before `offdesk tick` can launch the
-workload.
+A generated review artifact should inspect the exact `prepared_task.json` in
+the workload directory. A clean deterministic review returns `needs_approval`,
+not `proceed`, because `dispatch.runtime` still requires separate operator
+approval before `offdesk tick` can launch the workload.
 
 The prepared task uses `dispatch.runtime` and `local-tmux` by default, so
 `offdesk tick` should stop at an operator-required approval before the workload
 starts. Approve the pending `dispatch.runtime` action and run `offdesk tick
---limit 1` only when the operator is ready to begin the 30-minute run. Use
+--limit 1` only when the operator is ready to begin the bounded run. Use
 `--runner local-background` only for short smoke workloads; long Python
 workloads should use tmux so the process remains inspectable after the tick
 command exits.
 
-The current launch path is covered by a short TwinPaper smoke runbook:
-[`TwinPaper Offdesk Runtime Smoke`](guides/twinpaper-offdesk-runtime-smoke.md).
+The current launch path is covered by a short smoke runbook:
+[`Offdesk Runtime Smoke`](guides/offdesk-runtime-smoke.md).
 That smoke validates prepare, enqueue, approval, local-tmux launch, polling,
 result artifacts, and deterministic post-run review without starting an
 overnight campaign.
@@ -1080,10 +1059,9 @@ The workload report separates raw pass/fail from operator judgement. `REPORT.md`
 and `result.json` include an `assessment` block with `overall_verdict`,
 `operator_risk`, `next_action`, failure-category counts, baseline policy
 coverage, and `false_negative_prevented_count`. The latter increments when a
-response satisfies a required domain anchor only through an accepted alias, for
-example `No-op baseline` satisfying the canonical `no-option` anchor. Treat
-`pass_with_canonicalization` as usable evidence that still deserves prompt or
-checker review before comparing strict pass rates across models.
+response satisfies a required domain anchor only through an accepted alias.
+Treat `pass_with_canonicalization` as usable evidence that still deserves
+prompt or checker review before comparing strict pass rates across models.
 
 ### Episode Council Gate
 
@@ -1103,17 +1081,12 @@ The Council has three modes:
   `OFFDESK_GPT_COUNCIL_CMD` and `OFFDESK_CLAUDE_COUNCIL_CMD` environment
   variables.
 
-TwinPaper workload integration is opt-in:
+Council integration is opt-in:
 
 ```bash
-scripts/prepare_twinpaper_offdesk_task.py \
-  --duration-minutes 360 \
-  --max-iterations 24 \
-  --role-gate-result latest \
-  --review-artifact generate \
-  --council-mode command \
-  --gpt-council-command "gpt-reviewer-command" \
-  --claude-council-command "claude-reviewer-command"
+OFFDESK_GPT_COUNCIL_CMD="gpt-reviewer-command" \
+OFFDESK_CLAUDE_COUNCIL_CMD="claude-reviewer-command" \
+<bounded-workload-command-with-council-enabled>
 ```
 
 When enabled, the workload writes one episode JSON artifact, runs the Council,

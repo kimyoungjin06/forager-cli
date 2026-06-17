@@ -32,7 +32,7 @@ This gives Offdesk a scoped target instead of raw chat history.
 After Offdesk work, run closeout before resuming Ondesk:
 
 ```bash
-forager offdesk closeout --project-key twinpaper --dry-run
+forager offdesk closeout --project-key <project-key> --dry-run
 ```
 
 The command writes a closeout artifact directory under the active profile:
@@ -225,22 +225,22 @@ recommendations, such as deliverables to promote or outputs to record in
 For workloads launched from a harness checkout against a separate target repo,
 closeout first looks beside result and log artifacts for `prepared_task.json` or
 `manifest.json` and uses their `repo` field as the documentation-governance
-workdir. An explicit `--workdir` still wins. This keeps a TwinPaper runtime
-command launched from Forager from accidentally auditing the Forager checkout as
-the research project.
+workdir. An explicit `--workdir` still wins. This keeps a runtime command
+launched from Forager from accidentally auditing the Forager checkout instead
+of the target project.
 
 ## Runtime Smoke Interpretation
 
-A clean runtime smoke does not skip closeout. For example, the TwinPaper
-runtime smoke can prove that `dispatch.runtime` approval, `local-tmux` launch,
-polling, result artifacts, and deterministic post-run review all work. It still
-leaves `mode_risk=operator_review_required`, because the result must be read
-before it becomes trusted work.
+A clean runtime smoke does not skip closeout. A runtime smoke can prove that
+`dispatch.runtime` approval, `local-tmux` launch, polling, result artifacts,
+and deterministic post-run review all work. It still leaves
+`mode_risk=operator_review_required`, because the result must be read before it
+becomes trusted work.
 
 Use the smoke result as launch-path evidence, then close out any real Offdesk
 run before returning to Ondesk. See
-[`TwinPaper Offdesk Runtime Smoke`](twinpaper-offdesk-runtime-smoke.md) for the
-validated short-run procedure.
+[`Offdesk Runtime Smoke`](offdesk-runtime-smoke.md) for the validated short-run
+procedure.
 
 `forager offdesk tasks`, `forager offdesk poll`, `forager offdesk tick`,
 `forager offdesk pending`, `forager offdesk maintenance-report`, and

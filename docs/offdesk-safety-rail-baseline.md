@@ -9,8 +9,9 @@ Detailed design notes remain in:
 
 - [`hermes-pattern-review.md`](hermes-pattern-review.md)
 - [`adaptive-wiki.md`](adaptive-wiki.md)
-- [`adaptive-wiki-execution-plan.md`](adaptive-wiki-execution-plan.md)
-- [`hermes-adaptive-knowledge-benchmark.md`](hermes-adaptive-knowledge-benchmark.md)
+
+Historical adaptive-wiki implementation and benchmark notes are archived under
+`archive/domain-history/`; they are not part of the active product runbook.
 
 ## Baseline Scope
 
@@ -56,7 +57,7 @@ bundles, or automatic agent-mode inference.
   default.
 - Mode tags filter context only. They do not authorize command execution,
   provider/model retargeting, file mutation, or approval resolution.
-- Long-running TwinPaper Offdesk workloads must declare system-critical guards:
+- Long-running Offdesk workloads must declare system-critical guards:
   no file deletion or cleanup, reboot/shutdown/power-state changes, service or
   system configuration changes, storage/RAID/NVMe/mount changes, package or
   permission changes, process or runner interruption, network/firewall/SSH
@@ -224,7 +225,7 @@ Completed in this baseline:
   mutating task files.
 - maintenance approval requests that deduplicate matching pending approvals and
   leave the actual maintenance operation as an explicit follow-up command.
-- system-critical hard gates for prepared TwinPaper overnight workloads,
+- system-critical hard gates for prepared overnight workloads,
   including deletion, reboot, service, storage, permission, process, network,
   kernel, driver, firmware, and BIOS mutation constraints.
 

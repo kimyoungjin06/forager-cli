@@ -1,6 +1,6 @@
 # Deliverables
 
-Updated: 2026-06-01
+Updated: 2026-06-17
 
 This is the compact development deliverables surface for Forager. It is for
 humans who need to inspect outputs without browsing build or documentation
@@ -11,36 +11,49 @@ folders.
 - `README.md`: public product overview.
 - `docs/index.md`: mdBook introduction.
 - `docs/SUMMARY.md`: mdBook navigation.
-- `docs/gajae-benchmarking.md`: Forager-native benchmark translation of
-  Gajae-Code operating patterns.
+- `docs/project-direction.md`: product direction and operating principles.
+- `docs/remote-operator.md`: mobile/chat operator contract.
 - `docs/decision-pipeline.md`: canonical decision state design for
   Agent/Council/User escalation and execution handoff.
-- `docs/guides/operation-cycle.md`: offdesk lifecycle guide.
+- `docs/guides/operation-cycle.md`: Offdesk lifecycle guide.
+- `docs/guides/offdesk-runtime-smoke.md`: generic short runtime validation
+  runbook.
+- `docs/guides/offdesk-long-run-validation.md`: generic long-run validation
+  runbook.
 - `docs/guides/documentation-artifact-governance.md`: documentation and
   artifact governance guide.
 - `docs/cli/reference.md`: generated CLI reference.
 
 ## Operator And Offdesk References
 
-- `docs/offdesk-operation-status.md`: current offdesk status and improvement
+- `docs/offdesk-operation-status.md`: current Offdesk status and improvement
   queue.
 - `docs/adaptive-wiki.md`: adaptive wiki operator boundary.
-- `docs/adaptive-wiki-execution-plan.md`: adaptive wiki implementation plan.
 - `docs/guides/approval-brief.md`: operator decision brief contract.
-- `docs/guides/twinpaper-offdesk-long-run-validation.md`: realistic long-run
-  validation procedure.
+- `docs/guides/offdesk-closeout.md`: closeout and review packet contract.
+- `docs/guides/module-operation-profile.md`: generic module-operation profile
+  contract.
 
 ## Visual Assets
 
-- `docs/assets/tui.png`: committed TUI preview used by documentation.
-- `docs/assets/benchmarks/single_agent_ops_template_20260226.zip`: benchmark
-  template asset.
+- `docs/assets/tui.png`: committed neutral TUI preview used by documentation
+  and the website hero.
+- `assets/logo.svg`, `assets/logo.png`, `assets/logo-lockup.svg`: product logo
+  assets.
+- `assets/social-preview.svg`, `assets/social-preview.png`: social preview
+  assets.
+
+## Historical Validation Notes
+
+- `archive/domain-history/`: domain-specific validation history retained
+  outside mdBook product docs. These files are not current product surfaces.
 
 ## Local Build Outputs
 
 - `target/debug/forager`: local debug binary when built.
 - `target/release/forager`: local release binary when built.
 - `book/`: local mdBook output when `mdbook build` is available.
+- `dist/`: local website output from `scripts/build-site.sh`.
 
 Local build outputs are not source-controlled deliverables. They are listed
 here as inspection targets for local validation.

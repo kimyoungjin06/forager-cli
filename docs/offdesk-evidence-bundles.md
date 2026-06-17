@@ -60,26 +60,23 @@ Use decks for compact human review: closeout summaries, plan readiness, runtime
 status, and incident packets. Do not use decks to authorize work, mutate project
 state, or bypass the original JSON artifact and linked evidence.
 
-## TwinPaper V1
+## Workload Bundle V1
 
-The first concrete bundle targets TwinPaper Module03 direction review quality.
-It collects:
+A concrete bundle targets one project module or operating unit. It collects:
 
-- `AGENTS.md` direction-review rules;
-- `docs/operations/RunLog.md` recent tail entries;
-- targeted RunLog excerpts for `no-option`, `singlex`, `openexplore`,
-  `direction-review`, `validated_candidate`, `p/q`, `restart_stability`, and
-  `primary_objective_gate`;
-- latest metadata artifacts matching direction review, paired summaries, and
-  no-option/singlex/openexplore run summaries;
-- Module03 command and code/test entrypoint existence;
-- a compact current-state label such as `executed_primary_gate_failed`.
+- project or agent guidance that constrains the work;
+- recent operator notes or run-log excerpts relevant to the requested scope;
+- targeted evidence excerpts for required baselines, gates, known failure
+  modes, and success criteria;
+- latest matching result, summary, or metadata artifacts;
+- command, code, and test entrypoint existence for the selected module;
+- a compact current-state label such as `baseline_executed_gate_failed`.
 
-The current-state label is not a research conclusion. It is a routing aid for
-the next agent. For example, `executed_primary_gate_failed` means the bundle
-found baseline execution evidence and a failed promotion/primary objective gate,
-so a writing or critique agent should not claim that no baseline execution
-evidence exists.
+The current-state label is not a product or research conclusion. It is a
+routing aid for the next agent. For example,
+`baseline_executed_gate_failed` means the bundle found execution evidence and a
+failed promotion gate, so a writing or critique agent should not claim that no
+baseline execution evidence exists.
 
 ## Review Decisions
 

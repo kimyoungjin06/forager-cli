@@ -7,8 +7,8 @@ recovery artifacts, and action audit records.
 
 The first pass compared against the Hermes checkout recorded in the companion
 review note, `aoe_orch_control/docs/HERMES_AGENT_BENCHMARK_20260512.md`.
-The adaptive knowledge follow-up is tracked in
-[`hermes-adaptive-knowledge-benchmark.md`](hermes-adaptive-knowledge-benchmark.md).
+The adaptive knowledge follow-up is archived under
+`archive/domain-history/hermes-adaptive-knowledge-benchmark.md`.
 
 ## Review Rules
 
@@ -306,10 +306,9 @@ canonical Offdesk wiki record plus separate projections:
 
 This pass does not make wiki entries an authority for runtime mutation and does
 not enable `auto_apply`. Candidate observation, promotion, dashboard actions,
-and benchmark episodes remain separate integration steps. The design and
-benchmark contract live in [`adaptive-wiki.md`](adaptive-wiki.md), and the
-implementation sequence lives in
-[`adaptive-wiki-execution-plan.md`](adaptive-wiki-execution-plan.md).
+and benchmark episodes remain separate integration steps. The active design and
+benchmark contract lives in [`adaptive-wiki.md`](adaptive-wiki.md); historical
+implementation notes are archived under `archive/domain-history/`.
 
 ## Adaptive Wiki Acceptance Checks
 
@@ -353,5 +352,5 @@ Forager-owned interfaces:
   Forager should map this to governed `procedure` entries and runbook export,
   not to autonomous skill writes.
 
-The detailed adoption matrix and next implementation slices are in
-[`hermes-adaptive-knowledge-benchmark.md`](hermes-adaptive-knowledge-benchmark.md).
+The detailed adoption matrix and next implementation slices are archived under
+`archive/domain-history/hermes-adaptive-knowledge-benchmark.md`.
