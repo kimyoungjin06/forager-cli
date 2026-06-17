@@ -70,6 +70,7 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk decision resolve`↴](#forager-offdesk-decision-resolve)
 * [`forager offdesk decision receipt`↴](#forager-offdesk-decision-receipt)
 * [`forager offdesk decision ingest-telegram`↴](#forager-offdesk-decision-ingest-telegram)
+* [`forager offdesk decision ingest-telegram-feedback`↴](#forager-offdesk-decision-ingest-telegram-feedback)
 * [`forager offdesk provider-capacity`↴](#forager-offdesk-provider-capacity)
 * [`forager offdesk provider-fallback`↴](#forager-offdesk-provider-fallback)
 * [`forager offdesk cancel-task`↴](#forager-offdesk-cancel-task)
@@ -89,6 +90,7 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk debug-bundle`↴](#forager-offdesk-debug-bundle)
 * [`forager offdesk maintenance-report`↴](#forager-offdesk-maintenance-report)
 * [`forager offdesk maintenance-request`↴](#forager-offdesk-maintenance-request)
+* [`forager offdesk deck`↴](#forager-offdesk-deck)
 * [`forager offdesk closeout`↴](#forager-offdesk-closeout)
 * [`forager offdesk closeout-review`↴](#forager-offdesk-closeout-review)
 * [`forager offdesk closeout-decision`↴](#forager-offdesk-closeout-decision)
@@ -886,6 +888,7 @@ Manage offdesk approvals and recovery artifacts
 * `debug-bundle` — Emit a sanitized read-only debug bundle
 * `maintenance-report` — Summarize read-only Offdesk maintenance risks
 * `maintenance-request` — Create or reuse an approval request for a maintenance action
+* `deck` — Generate a Marp-compatible review deck from a read-only Offdesk artifact
 * `closeout` — Generate a mandatory closeout plan and commercial review packet
 * `closeout-review` — Record a reviewed closeout verdict without applying file operations
 * `closeout-decision` — Resolve a closeout receipt open decision without applying file operations
@@ -1321,6 +1324,7 @@ Inspect one canonical Offdesk decision record
 * `resolve` — Resolve a decision into an append-only execution handoff
 * `receipt` — Close a handoff-ready decision with an append-only receipt
 * `ingest-telegram` — Ingest a Telegram relay result into the canonical decision ledger
+* `ingest-telegram-feedback` — Promote Telegram freeform feedback into the canonical decision inbox
 
 
 
@@ -1406,6 +1410,23 @@ Ingest a Telegram relay result into the canonical decision ledger
 * `--receipt-result-status <RECEIPT_RESULT_STATUS>` — Also append a receipt with this result status after resolving
 * `--receipt-evidence <RECEIPT_EVIDENCE_SUMMARY>` — Receipt evidence summary line. Repeat for multiple lines
 * `--remaining-review <REMAINING_REVIEW>` — Remaining review item. Repeat for multiple lines
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk decision ingest-telegram-feedback`
+
+Promote Telegram freeform feedback into the canonical decision inbox
+
+**Usage:** `forager offdesk decision ingest-telegram-feedback [OPTIONS] --feedback <FEEDBACK>`
+
+###### **Options:**
+
+* `--feedback <FEEDBACK>` — Telegram feedback JSON or JSONL file
+* `--profile-dir <PROFILE_DIR>` — Override canonical profile directory for producer integrations
+* `--by <BY>` — Actor recording the inbox item
+
+  Default value: `telegram`
 * `--json` — Output as JSON
 
 
@@ -1718,6 +1739,35 @@ Create or reuse an approval request for a maintenance action
 * `--ttl-minutes <TTL_MINUTES>` — Pending approval TTL in minutes
 
   Default value: `30`
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk deck`
+
+Generate a Marp-compatible review deck from a read-only Offdesk artifact
+
+**Usage:** `forager offdesk deck [OPTIONS] --from <SOURCE>`
+
+###### **Options:**
+
+* `--from <SOURCE>` — Source Offdesk JSON artifact to summarize into a Marp deck
+* `--kind <KIND>` — Artifact shape. Use auto unless the source is ambiguous
+
+  Default value: `auto`
+
+  Possible values: `auto`, `closeout`, `plan`, `status`
+
+* `--out <OUT>` — Markdown deck output path. Defaults to `<source-stem>.marp.md`
+* `--force` — Overwrite the Markdown deck or rendered artifact if it already exists
+* `--title <TITLE>` — Optional deck title
+* `--render <RENDER>` — Render the deck with Marp CLI after writing Markdown
+
+  Possible values: `html`, `pdf`, `pptx`
+
+* `--marp-bin <MARP_BIN>` — Marp CLI binary to use with --render
+
+  Default value: `marp`
 * `--json` — Output as JSON
 
 

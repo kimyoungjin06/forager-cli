@@ -1585,7 +1585,7 @@ pub struct DeckArgs {
     #[arg(long, value_enum, default_value = "auto")]
     kind: OffdeskDeckKind,
 
-    /// Markdown deck output path. Defaults to <source-stem>.marp.md.
+    /// Markdown deck output path. Defaults to `<source-stem>.marp.md`.
     #[arg(long)]
     out: Option<PathBuf>,
 
