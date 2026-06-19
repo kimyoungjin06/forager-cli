@@ -1,0 +1,504 @@
+---
+import Base from '../layouts/Base.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import SourceStatus from '../components/SourceStatus.astro';
+import { sitePath } from '../lib/paths';
+import {
+  dashboardViewFromSurface,
+  formatLabel,
+  severityClasses,
+  severityLabels,
+  type DashboardView,
+  type ProjectDetail,
+} from '../lib/dashboardSurface';
+
+import workstationSurface from '../../../tests/fixtures/ui/workstation_surface/attention.json';
+
+const graphView = dashboardViewFromSurface(workstationSurface) as DashboardView;
+const selectedProject = graphView.projectDetails[0];
+const totalProjectEdges = graphView.projectDetails.reduce((sum, project) => sum + project.graph_edges.length, 0);
+const truthItemCount = graphView.projectDetails.reduce((sum, project) => sum + project.truth_recovery_count, 0);
+
+function graphStages(project: ProjectDetail | undefined) {
+  if (!project) {
+    return [];
+  }
+
+  return [
+    ['Project', project.display_name],
+    ['Plan', formatLabel(project.plan)],
+    ['Runtime', formatLabel(project.runtime)],
+    ['Closeout', formatLabel(project.closeout)],
+    ['Truth', formatLabel(project.truth)],
+  ];
+}
+---
+
+<Base
+  title="Forager Graph"
+  description="Read-only scoped Forager provenance graph for project support paths, blockers, and evidence references."
+>
+  <Nav />
+
+  <main
+    id="graph-app"
+    class="min-h-screen bg-[#08111d] pt-24 text-slate-100"
+    data-live-surface-url={sitePath('/workstation-surface.json')}
+  >
+    <section class="border-y border-slate-700/70 bg-[#101a27] px-6 py-5">
+      <div class="mx-auto grid max-w-7xl gap-5 xl:grid-cols-[1fr_auto] xl:items-center">
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-[0.16em] text-brand-300">Forager Graph</p>
+          <h1 class="mt-2 text-3xl font-semibold tracking-tight text-white md:text-4xl">Scoped provenance graph</h1>
+          <p class="mt-2 max-w-3xl text-sm leading-relaxed text-slate-400">
+            Source: <span class="font-medium text-slate-200" data-graph-source>{graphView.sourceLabel}</span>
+            <span class="text-slate-600"> / </span>
+            Profile: <span class="font-mono text-slate-200" data-graph-profile>{graphView.profile}</span>
+            <span class="text-slate-600"> / </span>
+            Freshness: <span class="font-medium text-slate-200" data-graph-stale>{graphView.staleLabel}</span>
+          </p>
+        </div>
+
+        <div class="grid gap-3 text-sm sm:grid-cols-4">
+          <div class="border border-slate-700 bg-slate-950/55 px-4 py-3">
+            <p class="text-slate-400">Projects</p>
+            <p class="mt-1 font-mono text-slate-100" data-graph-project-count>{graphView.projectDetails.length}</p>
+          </div>
+          <div class="border border-slate-700 bg-slate-950/55 px-4 py-3">
+            <p class="text-slate-400">Edges</p>
+            <p class="mt-1 font-mono text-slate-100" data-graph-edge-count>{totalProjectEdges}</p>
+          </div>
+          <div class="border border-slate-700 bg-slate-950/55 px-4 py-3">
+            <p class="text-slate-400">Decisions</p>
+            <p class="mt-1 font-mono text-slate-100" data-graph-decision-count>{graphView.decisionInbox.openCount}</p>
+          </div>
+          <div class="border border-slate-700 bg-slate-950/55 px-4 py-3">
+            <p class="text-slate-400">Truth</p>
+            <p class="mt-1 font-mono text-slate-100" data-graph-truth-count>{truthItemCount}</p>
+          </div>
+        </div>
+      </div>
+    </section>
+    <SourceStatus
+      detail="Static fixture data is visible until workstation-surface.json is loaded from the local export."
+      command="npm run export:workstation-surface"
+    />
+
+    <section class="mx-auto grid max-w-7xl gap-6 px-6 py-8 xl:grid-cols-[20rem_minmax(0,1fr)]">
+      <aside class="min-w-0 space-y-6">
+        <section class="border border-slate-700 bg-slate-950/55 p-6">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="text-sm font-semibold uppercase tracking-[0.16em] text-brand-200">Scope</p>
+              <h2 class="mt-2 text-2xl font-semibold text-white">Project paths</h2>
+            </div>
+            <a href={sitePath('/work/')} class="text-sm font-semibold text-brand-200 hover:text-white">Work</a>
+          </div>
+          <div class="mt-5 space-y-2" data-graph-scope-list>
+            {graphView.projectDetails.length ? (
+              graphView.projectDetails.map((project, index) => (
+                <button
+                  type="button"
+                  class={`w-full border px-4 py-3 text-left transition hover:border-brand-300/70 ${index === 0 ? 'border-brand-300/70 bg-brand-400/10' : 'border-slate-700 bg-slate-900/60'}`}
+                  data-graph-scope-select
+                  data-project-key={project.project_key}
+                  aria-pressed={index === 0 ? 'true' : 'false'}
+                >
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                      <p class="truncate font-semibold text-white">{project.display_name}</p>
+                      <p class="mt-1 truncate font-mono text-xs text-slate-500">{project.project_key}</p>
+                    </div>
+                    <span class={`whitespace-nowrap border px-2 py-1 text-xs font-semibold ${severityClasses[project.severity]}`}>{severityLabels[project.severity]}</span>
+                  </div>
+                  <p class="mt-2 truncate text-xs text-slate-400">{project.primary_action}</p>
+                </button>
+              ))
+            ) : (
+              <div class="border border-slate-700 bg-slate-900/60 p-5 text-slate-400">No project graph scope is currently visible.</div>
+            )}
+          </div>
+        </section>
+
+        <section class="border border-slate-700 bg-slate-950/55 p-6">
+          <p class="text-sm font-semibold uppercase tracking-[0.16em] text-brand-200">Graph Rule</p>
+          <p class="mt-3 text-sm leading-relaxed text-slate-300">
+            Default scope stays at one project path. Expand actions are intentionally absent until the graph has stronger source contracts.
+          </p>
+          <div class="mt-4 grid gap-2 text-xs">
+            <div class="border border-slate-700 bg-slate-900/60 px-3 py-2">
+              <p class="font-semibold text-slate-100">Support path</p>
+              <p class="mt-1 text-slate-400">project / plan / runtime / closeout / accepted truth</p>
+            </div>
+            <div class="border border-slate-700 bg-slate-900/60 px-3 py-2">
+              <p class="font-semibold text-slate-100">Execution boundary</p>
+              <p class="mt-1 text-slate-400">read-only evidence view; no shell or mutation path</p>
+            </div>
+          </div>
+        </section>
+      </aside>
+
+      <section class="min-w-0 space-y-6">
+        <section class="min-w-0 border border-slate-700 bg-[#0b1421] p-6">
+          <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p class="text-sm font-semibold uppercase tracking-[0.16em] text-brand-200">Support Path</p>
+              <h2 class="mt-2 text-2xl font-semibold text-white" data-graph-selected-title>
+                {selectedProject ? `${selectedProject.display_name} evidence path` : 'No graph scope selected'}
+              </h2>
+              <p class="mt-2 max-w-3xl text-sm leading-relaxed text-slate-400" data-graph-selected-summary>
+                {selectedProject?.primary_action ?? 'Select a project to inspect its scoped provenance path.'}
+              </p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <a href={sitePath('/decisions/')} class="border border-slate-600 px-3 py-2 text-sm font-semibold text-slate-200 hover:border-brand-300/70 hover:text-white">Decisions</a>
+              <a href={sitePath('/review/')} class="border border-slate-600 px-3 py-2 text-sm font-semibold text-slate-200 hover:border-brand-300/70 hover:text-white">Review</a>
+            </div>
+          </div>
+
+          <div class="mt-6" data-graph-canvas>
+            {selectedProject ? (
+              <>
+                <div class="grid gap-3 lg:grid-cols-5">
+                  {graphStages(selectedProject).map(([label, value]) => (
+                    <div class="min-w-0 border border-slate-700 bg-slate-950/55 p-4">
+                      <p class="text-[10px] font-semibold uppercase tracking-[0.14em] text-brand-200">{label}</p>
+                      <p class="mt-2 break-words text-base font-semibold text-white">{value}</p>
+                    </div>
+                  ))}
+                </div>
+                <div class="mt-4 grid min-w-0 gap-2 lg:grid-cols-4">
+                  {selectedProject.graph_edges.slice(0, 4).map((edge) => (
+                    <div class="min-w-0 border border-brand-300/25 bg-brand-400/10 px-3 py-2">
+                      <p class="break-words text-[10px] uppercase tracking-[0.12em] text-brand-200">{edge.from} to {edge.to}</p>
+                      <p class="mt-1 break-words text-sm font-semibold text-slate-100">{edge.label}</p>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div class="border border-slate-700 bg-slate-900/60 p-6 text-slate-400">No graph scope is currently visible.</div>
+            )}
+          </div>
+        </section>
+
+        <section class="grid min-w-0 gap-6 lg:grid-cols-[1fr_0.9fr]">
+          <section class="min-w-0 border border-slate-700 bg-slate-950/55 p-6">
+            <p class="text-sm font-semibold uppercase tracking-[0.16em] text-brand-200">Blockers</p>
+            <div class="mt-4 space-y-3" data-graph-blockers>
+              {selectedProject ? (
+                [
+                  ...selectedProject.decision_titles.map((title) => ['Decision', title]),
+                  ...selectedProject.runtime_stages.map((stage) => ['Runtime', stage]),
+                  ...selectedProject.truth_recovery_stages.map((stage) => ['Truth', stage]),
+                ].length ? (
+                  [
+                    ...selectedProject.decision_titles.map((title) => ['Decision', title]),
+                    ...selectedProject.runtime_stages.map((stage) => ['Runtime', stage]),
+                    ...selectedProject.truth_recovery_stages.map((stage) => ['Truth', stage]),
+                  ].map(([label, value]) => (
+                    <div class="border border-slate-700 bg-slate-900/60 px-4 py-3">
+                      <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{label}</p>
+                      <p class="mt-1 text-sm leading-relaxed text-slate-100">{value}</p>
+                    </div>
+                  ))
+                ) : (
+                  <div class="border border-emerald-400/35 bg-emerald-400/10 p-4 text-emerald-100">No project-specific blocker is visible.</div>
+                )
+              ) : (
+                <div class="border border-slate-700 bg-slate-900/60 p-4 text-slate-400">Select a scope to inspect blockers.</div>
+              )}
+            </div>
+          </section>
+
+          <section class="min-w-0 border border-slate-700 bg-slate-950/55 p-6">
+            <p class="text-sm font-semibold uppercase tracking-[0.16em] text-brand-200">Evidence Refs</p>
+            <div class="mt-4 space-y-3" data-graph-evidence>
+              {selectedProject ? (
+                selectedProject.assistant_refs.map((ref) => (
+                  <div class="border border-slate-700 bg-slate-900/60 px-4 py-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                      <p class="text-sm font-semibold text-slate-100">{ref.label}</p>
+                      <span class="font-mono text-[10px] uppercase tracking-[0.1em] text-slate-500">{formatLabel(ref.trust)}</span>
+                    </div>
+                    <p class="mt-2 break-all font-mono text-[11px] text-slate-400">{ref.reference}</p>
+                  </div>
+                ))
+              ) : (
+                <div class="border border-slate-700 bg-slate-900/60 p-4 text-slate-400">No evidence refs are currently visible.</div>
+              )}
+            </div>
+          </section>
+        </section>
+      </section>
+    </section>
+  </main>
+
+  <script id="graph-fallback-data" type="application/json" set:html={JSON.stringify(graphView)}></script>
+  <script>
+    import {
+      dashboardViewFromSurface,
+      formatLabel,
+      severityClasses,
+      severityLabels,
+    } from '../lib/dashboardSurface';
+    import {
+      sourceStatusClasses,
+      sourceStatusLabels,
+    } from '../lib/sourceStatus';
+
+    const WORKSTATION_REFRESH_COMMAND = 'npm run export:workstation-surface';
+    const app = document.getElementById('graph-app');
+    const fallbackElement = document.getElementById('graph-fallback-data');
+    const fallbackView = fallbackElement?.textContent ? JSON.parse(fallbackElement.textContent) : null;
+
+    if (app && fallbackView) {
+      fetchGraphSurface(app, fallbackView);
+    }
+
+    async function fetchGraphSurface(root, fallback) {
+      const liveSurfaceUrl = root.dataset.liveSurfaceUrl;
+      if (!liveSurfaceUrl) {
+        renderGraph(root, fallback);
+        setSourceStatus(
+          root,
+          'missing_surface_url',
+          'No live workstation-surface URL is configured; showing static fixture fallback.',
+          WORKSTATION_REFRESH_COMMAND,
+        );
+        return;
+      }
+
+      try {
+        const response = await fetch(liveSurfaceUrl, { cache: 'no-store' });
+        if (!response.ok) {
+          throw new Error(`workstation surface unavailable: ${response.status}`);
+        }
+
+        const view = dashboardViewFromSurface(await response.json());
+        renderGraph(root, view);
+        setSourceStatus(
+          root,
+          view.staleLabel.toLowerCase().includes('fresh') ? 'live' : 'stale_live',
+          `Loaded workstation_surface.v1 from ${liveSurfaceUrl}; freshness is ${view.staleLabel}.`,
+          WORKSTATION_REFRESH_COMMAND,
+        );
+      } catch {
+        renderGraph(root, fallback);
+        setSourceStatus(
+          root,
+          'live_fetch_failed',
+          `Could not load ${liveSurfaceUrl}; showing static fixture fallback.`,
+          WORKSTATION_REFRESH_COMMAND,
+        );
+      }
+    }
+
+    function renderGraph(root, view) {
+      const selectedProject = view.projectDetails[0];
+      setText(root, '[data-graph-source]', view.sourceLabel);
+      setText(root, '[data-graph-profile]', view.profile);
+      setText(root, '[data-graph-stale]', view.staleLabel);
+      setText(root, '[data-graph-project-count]', view.projectDetails.length);
+      setText(root, '[data-graph-edge-count]', sumProjectEdges(view.projectDetails));
+      setText(root, '[data-graph-decision-count]', view.decisionInbox.openCount);
+      setText(root, '[data-graph-truth-count]', sumProjectCount(view.projectDetails, 'truth_recovery_count'));
+      setHtml(root, '[data-graph-scope-list]', scopeListHtml(view.projectDetails));
+      renderProjectGraph(root, selectedProject);
+      bindGraphScopes(root, view);
+    }
+
+    function sumProjectEdges(projects) {
+      return projects.reduce((sum, project) => sum + Number(project.graph_edges?.length ?? 0), 0);
+    }
+
+    function sumProjectCount(projects, field) {
+      return projects.reduce((sum, project) => sum + Number(project[field] ?? 0), 0);
+    }
+
+    function setText(root, selector, value) {
+      const element = root.querySelector(selector);
+      if (element) {
+        element.textContent = String(value ?? '');
+      }
+    }
+
+    function setHtml(root, selector, value) {
+      const element = root.querySelector(selector);
+      if (element) {
+        element.innerHTML = value;
+      }
+    }
+
+    function setSourceStatus(root, status, detail, command) {
+      const element = root.querySelector('[data-source-status]');
+      if (!element) {
+        return;
+      }
+
+      element.className = `${element.dataset.baseClass} ${sourceStatusClasses[status]}`;
+      setText(root, '[data-source-status-label]', sourceStatusLabels[status]);
+      setText(root, '[data-source-status-detail]', detail);
+      const commandElement = root.querySelector('[data-source-status-command]');
+      if (commandElement) {
+        commandElement.textContent = command ?? '';
+        commandElement.toggleAttribute('hidden', !command);
+      }
+    }
+
+    function scopeListHtml(projects) {
+      if (!projects.length) {
+        return '<div class="border border-slate-700 bg-slate-900/60 p-5 text-slate-400">No project graph scope is currently visible.</div>';
+      }
+
+      return projects.map((project, index) => scopeButtonHtml(project, index === 0)).join('');
+    }
+
+    function scopeButtonHtml(project, selected) {
+      return `<button
+        type="button"
+        class="${scopeButtonClass(selected)}"
+        data-graph-scope-select
+        data-project-key="${escapeHtml(project.project_key)}"
+        aria-pressed="${selected ? 'true' : 'false'}"
+      >
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="truncate font-semibold text-white">${escapeHtml(project.display_name)}</p>
+            <p class="mt-1 truncate font-mono text-xs text-slate-500">${escapeHtml(project.project_key)}</p>
+          </div>
+          <span class="whitespace-nowrap border px-2 py-1 text-xs font-semibold ${severityClasses[project.severity]}">${escapeHtml(severityLabels[project.severity])}</span>
+        </div>
+        <p class="mt-2 truncate text-xs text-slate-400">${escapeHtml(project.primary_action)}</p>
+      </button>`;
+    }
+
+    function scopeButtonClass(selected) {
+      return `w-full border px-4 py-3 text-left transition hover:border-brand-300/70 ${selected ? 'border-brand-300/70 bg-brand-400/10' : 'border-slate-700 bg-slate-900/60'}`;
+    }
+
+    function bindGraphScopes(root, view) {
+      const scopeList = root.querySelector('[data-graph-scope-list]');
+      if (!scopeList) {
+        return;
+      }
+
+      scopeList.querySelectorAll('[data-graph-scope-select]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const project = view.projectDetails.find((item) => item.project_key === button.dataset.projectKey);
+          if (!project) {
+            return;
+          }
+
+          scopeList.querySelectorAll('[data-graph-scope-select]').forEach((item) => {
+            const selected = item === button;
+            item.setAttribute('aria-pressed', selected ? 'true' : 'false');
+            item.className = scopeButtonClass(selected);
+          });
+          renderProjectGraph(root, project);
+        });
+      });
+    }
+
+    function renderProjectGraph(root, project) {
+      setText(root, '[data-graph-selected-title]', project ? `${project.display_name} evidence path` : 'No graph scope selected');
+      setText(root, '[data-graph-selected-summary]', project?.primary_action ?? 'Select a project to inspect its scoped provenance path.');
+      setHtml(root, '[data-graph-canvas]', graphCanvasHtml(project));
+      setHtml(root, '[data-graph-blockers]', blockerListHtml(project));
+      setHtml(root, '[data-graph-evidence]', evidenceRefsHtml(project));
+    }
+
+    function graphCanvasHtml(project) {
+      if (!project) {
+        return '<div class="border border-slate-700 bg-slate-900/60 p-6 text-slate-400">No graph scope is currently visible.</div>';
+      }
+
+      return `<div class="grid gap-3 lg:grid-cols-5">
+        ${graphStages(project).map(stageCardHtml).join('')}
+      </div>
+      <div class="mt-4 grid min-w-0 gap-2 lg:grid-cols-4">
+        ${project.graph_edges.slice(0, 4).map(edgeLabelHtml).join('')}
+      </div>`;
+    }
+
+    function graphStages(project) {
+      return [
+        ['Project', project.display_name],
+        ['Plan', formatLabel(project.plan)],
+        ['Runtime', formatLabel(project.runtime)],
+        ['Closeout', formatLabel(project.closeout)],
+        ['Truth', formatLabel(project.truth)],
+      ];
+    }
+
+    function stageCardHtml([label, value]) {
+      return `<div class="min-w-0 border border-slate-700 bg-slate-950/55 p-4">
+        <p class="text-[10px] font-semibold uppercase tracking-[0.14em] text-brand-200">${escapeHtml(label)}</p>
+        <p class="mt-2 break-words text-base font-semibold text-white">${escapeHtml(value)}</p>
+      </div>`;
+    }
+
+    function edgeLabelHtml(edge) {
+      return `<div class="min-w-0 border border-brand-300/25 bg-brand-400/10 px-3 py-2">
+        <p class="break-words text-[10px] uppercase tracking-[0.12em] text-brand-200">${escapeHtml(edge.from)} to ${escapeHtml(edge.to)}</p>
+        <p class="mt-1 break-words text-sm font-semibold text-slate-100">${escapeHtml(edge.label)}</p>
+      </div>`;
+    }
+
+    function blockerListHtml(project) {
+      if (!project) {
+        return '<div class="border border-slate-700 bg-slate-900/60 p-4 text-slate-400">Select a scope to inspect blockers.</div>';
+      }
+
+      const blockers = [
+        ...project.decision_titles.map((title) => ['Decision', title]),
+        ...project.runtime_stages.map((stage) => ['Runtime', stage]),
+        ...project.truth_recovery_stages.map((stage) => ['Truth', stage]),
+      ];
+      if (!blockers.length) {
+        return '<div class="border border-emerald-400/35 bg-emerald-400/10 p-4 text-emerald-100">No project-specific blocker is visible.</div>';
+      }
+
+      return blockers.map(([label, value]) => `<div class="border border-slate-700 bg-slate-900/60 px-4 py-3">
+        <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">${escapeHtml(label)}</p>
+        <p class="mt-1 text-sm leading-relaxed text-slate-100">${escapeHtml(value)}</p>
+      </div>`).join('');
+    }
+
+    function evidenceRefsHtml(project) {
+      if (!project) {
+        return '<div class="border border-slate-700 bg-slate-900/60 p-4 text-slate-400">No evidence refs are currently visible.</div>';
+      }
+
+      return project.assistant_refs.map((ref) => `<div class="border border-slate-700 bg-slate-900/60 px-4 py-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <p class="text-sm font-semibold text-slate-100">${escapeHtml(ref.label)}</p>
+          <span class="font-mono text-[10px] uppercase tracking-[0.1em] text-slate-500">${escapeHtml(formatLabel(ref.trust))}</span>
+        </div>
+        <p class="mt-2 break-all font-mono text-[11px] text-slate-400">${escapeHtml(ref.reference)}</p>
+      </div>`).join('');
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (char) => {
+        switch (char) {
+          case '&':
+            return '&amp;';
+          case '<':
+            return '&lt;';
+          case '>':
+            return '&gt;';
+          case '"':
+            return '&quot;';
+          case "'":
+            return '&#39;';
+          default:
+            return char;
+        }
+      });
+    }
+  </script>
+
+  <Footer />
+</Base>

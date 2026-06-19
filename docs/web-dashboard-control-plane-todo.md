@@ -342,6 +342,16 @@ Layout:
 - closeout and accepted truth status;
 - filters for blocked, running, attention, accepted, and stale.
 
+Status: implemented as a first selectable portfolio route. `/work/` now shows
+parallel project state chips, selected-project provenance, read-only assistant
+prompts, and an attention path that consolidates decision/runtime/truth blockers
+with state refs, fallback commands, and action boundaries. It also includes
+read-only project filters for all, attention, blocked, running, and truth-gap
+views plus a read-only active-task drawer derived from decision, runtime,
+truth-recovery, and project-row state. A future slice should wire the drawer to
+exact task-store records and add accepted/stale filters once the read model
+exposes those per-project states.
+
 ### P1 - `/graph`
 
 Purpose: scoped provenance and knowledge graph.
@@ -352,6 +362,28 @@ Default:
 - one to two hops by default;
 - highlight blocker and accepted-truth paths;
 - offer "expand" only as an advanced action.
+
+Status: implemented as a first read-only route. `/graph/` now renders
+project-scoped support paths, blocker lists, and evidence refs from
+`workstation_surface.v1`, with fixture fallback and live source-status handling.
+Expandable multi-hop graph exploration remains intentionally deferred.
+
+### P1 - `/settings`
+
+Purpose: read-only workstation readiness and source-contract surface.
+
+Default:
+
+- show Telegram, local LLM, runtime store, and other health checks;
+- show capacity signals such as active runners, queued tasks, provider-deferred
+  work, and budget warnings;
+- list known workspace roots and source refs from `workstation_surface.v1`;
+- keep edits and runtime changes out of the Web UI settings page.
+
+Status: implemented as a first read-only route. `/settings/` now hydrates from
+`workstation_surface.v1`, shows source-status warnings, exposes workspace roots
+and source refs, and documents guardrails without adding config mutation
+controls.
 
 ### P2 - Assistant Panel
 
@@ -374,6 +406,11 @@ Suggested prompts:
 - "Show the provenance path."
 - "Draft a safe action note."
 
+Status: partially implemented as read-only prompt composers. `/dashboard/` now
+has a workstation-level State briefing with cited refs and copyable prompts,
+and `/work/` has selected-project context prompts. A real answer surface,
+retrieval path, and action-card proposal loop remain deferred.
+
 ## Risk Register
 
 - Button overload: mitigated by contextual actions and detail drawers.
@@ -387,6 +424,198 @@ Suggested prompts:
   action.
 - Over-broad backend authority: mitigated by a local-only Forager control API
   or action packet processor with explicit schemas.
+
+## Current Completeness Review - 2026-06-19
+
+Current baseline checked with `npm run test:visual`: 24 Playwright tests pass
+across desktop and mobile. That is now a useful route-level smoke baseline, but
+it still misses deeper product gaps such as backend action API wiring, a real
+assistant answer surface, and expanded graph exploration.
+
+### P0 - Make `/decisions/` a selectable action center
+
+Current gap:
+
+- The queue renders decision and runtime handoff cards as static `<article>`
+  elements. Only the first open decision drives the detail panel.
+- Runtime handoff detail is only reachable when there are no open decisions.
+- Tests assert the first detail and details disclosure only; they do not click
+  queue items or verify selection state.
+
+Todo:
+
+- Render decision queue rows and runtime handoff rows as accessible buttons or
+  links with `aria-pressed` or equivalent selected-state semantics.
+- Track a selected item id in client state and render the matching decision or
+  runtime handoff detail.
+- Preserve the strict boundary: selection changes detail context only; it does
+  not run an action, preflight, dispatch, or closeout.
+- Add Playwright coverage for:
+  - selecting the second decision;
+  - selecting a runtime handoff while decisions still exist;
+  - keyboard focus and activation;
+  - mobile selection without horizontal overflow.
+
+Done when:
+
+- Every visible item in the decision queue can be inspected from the same page.
+- Runtime handoffs are inspectable without clearing the decision inbox first.
+- Tests would fail if `/decisions/` regressed to a first-item-only detail view.
+
+Status: implemented for the current `/decisions/` route. Queue items now select
+detail context only, runtime handoffs are inspectable alongside open decisions,
+and Playwright covers second-decision and runtime-handoff selection.
+
+### P0 - Surface live, fallback, stale, and failed-load states explicitly
+
+Current gap:
+
+- `/review/`, `/dashboard/`, and `/decisions/` silently render fixture fallback
+  when the live JSON fetch fails.
+- The source label is visible, but a failed live fetch does not produce a clear
+  operator-facing warning.
+- This is risky because the dashboard may look usable while it is no longer
+  reading current workstation state.
+
+Todo:
+
+- Add a shared source-status banner component or projection helper with states:
+  `live`, `fixture_fallback`, `live_fetch_failed`, `stale_live`, and
+  `missing_surface_url`.
+- On fetch failure, preserve the fallback UI but show a compact warning near the
+  page header with the attempted URL, failure class, and safe CLI refresh path.
+- Keep raw error text out of the primary card unless it is short and actionable.
+- Add tests that route a 404/500/network failure and assert that fallback is
+  visibly marked as fallback or failed-live state.
+
+Done when:
+
+- An operator can tell at a glance whether the page is live, stale, fixture-only,
+  or degraded.
+- A failed live fetch can no longer be mistaken for a fresh workstation state.
+
+Status: implemented for `/review/`, `/dashboard/`, `/work/`, `/graph/`,
+`/settings/`, and `/decisions/` with a shared source-status banner and
+failed-live fallback tests.
+
+### P0 - Repair dashboard project portfolio density
+
+Current gap:
+
+- Desktop screenshots show the selected project detail card becoming too narrow;
+  the `Plan / Runtime / Closeout / Truth` chips overlap or become unreadable.
+- Mobile screenshots do not overflow horizontally, but status lines and project
+  details are too dense to function as a mobile manager surface.
+- The current tests catch page-level overflow, not internal compression,
+  truncation, or chip readability.
+
+Todo:
+
+- Keep the project list/detail layout single-column until a wider breakpoint, or
+  give the detail card more width before switching to two columns.
+- Use two state-chip columns at normal desktop widths and reserve four columns
+  for wide desktop only.
+- Replace long status strings in the project list with semantic chips or short
+  labels, moving full detail into the selected panel.
+- Add visual/DOM checks for minimum chip widths, non-overlapping chip text, and
+  readable selected project detail on desktop and mobile.
+
+Done when:
+
+- The selected project detail can show plan, runtime, closeout, truth, decisions,
+  runtime handoffs, and truth items without overlapping or relying on tiny text.
+- Mobile users can identify the selected project, blocker, and next action before
+  opening details or scrolling through raw identifiers.
+
+Status: implemented for the current dashboard. Project list rows now use compact
+state chips, selected-project state chips no longer force four columns at normal
+desktop widths, and Playwright checks chip overflow on desktop/mobile.
+
+### P1 - Make assistant prompts honest controls
+
+Current gap:
+
+- Assistant prompt chips look like buttons but have no click behavior.
+- The panel correctly says read-only, but the controls still imply a missing
+  action.
+
+Todo:
+
+- Choose one behavior for the read-only phase:
+  - copy prompt to clipboard and show a short status message;
+  - open a local prompt composer drawer that still cannot execute actions; or
+  - render prompts as non-button chips until the assistant panel is wired.
+- Keep suggested actions as action-card proposals only; no direct execution path
+  from chat or prompt chips.
+- Add a small browser test for the chosen behavior.
+
+Done when:
+
+- Prompt controls either do something visible and bounded, or they no longer look
+  like interactive action buttons.
+
+Status: implemented as bounded copy controls on `/dashboard/` and `/work/`. If
+clipboard access is unavailable, the UI shows the prompt text as a ready-to-copy
+fallback instead of silently doing nothing.
+
+### P1 - Improve visual review artifacts
+
+Current gap:
+
+- Full-page screenshots capture the fixed top nav over the middle of long pages,
+  which makes the artifact harder to review.
+- `/decisions/` has no saved screenshot artifact even though it is now the main
+  action-center route.
+
+Todo:
+
+- Capture viewport screenshots for fixed-header layout checks and full-page
+  screenshots for document-length checks, or hide fixed nav only for full-page
+  artifact capture.
+- Add desktop and mobile `/decisions/` screenshots to the visual smoke suite.
+- Add one narrow-width dashboard screenshot after the project portfolio layout is
+  repaired.
+
+Done when:
+
+- Screenshot artifacts are useful for human review, not just byte-size smoke
+  assertions.
+
+Status: partially implemented. `/decisions/`, `/work/`, `/graph/`, and
+`/settings/` desktop/mobile screenshots are now captured, and visual smoke
+screenshots stabilize the fixed nav during full-page artifact capture. A future
+visual pass can still add more targeted narrow-width portfolio artifacts.
+
+### P1 - Normalize Web UI information hierarchy
+
+Current gap:
+
+- `/dashboard/` still mixes overview, project portfolio, decision inbox, truth
+  recovery, graph, assistant, health, and capacity in one long page.
+- This is acceptable for a read-only prototype, but it will become exhausting as
+  soon as more projects and actions are present.
+
+Todo:
+
+- Keep `/dashboard/` focused on workstation health, top attention, project
+  portfolio summary, and two primary navigation actions.
+- Move deeper action details to `/decisions/` and scoped evidence detail to
+  `/review/` or a future selected-entity detail route.
+- Decide whether `/work/` should become a real project portfolio route before
+  adding more project cards to `/dashboard/`.
+
+Done when:
+
+- The first viewport answers "what needs attention now?" without requiring the
+  operator to parse every subsystem at once.
+- Detail-heavy sections are reachable but not all permanently expanded on the
+  dashboard.
+
+Status: implemented for the first route split. `/dashboard/` now stays focused
+on workstation health, top attention, decision/truth summaries, and project
+attention counts. `/work/` now owns the selectable project portfolio, scoped
+provenance graph, and read-only assistant context, with desktop/mobile visual
+coverage.
 
 ## Suggested Implementation Order
 
@@ -433,12 +662,21 @@ Current status:
   a selectable project work queue with a focused detail panel showing each
   project's plan/runtime/closeout/truth chips, decision count, runtime handoff
   count, accepted-truth recovery count, and project-specific next action.
-- Done: made the `/dashboard/` Scoped Graph follow the selected project,
-  rendering that project's plan -> runtime -> closeout -> accepted-truth path
-  plus local decision, runtime-handoff, and truth-recovery blockers.
-- Done: made the `/dashboard/` Assistant panel follow the selected project in
-  read-only mode, with scoped context, up to three suggested prompts, and
-  explicit state or receipt refs so it cannot act as an execution bypass.
+- Done: split that deeper project work queue into `/work/`, leaving
+  `/dashboard/` as a calmer overview and moving scoped graph plus assistant
+  context out of the always-expanded dashboard surface.
+- Done: moved the selected-project Scoped Graph to `/work/`, rendering that
+  project's plan -> runtime -> closeout -> accepted-truth path plus local
+  decision, runtime-handoff, and truth-recovery blockers.
+- Done: moved the selected-project Assistant panel to `/work/` in read-only
+  mode, with scoped context, up to three suggested prompts, and explicit state
+  or receipt refs so it cannot act as an execution bypass.
+- Done: added `/graph/` as a read-only scoped provenance route with project
+  selector, support-path rail, blockers, evidence refs, source-status handling,
+  and desktop/mobile visual coverage.
+- Done: added `/settings/` as a read-only workstation readiness route with
+  service health, capacity signals, workspace roots, source refs, operational
+  guardrails, and desktop/mobile visual coverage.
 - Done: defined `decision_inbox_surface.v1` inside
   `workstation_surface.v1`, including open/visible counts, urgency sort order,
   read-only action model, stale guard, authorization boundary, receipt policy,

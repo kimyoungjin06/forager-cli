@@ -2,6 +2,7 @@
 import Base from '../layouts/Base.astro';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
+import SourceStatus from '../components/SourceStatus.astro';
 import { sitePath } from '../lib/paths';
 import {
   formatCountLabel,
@@ -70,6 +71,10 @@ const reviewView = viewFromOperatorCards(cards, closeoutRequired.id);
         </div>
       </div>
     </section>
+    <SourceStatus
+      detail="Static fixture data is visible until review-surface.json is loaded from the local export."
+      command="npm run export:review-surface"
+    />
 
     <section class="mx-auto grid max-w-7xl gap-6 px-6 py-8 lg:grid-cols-[22rem_1fr]">
       <aside class="min-w-0 space-y-3">
@@ -161,6 +166,12 @@ const reviewView = viewFromOperatorCards(cards, closeoutRequired.id);
       severityClasses,
       severityLabels,
     } from '../lib/reviewSurface';
+    import {
+      sourceStatusClasses,
+      sourceStatusLabels,
+    } from '../lib/sourceStatus';
+
+    const REVIEW_REFRESH_COMMAND = 'npm run export:review-surface';
 
     const app = document.getElementById('review-app');
     const fallbackDataElement = document.getElementById('review-fallback-data');
@@ -176,6 +187,12 @@ const reviewView = viewFromOperatorCards(cards, closeoutRequired.id);
       const liveSurfaceUrl = root.dataset.liveSurfaceUrl;
       if (!liveSurfaceUrl) {
         renderReviewView(root, fallback);
+        setSourceStatus(
+          root,
+          'missing_surface_url',
+          'No live review-surface URL is configured; showing static fixture fallback.',
+          REVIEW_REFRESH_COMMAND,
+        );
         return;
       }
 
@@ -187,8 +204,20 @@ const reviewView = viewFromOperatorCards(cards, closeoutRequired.id);
 
         const surface = await response.json();
         renderReviewView(root, projectReviewSurface(surface));
+        setSourceStatus(
+          root,
+          'live',
+          `Loaded review_surface.v1 from ${liveSurfaceUrl}.`,
+          REVIEW_REFRESH_COMMAND,
+        );
       } catch {
         renderReviewView(root, fallback);
+        setSourceStatus(
+          root,
+          'live_fetch_failed',
+          `Could not load ${liveSurfaceUrl}; showing static fixture fallback.`,
+          REVIEW_REFRESH_COMMAND,
+        );
       }
     }
 
@@ -245,6 +274,22 @@ const reviewView = viewFromOperatorCards(cards, closeoutRequired.id);
 
       element.textContent = command ?? '';
       element.toggleAttribute('hidden', !command);
+    }
+
+    function setSourceStatus(root, status, detail, command) {
+      const element = root.querySelector('[data-source-status]');
+      if (!element) {
+        return;
+      }
+
+      element.className = `${element.dataset.baseClass} ${sourceStatusClasses[status]}`;
+      setText(root, '[data-source-status-label]', sourceStatusLabels[status]);
+      setText(root, '[data-source-status-detail]', detail);
+      const commandElement = root.querySelector('[data-source-status-command]');
+      if (commandElement) {
+        commandElement.textContent = command ?? '';
+        commandElement.toggleAttribute('hidden', !command);
+      }
     }
 
     function queueCardHtml(card) {

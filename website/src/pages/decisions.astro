@@ -2,6 +2,7 @@
 import Base from '../layouts/Base.astro';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
+import SourceStatus from '../components/SourceStatus.astro';
 import { sitePath } from '../lib/paths';
 import {
   dashboardViewFromSurface,
@@ -54,6 +55,10 @@ const selectedRuntimeDispatch = decisionView.runtimeDispatch.items[0] as Runtime
         </div>
       </div>
     </section>
+    <SourceStatus
+      detail="Static fixture data is visible until workstation-surface.json is loaded from the local export."
+      command="npm run export:workstation-surface"
+    />
 
     <section class="mx-auto grid max-w-7xl gap-6 px-6 py-8 lg:grid-cols-[22rem_1fr]">
       <aside class="min-w-0 space-y-3">
@@ -64,14 +69,21 @@ const selectedRuntimeDispatch = decisionView.runtimeDispatch.items[0] as Runtime
         <div class="space-y-3" data-decision-queue>
           {decisionView.decisionInbox.items.length ? (
             decisionView.decisionInbox.items.map((decision, index) => (
-              <article class={`min-w-0 border p-4 ${index === 0 ? severityClasses[decision.severity] : 'border-slate-700 bg-slate-900/70 text-slate-200'}`}>
+              <button
+                type="button"
+                class={`w-full min-w-0 border p-4 text-left transition hover:border-brand-300/70 ${index === 0 ? severityClasses[decision.severity] : 'border-slate-700 bg-slate-900/70 text-slate-200'}`}
+                data-decision-select
+                data-decision-type="decision"
+                data-decision-id={decision.decision_id}
+                aria-pressed={index === 0 ? 'true' : 'false'}
+              >
                 <div class="flex items-start justify-between gap-3">
                   <h3 class="text-base font-semibold">{decision.title}</h3>
                   <span class="whitespace-nowrap text-xs font-semibold uppercase tracking-[0.12em] opacity-75">{severityLabels[decision.severity]}</span>
                 </div>
                 <p class="mt-2 font-mono text-xs uppercase tracking-[0.12em] opacity-70">{decision.project_key} · {formatLabel(decision.kind)}</p>
                 <p class="mt-2 text-sm leading-relaxed opacity-85">{decision.why_now}</p>
-              </article>
+              </button>
             ))
           ) : (
             <article class="border border-emerald-400/35 bg-emerald-400/10 p-4 text-emerald-100">
@@ -84,14 +96,21 @@ const selectedRuntimeDispatch = decisionView.runtimeDispatch.items[0] as Runtime
               <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Runtime handoff</p>
               <p class="mt-2 text-sm leading-relaxed text-slate-300">{decisionView.runtimeDispatch.summary}</p>
               <div class="mt-3 space-y-2">
-                {decisionView.runtimeDispatch.items.map((item) => (
-                  <article class={`border p-3 ${severityClasses[item.severity]}`}>
+                {decisionView.runtimeDispatch.items.map((item, index) => (
+                  <button
+                    type="button"
+                    class={`w-full border p-3 text-left transition hover:border-brand-300/70 ${!selectedDecision && index === 0 ? severityClasses[item.severity] : 'border-slate-700 bg-slate-900/70 text-slate-200'}`}
+                    data-decision-select
+                    data-decision-type="runtime"
+                    data-decision-id={`${item.project_key}:${item.decision_id}:${item.closeout_id}`}
+                    aria-pressed={!selectedDecision && index === 0 ? 'true' : 'false'}
+                  >
                     <div class="flex items-start justify-between gap-3">
                       <h3 class="text-sm font-semibold">{item.title}</h3>
                       <span class="whitespace-nowrap text-xs font-semibold uppercase tracking-[0.12em] opacity-75">{formatLabel(item.stage)}</span>
                     </div>
                     <p class="mt-2 break-all font-mono text-xs opacity-80">{item.closeout_id}</p>
-                  </article>
+                  </button>
                 ))}
               </div>
             </section>
@@ -215,10 +234,17 @@ const selectedRuntimeDispatch = decisionView.runtimeDispatch.items[0] as Runtime
       severityClasses,
       severityLabels,
     } from '../lib/dashboardSurface';
+    import {
+      sourceStatusClasses,
+      sourceStatusLabels,
+    } from '../lib/sourceStatus';
+
+    const WORKSTATION_REFRESH_COMMAND = 'npm run export:workstation-surface';
 
     const app = document.getElementById('decision-app');
     const fallbackElement = document.getElementById('decision-fallback-data');
     const fallbackView = fallbackElement?.textContent ? JSON.parse(fallbackElement.textContent) : null;
+    let selectedQueueItem = null;
 
     if (app && fallbackView) {
       fetchDecisionSurface(app, fallbackView);
@@ -228,6 +254,12 @@ const selectedRuntimeDispatch = decisionView.runtimeDispatch.items[0] as Runtime
       const liveSurfaceUrl = root.dataset.liveSurfaceUrl;
       if (!liveSurfaceUrl) {
         renderDecisionCenter(root, fallback);
+        setSourceStatus(
+          root,
+          'missing_surface_url',
+          'No live workstation-surface URL is configured; showing static fixture fallback.',
+          WORKSTATION_REFRESH_COMMAND,
+        );
         return;
       }
 
@@ -237,24 +269,67 @@ const selectedRuntimeDispatch = decisionView.runtimeDispatch.items[0] as Runtime
           throw new Error(`workstation surface unavailable: ${response.status}`);
         }
 
-        renderDecisionCenter(root, dashboardViewFromSurface(await response.json()));
+        const view = dashboardViewFromSurface(await response.json());
+        renderDecisionCenter(root, view);
+        setSourceStatus(
+          root,
+          view.staleLabel.toLowerCase().includes('fresh') ? 'live' : 'stale_live',
+          `Loaded workstation_surface.v1 from ${liveSurfaceUrl}; freshness is ${view.staleLabel}.`,
+          WORKSTATION_REFRESH_COMMAND,
+        );
       } catch {
         renderDecisionCenter(root, fallback);
+        setSourceStatus(
+          root,
+          'live_fetch_failed',
+          `Could not load ${liveSurfaceUrl}; showing static fixture fallback.`,
+          WORKSTATION_REFRESH_COMMAND,
+        );
       }
     }
 
     function renderDecisionCenter(root, view) {
       const inbox = view.decisionInbox;
+      const selected = resolveSelectedQueueItem(view, selectedQueueItem);
+      selectedQueueItem = selected ? { type: selected.type, id: selected.id } : null;
       setText(root, '[data-decision-summary]', inbox.summary);
       setText(root, '[data-decision-open-count]', inbox.openCount);
       setText(root, '[data-decision-visible-count]', inbox.visibleCount);
       setText(root, '[data-decision-mode]', inbox.actionMode);
-      setHtml(root, '[data-decision-queue]', queueHtml(inbox.items, inbox, view.runtimeDispatch));
-      setHtml(root, '[data-decision-detail]', detailHtml(inbox.items[0], inbox, view.runtimeDispatch));
+      setHtml(root, '[data-decision-queue]', queueHtml(inbox.items, inbox, view.runtimeDispatch, selectedQueueItem));
+      setHtml(root, '[data-decision-detail]', detailHtml(selected, inbox));
+      bindDecisionQueue(root, view);
     }
 
-    function queueHtml(items, inbox, runtimeDispatch) {
-      const runtimeHtml = runtimeDispatchQueueHtml(runtimeDispatch);
+    function resolveSelectedQueueItem(view, preferred) {
+      const decisionItems = view.decisionInbox.items.map((item) => ({
+        type: 'decision',
+        id: item.decision_id,
+        item,
+      }));
+      const runtimeItems = view.runtimeDispatch.items.map((item) => ({
+        type: 'runtime',
+        id: runtimeDispatchId(item),
+        item,
+      }));
+      const allItems = [...decisionItems, ...runtimeItems];
+
+      if (!allItems.length) {
+        return null;
+      }
+
+      if (preferred) {
+        const matched = allItems.find((item) => item.type === preferred.type && item.id === preferred.id);
+        if (matched) {
+          return matched;
+        }
+      }
+
+      return allItems[0];
+    }
+
+    function queueHtml(items, inbox, runtimeDispatch, selected) {
+      const runtimeHtml = runtimeDispatchQueueHtml(runtimeDispatch, selected);
       if (!items.length) {
         const emptyDecision = runtimeDispatch.items.length ? '' : `<article class="border border-emerald-400/35 bg-emerald-400/10 p-4 text-emerald-100">
           <h3 class="font-semibold">${escapeHtml(inbox.emptyTitle)}</h3>
@@ -263,31 +338,44 @@ const selectedRuntimeDispatch = decisionView.runtimeDispatch.items[0] as Runtime
         return `${emptyDecision}${runtimeHtml}`;
       }
 
-      const decisionHtml = items.map((decision, index) => {
-        const classes = index === 0 ? severityClasses[decision.severity] : 'border-slate-700 bg-slate-900/70 text-slate-200';
-        return `<article class="min-w-0 border p-4 ${classes}">
+      const decisionHtml = items.map((decision) => decisionQueueButtonHtml(decision, selected)).join('');
+      return `${decisionHtml}${runtimeHtml}`;
+    }
+
+    function decisionQueueButtonHtml(decision, selected) {
+      const isSelected = selected?.type === 'decision' && selected.id === decision.decision_id;
+      const classes = isSelected ? severityClasses[decision.severity] : 'border-slate-700 bg-slate-900/70 text-slate-200';
+      return `<button
+          type="button"
+          class="w-full min-w-0 border p-4 text-left transition hover:border-brand-300/70 ${classes}"
+          data-decision-select
+          data-decision-type="decision"
+          data-decision-id="${escapeHtml(decision.decision_id)}"
+          aria-pressed="${isSelected ? 'true' : 'false'}"
+        >
           <div class="flex items-start justify-between gap-3">
             <h3 class="text-base font-semibold">${escapeHtml(decision.title)}</h3>
             <span class="whitespace-nowrap text-xs font-semibold uppercase tracking-[0.12em] opacity-75">${escapeHtml(severityLabels[decision.severity])}</span>
           </div>
           <p class="mt-2 font-mono text-xs uppercase tracking-[0.12em] opacity-70">${escapeHtml(decision.project_key)} · ${escapeHtml(formatLabel(decision.kind))}</p>
           <p class="mt-2 text-sm leading-relaxed opacity-85">${escapeHtml(decision.why_now)}</p>
-        </article>`;
-      }).join('');
-      return `${decisionHtml}${runtimeHtml}`;
+        </button>`;
     }
 
-    function detailHtml(decision, inbox, runtimeDispatch) {
-      if (!decision) {
-        if (runtimeDispatch.items.length) {
-          return runtimeDispatchDetailHtml(runtimeDispatch.items[0]);
-        }
+    function detailHtml(selected, inbox) {
+      if (!selected) {
         return `<article class="min-w-0 border border-emerald-400/35 bg-emerald-400/10 p-6 text-emerald-100">
           <h2 class="text-2xl font-semibold">${escapeHtml(inbox.emptyTitle)}</h2>
           <p class="mt-3 leading-relaxed opacity-85">${escapeHtml(inbox.emptySummary)}</p>
           <code class="mt-4 block whitespace-pre-wrap break-all border border-emerald-300/40 bg-slate-950/35 px-4 py-3 font-mono text-xs">${escapeHtml(inbox.emptyCliFallback)}</code>
         </article>`;
       }
+
+      if (selected.type === 'runtime') {
+        return runtimeDispatchDetailHtml(selected.item);
+      }
+
+      const decision = selected.item;
 
       return `<article class="min-w-0 border p-6 ${severityClasses[decision.severity]}">
         <p class="text-sm font-semibold uppercase tracking-[0.14em] opacity-75">${escapeHtml(decision.project_key)} · ${escapeHtml(formatLabel(decision.kind))}</p>
@@ -318,24 +406,52 @@ const selectedRuntimeDispatch = decisionView.runtimeDispatch.items[0] as Runtime
       </article>`;
     }
 
-    function runtimeDispatchQueueHtml(runtimeDispatch) {
+    function runtimeDispatchQueueHtml(runtimeDispatch, selected) {
       if (!runtimeDispatch.items.length) {
         return '';
       }
 
-      const items = runtimeDispatch.items.map((item) => `<article class="border p-3 ${severityClasses[item.severity]}">
-        <div class="flex items-start justify-between gap-3">
-          <h3 class="text-sm font-semibold">${escapeHtml(item.title)}</h3>
-          <span class="whitespace-nowrap text-xs font-semibold uppercase tracking-[0.12em] opacity-75">${escapeHtml(formatLabel(item.stage))}</span>
-        </div>
-        <p class="mt-2 break-all font-mono text-xs opacity-80">${escapeHtml(item.closeout_id)}</p>
-      </article>`).join('');
+      const items = runtimeDispatch.items.map((item) => {
+        const id = runtimeDispatchId(item);
+        const isSelected = selected?.type === 'runtime' && selected.id === id;
+        const classes = isSelected ? severityClasses[item.severity] : 'border-slate-700 bg-slate-900/70 text-slate-200';
+        return `<button
+          type="button"
+          class="w-full border p-3 text-left transition hover:border-brand-300/70 ${classes}"
+          data-decision-select
+          data-decision-type="runtime"
+          data-decision-id="${escapeHtml(id)}"
+          aria-pressed="${isSelected ? 'true' : 'false'}"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <h3 class="text-sm font-semibold">${escapeHtml(item.title)}</h3>
+            <span class="whitespace-nowrap text-xs font-semibold uppercase tracking-[0.12em] opacity-75">${escapeHtml(formatLabel(item.stage))}</span>
+          </div>
+          <p class="mt-2 break-all font-mono text-xs opacity-80">${escapeHtml(item.closeout_id)}</p>
+        </button>`;
+      }).join('');
 
       return `<section class="border border-slate-700 bg-slate-950/55 p-4">
         <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Runtime handoff</p>
         <p class="mt-2 text-sm leading-relaxed text-slate-300">${escapeHtml(runtimeDispatch.summary)}</p>
         <div class="mt-3 space-y-2">${items}</div>
       </section>`;
+    }
+
+    function bindDecisionQueue(root, view) {
+      root.querySelectorAll('[data-decision-select]').forEach((button) => {
+        button.addEventListener('click', () => {
+          selectedQueueItem = {
+            type: button.dataset.decisionType,
+            id: button.dataset.decisionId,
+          };
+          renderDecisionCenter(root, view);
+        });
+      });
+    }
+
+    function runtimeDispatchId(item) {
+      return `${item.project_key}:${item.decision_id}:${item.closeout_id}`;
     }
 
     function runtimeDispatchDetailHtml(item) {
@@ -487,6 +603,22 @@ const selectedRuntimeDispatch = decisionView.runtimeDispatch.items[0] as Runtime
       const element = root.querySelector(selector);
       if (element) {
         element.innerHTML = value;
+      }
+    }
+
+    function setSourceStatus(root, status, detail, command) {
+      const element = root.querySelector('[data-source-status]');
+      if (!element) {
+        return;
+      }
+
+      element.className = `${element.dataset.baseClass} ${sourceStatusClasses[status]}`;
+      setText(root, '[data-source-status-label]', sourceStatusLabels[status]);
+      setText(root, '[data-source-status-detail]', detail);
+      const commandElement = root.querySelector('[data-source-status-command]');
+      if (commandElement) {
+        commandElement.textContent = command ?? '';
+        commandElement.toggleAttribute('hidden', !command);
       }
     }
 

@@ -51,6 +51,8 @@ export type ProjectDetail = {
   runtime_handoff_count: number;
   truth_recovery_count: number;
   primary_action: string;
+  attention_items: ProjectAttentionItem[];
+  task_items: ProjectTaskItem[];
   decision_titles: string[];
   runtime_stages: string[];
   truth_recovery_stages: string[];
@@ -59,6 +61,26 @@ export type ProjectDetail = {
   assistant_context: string;
   assistant_prompts: AssistantPrompt[];
   assistant_refs: AssistantRef[];
+};
+
+export type ProjectAttentionItem = {
+  kind: string;
+  title: string;
+  severity: Severity;
+  summary: string;
+  status: string;
+  reference: string;
+  command: string;
+  boundary: string;
+};
+
+export type ProjectTaskItem = {
+  kind: string;
+  title: string;
+  status: string;
+  summary: string;
+  reference: string;
+  command: string;
 };
 
 export type DecisionItem = {
@@ -295,12 +317,19 @@ export type GraphEdge = {
   label: string;
 };
 
+export type SourceRef = {
+  label: string;
+  reference: string;
+};
+
 export type DashboardView = {
   sourceLabel: string;
   workstationId: string;
   profile: string;
   generatedAt: string;
   staleLabel: string;
+  workspaceRoots: string[];
+  sourceRefs: SourceRef[];
   topTitle: string;
   topSummary: string;
   topSeverity: Severity;
@@ -348,6 +377,8 @@ export function dashboardViewFromSurface(surface: unknown): DashboardView {
     profile: fallbackString(stringAt(surface, 'profile'), 'default'),
     generatedAt: fallbackString(stringAt(surface, 'generated_at'), '-'),
     staleLabel: fallbackString(stringAt(stale, 'status'), 'unknown'),
+    workspaceRoots: stringArrayAt(surface, 'workspace_roots'),
+    sourceRefs: sourceRefsFromRecord(recordAt(surface, 'source_refs')),
     topTitle: fallbackString(stringAt(top, 'title'), 'No top attention item'),
     topSummary: fallbackString(
       stringAt(top, 'summary'),
@@ -393,6 +424,78 @@ export function statusClasses(status: HealthStatus): string {
     default:
       return 'border-slate-700 bg-slate-900/70 text-slate-200';
   }
+}
+
+export function dashboardAssistantContext(view: DashboardView): string {
+  if (view.decisionInbox.openCount > 0) {
+    return `${view.workstationId} has ${view.decisionInbox.openCount} open decision item(s). Start from "${view.topTitle}", cite the decision inbox and capacity state, and mark anything beyond the surface as inference.`;
+  }
+  if (view.acceptedTruthRecovery.visibleCount > 0) {
+    return `${view.workstationId} has accepted-truth recovery work visible. Separate closeout evidence, follow-up state, and accepted-truth recording before proposing any action card.`;
+  }
+  if (view.runtimeDispatch.visibleCount > 0) {
+    return `${view.workstationId} has post-closeout runtime handoffs visible. Distinguish queueing, launch, and monitoring; do not treat this assistant entry as runtime authorization.`;
+  }
+
+  return `${view.workstationId} has no open decision item in the current surface. Summarize health, capacity, and project state, and call out stale or inferred claims explicitly.`;
+}
+
+export function dashboardAssistantPrompts(view: DashboardView): AssistantPrompt[] {
+  const prompts: AssistantPrompt[] = [
+    {
+      label: 'What needs attention?',
+      prompt: `Summarize the current Forager workstation state from workstation_surface.v1 for profile ${view.profile}. Cite top_attention, decision_inbox, capacity, and health refs; mark any inference.`,
+    },
+    {
+      label: 'Explain top item',
+      prompt: `Explain why "${view.topTitle}" needs attention. Include the risk, next safe action, and which receipt or state refs must be checked before action.`,
+    },
+  ];
+
+  if (view.decisionInbox.openCount > 0) {
+    prompts.push({
+      label: 'Draft manager brief',
+      prompt: `Draft a concise manager brief for ${view.decisionInbox.openCount} open decision item(s), grouping by project and stating what is blocked without executing anything.`,
+    });
+  } else {
+    prompts.push({
+      label: 'Check readiness',
+      prompt: `Review workstation readiness for ${view.workstationId}: summarize health, capacity, workspace roots, and stale-state risks without proposing direct execution.`,
+    });
+  }
+
+  return prompts.slice(0, 3);
+}
+
+export function dashboardAssistantRefs(view: DashboardView): AssistantRef[] {
+  const refs: AssistantRef[] = [
+    {
+      label: 'Top attention',
+      reference: 'workstation_surface.v1#top_attention',
+      trust: 'state-ref',
+    },
+    {
+      label: 'Decision inbox',
+      reference: view.decisionInbox.schema,
+      trust: 'state-ref',
+    },
+    {
+      label: 'Capacity',
+      reference: 'workstation_surface.v1#capacity',
+      trust: 'state-ref',
+    },
+  ];
+
+  const decision = view.decisions[0];
+  if (decision) {
+    refs.push({
+      label: 'Leading decision',
+      reference: `decision:${decision.decision_id}`,
+      trust: decision.receipt_ref ? 'receipt-backed' : 'state-ref',
+    });
+  }
+
+  return refs.slice(0, 4);
 }
 
 function healthItems(values: unknown[]): HealthItem[] {
@@ -457,6 +560,8 @@ function projectDetailsFromSurface(
       runtime_handoff_count: runtimeItems.length,
       truth_recovery_count: truthItems.length,
       primary_action: projectPrimaryAction(decisions, runtimeItems, truthItems),
+      attention_items: projectAttentionItems(decisions, runtimeItems, truthItems),
+      task_items: projectTaskItems(project, decisions, runtimeItems, truthItems),
       decision_titles: decisions.map((item) => item.title).slice(0, 3),
       runtime_stages: runtimeItems.map((item) => `${formatLabel(item.stage)}: ${item.title}`).slice(0, 3),
       truth_recovery_stages: truthItems
@@ -469,6 +574,130 @@ function projectDetailsFromSurface(
       assistant_refs: projectAssistantRefs(project, decisions, runtimeItems, truthItems),
     };
   });
+}
+
+function projectTaskItems(
+  project: ProjectRow,
+  decisions: DecisionItem[],
+  runtimeItems: RuntimeDispatchItem[],
+  truthItems: AcceptedTruthRecoveryItem[],
+): ProjectTaskItem[] {
+  const decisionTasks = decisions.map((item) => {
+    const action = item.action_envelopes[0];
+    const latestExecution = action?.latest_execution;
+    const latestReceipt = action?.latest_receipt;
+    return {
+      kind: 'Decision task',
+      title: item.title,
+      status: latestExecution?.result_status || latestReceipt?.result_status || item.status,
+      summary: item.recommendation || item.why_now,
+      reference: item.receipt_ref || item.decision_id,
+      command: action?.allowed_command || item.cli_fallback,
+    };
+  });
+
+  const runtimeTasks = runtimeItems.map((item) => ({
+    kind: 'Runtime task',
+    title: item.title,
+    status: item.latest_receipt?.result_status || item.latest_preflight?.result_status || item.stage,
+    summary: item.latest_preflight?.reason || item.latest_receipt?.reason || item.boundary,
+    reference: item.latest_receipt?.receipt_id || item.handoff_id || item.closeout_id || item.decision_id,
+    command: item.tick_command || item.dispatch_command || item.preflight_command,
+  }));
+
+  const truthTasks = truthItems.map((item) => ({
+    kind: 'Truth task',
+    title: formatLabel(item.stage),
+    status: item.acceptance_status,
+    summary: item.next_safe_action,
+    reference: item.receipt_id || item.closeout_id || item.review_id,
+    command: item.resolve_command || item.retire_command,
+  }));
+
+  const derivedTasks: ProjectTaskItem[] = [];
+  if (decisionTasks.length === 0 && project.decisions > 0) {
+    derivedTasks.push({
+      kind: 'Decision count',
+      title: `${project.decisions} decision${project.decisions === 1 ? '' : 's'} reported`,
+      status: 'needs inspection',
+      summary: 'The workstation surface reports decision pressure, but no scoped decision records were included for this project.',
+      reference: `workstation_surface.v1#project:${project.project_key}`,
+      command: 'forager offdesk decisions --json',
+    });
+  }
+  if (runtimeTasks.length === 0 && project.runtime !== '-' && project.runtime !== 'completed') {
+    derivedTasks.push({
+      kind: 'Runtime state',
+      title: `Runtime ${formatLabel(project.runtime)}`,
+      status: project.runtime,
+      summary: 'Runtime state is visible in the project row; inspect the queue before launching or stopping work.',
+      reference: `workstation_surface.v1#project:${project.project_key}`,
+      command: 'forager status --json',
+    });
+  }
+
+  return [
+    ...decisionTasks,
+    ...runtimeTasks,
+    ...truthTasks,
+    ...derivedTasks,
+  ].slice(0, 6);
+}
+
+function projectAttentionItems(
+  decisions: DecisionItem[],
+  runtimeItems: RuntimeDispatchItem[],
+  truthItems: AcceptedTruthRecoveryItem[],
+): ProjectAttentionItem[] {
+  const decisionItems = decisions.map((item) => {
+    const action = item.action_envelopes[0];
+    const latestReceipt = action?.latest_receipt;
+    const latestExecution = action?.latest_execution;
+    const status = latestExecution?.result_status
+      ? `latest execution ${latestExecution.result_status}`
+      : latestReceipt?.result_status
+        ? `latest receipt ${latestReceipt.result_status}`
+        : item.status;
+
+    return {
+      kind: 'Decision',
+      title: item.title,
+      severity: item.severity,
+      summary: item.why_now,
+      status,
+      reference: item.receipt_ref || item.decision_id,
+      command: action?.allowed_command || item.cli_fallback,
+      boundary: action?.stale_rejection_reason || item.authorization_boundary,
+    };
+  });
+
+  const runtimeAttentionItems = runtimeItems.map((item) => ({
+    kind: 'Runtime handoff',
+    title: item.title,
+    severity: item.severity,
+    summary: item.latest_preflight?.reason || item.latest_receipt?.reason || item.boundary,
+    status: item.latest_receipt?.result_status || item.latest_preflight?.result_status || item.stage,
+    reference: item.latest_receipt?.receipt_id || item.handoff_id || item.closeout_id || item.decision_id,
+    command: item.dispatch_command || item.preflight_command || item.tick_command,
+    boundary: item.boundary,
+  }));
+
+  const truthAttentionItems = truthItems.map((item) => ({
+    kind: 'Truth recovery',
+    title: formatLabel(item.stage),
+    severity: item.severity,
+    summary: item.next_safe_action,
+    status: `${item.acceptance_status} / ${item.verification_status}`,
+    reference: item.receipt_id || item.closeout_id || item.review_id,
+    command: item.resolve_command || item.retire_command,
+    boundary: item.boundary,
+  }));
+
+  return [
+    ...decisionItems,
+    ...runtimeAttentionItems,
+    ...truthAttentionItems,
+  ].slice(0, 5);
 }
 
 function projectGraphEdges(
@@ -1027,6 +1256,15 @@ function graphEdges(values: unknown[]): GraphEdge[] {
   }));
 }
 
+function sourceRefsFromRecord(record: Record<string, unknown>): SourceRef[] {
+  return Object.entries(record)
+    .map(([label, value]) => ({
+      label,
+      reference: typeof value === 'string' ? value.trim() : '',
+    }))
+    .filter((item) => item.reference.length > 0);
+}
+
 function entriesFromRecord(record: Record<string, unknown>): { label: string; value: number }[] {
   return Object.entries(record)
     .map(([label, value]) => ({ label, value: typeof value === 'number' && Number.isFinite(value) ? value : 0 }));
@@ -1076,6 +1314,13 @@ function booleanAt(value: Record<string, unknown>, key: string): boolean {
 function arrayAt(value: Record<string, unknown>, key: string): unknown[] {
   const child = value[key];
   return Array.isArray(child) ? child : [];
+}
+
+function stringArrayAt(value: Record<string, unknown>, key: string): string[] {
+  return arrayAt(value, key)
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function fallbackString(...values: string[]): string {

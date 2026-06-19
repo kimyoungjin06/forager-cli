@@ -1,0 +1,337 @@
+---
+import Base from '../layouts/Base.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import SourceStatus from '../components/SourceStatus.astro';
+import { sitePath } from '../lib/paths';
+import {
+  dashboardViewFromSurface,
+  formatLabel,
+  statusClasses,
+  type DashboardView,
+  type HealthItem,
+  type SourceRef,
+} from '../lib/dashboardSurface';
+
+import workstationSurface from '../../../tests/fixtures/ui/workstation_surface/attention.json';
+
+const settingsView = dashboardViewFromSurface(workstationSurface) as DashboardView;
+---
+
+<Base
+  title="Forager Settings"
+  description="Read-only Forager workstation readiness, source contract, and operational guardrail settings surface."
+>
+  <Nav />
+
+  <main
+    id="settings-app"
+    class="min-h-screen bg-[#08111d] pt-24 text-slate-100"
+    data-live-surface-url={sitePath('/workstation-surface.json')}
+  >
+    <section class="border-y border-slate-700/70 bg-[#101a27] px-6 py-5">
+      <div class="mx-auto grid max-w-7xl gap-5 xl:grid-cols-[1fr_auto] xl:items-center">
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-[0.16em] text-brand-300">Forager Settings</p>
+          <h1 class="mt-2 text-3xl font-semibold tracking-tight text-white md:text-4xl">Workstation readiness</h1>
+          <p class="mt-2 max-w-3xl text-sm leading-relaxed text-slate-400">
+            Source: <span class="font-medium text-slate-200" data-settings-source>{settingsView.sourceLabel}</span>
+            <span class="text-slate-600"> / </span>
+            Profile: <span class="font-mono text-slate-200" data-settings-profile>{settingsView.profile}</span>
+            <span class="text-slate-600"> / </span>
+            Freshness: <span class="font-medium text-slate-200" data-settings-stale>{settingsView.staleLabel}</span>
+          </p>
+        </div>
+
+        <div class="grid gap-3 text-sm sm:grid-cols-4">
+          <div class="border border-slate-700 bg-slate-950/55 px-4 py-3">
+            <p class="text-slate-400">Health checks</p>
+            <p class="mt-1 font-mono text-slate-100" data-settings-health-count>{settingsView.health.length}</p>
+          </div>
+          <div class="border border-slate-700 bg-slate-950/55 px-4 py-3">
+            <p class="text-slate-400">Workspace roots</p>
+            <p class="mt-1 font-mono text-slate-100" data-settings-root-count>{settingsView.workspaceRoots.length}</p>
+          </div>
+          <div class="border border-slate-700 bg-slate-950/55 px-4 py-3">
+            <p class="text-slate-400">Source refs</p>
+            <p class="mt-1 font-mono text-slate-100" data-settings-source-ref-count>{settingsView.sourceRefs.length}</p>
+          </div>
+          <div class="border border-slate-700 bg-slate-950/55 px-4 py-3">
+            <p class="text-slate-400">Capacity rows</p>
+            <p class="mt-1 font-mono text-slate-100" data-settings-capacity-count>{settingsView.capacity.length}</p>
+          </div>
+        </div>
+      </div>
+    </section>
+    <SourceStatus
+      detail="Static fixture data is visible until workstation-surface.json is loaded from the local export."
+      command="npm run export:workstation-surface"
+    />
+
+    <section class="mx-auto grid max-w-7xl gap-6 px-6 py-8 xl:grid-cols-[1.05fr_0.95fr]">
+      <section class="min-w-0 space-y-6">
+        <section class="min-w-0 border border-slate-700 bg-slate-950/55 p-6">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p class="text-sm font-semibold uppercase tracking-[0.16em] text-brand-200">Runtime Prerequisites</p>
+              <h2 class="mt-2 text-2xl font-semibold text-white">Services and local model</h2>
+            </div>
+            <a href={sitePath('/dashboard/')} class="text-sm font-semibold text-brand-200 hover:text-white">Dashboard</a>
+          </div>
+          <div class="mt-5 grid gap-3 lg:grid-cols-2" data-settings-health>
+            {settingsView.health.map((item: HealthItem) => (
+              <article class={`min-w-0 border p-4 ${statusClasses(item.status)}`}>
+                <div class="flex items-start justify-between gap-3">
+                  <h3 class="font-semibold">{item.label}</h3>
+                  <span class="whitespace-nowrap font-mono text-xs uppercase opacity-75">{item.status}</span>
+                </div>
+                <p class="mt-2 text-sm leading-relaxed opacity-85">{item.summary}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section class="min-w-0 border border-slate-700 bg-[#111b27] p-6">
+          <p class="text-sm font-semibold uppercase tracking-[0.16em] text-slate-400">Capacity Signals</p>
+          <div class="mt-5 grid gap-3 sm:grid-cols-2" data-settings-capacity>
+            {settingsView.capacity.map((item) => (
+              <div class="border border-slate-700 bg-slate-950/45 p-4">
+                <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{formatLabel(item.label)}</p>
+                <p class="mt-2 font-mono text-2xl text-white">{item.value}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section class="min-w-0 border border-slate-700 bg-slate-950/55 p-6">
+          <p class="text-sm font-semibold uppercase tracking-[0.16em] text-brand-200">Operational Guardrails</p>
+          <div class="mt-5 grid gap-3 lg:grid-cols-3">
+            <div class="border border-slate-700 bg-slate-900/60 p-4">
+              <p class="font-semibold text-white">Read-only settings</p>
+              <p class="mt-2 text-sm leading-relaxed text-slate-400">This page reports readiness and source contracts. It does not edit config files.</p>
+            </div>
+            <div class="border border-slate-700 bg-slate-900/60 p-4">
+              <p class="font-semibold text-white">Structured actions</p>
+              <p class="mt-2 text-sm leading-relaxed text-slate-400">Runtime, provider, closeout, and truth changes remain behind envelope and receipt checks.</p>
+            </div>
+            <div class="border border-slate-700 bg-slate-900/60 p-4">
+              <p class="font-semibold text-white">Local review</p>
+              <p class="mt-2 text-sm leading-relaxed text-slate-400">Remote surfaces may expose state, but accepted truth and closeout judgment stay explicit.</p>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <aside class="min-w-0 space-y-6">
+        <section class="min-w-0 border border-slate-700 bg-slate-950/55 p-6">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="text-sm font-semibold uppercase tracking-[0.16em] text-brand-200">Workspace Roots</p>
+              <p class="mt-2 text-sm leading-relaxed text-slate-400">Known task workdirs, capped by the workstation surface.</p>
+            </div>
+            <a href={sitePath('/work/')} class="text-sm font-semibold text-brand-200 hover:text-white">Work</a>
+          </div>
+          <div class="mt-4 space-y-3" data-settings-roots>
+            {settingsView.workspaceRoots.length ? (
+              settingsView.workspaceRoots.map((root) => (
+                <div class="border border-slate-700 bg-slate-900/60 px-4 py-3">
+                  <p class="break-all font-mono text-xs text-slate-200">{root}</p>
+                </div>
+              ))
+            ) : (
+              <div class="border border-slate-700 bg-slate-900/60 p-4 text-slate-400">No workspace roots are currently reported.</div>
+            )}
+          </div>
+        </section>
+
+        <section class="min-w-0 border border-slate-700 bg-slate-950/55 p-6">
+          <p class="text-sm font-semibold uppercase tracking-[0.16em] text-brand-200">Source Contracts</p>
+          <div class="mt-4 space-y-3" data-settings-source-refs>
+            {settingsView.sourceRefs.length ? (
+              settingsView.sourceRefs.map((ref: SourceRef) => (
+                <div class="border border-slate-700 bg-slate-900/60 px-4 py-3">
+                  <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">{formatLabel(ref.label)}</p>
+                  <p class="mt-2 break-all font-mono text-xs text-slate-200">{ref.reference}</p>
+                </div>
+              ))
+            ) : (
+              <div class="border border-slate-700 bg-slate-900/60 p-4 text-slate-400">No source refs are currently reported by this surface.</div>
+            )}
+          </div>
+        </section>
+
+        <section class="min-w-0 border border-slate-700 bg-[#0b1421] p-6">
+          <p class="text-sm font-semibold uppercase tracking-[0.16em] text-brand-200">Safe Fallbacks</p>
+          <div class="mt-4 grid gap-2 text-sm">
+            <a href={sitePath('/decisions/')} class="border border-slate-600 px-3 py-2 font-semibold text-slate-200 hover:border-brand-300/70 hover:text-white">Open decisions</a>
+            <a href={sitePath('/review/')} class="border border-slate-600 px-3 py-2 font-semibold text-slate-200 hover:border-brand-300/70 hover:text-white">Open review</a>
+            <code class="block break-all border border-slate-700 bg-[#050a12] px-3 py-2 font-mono text-[11px] text-slate-300">forager ondesk workstation-surface --json</code>
+          </div>
+        </section>
+      </aside>
+    </section>
+  </main>
+
+  <script id="settings-fallback-data" type="application/json" set:html={JSON.stringify(settingsView)}></script>
+  <script>
+    import {
+      dashboardViewFromSurface,
+      formatLabel,
+      statusClasses,
+    } from '../lib/dashboardSurface';
+    import {
+      sourceStatusClasses,
+      sourceStatusLabels,
+    } from '../lib/sourceStatus';
+
+    const WORKSTATION_REFRESH_COMMAND = 'npm run export:workstation-surface';
+    const app = document.getElementById('settings-app');
+    const fallbackElement = document.getElementById('settings-fallback-data');
+    const fallbackView = fallbackElement?.textContent ? JSON.parse(fallbackElement.textContent) : null;
+
+    if (app && fallbackView) {
+      fetchSettingsSurface(app, fallbackView);
+    }
+
+    async function fetchSettingsSurface(root, fallback) {
+      const liveSurfaceUrl = root.dataset.liveSurfaceUrl;
+      if (!liveSurfaceUrl) {
+        renderSettings(root, fallback);
+        setSourceStatus(
+          root,
+          'missing_surface_url',
+          'No live workstation-surface URL is configured; showing static fixture fallback.',
+          WORKSTATION_REFRESH_COMMAND,
+        );
+        return;
+      }
+
+      try {
+        const response = await fetch(liveSurfaceUrl, { cache: 'no-store' });
+        if (!response.ok) {
+          throw new Error(`workstation surface unavailable: ${response.status}`);
+        }
+
+        const view = dashboardViewFromSurface(await response.json());
+        renderSettings(root, view);
+        setSourceStatus(
+          root,
+          view.staleLabel.toLowerCase().includes('fresh') ? 'live' : 'stale_live',
+          `Loaded workstation_surface.v1 from ${liveSurfaceUrl}; freshness is ${view.staleLabel}.`,
+          WORKSTATION_REFRESH_COMMAND,
+        );
+      } catch {
+        renderSettings(root, fallback);
+        setSourceStatus(
+          root,
+          'live_fetch_failed',
+          `Could not load ${liveSurfaceUrl}; showing static fixture fallback.`,
+          WORKSTATION_REFRESH_COMMAND,
+        );
+      }
+    }
+
+    function renderSettings(root, view) {
+      setText(root, '[data-settings-source]', view.sourceLabel);
+      setText(root, '[data-settings-profile]', view.profile);
+      setText(root, '[data-settings-stale]', view.staleLabel);
+      setText(root, '[data-settings-health-count]', view.health.length);
+      setText(root, '[data-settings-root-count]', view.workspaceRoots.length);
+      setText(root, '[data-settings-source-ref-count]', view.sourceRefs.length);
+      setText(root, '[data-settings-capacity-count]', view.capacity.length);
+      setHtml(root, '[data-settings-health]', view.health.map(healthHtml).join(''));
+      setHtml(root, '[data-settings-capacity]', view.capacity.map(capacityHtml).join(''));
+      setHtml(root, '[data-settings-roots]', workspaceRootsHtml(view.workspaceRoots));
+      setHtml(root, '[data-settings-source-refs]', sourceRefsHtml(view.sourceRefs));
+    }
+
+    function setText(root, selector, value) {
+      const element = root.querySelector(selector);
+      if (element) {
+        element.textContent = String(value ?? '');
+      }
+    }
+
+    function setHtml(root, selector, value) {
+      const element = root.querySelector(selector);
+      if (element) {
+        element.innerHTML = value;
+      }
+    }
+
+    function setSourceStatus(root, status, detail, command) {
+      const element = root.querySelector('[data-source-status]');
+      if (!element) {
+        return;
+      }
+
+      element.className = `${element.dataset.baseClass} ${sourceStatusClasses[status]}`;
+      setText(root, '[data-source-status-label]', sourceStatusLabels[status]);
+      setText(root, '[data-source-status-detail]', detail);
+      const commandElement = root.querySelector('[data-source-status-command]');
+      if (commandElement) {
+        commandElement.textContent = command ?? '';
+        commandElement.toggleAttribute('hidden', !command);
+      }
+    }
+
+    function healthHtml(item) {
+      return `<article class="min-w-0 border p-4 ${statusClasses(item.status)}">
+        <div class="flex items-start justify-between gap-3">
+          <h3 class="font-semibold">${escapeHtml(item.label)}</h3>
+          <span class="whitespace-nowrap font-mono text-xs uppercase opacity-75">${escapeHtml(item.status)}</span>
+        </div>
+        <p class="mt-2 text-sm leading-relaxed opacity-85">${escapeHtml(item.summary)}</p>
+      </article>`;
+    }
+
+    function capacityHtml(item) {
+      return `<div class="border border-slate-700 bg-slate-950/45 p-4">
+        <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">${escapeHtml(formatLabel(item.label))}</p>
+        <p class="mt-2 font-mono text-2xl text-white">${escapeHtml(String(item.value))}</p>
+      </div>`;
+    }
+
+    function workspaceRootsHtml(roots) {
+      if (!roots.length) {
+        return '<div class="border border-slate-700 bg-slate-900/60 p-4 text-slate-400">No workspace roots are currently reported.</div>';
+      }
+
+      return roots.map((root) => `<div class="border border-slate-700 bg-slate-900/60 px-4 py-3">
+        <p class="break-all font-mono text-xs text-slate-200">${escapeHtml(root)}</p>
+      </div>`).join('');
+    }
+
+    function sourceRefsHtml(refs) {
+      if (!refs.length) {
+        return '<div class="border border-slate-700 bg-slate-900/60 p-4 text-slate-400">No source refs are currently reported by this surface.</div>';
+      }
+
+      return refs.map((ref) => `<div class="border border-slate-700 bg-slate-900/60 px-4 py-3">
+        <p class="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">${escapeHtml(formatLabel(ref.label))}</p>
+        <p class="mt-2 break-all font-mono text-xs text-slate-200">${escapeHtml(ref.reference)}</p>
+      </div>`).join('');
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (char) => {
+        switch (char) {
+          case '&':
+            return '&amp;';
+          case '<':
+            return '&lt;';
+          case '>':
+            return '&gt;';
+          case '"':
+            return '&quot;';
+          case "'":
+            return '&#39;';
+          default:
+            return char;
+        }
+      });
+    }
+  </script>
+
+  <Footer />
+</Base>

@@ -2,9 +2,13 @@
 import Base from '../layouts/Base.astro';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
+import SourceStatus from '../components/SourceStatus.astro';
 import { sitePath } from '../lib/paths';
 import {
   dashboardViewFromSurface,
+  dashboardAssistantContext,
+  dashboardAssistantPrompts,
+  dashboardAssistantRefs,
   formatLabel,
   severityClasses,
   severityLabels,
@@ -15,11 +19,11 @@ import {
 import workstationSurface from '../../../tests/fixtures/ui/workstation_surface/attention.json';
 
 const dashboardView = dashboardViewFromSurface(workstationSurface) as DashboardView;
-const selectedProjectDetail = dashboardView.projectDetails[0];
-const selectedGraphTitle = selectedProjectDetail?.graph_title ?? dashboardView.graphTitle;
-const selectedGraphEdges = selectedProjectDetail?.graph_edges.length
-  ? selectedProjectDetail.graph_edges
-  : dashboardView.graphEdges;
+const dashboardAssistant = {
+  context: dashboardAssistantContext(dashboardView),
+  prompts: dashboardAssistantPrompts(dashboardView),
+  refs: dashboardAssistantRefs(dashboardView),
+};
 ---
 
 <Base
@@ -67,6 +71,10 @@ const selectedGraphEdges = selectedProjectDetail?.graph_edges.length
         </div>
       </div>
     </section>
+    <SourceStatus
+      detail="Static fixture data is visible until workstation-surface.json is loaded from the local export."
+      command="npm run export:workstation-surface"
+    />
 
     <section class="mx-auto grid max-w-7xl gap-6 px-6 py-8 xl:grid-cols-[1.25fr_0.75fr]">
       <section class="min-w-0 space-y-6">
@@ -142,87 +150,44 @@ const selectedGraphEdges = selectedProjectDetail?.graph_edges.length
           </div>
         </section>
 
-        <section class="min-w-0 border border-slate-700 bg-slate-950/55 p-6">
-          <div class="flex items-center justify-between gap-4">
-            <div>
-              <p class="text-sm font-semibold uppercase tracking-[0.16em] text-brand-200">Project Portfolio</p>
-              <h2 class="mt-2 text-2xl font-semibold text-white">Work queue by project</h2>
+          <section class="min-w-0 border border-slate-700 bg-slate-950/55 p-6">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <p class="text-sm font-semibold uppercase tracking-[0.16em] text-brand-200">Work Portfolio</p>
+                <h2 class="mt-2 text-2xl font-semibold text-white">Project attention summary</h2>
+              </div>
+              <a href={sitePath('/work/')} class="text-sm font-semibold text-brand-200 hover:text-white">Open work</a>
             </div>
-            <a href={sitePath('/review/')} class="hidden text-sm font-semibold text-brand-200 hover:text-white sm:inline">Review detail</a>
-          </div>
-          <div class="mt-5 grid gap-4 lg:grid-cols-[0.85fr_1.15fr]" data-dashboard-project-portfolio>
-            {dashboardView.projectDetails.length && selectedProjectDetail ? (
-              <>
-                <div class="space-y-2" data-dashboard-projects>
-                  {dashboardView.projectDetails.map((project, index) => (
-                    <button
-                      type="button"
-                      class={`w-full border px-4 py-3 text-left transition hover:border-brand-300/70 ${index === 0 ? 'border-brand-300/70 bg-brand-400/10' : 'border-slate-700 bg-slate-900/60'}`}
-                      data-project-select
-                      data-project-key={project.project_key}
-                      aria-pressed={index === 0 ? 'true' : 'false'}
-                    >
-                      <div class="flex items-start justify-between gap-3">
-                        <div class="min-w-0">
-                          <p class="truncate font-semibold text-white">{project.display_name}</p>
-                          <p class="mt-1 truncate font-mono text-xs text-slate-500">{project.project_key}</p>
-                        </div>
-                        <span class={`whitespace-nowrap border px-2 py-1 text-xs font-semibold ${severityClasses[project.severity]}`}>{severityLabels[project.severity]}</span>
-                      </div>
-                      <p class="mt-2 truncate text-xs text-slate-400">{project.status_line}</p>
-                    </button>
-                  ))}
-                </div>
-                <article class={`border p-5 ${severityClasses[selectedProjectDetail.severity]}`} data-dashboard-project-detail>
-                  <div class="flex flex-wrap items-start justify-between gap-4">
+            <div class="mt-5 grid gap-3 md:grid-cols-3" data-dashboard-work-summary>
+              {dashboardView.projectDetails.length ? (
+                dashboardView.projectDetails.slice(0, 3).map((project) => (
+                  <article class={`min-w-0 border p-4 ${severityClasses[project.severity]}`}>
+                  <div class="flex items-start justify-between gap-3">
                     <div class="min-w-0">
-                      <p class="font-mono text-xs uppercase tracking-[0.12em] opacity-75">{selectedProjectDetail.project_key}</p>
-                      <h3 class="mt-2 text-xl font-semibold text-white">{selectedProjectDetail.display_name}</h3>
-                      <p class="mt-2 text-sm leading-relaxed opacity-90">{selectedProjectDetail.primary_action}</p>
+                      <h3 class="truncate font-semibold text-white">{project.display_name}</h3>
+                      <p class="mt-1 truncate font-mono text-xs opacity-70">{project.project_key}</p>
                     </div>
-                    <span class="whitespace-nowrap font-mono text-xs opacity-75">{selectedProjectDetail.last_activity}</span>
+                    <span class="whitespace-nowrap text-xs font-semibold uppercase tracking-[0.12em] opacity-75">{severityLabels[project.severity]}</span>
                   </div>
-                  <div class="mt-5 grid gap-3 sm:grid-cols-4">
-                    <div class="border border-white/15 bg-slate-950/25 px-3 py-2">
-                      <p class="text-[10px] uppercase tracking-[0.12em] opacity-65">Plan</p>
-                      <p class="mt-1 text-sm font-semibold">{selectedProjectDetail.plan}</p>
-                    </div>
-                    <div class="border border-white/15 bg-slate-950/25 px-3 py-2">
-                      <p class="text-[10px] uppercase tracking-[0.12em] opacity-65">Runtime</p>
-                      <p class="mt-1 text-sm font-semibold">{selectedProjectDetail.runtime}</p>
-                    </div>
-                    <div class="border border-white/15 bg-slate-950/25 px-3 py-2">
-                      <p class="text-[10px] uppercase tracking-[0.12em] opacity-65">Closeout</p>
-                      <p class="mt-1 text-sm font-semibold">{selectedProjectDetail.closeout}</p>
-                    </div>
-                    <div class="border border-white/15 bg-slate-950/25 px-3 py-2">
-                      <p class="text-[10px] uppercase tracking-[0.12em] opacity-65">Truth</p>
-                      <p class="mt-1 text-sm font-semibold">{selectedProjectDetail.truth}</p>
-                    </div>
-                  </div>
-                  <div class="mt-5 grid gap-3 text-sm sm:grid-cols-3">
+                    <p class="mt-3 text-sm leading-relaxed opacity-90">{project.primary_action}</p>
+                    <div class="mt-3 grid grid-cols-3 gap-2 text-xs">
+                      <div>
+                        <p class="uppercase tracking-[0.1em] opacity-60">Dec</p>
+                        <p class="mt-1 font-mono text-base text-white">{project.open_decision_count}</p>
+                      </div>
+                      <div>
+                        <p class="uppercase tracking-[0.1em] opacity-60">Run</p>
+                        <p class="mt-1 font-mono text-base text-white">{project.runtime_handoff_count}</p>
+                      </div>
                     <div>
-                      <p class="text-xs font-semibold uppercase tracking-[0.12em] opacity-70">Decisions</p>
-                      <p class="mt-1 font-mono text-lg text-white">{selectedProjectDetail.open_decision_count}</p>
+                      <p class="uppercase tracking-[0.1em] opacity-60">Truth</p>
+                      <p class="mt-1 font-mono text-base text-white">{project.truth_recovery_count}</p>
                     </div>
-                    <div>
-                      <p class="text-xs font-semibold uppercase tracking-[0.12em] opacity-70">Runtime Handoffs</p>
-                      <p class="mt-1 font-mono text-lg text-white">{selectedProjectDetail.runtime_handoff_count}</p>
-                    </div>
-                    <div>
-                      <p class="text-xs font-semibold uppercase tracking-[0.12em] opacity-70">Truth Items</p>
-                      <p class="mt-1 font-mono text-lg text-white">{selectedProjectDetail.truth_recovery_count}</p>
-                    </div>
-                  </div>
-                  <div class="mt-5 space-y-2 text-sm opacity-90">
-                    {selectedProjectDetail.decision_titles.map((title) => <p>Decision: {title}</p>)}
-                    {selectedProjectDetail.runtime_stages.map((stage) => <p>Runtime: {stage}</p>)}
-                    {selectedProjectDetail.truth_recovery_stages.map((stage) => <p>Truth: {stage}</p>)}
                   </div>
                 </article>
-              </>
+              ))
             ) : (
-              <div class="border border-slate-700 bg-slate-900/60 p-5 text-slate-400">No project activity is currently visible.</div>
+              <div class="border border-slate-700 bg-slate-900/60 p-5 text-slate-400 md:col-span-3">No project activity is currently visible.</div>
             )}
           </div>
         </section>
@@ -244,6 +209,43 @@ const selectedGraphEdges = selectedProjectDetail?.graph_edges.length
           </div>
         </section>
 
+        <section class="min-w-0 border border-slate-700 bg-[#0b1421] p-6">
+          <p class="text-sm font-semibold uppercase tracking-[0.16em] text-brand-200">Assistant</p>
+          <h2 class="mt-2 text-xl font-semibold text-white">State briefing</h2>
+          <div data-dashboard-assistant>
+            <p class="mt-3 text-sm leading-relaxed text-slate-300" data-dashboard-assistant-context>
+              {dashboardAssistant.context}
+            </p>
+            <div class="mt-4 space-y-2" data-dashboard-assistant-refs>
+              {dashboardAssistant.refs.map((ref) => (
+                <div class="border border-slate-700 bg-slate-950/35 px-3 py-2">
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <span class="text-xs font-semibold text-slate-100">{ref.label}</span>
+                    <span class="font-mono text-[10px] uppercase tracking-[0.1em] text-slate-500">{formatLabel(ref.trust)}</span>
+                  </div>
+                  <p class="mt-1 break-all font-mono text-[10px] text-slate-400">{ref.reference}</p>
+                </div>
+              ))}
+            </div>
+            <div class="mt-4 flex flex-wrap gap-2" data-dashboard-assistant-prompts>
+              {dashboardAssistant.prompts.map((prompt) => (
+                <button
+                  class="border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-brand-300/70 hover:text-white"
+                  type="button"
+                  data-dashboard-assistant-copy-prompt={prompt.prompt}
+                  aria-label={`Copy dashboard prompt: ${prompt.label}`}
+                >
+                  {prompt.label}
+                </button>
+              ))}
+            </div>
+            <p class="mt-3 text-xs text-brand-200" data-dashboard-assistant-copy-status aria-live="polite"></p>
+            <p class="mt-4 text-xs leading-relaxed text-slate-500">
+              Read-only: this assistant entry prepares a cited prompt. It does not run shell commands or bypass action envelopes.
+            </p>
+          </div>
+        </section>
+
         <section id="decisions" class="min-w-0 border border-slate-700 bg-[#111827] p-6">
           <div class="flex items-start justify-between gap-4">
             <div>
@@ -261,24 +263,19 @@ const selectedGraphEdges = selectedProjectDetail?.graph_edges.length
               <p class="uppercase tracking-[0.12em] text-slate-500">Mode</p>
               <p class="mt-1 font-mono text-slate-200">{dashboardView.decisionInbox.actionMode}</p>
             </div>
-          </div>
-          <div class="mt-4 space-y-3" data-dashboard-decisions>
-            {dashboardView.decisions.length ? (
-              dashboardView.decisions.map((decision) => (
-                <article class={`border p-4 ${severityClasses[decision.severity]}`}>
-                  <p class="font-mono text-xs uppercase tracking-[0.12em] opacity-75">{decision.project_key} · {formatLabel(decision.kind)}</p>
-                  <h3 class="mt-2 text-base font-semibold text-white">{decision.title}</h3>
-                  <p class="mt-2 text-sm leading-relaxed opacity-90">{decision.what_changed}</p>
-                  <p class="mt-2 text-sm leading-relaxed opacity-90">{decision.why_now}</p>
-                  <p class="mt-3 text-xs font-semibold uppercase tracking-[0.12em] opacity-75">Allowed</p>
-                  <p class="mt-1 text-sm opacity-90">{decision.allowed_actions.join(' / ')}</p>
-                  <p class="mt-3 text-xs font-semibold uppercase tracking-[0.12em] opacity-75">Boundary</p>
-                  <p class="mt-1 text-sm opacity-90">{decision.authorization_boundary}</p>
-                </article>
-              ))
-            ) : (
-              <article class="border border-emerald-400/35 bg-emerald-400/10 p-4 text-emerald-100">
-                <h3 class="font-semibold">No open decisions</h3>
+            </div>
+            <div class="mt-4 space-y-3" data-dashboard-decisions>
+              {dashboardView.decisions.length ? (
+                dashboardView.decisions.map((decision) => (
+                  <article class={`border p-4 ${severityClasses[decision.severity]}`}>
+                    <p class="font-mono text-xs uppercase tracking-[0.12em] opacity-75">{decision.project_key} · {formatLabel(decision.kind)}</p>
+                    <h3 class="mt-2 text-base font-semibold text-white">{decision.title}</h3>
+                    <p class="mt-2 text-sm leading-relaxed opacity-90">{decision.why_now}</p>
+                  </article>
+                ))
+              ) : (
+                <article class="border border-emerald-400/35 bg-emerald-400/10 p-4 text-emerald-100">
+                  <h3 class="font-semibold">No open decisions</h3>
                 <p class="mt-2 text-sm leading-relaxed opacity-85">The current workstation surface does not report a human decision item.</p>
               </article>
             )}
@@ -298,105 +295,22 @@ const selectedGraphEdges = selectedProjectDetail?.graph_edges.length
               dashboardView.acceptedTruthRecovery.items.map((item) => (
                 <article class={`border p-4 ${severityClasses[item.severity]}`}>
                   <div class="flex items-start justify-between gap-3">
-                    <h3 class="font-semibold text-white">{formatLabel(item.stage)}</h3>
-                    <span class="whitespace-nowrap font-mono text-xs uppercase opacity-75">{item.acceptance_status}</span>
-                  </div>
-                  <p class="mt-2 break-all font-mono text-xs opacity-80">{item.project_key} · {item.closeout_id}</p>
-                  <p class="mt-3 text-sm leading-relaxed opacity-90">{item.next_safe_action}</p>
-                  {item.open_decision_kinds.length ? (
-                    <p class="mt-2 text-xs font-semibold uppercase tracking-[0.12em] opacity-75">Open: {item.open_decision_kinds.join(' / ')}</p>
-                  ) : null}
-                  {item.resolve_command ? (
-                    <code class="mt-3 block break-all border border-white/15 bg-slate-950/35 px-3 py-2 font-mono text-[11px] text-slate-100">{item.resolve_command}</code>
-                  ) : null}
-                  {item.retire_command ? (
-                    <code class="mt-2 block break-all border border-white/15 bg-slate-950/35 px-3 py-2 font-mono text-[11px] text-slate-100">{item.retire_command}</code>
-                  ) : null}
-                  {item.action_envelopes.length ? (
-                    <div class="mt-3 space-y-2">
-                      {item.action_envelopes.map((action) => (
-                        <div class="border border-white/15 bg-slate-950/30 px-3 py-2">
-                          <div class="flex flex-wrap items-center justify-between gap-2">
-                            <p class="text-xs font-semibold uppercase tracking-[0.12em] opacity-75">{formatLabel(action.action_kind)}</p>
-                            <span class="font-mono text-[10px] opacity-70">{action.schema}</span>
-                          </div>
-                          <p class="mt-2 text-xs leading-relaxed opacity-85">{action.latest_receipt ? `Latest receipt: ${action.latest_receipt.result_status}` : action.expected_receipt_schema}</p>
-                          <code class="mt-2 block break-all font-mono text-[10px] leading-relaxed text-slate-100">{action.allowed_command}</code>
-                        </div>
-                      ))}
+                      <h3 class="font-semibold text-white">{formatLabel(item.stage)}</h3>
+                      <span class="whitespace-nowrap font-mono text-xs uppercase opacity-75">{item.acceptance_status}</span>
                     </div>
-                  ) : null}
+                    <p class="mt-2 break-all font-mono text-xs opacity-80">{item.project_key} · {item.closeout_id}</p>
+                    <p class="mt-3 text-sm leading-relaxed opacity-90">{item.next_safe_action}</p>
+                  </article>
+                ))
+              ) : (
+                <article class="border border-emerald-400/35 bg-emerald-400/10 p-4 text-emerald-100">
+                  <h3 class="font-semibold">{dashboardView.acceptedTruthRecovery.emptyTitle}</h3>
+                  <p class="mt-2 text-sm leading-relaxed opacity-85">{dashboardView.acceptedTruthRecovery.emptySummary}</p>
                 </article>
-              ))
-            ) : (
-              <article class="border border-emerald-400/35 bg-emerald-400/10 p-4 text-emerald-100">
-                <h3 class="font-semibold">{dashboardView.acceptedTruthRecovery.emptyTitle}</h3>
-                <p class="mt-2 text-sm leading-relaxed opacity-85">{dashboardView.acceptedTruthRecovery.emptySummary}</p>
-              </article>
-            )}
-          </div>
-        </section>
-
-        <section class="min-w-0 border border-slate-700 bg-slate-950/55 p-6">
-          <p class="text-sm font-semibold uppercase tracking-[0.16em] text-brand-200">Scoped Graph</p>
-          <h2 class="mt-2 text-xl font-semibold text-white" data-dashboard-graph-title>{selectedGraphTitle}</h2>
-          <div class="mt-4 space-y-3" data-dashboard-graph>
-            {selectedGraphEdges.map((edge) => (
-              <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-sm">
-                <span class="truncate border border-slate-700 bg-slate-900/70 px-3 py-2 text-slate-100">{edge.from}</span>
-                <span class="whitespace-nowrap text-xs uppercase tracking-[0.1em] text-brand-200">{edge.label}</span>
-                <span class="truncate border border-slate-700 bg-slate-900/70 px-3 py-2 text-slate-100">{edge.to}</span>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section class="min-w-0 border border-slate-700 bg-[#161423] p-6">
-          <p class="text-sm font-semibold uppercase tracking-[0.16em] text-brand-200">Assistant</p>
-          <h2 class="mt-2 text-xl font-semibold text-white">Context helper</h2>
-          <div data-dashboard-assistant>
-            {selectedProjectDetail ? (
-              <>
-                <p class="mt-3 font-mono text-xs uppercase tracking-[0.12em] text-brand-200" data-dashboard-assistant-scope>
-                  Scope: {selectedProjectDetail.display_name}
-                </p>
-                <p class="mt-3 text-sm leading-relaxed text-slate-300" data-dashboard-assistant-context>
-                  {selectedProjectDetail.assistant_context}
-                </p>
-                <div class="mt-4 space-y-2" data-dashboard-assistant-refs>
-                  {selectedProjectDetail.assistant_refs.map((ref) => (
-                    <div class="border border-slate-700 bg-slate-950/35 px-3 py-2">
-                      <div class="flex flex-wrap items-center justify-between gap-2">
-                        <span class="text-xs font-semibold text-slate-100">{ref.label}</span>
-                        <span class="font-mono text-[10px] uppercase tracking-[0.1em] text-slate-500">{formatLabel(ref.trust)}</span>
-                      </div>
-                      <p class="mt-1 break-all font-mono text-[10px] text-slate-400">{ref.reference}</p>
-                    </div>
-                  ))}
-                </div>
-                <div class="mt-4 flex flex-wrap gap-2" data-dashboard-assistant-prompts>
-                  {selectedProjectDetail.assistant_prompts.map((prompt) => (
-                    <button
-                      class="border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-brand-300/70 hover:text-white"
-                      type="button"
-                      data-assistant-prompt={prompt.prompt}
-                    >
-                      {prompt.label}
-                    </button>
-                  ))}
-                </div>
-                <p class="mt-4 text-xs leading-relaxed text-slate-500" data-dashboard-assistant-boundary>
-                  Read-only: answers must cite these refs or mark inference; execution still requires action envelopes and receipts.
-                </p>
-              </>
-            ) : (
-              <p class="mt-3 text-sm leading-relaxed text-slate-300" data-dashboard-assistant-context>
-                No selected project is available. Review workstation health and decision inbox first.
-              </p>
-            )}
-          </div>
-        </section>
-      </aside>
+              )}
+            </div>
+          </section>
+        </aside>
     </section>
   </main>
 
@@ -404,11 +318,20 @@ const selectedGraphEdges = selectedProjectDetail?.graph_edges.length
   <script>
     import {
       dashboardViewFromSurface,
+      dashboardAssistantContext,
+      dashboardAssistantPrompts,
+      dashboardAssistantRefs,
       formatLabel,
       severityClasses,
       severityLabels,
       statusClasses,
     } from '../lib/dashboardSurface';
+    import {
+      sourceStatusClasses,
+      sourceStatusLabels,
+    } from '../lib/sourceStatus';
+
+    const WORKSTATION_REFRESH_COMMAND = 'npm run export:workstation-surface';
 
     const app = document.getElementById('dashboard-app');
     const fallbackElement = document.getElementById('dashboard-fallback-data');
@@ -422,6 +345,12 @@ const selectedGraphEdges = selectedProjectDetail?.graph_edges.length
       const liveSurfaceUrl = root.dataset.liveSurfaceUrl;
       if (!liveSurfaceUrl) {
         renderDashboard(root, fallback);
+        setSourceStatus(
+          root,
+          'missing_surface_url',
+          'No live workstation-surface URL is configured; showing static fixture fallback.',
+          WORKSTATION_REFRESH_COMMAND,
+        );
         return;
       }
 
@@ -431,9 +360,22 @@ const selectedGraphEdges = selectedProjectDetail?.graph_edges.length
           throw new Error(`workstation surface unavailable: ${response.status}`);
         }
 
-        renderDashboard(root, dashboardViewFromSurface(await response.json()));
+        const view = dashboardViewFromSurface(await response.json());
+        renderDashboard(root, view);
+        setSourceStatus(
+          root,
+          view.staleLabel.toLowerCase().includes('fresh') ? 'live' : 'stale_live',
+          `Loaded workstation_surface.v1 from ${liveSurfaceUrl}; freshness is ${view.staleLabel}.`,
+          WORKSTATION_REFRESH_COMMAND,
+        );
       } catch {
         renderDashboard(root, fallback);
+        setSourceStatus(
+          root,
+          'live_fetch_failed',
+          `Could not load ${liveSurfaceUrl}; showing static fixture fallback.`,
+          WORKSTATION_REFRESH_COMMAND,
+        );
       }
     }
 
@@ -451,19 +393,18 @@ const selectedGraphEdges = selectedProjectDetail?.graph_edges.length
       setText(root, '[data-dashboard-next-reason]', view.nextActionReason);
       setText(root, '[data-dashboard-decision-summary]', view.decisionInbox.summary);
       setText(root, '[data-dashboard-truth-summary]', view.acceptedTruthRecovery.summary);
-      setSeverity(root, '[data-dashboard-top-severity]', view.topSeverity);
-      setSeverity(root, '[data-dashboard-top-card]', view.topSeverity);
-      setCommand(root, view.nextActionCommand);
-      setHtml(root, '[data-dashboard-attention-counts]', attentionCountsHtml(view.attentionCounts));
-      setHtml(root, '[data-dashboard-capacity]', view.capacity.map(capacityHtml).join(''));
-      setHtml(root, '[data-dashboard-health]', view.health.map(healthHtml).join(''));
-      setHtml(root, '[data-dashboard-project-portfolio]', projectPortfolioHtml(view.projectDetails));
-      renderProjectGraph(root, view.projectDetails[0], view);
-      renderProjectAssistant(root, view.projectDetails[0]);
-      bindProjectPortfolio(root, view);
-      setHtml(root, '[data-dashboard-decision-meta]', decisionMetaHtml(view.decisionInbox));
-      setHtml(root, '[data-dashboard-decisions]', decisionsHtml(view.decisions));
-      setHtml(root, '[data-dashboard-truth-recovery]', truthRecoveryHtml(view.acceptedTruthRecovery));
+        setSeverity(root, '[data-dashboard-top-severity]', view.topSeverity);
+        setSeverity(root, '[data-dashboard-top-card]', view.topSeverity);
+        setCommand(root, view.nextActionCommand);
+        setHtml(root, '[data-dashboard-attention-counts]', attentionCountsHtml(view.attentionCounts));
+        setHtml(root, '[data-dashboard-capacity]', view.capacity.map(capacityHtml).join(''));
+        setHtml(root, '[data-dashboard-health]', view.health.map(healthHtml).join(''));
+        setHtml(root, '[data-dashboard-work-summary]', workSummaryHtml(view.projectDetails));
+        setHtml(root, '[data-dashboard-decision-meta]', decisionMetaHtml(view.decisionInbox));
+        setHtml(root, '[data-dashboard-decisions]', decisionsHtml(view.decisions));
+        setHtml(root, '[data-dashboard-assistant]', dashboardAssistantHtml(view));
+        setHtml(root, '[data-dashboard-truth-recovery]', truthRecoveryHtml(view.acceptedTruthRecovery));
+        bindDashboardAssistantPrompts(root);
     }
 
     function setText(root, selector, value) {
@@ -497,6 +438,22 @@ const selectedGraphEdges = selectedProjectDetail?.graph_edges.length
 
       element.textContent = command ?? '';
       element.toggleAttribute('hidden', !command);
+    }
+
+    function setSourceStatus(root, status, detail, command) {
+      const element = root.querySelector('[data-source-status]');
+      if (!element) {
+        return;
+      }
+
+      element.className = `${element.dataset.baseClass} ${sourceStatusClasses[status]}`;
+      setText(root, '[data-source-status-label]', sourceStatusLabels[status]);
+      setText(root, '[data-source-status-detail]', detail);
+      const commandElement = root.querySelector('[data-source-status-command]');
+      if (commandElement) {
+        commandElement.textContent = command ?? '';
+        commandElement.toggleAttribute('hidden', !command);
+      }
     }
 
     function countHtml(item) {
@@ -534,182 +491,46 @@ const selectedGraphEdges = selectedProjectDetail?.graph_edges.length
       </article>`;
     }
 
-    function projectPortfolioHtml(projects) {
-      if (!projects.length) {
-        return '<div class="border border-slate-700 bg-slate-900/60 p-5 text-slate-400">No project activity is currently visible.</div>';
+      function workSummaryHtml(projects) {
+        if (!projects.length) {
+          return '<div class="border border-slate-700 bg-slate-900/60 p-5 text-slate-400 md:col-span-3">No project activity is currently visible.</div>';
+        }
+
+        return projects.slice(0, 3).map(workSummaryCardHtml).join('');
       }
 
-      const selected = projects[0];
-      return `<div class="space-y-2" data-dashboard-projects>
-        ${projects.map((project, index) => projectSelectHtml(project, index === 0)).join('')}
-      </div>
-      ${projectDetailHtml(selected)}`;
-    }
-
-    function projectSelectHtml(project, selected) {
-      return `<button
-        type="button"
-        class="${projectButtonClass(selected)}"
-        data-project-select
-        data-project-key="${escapeHtml(project.project_key)}"
-        aria-pressed="${selected ? 'true' : 'false'}"
-      >
-        <div class="flex items-start justify-between gap-3">
-          <div class="min-w-0">
-            <p class="truncate font-semibold text-white">${escapeHtml(project.display_name)}</p>
-            <p class="mt-1 truncate font-mono text-xs text-slate-500">${escapeHtml(project.project_key)}</p>
+      function workSummaryCardHtml(project) {
+        return `<article class="min-w-0 border p-4 ${severityClasses[project.severity]}">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <h3 class="truncate font-semibold text-white">${escapeHtml(project.display_name)}</h3>
+              <p class="mt-1 truncate font-mono text-xs opacity-70">${escapeHtml(project.project_key)}</p>
+            </div>
+            <span class="whitespace-nowrap text-xs font-semibold uppercase tracking-[0.12em] opacity-75">${escapeHtml(severityLabels[project.severity])}</span>
           </div>
-          <span class="whitespace-nowrap border px-2 py-1 text-xs font-semibold ${severityClasses[project.severity]}">${escapeHtml(severityLabels[project.severity])}</span>
-        </div>
-        <p class="mt-2 truncate text-xs text-slate-400">${escapeHtml(project.status_line)}</p>
-      </button>`;
-    }
-
-    function projectButtonClass(selected) {
-      return `w-full border px-4 py-3 text-left transition hover:border-brand-300/70 ${selected ? 'border-brand-300/70 bg-brand-400/10' : 'border-slate-700 bg-slate-900/60'}`;
-    }
-
-    function projectDetailHtml(project) {
-      const detailLines = [
-        ...project.decision_titles.map((title) => `Decision: ${title}`),
-        ...project.runtime_stages.map((stage) => `Runtime: ${stage}`),
-        ...project.truth_recovery_stages.map((stage) => `Truth: ${stage}`),
-      ];
-      return `<article class="border p-5 ${severityClasses[project.severity]}" data-dashboard-project-detail>
-        <div class="flex flex-wrap items-start justify-between gap-4">
-          <div class="min-w-0">
-            <p class="font-mono text-xs uppercase tracking-[0.12em] opacity-75">${escapeHtml(project.project_key)}</p>
-            <h3 class="mt-2 text-xl font-semibold text-white">${escapeHtml(project.display_name)}</h3>
-            <p class="mt-2 text-sm leading-relaxed opacity-90">${escapeHtml(project.primary_action)}</p>
+          <p class="mt-3 text-sm leading-relaxed opacity-90">${escapeHtml(project.primary_action)}</p>
+          <div class="mt-3 grid grid-cols-3 gap-2 text-xs">
+            ${projectCountHtml('Dec', project.open_decision_count)}
+            ${projectCountHtml('Run', project.runtime_handoff_count)}
+            ${projectCountHtml('Truth', project.truth_recovery_count)}
           </div>
-          <span class="whitespace-nowrap font-mono text-xs opacity-75">${escapeHtml(project.last_activity)}</span>
-        </div>
-        <div class="mt-5 grid gap-3 sm:grid-cols-4">
-          ${projectMetricHtml('Plan', project.plan)}
-          ${projectMetricHtml('Runtime', project.runtime)}
-          ${projectMetricHtml('Closeout', project.closeout)}
-          ${projectMetricHtml('Truth', project.truth)}
-        </div>
-        <div class="mt-5 grid gap-3 text-sm sm:grid-cols-3">
-          ${projectCountHtml('Decisions', project.open_decision_count)}
-          ${projectCountHtml('Runtime Handoffs', project.runtime_handoff_count)}
-          ${projectCountHtml('Truth Items', project.truth_recovery_count)}
-        </div>
-        <div class="mt-5 space-y-2 text-sm opacity-90">
-          ${detailLines.length ? detailLines.map((line) => `<p>${escapeHtml(line)}</p>`).join('') : '<p>No project-specific action is currently queued.</p>'}
-        </div>
-      </article>`;
-    }
-
-    function projectMetricHtml(label, value) {
-      return `<div class="border border-white/15 bg-slate-950/25 px-3 py-2">
-        <p class="text-[10px] uppercase tracking-[0.12em] opacity-65">${escapeHtml(label)}</p>
-        <p class="mt-1 text-sm font-semibold">${escapeHtml(value)}</p>
-      </div>`;
-    }
-
-    function projectCountHtml(label, value) {
-      return `<div>
-        <p class="text-xs font-semibold uppercase tracking-[0.12em] opacity-70">${escapeHtml(label)}</p>
-        <p class="mt-1 font-mono text-lg text-white">${escapeHtml(String(value))}</p>
-      </div>`;
-    }
-
-    function bindProjectPortfolio(root, view) {
-      const container = root.querySelector('[data-dashboard-project-portfolio]');
-      if (!container) {
-        return;
+        </article>`;
       }
 
-      container.querySelectorAll('[data-project-select]').forEach((button) => {
-        button.addEventListener('click', () => {
-          const project = view.projectDetails.find((item) => item.project_key === button.dataset.projectKey);
-          if (!project) {
-            return;
-          }
-
-          container.querySelectorAll('[data-project-select]').forEach((item) => {
-            const selected = item === button;
-            item.setAttribute('aria-pressed', selected ? 'true' : 'false');
-            item.className = projectButtonClass(selected);
-          });
-          const detailTarget = root.querySelector('[data-dashboard-project-detail]');
-          if (detailTarget) {
-            detailTarget.outerHTML = projectDetailHtml(project);
-          }
-          renderProjectGraph(root, project, view);
-          renderProjectAssistant(root, project);
-        });
-      });
-    }
-
-    function renderProjectGraph(root, project, fallbackView) {
-      const title = project?.graph_title ?? fallbackView.graphTitle;
-      const edges = project?.graph_edges?.length ? project.graph_edges : fallbackView.graphEdges;
-      setText(root, '[data-dashboard-graph-title]', title);
-      setHtml(root, '[data-dashboard-graph]', edges.map(edgeHtml).join(''));
-    }
-
-    function renderProjectAssistant(root, project) {
-      setHtml(root, '[data-dashboard-assistant]', assistantPanelHtml(project));
-    }
-
-    function assistantPanelHtml(project) {
-      if (!project) {
-        return `<p class="mt-3 text-sm leading-relaxed text-slate-300" data-dashboard-assistant-context>
-          No selected project is available. Review workstation health and decision inbox first.
-        </p>`;
+      function projectCountHtml(label, value) {
+        return `<div>
+          <p class="uppercase tracking-[0.1em] opacity-60">${escapeHtml(label)}</p>
+          <p class="mt-1 font-mono text-base text-white">${escapeHtml(String(value))}</p>
+        </div>`;
       }
 
-      return `<p class="mt-3 font-mono text-xs uppercase tracking-[0.12em] text-brand-200" data-dashboard-assistant-scope>
-          Scope: ${escapeHtml(project.display_name)}
-        </p>
-        <p class="mt-3 text-sm leading-relaxed text-slate-300" data-dashboard-assistant-context>
-          ${escapeHtml(project.assistant_context)}
-        </p>
-        <div class="mt-4 space-y-2" data-dashboard-assistant-refs>
-          ${project.assistant_refs.map(assistantRefHtml).join('')}
-        </div>
-        <div class="mt-4 flex flex-wrap gap-2" data-dashboard-assistant-prompts>
-          ${project.assistant_prompts.map(assistantPromptHtml).join('')}
-        </div>
-        <p class="mt-4 text-xs leading-relaxed text-slate-500" data-dashboard-assistant-boundary>
-          Read-only: answers must cite these refs or mark inference; execution still requires action envelopes and receipts.
-        </p>`;
-    }
-
-    function assistantRefHtml(ref) {
-      return `<div class="border border-slate-700 bg-slate-950/35 px-3 py-2">
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <span class="text-xs font-semibold text-slate-100">${escapeHtml(ref.label)}</span>
-          <span class="font-mono text-[10px] uppercase tracking-[0.1em] text-slate-500">${escapeHtml(formatLabel(ref.trust))}</span>
-        </div>
-        <p class="mt-1 break-all font-mono text-[10px] text-slate-400">${escapeHtml(ref.reference)}</p>
-      </div>`;
-    }
-
-    function assistantPromptHtml(prompt) {
-      return `<button
-        class="border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-brand-300/70 hover:text-white"
-        type="button"
-        data-assistant-prompt="${escapeHtml(prompt.prompt)}"
-      >
-        ${escapeHtml(prompt.label)}
-      </button>`;
-    }
-
-    function decisionHtml(decision) {
-      return `<article class="border p-4 ${severityClasses[decision.severity]}">
-        <p class="font-mono text-xs uppercase tracking-[0.12em] opacity-75">${escapeHtml(decision.project_key)} · ${escapeHtml(formatLabel(decision.kind))}</p>
-        <h3 class="mt-2 text-base font-semibold text-white">${escapeHtml(decision.title)}</h3>
-        <p class="mt-2 text-sm leading-relaxed opacity-90">${escapeHtml(decision.what_changed)}</p>
-        <p class="mt-2 text-sm leading-relaxed opacity-90">${escapeHtml(decision.why_now)}</p>
-        <p class="mt-3 text-xs font-semibold uppercase tracking-[0.12em] opacity-75">Allowed</p>
-        <p class="mt-1 text-sm opacity-90">${escapeHtml(decision.allowed_actions.join(' / '))}</p>
-        <p class="mt-3 text-xs font-semibold uppercase tracking-[0.12em] opacity-75">Boundary</p>
-        <p class="mt-1 text-sm opacity-90">${escapeHtml(decision.authorization_boundary)}</p>
-      </article>`;
-    }
+      function decisionHtml(decision) {
+        return `<article class="border p-4 ${severityClasses[decision.severity]}">
+          <p class="font-mono text-xs uppercase tracking-[0.12em] opacity-75">${escapeHtml(decision.project_key)} · ${escapeHtml(formatLabel(decision.kind))}</p>
+          <h3 class="mt-2 text-base font-semibold text-white">${escapeHtml(decision.title)}</h3>
+          <p class="mt-2 text-sm leading-relaxed opacity-90">${escapeHtml(decision.why_now)}</p>
+        </article>`;
+      }
 
     function decisionMetaHtml(inbox) {
       return `<div class="border border-slate-700 bg-slate-950/50 p-3">
@@ -730,69 +551,89 @@ const selectedGraphEdges = selectedProjectDetail?.graph_edges.length
         </article>`;
       }
 
-      return decisions.map(decisionHtml).join('');
-    }
+        return decisions.map(decisionHtml).join('');
+      }
 
-    function truthRecoveryItemHtml(item) {
-      const openKinds = item.open_decision_kinds.length
-        ? `<p class="mt-2 text-xs font-semibold uppercase tracking-[0.12em] opacity-75">Open: ${escapeHtml(item.open_decision_kinds.join(' / '))}</p>`
-        : '';
-      const resolve = item.resolve_command
-        ? `<code class="mt-3 block break-all border border-white/15 bg-slate-950/35 px-3 py-2 font-mono text-[11px] text-slate-100">${escapeHtml(item.resolve_command)}</code>`
-        : '';
-      const retire = item.retire_command
-        ? `<code class="mt-2 block break-all border border-white/15 bg-slate-950/35 px-3 py-2 font-mono text-[11px] text-slate-100">${escapeHtml(item.retire_command)}</code>`
-        : '';
-      const actions = item.action_envelopes.length
-        ? `<div class="mt-3 space-y-2">${item.action_envelopes.map(truthRecoveryActionHtml).join('')}</div>`
-        : '';
-
-      return `<article class="border p-4 ${severityClasses[item.severity]}">
-        <div class="flex items-start justify-between gap-3">
-          <h3 class="font-semibold text-white">${escapeHtml(formatLabel(item.stage))}</h3>
-          <span class="whitespace-nowrap font-mono text-xs uppercase opacity-75">${escapeHtml(item.acceptance_status)}</span>
-        </div>
-        <p class="mt-2 break-all font-mono text-xs opacity-80">${escapeHtml(item.project_key)} · ${escapeHtml(item.closeout_id)}</p>
-        <p class="mt-3 text-sm leading-relaxed opacity-90">${escapeHtml(item.next_safe_action)}</p>
-        ${openKinds}
-        ${resolve}
-        ${retire}
-        ${actions}
-      </article>`;
-    }
-
-    function truthRecoveryActionHtml(action) {
-      const receipt = action.latest_receipt
-        ? `Latest receipt: ${escapeHtml(action.latest_receipt.result_status)}`
-        : escapeHtml(action.expected_receipt_schema);
-      return `<div class="border border-white/15 bg-slate-950/30 px-3 py-2">
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <p class="text-xs font-semibold uppercase tracking-[0.12em] opacity-75">${escapeHtml(formatLabel(action.action_kind))}</p>
-          <span class="font-mono text-[10px] opacity-70">${escapeHtml(action.schema)}</span>
-        </div>
-        <p class="mt-2 text-xs leading-relaxed opacity-85">${receipt}</p>
-        <code class="mt-2 block break-all font-mono text-[10px] leading-relaxed text-slate-100">${escapeHtml(action.allowed_command)}</code>
-      </div>`;
-    }
-
-    function truthRecoveryHtml(recovery) {
-      if (!recovery.items.length) {
-        return `<article class="border border-emerald-400/35 bg-emerald-400/10 p-4 text-emerald-100">
-          <h3 class="font-semibold">${escapeHtml(recovery.emptyTitle)}</h3>
-          <p class="mt-2 text-sm leading-relaxed opacity-85">${escapeHtml(recovery.emptySummary)}</p>
+      function truthRecoveryItemHtml(item) {
+        return `<article class="border p-4 ${severityClasses[item.severity]}">
+          <div class="flex items-start justify-between gap-3">
+            <h3 class="font-semibold text-white">${escapeHtml(formatLabel(item.stage))}</h3>
+            <span class="whitespace-nowrap font-mono text-xs uppercase opacity-75">${escapeHtml(item.acceptance_status)}</span>
+          </div>
+          <p class="mt-2 break-all font-mono text-xs opacity-80">${escapeHtml(item.project_key)} · ${escapeHtml(item.closeout_id)}</p>
+          <p class="mt-3 text-sm leading-relaxed opacity-90">${escapeHtml(item.next_safe_action)}</p>
         </article>`;
       }
 
-      return recovery.items.map(truthRecoveryItemHtml).join('');
-    }
+      function truthRecoveryHtml(recovery) {
+        if (!recovery.items.length) {
+          return `<article class="border border-emerald-400/35 bg-emerald-400/10 p-4 text-emerald-100">
+            <h3 class="font-semibold">${escapeHtml(recovery.emptyTitle)}</h3>
+            <p class="mt-2 text-sm leading-relaxed opacity-85">${escapeHtml(recovery.emptySummary)}</p>
+          </article>`;
+        }
 
-    function edgeHtml(edge) {
-      return `<div class="grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-sm">
-        <span class="truncate border border-slate-700 bg-slate-900/70 px-3 py-2 text-slate-100">${escapeHtml(edge.from)}</span>
-        <span class="whitespace-nowrap text-xs uppercase tracking-[0.1em] text-brand-200">${escapeHtml(edge.label)}</span>
-        <span class="truncate border border-slate-700 bg-slate-900/70 px-3 py-2 text-slate-100">${escapeHtml(edge.to)}</span>
-      </div>`;
-    }
+        return recovery.items.map(truthRecoveryItemHtml).join('');
+      }
+
+      function dashboardAssistantHtml(view) {
+        const context = dashboardAssistantContext(view);
+        const refs = dashboardAssistantRefs(view);
+        const prompts = dashboardAssistantPrompts(view);
+        return `<p class="mt-3 text-sm leading-relaxed text-slate-300" data-dashboard-assistant-context>
+          ${escapeHtml(context)}
+        </p>
+        <div class="mt-4 space-y-2" data-dashboard-assistant-refs>
+          ${refs.map(assistantRefHtml).join('')}
+        </div>
+        <div class="mt-4 flex flex-wrap gap-2" data-dashboard-assistant-prompts>
+          ${prompts.map(assistantPromptHtml).join('')}
+        </div>
+        <p class="mt-3 text-xs text-brand-200" data-dashboard-assistant-copy-status aria-live="polite"></p>
+        <p class="mt-4 text-xs leading-relaxed text-slate-500">
+          Read-only: this assistant entry prepares a cited prompt. It does not run shell commands or bypass action envelopes.
+        </p>`;
+      }
+
+      function assistantRefHtml(ref) {
+        return `<div class="border border-slate-700 bg-slate-950/35 px-3 py-2">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <span class="text-xs font-semibold text-slate-100">${escapeHtml(ref.label)}</span>
+            <span class="font-mono text-[10px] uppercase tracking-[0.1em] text-slate-500">${escapeHtml(formatLabel(ref.trust))}</span>
+          </div>
+          <p class="mt-1 break-all font-mono text-[10px] text-slate-400">${escapeHtml(ref.reference)}</p>
+        </div>`;
+      }
+
+      function assistantPromptHtml(prompt) {
+        return `<button
+          class="border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-brand-300/70 hover:text-white"
+          type="button"
+          data-dashboard-assistant-copy-prompt="${escapeHtml(prompt.prompt)}"
+          aria-label="Copy dashboard prompt: ${escapeHtml(prompt.label)}"
+        >
+          ${escapeHtml(prompt.label)}
+        </button>`;
+      }
+
+      function bindDashboardAssistantPrompts(root) {
+        const status = root.querySelector('[data-dashboard-assistant-copy-status]');
+        root.querySelectorAll('[data-dashboard-assistant-copy-prompt]').forEach((button) => {
+          button.addEventListener('click', async () => {
+            const prompt = button.dataset.dashboardAssistantCopyPrompt ?? '';
+            try {
+              await navigator.clipboard?.writeText(prompt);
+              if (status) {
+                status.textContent = 'Prompt copied.';
+              }
+            } catch {
+              if (status) {
+                status.textContent = prompt ? `Prompt ready: ${prompt}` : 'Prompt unavailable.';
+              }
+            }
+          });
+        });
+      }
 
     function escapeHtml(value) {
       return String(value ?? '').replace(/[&<>"']/g, (char) => {
