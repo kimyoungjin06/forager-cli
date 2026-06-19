@@ -23,9 +23,14 @@ At this point:
   polling state through `scripts/offdesk_remote_operator_telegram.py --health`;
 - the Telegram listener can survive known Telegram transport failures and
   record them as loop state instead of exiting;
+- `scripts/offdesk_remote_operator_watchdog.py` runs outside the listener,
+  reads the loop-status file and systemd service state, and sends rate-limited
+  emergency Telegram alerts when remote operation is not currently reliable;
 - the local model endpoint configured for the Remote Operator is available;
-- remote start/launch/dispatch/shell actions remain blocked from Telegram by
-  design;
+- Telegram can start and monitor only a reviewed, bound task through
+  task-scoped `offdesk tick`, and can create a closeout packet only for that
+  completed task; closeout review, accepted truth, arbitrary launch, and shell
+  actions remain blocked from Telegram by design;
 - `cargo test`, `cargo fmt -- --check`, `cargo clippy -- -D warnings`,
   `mdbook build`, and the website build pass locally.
 
@@ -54,7 +59,8 @@ project init
   -> Ondesk return package
 ```
 
-The Telegram Remote Operator currently covers the planning side of this flow:
+The Telegram Remote Operator currently covers the planning and narrowly scoped
+runtime-start side of this flow:
 
 - read-only `/status`, `/pending`, `/plans`, and `/show`;
 - freeform planning request capture;
@@ -63,10 +69,45 @@ The Telegram Remote Operator currently covers the planning side of this flow:
 - project initialization packet creation;
 - bounded plan draft creation;
 - plan registration;
-- explicit plan-review approval.
+- explicit plan-review approval;
+- read-only launch-preparation packet creation;
+- pending gate request creation for local approval;
+- exact pending gate approval resolution;
+- bounded execution-brief generation;
+- reviewed workload binding;
+- bound enqueue run;
+- task-scoped runtime start;
+- task-scoped runtime monitor/readout;
+- completed-task closeout packet creation.
 
-It intentionally does not cover runtime launch. Runtime dispatch still belongs
-to local Offdesk gate approval.
+It intentionally does not cover broad runtime launch, closeout review, or
+accepted-truth review. Runtime dispatch still belongs to the local
+enqueue/launch/tick path, and Telegram can only start the one reviewed task that
+was already bound and queued, then poll/read and closeout-packet that same
+completed task.
+
+Remote Operator phase status:
+
+| Phase | Status | Boundary |
+| --- | --- | --- |
+| Read-only status and pending/plans/show | Implemented | No approvals are resolved. |
+| Freeform planning request and project selection | Implemented | Creates planning/session evidence only. |
+| Project init preview/run | Implemented | Creates local project operation packets; no runtime work. |
+| Plan draft and registration | Implemented | Writes/dry-runs local plan artifacts only. |
+| Explicit plan-review approval | Implemented | Records plan review; does not authorize launch. |
+| Launch-preparation packet | Implemented | Creates `offdesk_plan_launch_prep.v1`; no gate approval. |
+| Gate request | Implemented | Creates pending `dispatch.runtime` approval; does not resolve it. |
+| Gate approval resolution | Implemented | Resolves exact matching approval; does not enqueue or launch. |
+| Execution brief | Implemented | Writes bounded brief for local enqueue; does not enqueue or launch. |
+| Enqueue handoff | Implemented | Writes a local-review command template only; does not enqueue or launch. |
+| Workload binding | Implemented | Verifies and binds reviewed `prepared_task.json`; does not enqueue or launch. |
+| Enqueue run | Implemented | Runs only bound `offdesk enqueue`; does not launch or tick. |
+| Runtime start | Implemented | Runs only task-scoped `offdesk tick`; does not monitor or close out. |
+| Runtime monitor/readout | Implemented | Polls only the same task with `offdesk tick --limit 0`; does not dispatch or close out. |
+| Closeout packet | Implemented | Generates closeout artifacts only for the completed monitored task; does not review or accept truth. |
+| Closeout review handoff | Implemented | Writes local `closeout-review` verdict templates; does not execute verdicts or accept truth. |
+| Closeout verdict/accepted-truth bridge | Implemented | Runs only handoff-bound `closeout-review` verdicts; accepted truth follows the CLI receipt. |
+| Listener health and external watchdog | Implemented | Reports or alerts; does not mutate Offdesk state. |
 
 ## Completed Work
 
@@ -98,9 +139,37 @@ to local Offdesk gate approval.
   diagnostics in local health output.
 - Telegram freeform messages can become reviewable decision-inbox items or
   planning sessions.
+- Telegram can guide project selection, initialization preview/run, plan draft,
+  plan registration, explicit plan-review approval, and read-only
+  launch-preparation packet creation without launching work.
+- Telegram can create a pending `dispatch.runtime` gate approval request from
+  a launch-preparation packet without enqueueing or launching work.
+- Telegram can approve or deny the exact pending gate approval it created, but
+  cannot enqueue, launch, tick, or mark runtime work accepted.
+- Telegram can write an `ExecutionBrief` for the exact approved gate context,
+  but cannot enqueue, launch, tick, or mark runtime work accepted.
+- Telegram can write an enqueue handoff receipt with a local-review command
+  template, but cannot enqueue, launch, tick, or mark runtime work accepted.
+- Telegram can bind a reviewed `prepared_task.json` to the approved execution
+  brief after checking exact project/request/task and brief hash, but cannot
+  enqueue, launch, tick, or mark runtime work accepted.
+- Telegram can enqueue only the bound `dispatch.runtime` task after rechecking
+  prepared workload and execution brief hashes, but cannot launch, tick, or mark
+  runtime work accepted.
+- Telegram can start only the bound queued task through task-scoped tick after
+  rechecking prepared workload and execution brief hashes, but cannot close
+  out or mark runtime work accepted.
+- Telegram can monitor only the started task through task-scoped tick with
+  `--limit 0`, but cannot dispatch, close out, or mark runtime work accepted.
+- Telegram can create closeout artifacts only after the task-scoped monitor
+  shows `completed`, but cannot review closeout, mutate files, or mark runtime
+  work accepted.
 - Telegram transport errors, send failures, and unexpected loop exceptions are
   recorded as health state with backoff.
 - The user service uses restart-friendly systemd settings.
+- The external watchdog reads loop-status and systemd state from outside the
+  listener process and sends rate-limited emergency alerts when remote
+  operation is not reliable.
 
 ### Adaptive Wiki And Return Boundary
 
@@ -128,34 +197,47 @@ to local Offdesk gate approval.
 
 ## Remaining Work
 
-### 1. External Remote Operator Watchdog
+### 1. Closeout Review And Accepted-Truth Bridge
 
-Goal: report when the listener, user service, or machine-level dependency is
-stale even if the Telegram listener itself cannot send a message.
-
-Acceptance checks:
-
-- watchdog reads the loop health file and systemd status;
-- stale listener state is reported with concrete recovery commands;
-- watchdog does not depend on the listener process it is checking;
-- repeated alerts are rate-limited.
-
-### 2. Launch-Prep And Gate Bridge
-
-Goal: connect approved plan review to launch-preparation packets without
-collapsing plan approval and runtime launch approval.
+Goal: connect generated closeout packets to closeout review without
+collapsing plan approval, gate request creation, approval resolution, brief
+generation, enqueue, runtime start, runtime monitoring, closeout packet
+generation, and accepted-truth review.
 
 Acceptance checks:
 
-- launch prep binds to a reviewed plan hash;
-- `forager offdesk gate` remains the runtime authority;
-- Telegram cannot convert a plan-review approval into execution;
-- stale plan, stale review, or changed launch packet blocks progression.
+- `forager offdesk enqueue`, `launch`, and `tick` remain separate runtime
+  surfaces;
+- Telegram cannot convert a plan-review approval, gate request, or gate
+  approval into execution by itself;
+- Telegram enqueue handoff stays a review receipt until a reviewed workload
+  packet is bound;
+- Telegram workload binding only produces `bound_enqueue_args` for local
+  review; it must not run `forager offdesk enqueue` itself;
+- Telegram enqueue run can queue only the bound task and must not call launch or
+  tick;
+- Telegram runtime start can call only task-scoped
+  `offdesk tick --project-key --task-id --limit 1` and must not close out or
+  accept runtime work;
+- Telegram runtime monitor can call only task-scoped
+  `offdesk tick --project-key --task-id --limit 0` and read the same task; it
+  must not dispatch, close out, or accept runtime work;
+- Telegram closeout packet can call only
+  `offdesk closeout --project-key --task-id --dry-run --json`; it must not run
+  closeout review, mutate files, or accept runtime work;
+- Telegram closeout review handoff can write local `closeout-review` command
+  templates only; it must not execute `closeout-review`, mutate files, or
+  accept runtime work;
+- Telegram closeout verdict recording can run only handoff-bound
+  `closeout-review --verdict approved|revise|blocked`; accepted truth is
+  recorded only when the resulting closeout receipt status is `accepted`;
+- stale plan, stale review, changed launch packet, or mismatched approval
+  blocks progression.
 
-### 3. Monitor And Closeout Bridge
+### 2. Accepted-Truth Review Bridge
 
-Goal: expose live task state and closeout readiness through compact operator
-surfaces.
+Goal: expose closeout readiness and accepted-truth decisions through compact
+operator surfaces.
 
 Acceptance checks:
 
@@ -164,7 +246,7 @@ Acceptance checks:
 - completed execution remains separate from accepted truth;
 - review-required states do not disappear from status.
 
-### 4. Documentation And Dependency Hygiene
+### 3. Documentation And Dependency Hygiene
 
 Goal: keep product docs current and release-clean.
 
@@ -175,7 +257,7 @@ Acceptance checks:
 - CLI reference is regenerated when command surfaces change;
 - website dependencies are refreshed and `npm audit` is reviewed.
 
-### 5. Module Decomposition
+### 4. Module Decomposition
 
 Goal: reduce regression risk before adding more remote actions.
 

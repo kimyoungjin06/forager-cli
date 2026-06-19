@@ -167,6 +167,51 @@ State transitions must be idempotent. Replaying a Telegram callback or mobile
 button must not duplicate a review, consume the wrong approval, or launch work
 twice.
 
+## Current Implementation Status
+
+The current Telegram implementation covers read-only inspection, remote Plan
+Mode preparation, explicit plan-review approval, launch-preparation packet
+creation, gate-request creation for pending local approval, exact gate approval
+resolution, execution-brief generation, reviewed workload binding, bound enqueue
+run, task-scoped runtime start, task-scoped runtime monitor/readout, health
+checks, closeout packet creation, and an external watchdog. It does not cover
+broad runtime launch, continuous execution control, closeout review, or
+accepted-truth review from Telegram.
+
+| Surface | Current status | Authority boundary | Durable/local artifact |
+| --- | --- | --- | --- |
+| `/status`, `/pending`, `/plans`, `/show` | Implemented | Read-only projection only | `remote_operator_readonly_projection.v1` |
+| Freeform Telegram text | Implemented | Classifier and inbox input only; no approval or execution authority | `remote_operator_telegram_feedback.v1` and decision inbox rows |
+| Project selection | Implemented | Selects a Plan Mode target; does not start work | `telegram_remote_plan_session.v1` |
+| Project init preview | Implemented | Dry-run review of project markers and init command | `telegram_remote_project_init_preview.v1` |
+| Project init run | Implemented | Runs the local project initialization packet command only; no Offdesk runtime work | `telegram_remote_project_init_run.v1` |
+| Plan draft | Implemented | Builds a bounded draft and validates `forager offdesk plan --dry-run` | `telegram_remote_plan_draft.v1` |
+| Plan registration | Implemented | Writes only the local Offdesk plan registry | `telegram_remote_plan_registration.v1` |
+| Plan-review approval | Implemented | Records plan review only; not launch approval | `telegram_remote_plan_review.v1` and `forager offdesk plan-review` record |
+| Launch-preparation packet | Implemented | Creates a read-only packet from an approved review; not gate approval | `telegram_remote_plan_launch_prep.v1` and `offdesk_plan_launch_prep.v1` |
+| Gate request | Implemented | Runs `offdesk gate` to create pending approval only; does not approve it | `telegram_remote_plan_gate_request.v1` and pending approval row |
+| Gate approval resolution | Implemented | Resolves only the exact matching pending approval; does not enqueue or launch | `telegram_remote_plan_gate_resolution.v1` and approval transition row |
+| Execution brief | Implemented | Creates a bounded `ExecutionBrief`; does not enqueue or launch | `telegram_remote_plan_execution_brief.v1` and `EXECUTION_BRIEF.json` |
+| Enqueue handoff | Implemented | Writes a local-review command template only; does not enqueue or launch | `telegram_remote_plan_enqueue_handoff.v1` and `PLAN_ENQUEUE_HANDOFF.json` |
+| Workload binding | Implemented | Binds a reviewed `prepared_task.json` to the execution brief; does not enqueue or launch | `telegram_remote_plan_workload_binding.v1` and `PLAN_WORKLOAD_BINDING.json` |
+| Enqueue run | Implemented | Runs only the bound `offdesk enqueue` argv; does not launch or tick | `telegram_remote_plan_enqueue_run.v1` and `PLAN_ENQUEUE_RUN.json` |
+| Listener health | Implemented | Reports local transport/model readiness; no mutation authority | `remote_operator_telegram_health.v1` |
+| External watchdog | Implemented | Runs outside the listener; sends rate-limited emergency alerts only | `remote_operator_telegram_watchdog.v1` |
+| Runtime start | Implemented | Runs task-scoped `offdesk tick --project-key --task-id --limit 1`; does not monitor, close out, or accept truth | `telegram_remote_plan_runtime_start.v1` and `PLAN_RUNTIME_START.json` |
+| Runtime monitor/readout | Implemented | Runs task-scoped `offdesk tick --project-key --task-id --limit 0` and reads the same task; does not dispatch, close out, or accept truth | `telegram_remote_plan_runtime_monitor.v1` and `PLAN_RUNTIME_MONITOR.json` |
+| Closeout packet | Implemented | Runs `offdesk closeout --project-key --task-id --dry-run --json`; does not review, mutate files, or accept truth | `telegram_remote_plan_closeout_packet.v1` and `PLAN_CLOSEOUT_PACKET.json` |
+| Closeout review handoff | Implemented | Writes bounded `closeout-review` verdict templates; does not run verdicts yet | `telegram_remote_plan_closeout_review_handoff.v1` and `PLAN_CLOSEOUT_REVIEW_HANDOFF.json` |
+| Closeout verdict/accepted-truth bridge | Implemented | Runs only handoff-bound `closeout-review --verdict approved|revise|blocked`; accepted truth is recorded only from the closeout receipt | `telegram_remote_plan_closeout_verdict.v1` and `PLAN_CLOSEOUT_VERDICT.json` |
+
+The practical rule is: Telegram can prepare and review a plan and create the
+read-only launch-preparation packet and pending gate request without turning
+plan approval into runtime authority. After `실행 브리프 생성`, Telegram can
+write a local enqueue handoff template, bind a reviewed `prepared_task.json`,
+enqueue the bound task, and start only that queued task through task-scoped
+tick. Telegram can then poll/read only that same task and create the closeout
+packet for a completed task. Closeout review and accepted-truth decisions remain
+local-only.
+
 ## Remote Command Envelope
 
 Every remote message or button callback is normalized before it can affect
@@ -395,15 +440,24 @@ status but cannot approve mutations.
 
 ## Telegram Transport Policy
 
-Telegram should expose a small command surface:
+The current Telegram adapter exposes a small safe command surface:
 
 ```text
 /status
-/projects
-/plan tonight
 /plans
 /show <plan_id>
 /pending
+freeform planning text
+project-selection buttons
+plan-session buttons through 계획 승인
+```
+
+The following command classes are future design targets, not current Telegram
+runtime authority:
+
+```text
+/projects
+/plan tonight
 /approve <approval_id>
 /deny <approval_id>
 /pause <run_id>
@@ -417,6 +471,12 @@ Allowed button callbacks:
 approve_plan
 request_revision
 reject_plan
+```
+
+Future button callbacks must remain unavailable until the corresponding bridge
+has explicit staleness checks, observed-hash binding, and local CLI recovery:
+
+```text
 approve_launch
 deny_launch
 acknowledge_status
@@ -526,7 +586,7 @@ Initial action gates:
 | `status` | Telegram config, listener loop status | Keep read-only status if possible; otherwise report transport outage. |
 | `project_scan` | Workspace roots and readable project markers | Allow deterministic search; ask for a path if unresolved. |
 | `build_plan` | Resolved project and available local agent/model for freeform judgment | Block new plan/night-run starts; allow status, project scan, and existing plan review. |
-| `start_offdesk` | Approved plan, launch prep, provider capacity, runner heartbeat | Always fail closed from Telegram; require local approval and launch prep. |
+| `start_offdesk` | Approved plan, launch prep, gate approval, execution brief, reviewed workload binding, queued task | Allow only bound task start/readout; fail closed for arbitrary launch, shell, closeout, and accepted truth. |
 
 When local agent/model resolution fails, Telegram should not imply that a new
 night run is ready. It may still show deterministic project candidates, but the
@@ -548,7 +608,7 @@ short recovery hint.
 
 ## Implementation Phases
 
-### Phase 1: Read-Only Remote Surface
+### Phase 1: Read-Only Remote Surface - Implemented
 
 - Implement transport allowlist.
 - Implement `/status`, `/pending`, `/plans`, and `/show`.
@@ -574,7 +634,8 @@ to false. They are intended for Telegram or another transport adapter to
 render. The `pending` projection reads approval rows without resolving or
 expiring them.
 
-The first Telegram adapter is also read-only:
+The Telegram adapter starts from these read-only commands and then adds bounded
+Plan Mode preparation receipts. Runtime mutation remains unavailable:
 
 ```bash
 scripts/offdesk_remote_operator_telegram.py \
@@ -595,19 +656,25 @@ scripts/offdesk_remote_operator_telegram.py \
   --health \
   --env-file /path/to/telegram.env
 
+scripts/offdesk_remote_operator_watchdog.py \
+  --dry-run \
+  --env-file /path/to/telegram.env \
+  --loop-status-file ~/.cache/forager/remote_operator_telegram_loop.json
+
 scripts/offdesk_remote_operator_telegram.py \
   --send-command-text "/status" \
   --env-file /path/to/telegram.env \
   --forager-bin target/debug/forager
 ```
 
-The adapter accepts only `/status`, `/pending`, `/plans`, `/show <plan-id>`,
-and `/help`. Unsupported commands such as `/approve`, `/launch`, `/exec`, or
-`/git push` return an unsupported result and do not call the projection CLI.
-Without `--once`, live polling stays attached and keeps reading Telegram
-updates. `--once` is for one-shot probes, and `--max-polls` is available for
-bounded smoke tests. `--send-command-text` sends one read-only projection to
-the configured owner chat without consuming updates.
+The adapter accepts `/status`, `/pending`, `/plans`, `/show <plan-id>`,
+`/help`, freeform planning text, and the bounded plan-session buttons described
+below. Unsupported commands such as `/approve`, `/launch`, `/exec`, or
+`/git push` return an unsupported result and do not call mutation-capable local
+surfaces. Without `--once`, live polling stays attached and keeps reading
+Telegram updates. `--once` is for one-shot probes, and `--max-polls` is
+available for bounded smoke tests. `--send-command-text` sends one read-only
+projection to the configured owner chat without consuming updates.
 
 Telegram messages should stay short enough for mobile scanning: a compact
 title, the current state, and the next local-safe action. Longer listener
@@ -675,65 +742,307 @@ scripts/install_offdesk_telegram_operator_service.py \
   --install \
   --enable \
   --restart \
+  --include-watchdog \
   --env-file /path/to/telegram.env \
   --forager-bin "$PWD/target/debug/forager"
 
 systemctl --user status forager-telegram-operator.service
+systemctl --user status forager-telegram-operator-watchdog.timer
 ```
 
-### Phase 2: Remote Envelope And Receipts
+The watchdog is separate from the listener. It reads the listener loop-status
+file, checks the user service state, sends at most one compact emergency
+Telegram alert per alert window, and reports concrete local recovery commands.
+If the listener is stale or the service is failed, the alert says plainly that
+remote/offdesk operation is currently not reliable instead of pretending the
+night run can continue.
 
-- Add `remote_command_envelope.v1`.
-- Add nonce and TTL validation.
-- Persist accepted and rejected remote action receipts.
-- Verify local CLI can inspect all receipts.
+### Phase 2: Remote Envelope And Receipts - Partially Implemented
 
-### Phase 3: Plan Mode Bridge
+- Implemented: plan-session receipts for project init preview/run, plan draft,
+  plan registration, and plan review.
+- Implemented: unsupported command attempts are rejected instead of routed to
+  shell or launch surfaces.
+- Remaining: full `remote_command_envelope.v1`, nonce and TTL validation for
+  every callback, and a uniform receipt inspector for all remote receipts.
 
-- Extend the read-only project inventory beyond the current Telegram
-  selection session.
-- Generate candidate ranking and plan artifacts.
-- Register plans through `forager offdesk plan`.
-- Display summaries with observed hashes.
-- Convert `telegram_operator_plan_request` inbox items into bounded Plan Mode
-  candidates. This closes the gap where an operator sends a Telegram request
-  after leaving the desk but no local plan has been registered yet.
-- Promote `telegram_remote_plan_registration.v1` receipts into approved
-  `forager offdesk plan-review` records only after explicit Telegram operator
-  confirmation.
+### Phase 3: Plan Mode Bridge - Partially Implemented
 
-### Phase 4: Plan Review Bridge
+- Implemented: freeform planning text becomes a reviewable decision-inbox item
+  or a Plan Mode session.
+- Implemented: project candidates can be selected by button or direct typing.
+- Implemented: project initialization preview/run receipts are stored locally.
+- Implemented: bounded plan draft generation and `forager offdesk plan
+  --dry-run --json` validation.
+- Implemented: plan registration through `forager offdesk plan --json`.
+- Remaining: broader portfolio ranking beyond the current candidate session,
+  richer plan comparison, and uniform observed-hash display for all summaries.
 
-- Keep `계획 승인` as an explicit positive plan-review action.
-- Add revision-required and rejected decisions.
-- Reject stale approvals by observed hash.
-- Never enqueue or launch work in this phase.
+### Phase 4: Plan Review Bridge - Partially Implemented
 
-### Phase 5: Launch-Prep And Gate Bridge
+- Implemented: `계획 승인` records
+  `forager offdesk plan-review <plan-id> --decision approved --json`.
+- Implemented: plan review does not build launch-preparation packets, enqueue
+  work, or start runtime execution.
+- Remaining: revision-required and rejected decisions, stale approval rejection
+  by observed hash, and complete callback nonce/TTL checks.
 
-- Build launch-preparation packets after approved plan review.
-- Generate execution brief candidates.
-- Use `forager offdesk gate` for launch approval.
-- Consume only matching pending approvals.
+### Phase 5: Launch-Prep And Gate Bridge - Partially Implemented
 
-### Phase 6: Monitor And Closeout Bridge
+- Implemented: Telegram `실행 준비 검토` runs
+  `forager offdesk plan-launch-prep <plan-id> --review-id <review-id> --json`
+  after an approved plan review.
+- Implemented: `telegram_remote_plan_launch_prep.v1` receipts keep
+  `approval_authorized`, `gate_approval_authorized`, `execution_authorized`,
+  `enqueue_authorized`, and `runtime_authorized` false.
+- Implemented: Telegram `게이트 요청` runs
+  `forager offdesk gate dispatch.runtime ... --json` to create a pending local
+  approval row.
+- Implemented: `telegram_remote_plan_gate_request.v1` receipts keep
+  `approval_authorized`, `gate_approval_authorized`, `execution_authorized`,
+  `launch_authorized`, `enqueue_authorized`, and `runtime_authorized` false.
+- Implemented: Telegram `게이트 승인` and `게이트 거절` resolve only the exact
+  matching pending approval after checking `approval_id`, action, project,
+  request, task, source surface, and launch-prep hash.
+- Implemented: `telegram_remote_plan_gate_resolution.v1` receipts keep
+  `execution_authorized`, `launch_authorized`, `enqueue_authorized`, and
+  `runtime_authorized` false.
+- Implemented: Telegram `실행 브리프 생성` writes a bounded
+  `EXECUTION_BRIEF.json` with `approved=true` and
+  `allowed_runtime_mutations=["dispatch.runtime"]` for the exact approved
+  gate context.
+- Implemented: `telegram_remote_plan_execution_brief.v1` receipts keep
+  `execution_authorized`, `launch_authorized`, `enqueue_authorized`, and
+  `runtime_authorized` false.
+- Implemented: Telegram `큐 등록 검토` writes
+  `PLAN_ENQUEUE_HANDOFF.json` with a local-review enqueue command template
+  that still requires a reviewed workload command.
+- Implemented: `telegram_remote_plan_enqueue_handoff.v1` receipts keep
+  `execution_authorized`, `launch_authorized`, `enqueue_authorized`, and
+  `runtime_authorized` false.
+- Implemented: Telegram accepts a `prepared_task.json` path after handoff and
+  verifies the prepared workload kind, preflight readiness, exact
+  project/request/task match, `dispatch.runtime` capability, wrapper existence,
+  and execution-brief hash.
+- Implemented: `telegram_remote_plan_workload_binding.v1` receipts write
+  `bound_enqueue_args` for local review while keeping `execution_authorized`,
+  `launch_authorized`, `enqueue_authorized`, and `runtime_authorized` false.
+- Implemented: Telegram `큐 등록 실행` runs only the exact bound
+  `offdesk enqueue dispatch.runtime` argv after rechecking prepared workload
+  and execution brief hashes.
+- Implemented: `telegram_remote_plan_enqueue_run.v1` receipts keep
+  `execution_authorized`, `launch_authorized`, and `runtime_authorized` false.
+- Implemented: CLI `forager offdesk tick` accepts `--project-key` and
+  `--task-id` filters so remote runtime start can target one queued task rather
+  than sweeping the full queue.
+- Implemented: Telegram `실행 시작` runs only task-scoped
+  `offdesk tick --project-key <project> --task-id <task> --limit 1 --json`
+  after rechecking prepared workload and execution-brief hashes.
+- Implemented: `telegram_remote_plan_runtime_start.v1` receipts keep
+  `closeout_authorized` and `accepted_truth_authorized` false.
+- Implemented: Telegram `실행 상태 확인` runs only task-scoped
+  `offdesk tick --project-key <project> --task-id <task> --limit 0 --json`
+  and then reads the same task with `offdesk tasks --project-key <project>
+  --task-id <task> --json`.
+- Implemented: `telegram_remote_plan_runtime_monitor.v1` receipts keep
+  `dispatch_authorized`, `closeout_authorized`, and
+  `accepted_truth_authorized` false.
+- Implemented: Telegram `마무리 패킷 생성` runs only
+  `offdesk closeout --project-key <project> --task-id <task> --dry-run --json`
+  after a completed task-scoped monitor receipt.
+- Implemented: `telegram_remote_plan_closeout_packet.v1` receipts keep
+  `closeout_review_authorized`, `file_mutation_authorized`, and
+  `accepted_truth_authorized` false.
+- Implemented: Telegram `마무리 검토 준비` writes only a bounded
+  `closeout-review` handoff with verdict command templates.
+- Implemented: `telegram_remote_plan_closeout_review_handoff.v1` receipts keep
+  `remote_closeout_review_authorized`, `file_mutation_authorized`, and
+  `accepted_truth_authorized` false.
+- Implemented: Telegram `승인 기록`, `수정 요청 기록`, and `차단 기록` run only
+  `closeout-review --verdict approved|revise|blocked` from the reviewed
+  handoff.
+- Implemented: `telegram_remote_plan_closeout_verdict.v1` receipts keep
+  `project_file_mutation_authorized` and `file_mutation_authorized` false, and
+  record `accepted_truth_recorded` only when the CLI receipt status is
+  `accepted`.
 
-- Stream bounded heartbeat and blocker summaries.
-- Raise mandatory decision interrupts.
-- Surface closeout artifacts and verdict state.
+### Phase 6: Runtime Monitor Readout - Implemented
+
+- Poll only the already-started task by `project_key` and `task_id`.
+- Use `--limit 0` so the monitor path cannot dispatch queued work.
+- Show compact status, blocker, and next-safe-action summaries.
+- Keep closeout review and accepted-truth review local-only.
+
+### Phase 7: Closeout Packet Bridge - Implemented
+
+- Generate closeout artifacts only for the completed monitored task.
+- Keep generated closeout artifacts read-only and review-required.
+- Do not run `closeout-review`, file operations, or accepted-truth decisions.
+
+### Phase 8: Closeout Review Handoff - Implemented
+
+- Show local `closeout-review` command templates for `revise`, `blocked`, and
+  `approved`.
+- Warn that `approved` can create accepted truth when the closeout has no
+  follow-ups.
+- Do not run `closeout-review` until a verdict button is selected.
+
+### Phase 9: Closeout Verdict And Accepted Truth Bridge - Implemented
+
+- Allow Telegram to record `approved`, `revise`, or `blocked` closeout-review
+  verdicts from the prepared handoff only.
+- Treat accepted truth as the CLI closeout receipt result, not as a generic
+  Telegram approval.
+- Keep project-file mutation authorization false.
 - Keep CLI as recovery path for all state.
+
+## Operator Runbooks
+
+### Start A Planning Cycle From Telegram
+
+Use this when away from the desk and the goal is to prepare a reviewed plan,
+not launch runtime work.
+
+1. Send a freeform planning request, for example "tonight, inspect which
+   project should get Offdesk time".
+2. Review the compact project candidates.
+3. Select a project by button, or type a project number/name directly.
+4. Tap `초기화 검토` to create a local project-init preview receipt.
+5. Tap `초기화 생성` only after the preview is acceptable.
+6. Tap `계획 초안 생성` to create and dry-run validate the plan draft.
+7. Tap `계획 등록` to write the local Offdesk plan registry entry.
+8. Tap `계획 승인` only if the plan direction is acceptable.
+9. Tap `실행 준비 검토` to create the read-only launch-preparation packet.
+10. Tap `게이트 요청` to create a pending local `dispatch.runtime` approval.
+11. Tap `게이트 승인` or `게이트 거절` to resolve that exact approval.
+12. Tap `실행 브리프 생성` to write the bounded `ExecutionBrief` file.
+13. Tap `큐 등록 검토` to write a local enqueue handoff template.
+14. Type the reviewed `prepared_task.json` path to bind the workload packet.
+15. Tap `큐 등록 실행` to enqueue the bound task.
+16. Tap `실행 시작` to start only that queued task.
+17. Tap `실행 상태 확인` to poll/read only that same task.
+18. If the task is completed, tap `마무리 패킷 생성` to create closeout
+    artifacts only.
+19. Tap `마무리 검토 준비` to write local `closeout-review` verdict
+    templates without running a verdict.
+20. Tap `승인 기록`, `수정 요청 기록`, or `차단 기록` only if that closeout
+    verdict is intended.
+
+After step 17, the task may be running, completed, failed, or waiting for
+recovery. After step 18, closeout artifacts exist. After step 19, local review
+commands exist. After step 20, the selected closeout verdict is recorded, and
+accepted truth is present only if the resulting `closeout_receipt.v1`
+acceptance status is `accepted`.
+
+### Continue After Plan Approval
+
+Plan approval can be followed by Telegram `실행 준비 검토` or by the equivalent
+local command:
+
+```bash
+forager offdesk plan-launch-prep <plan-id> --json
+```
+
+After the launch-preparation packet exists, the handoff point is local gate
+request and approval review. Telegram can create the request, or the same
+request can be made locally:
+
+```bash
+forager offdesk gate ... --json
+```
+
+After the pending approval exists, approval and runtime progression remain
+separate:
+
+```bash
+forager offdesk ok <approval-id>
+forager offdesk tick --project-key <project-key> --task-id <task-id> --limit 1 --json
+```
+
+Telegram can now replace the local `ok/cancel` step only for the exact matching
+approval it created. It can also enqueue only the reviewed bound task. Launch
+uses task-scoped tick only; monitor uses task-scoped tick with `--limit 0`.
+Closeout packet creation can run only after a completed task-scoped monitor.
+Closeout review remains local until the next bridge is implemented.
+
+### Respond To A Watchdog Alert
+
+The watchdog alert is deliberately blunt. If it says remote operation is
+unreliable, assume Telegram cannot safely drive the night run.
+
+1. Check the listener service:
+
+   ```bash
+   systemctl --user status forager-telegram-operator.service
+   ```
+
+2. Restart the listener if the service is failed or inactive:
+
+   ```bash
+   systemctl --user restart forager-telegram-operator.service
+   ```
+
+3. Recheck the listener health:
+
+   ```bash
+   scripts/offdesk_remote_operator_telegram.py \
+     --health \
+     --env-file /path/to/telegram.env \
+     --loop-status-file ~/.cache/forager/remote_operator_telegram_loop.json
+   ```
+
+4. Recheck the watchdog:
+
+   ```bash
+   scripts/offdesk_remote_operator_watchdog.py \
+     --dry-run \
+     --env-file /path/to/telegram.env \
+     --loop-status-file ~/.cache/forager/remote_operator_telegram_loop.json
+   ```
+
+Resume remote planning only after health is `healthy` or the remaining
+degradation is explicitly acceptable for read-only inspection.
 
 ## Acceptance Criteria
 
-Remote Operator is ready for first practical use when:
+Remote Operator is ready for practical planning use when:
 
 - no remote message can execute arbitrary shell text;
 - plan approval and launch approval are separate receipts;
-- stale callbacks are rejected and recorded;
 - project candidates are comparable across workspaces;
-- every mutation-capable callback binds to an observed hash;
 - every remote-visible state can be inspected through CLI;
 - Telegram outage does not prevent local recovery;
+- planning requests can produce registered, reviewable plans without launching
+  runtime work;
+- approved plans can produce launch-preparation packets without approving a
+  gate, enqueue, launch, or runtime dispatch;
+- launch-preparation packets can produce and resolve exact pending gate
+  approvals without launching work;
+- pending gate approvals can be approved or denied without enqueueing,
+  launching, or ticking runtime work;
+- approved gate context can produce an execution brief without enqueueing,
+  launching, or ticking runtime work;
+- execution briefs can produce local enqueue handoff templates without
+  enqueueing, launching, or ticking runtime work;
+- enqueue handoff receipts can bind reviewed prepared workload packets without
+  enqueueing, launching, or ticking runtime work;
+- bound workload packets can enqueue a queued task without launching or ticking
+  runtime work;
+- queued bound tasks can start through task-scoped tick without monitoring,
+  closeout, or accepted-truth authority;
+- watchdog alerts make stale or failed listener state visible outside the
+  listener process.
+
+Remote Operator is ready for runtime/overnight use only after:
+
+- stale callbacks are rejected and recorded through a full remote command
+  envelope;
+- every mutation-capable callback binds to an observed hash;
+- launch-preparation packets, gate requests, approval resolution, execution
+  brief generation, enqueue, and runtime launch remain distinct from
+  plan-review approval;
+- Telegram can observe heartbeat, blockers, and closeout readiness without
+  claiming accepted truth;
 - closeout produces a reviewable morning package;
 - tests cover duplicate callbacks, expired approvals, hash mismatch, observer
   denial, and owner-only abort.

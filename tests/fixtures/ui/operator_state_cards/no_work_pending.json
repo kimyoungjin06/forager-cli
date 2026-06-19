@@ -1,0 +1,29 @@
+{
+  "schema": "operator_state_card.v1",
+  "id": "no_work_pending",
+  "title": "Forager 점검",
+  "severity": "ok",
+  "state_summary": "처리할 항목이 없습니다.",
+  "primary_blocker_or_decision": {
+    "label": "대기",
+    "summary": "승인, 실패, 마무리 항목이 없습니다."
+  },
+  "next_safe_action": {
+    "label": "새 알림이 오면 다시 확인",
+    "reason": "현재 operator attention이 필요한 항목이 없습니다.",
+    "command": "forager status --json"
+  },
+  "detail_ref": {
+    "kind": "command",
+    "label": "상태 JSON",
+    "command": "forager status --json"
+  },
+  "authorization_boundary": "읽기 전용. 승인/실행 없음.",
+  "counts": {
+    "pending_approvals": 0,
+    "failed": 0,
+    "closeout_required": 0,
+    "active": 0,
+    "queued": 0
+  }
+}

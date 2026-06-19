@@ -76,6 +76,15 @@ fn remote_operator_command(home: &Path) -> Command {
     command
 }
 
+fn watchdog_command(home: &Path) -> Command {
+    let mut command = Command::new("python3");
+    command.arg(script_path("offdesk_remote_operator_watchdog.py"));
+    command.env("HOME", home);
+    command.env("XDG_CONFIG_HOME", home.join(".config"));
+    command.env_remove("FORAGER_PROFILE");
+    command
+}
+
 fn profile_dir(home: &Path) -> PathBuf {
     #[cfg(target_os = "linux")]
     {
@@ -2021,14 +2030,1660 @@ fn remote_operator_telegram_replay_plan_session_builds_init_preview_receipt() ->
     assert!(preview.contains("<b>계획 승인됨</b>"));
     assert!(preview.contains("계획 검토를 기록했습니다."));
     assert!(preview.contains("실행 준비는 아직 하지 않았습니다."));
-    assert!(preview.contains("로컬에서 실행 준비 검토"));
+    assert!(preview.contains("아래 버튼으로 실행 준비 검토"));
+    assert!(!preview.contains(workspace_root.to_str().expect("workspace path")));
+    assert!(button_texts(&result).contains(&"실행 준비 검토".to_string()));
+    assert_mobile_contract(&result);
+
+    let eighth_update = temp.path().join("launch_prep_update.json");
+    write_text_update(&eighth_update, 737, 916, "실행 준비 검토")?;
+    let eighth_out = temp.path().join("launch_prep_result.json");
+    let eighth_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&eighth_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--remote-plan-artifact-dir")
+        .arg(&plan_artifact_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&eighth_out)
+        .output()?;
+    assert!(
+        eighth_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&eighth_output.stdout),
+        String::from_utf8_lossy(&eighth_output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&eighth_out)?)?;
+    assert_eq!(result["parsed_command"]["command"], "remote_plan_selection");
+    assert_eq!(
+        result["parsed_command"]["selection_status"],
+        "plan_launch_prep_prepared"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["stage"],
+        "plan_launch_prep_prepared"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_launch_prep"]["schema"],
+        "telegram_remote_plan_launch_prep.v1"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_launch_prep"]["status"],
+        "prepared"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_launch_prep"]["launch_preparation_authorized"],
+        true
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_launch_prep"]["approval_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_launch_prep"]["gate_approval_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_launch_prep"]["execution_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_launch_prep"]["enqueue_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_launch_prep"]["runtime_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_launch_prep"]["launch_prep_output"]["schema"],
+        "offdesk_plan_launch_prep.v1"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_launch_prep"]["launch_prep_output"]["ready_for_launch"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_launch_prep"]["launch_prep_output"]
+            ["ready_for_enqueue"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_launch_prep"]["launch_prep_output"]
+            ["applies_file_operations"],
+        false
+    );
+    assert!(
+        result["remote_plan_session"]["plan_launch_prep"]["launch_prep_output"]
+            ["registration_path"]
+            .is_null()
+    );
+    assert!(
+        result["remote_plan_session"]["plan_launch_prep"]["launch_prep_output"]
+            ["registration_path_hash"]
+            .is_string()
+    );
+    assert!(
+        result["remote_plan_session"]["plan_launch_prep"]["launch_prep_output"]["artifacts"]
+            ["launch_prep_json"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("sha256:")
+    );
+    let artifact_path = result["remote_plan_session"]["plan_launch_prep"]["artifact_path"]
+        .as_str()
+        .expect("launch prep receipt path");
+    let artifact: Value = serde_json::from_slice(&fs::read(artifact_path)?)?;
+    assert_eq!(artifact["schema"], "telegram_remote_plan_launch_prep.v1");
+    assert_eq!(artifact["status"], "prepared");
+    assert_eq!(artifact["launch_preparation_authorized"], true);
+    assert_eq!(artifact["approval_authorized"], false);
+    assert_eq!(artifact["gate_approval_authorized"], false);
+    assert_eq!(artifact["execution_authorized"], false);
+    assert_eq!(artifact["launch_authorized"], false);
+    assert_eq!(artifact["enqueue_authorized"], false);
+    assert_eq!(artifact["runtime_authorized"], false);
+    assert_eq!(
+        artifact["launch_prep_output"]["schema"],
+        "offdesk_plan_launch_prep.v1"
+    );
+    assert_eq!(artifact["launch_prep_output"]["ready_for_launch"], false);
+    assert_eq!(artifact["launch_prep_output"]["ready_for_enqueue"], false);
+    assert_eq!(
+        artifact["launch_prep_output"]["applies_file_operations"],
+        false
+    );
+    assert!(artifact["launch_prep_output"]["does_not_authorize"]
+        .as_array()
+        .expect("does_not_authorize array")
+        .iter()
+        .any(|item| item.as_str() == Some("dispatch")));
+    let launch_prep_path = artifact["launch_prep_output"]["artifacts"]["launch_prep_json"]
+        .as_str()
+        .expect("launch prep json path");
+    assert!(Path::new(launch_prep_path).exists());
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>실행 준비 패킷 생성됨</b>"));
+    assert!(preview.contains("패킷만 저장했습니다."));
+    assert!(preview.contains("실행/승인은 아직 하지 않았습니다."));
+    assert!(preview.contains("아래 버튼으로 게이트 요청"));
+    assert!(!preview.contains(workspace_root.to_str().expect("workspace path")));
+    assert!(button_texts(&result).contains(&"게이트 요청".to_string()));
+    assert_mobile_contract(&result);
+
+    let ninth_update = temp.path().join("gate_request_update.json");
+    write_text_update(&ninth_update, 738, 916, "게이트 요청")?;
+    let ninth_out = temp.path().join("gate_request_result.json");
+    let ninth_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&ninth_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--remote-plan-artifact-dir")
+        .arg(&plan_artifact_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&ninth_out)
+        .output()?;
+    assert!(
+        ninth_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&ninth_output.stdout),
+        String::from_utf8_lossy(&ninth_output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&ninth_out)?)?;
+    assert_eq!(result["parsed_command"]["command"], "remote_plan_selection");
+    assert_eq!(
+        result["parsed_command"]["selection_status"],
+        "plan_gate_request_created"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["stage"],
+        "plan_gate_request_created"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_gate_request"]["schema"],
+        "telegram_remote_plan_gate_request.v1"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_gate_request"]["status"],
+        "pending_approval"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_gate_request"]["gate_request_authorized"],
+        true
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_gate_request"]["approval_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_gate_request"]["gate_approval_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_gate_request"]["execution_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_gate_request"]["launch_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_gate_request"]["enqueue_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_gate_request"]["runtime_authorized"],
+        false
+    );
+    assert!(result["remote_plan_session"]["plan_gate_request"]["launch_prep_json"].is_null());
+    assert!(
+        result["remote_plan_session"]["plan_gate_request"]["launch_prep_json_hash"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("sha256:")
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_gate_request"]["gate_output"]["status"],
+        "pending_approval"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_gate_request"]["gate_output"]["approval"]["action"],
+        "dispatch.runtime"
+    );
+    assert!(
+        result["remote_plan_session"]["plan_gate_request"]["gate_output"]["approval"]
+            ["approval_id"]
+            .is_string()
+    );
+    let artifact_path = result["remote_plan_session"]["plan_gate_request"]["artifact_path"]
+        .as_str()
+        .expect("gate request receipt path");
+    let artifact: Value = serde_json::from_slice(&fs::read(artifact_path)?)?;
+    assert_eq!(artifact["schema"], "telegram_remote_plan_gate_request.v1");
+    assert_eq!(artifact["status"], "pending_approval");
+    assert_eq!(artifact["gate_request_authorized"], true);
+    assert_eq!(artifact["approval_authorized"], false);
+    assert_eq!(artifact["gate_approval_authorized"], false);
+    assert_eq!(artifact["execution_authorized"], false);
+    assert_eq!(artifact["launch_authorized"], false);
+    assert_eq!(artifact["enqueue_authorized"], false);
+    assert_eq!(artifact["runtime_authorized"], false);
+    assert_eq!(artifact["gate_output"]["status"], "pending_approval");
+    assert_eq!(
+        artifact["gate_output"]["approval"]["action"],
+        "dispatch.runtime"
+    );
+    assert!(artifact["launch_prep_json"]
+        .as_str()
+        .is_some_and(|path| { Path::new(path).exists() }));
+    let approvals_path = profile_dir(temp.path()).join("pending_action_approvals.json");
+    let approvals: Value = serde_json::from_slice(&fs::read(&approvals_path)?)?;
+    assert_eq!(approvals.as_array().expect("approvals").len(), 1);
+    assert_eq!(approvals[0]["action"], "dispatch.runtime");
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>게이트 요청 생성됨</b>"));
+    assert!(preview.contains("승인 대기열에 올렸습니다."));
+    assert!(preview.contains("실행은 아직 시작하지 않았습니다."));
+    assert!(preview.contains("로컬에서 approval 확인"));
+    assert!(!preview.contains(workspace_root.to_str().expect("workspace path")));
+    assert!(button_texts(&result).contains(&"게이트 승인".to_string()));
+    assert!(button_texts(&result).contains(&"게이트 거절".to_string()));
+    assert_mobile_contract(&result);
+
+    let tenth_update = temp.path().join("gate_approval_update.json");
+    write_text_update(&tenth_update, 739, 916, "게이트 승인")?;
+    let tenth_out = temp.path().join("gate_approval_result.json");
+    let tenth_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&tenth_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--remote-plan-artifact-dir")
+        .arg(&plan_artifact_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&tenth_out)
+        .output()?;
+    assert!(
+        tenth_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&tenth_output.stdout),
+        String::from_utf8_lossy(&tenth_output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&tenth_out)?)?;
+    assert_eq!(result["parsed_command"]["command"], "remote_plan_selection");
+    assert_eq!(
+        result["parsed_command"]["selection_status"],
+        "plan_gate_approved"
+    );
+    assert_eq!(result["remote_plan_session"]["stage"], "plan_gate_approved");
+    assert_eq!(
+        result["remote_plan_session"]["plan_gate_resolution"]["schema"],
+        "telegram_remote_plan_gate_resolution.v1"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_gate_resolution"]["status"],
+        "approved"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_gate_resolution"]["approval_resolution_authorized"],
+        true
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_gate_resolution"]["approval_authorized"],
+        true
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_gate_resolution"]["gate_approval_authorized"],
+        true
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_gate_resolution"]["execution_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_gate_resolution"]["launch_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_gate_resolution"]["enqueue_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_gate_resolution"]["runtime_authorized"],
+        false
+    );
+    assert!(result["remote_plan_session"]["plan_gate_resolution"]["launch_prep_json"].is_null());
+    assert!(
+        result["remote_plan_session"]["plan_gate_resolution"]["launch_prep_json_hash"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("sha256:")
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_gate_resolution"]["pending_approval"]["status"],
+        "pending"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_gate_resolution"]["resolution_output"]["status"],
+        "approved"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_gate_resolution"]["resolution_output"]["action"],
+        "dispatch.runtime"
+    );
+    let artifact_path = result["remote_plan_session"]["plan_gate_resolution"]["artifact_path"]
+        .as_str()
+        .expect("gate resolution receipt path");
+    let artifact: Value = serde_json::from_slice(&fs::read(artifact_path)?)?;
+    assert_eq!(
+        artifact["schema"],
+        "telegram_remote_plan_gate_resolution.v1"
+    );
+    assert_eq!(artifact["status"], "approved");
+    assert_eq!(artifact["approval_resolution_authorized"], true);
+    assert_eq!(artifact["approval_authorized"], true);
+    assert_eq!(artifact["gate_approval_authorized"], true);
+    assert_eq!(artifact["execution_authorized"], false);
+    assert_eq!(artifact["launch_authorized"], false);
+    assert_eq!(artifact["enqueue_authorized"], false);
+    assert_eq!(artifact["runtime_authorized"], false);
+    assert_eq!(artifact["pending_approval"]["status"], "pending");
+    assert_eq!(artifact["resolution_output"]["status"], "approved");
+    assert_eq!(artifact["resolution_output"]["action"], "dispatch.runtime");
+    let approvals: Value = serde_json::from_slice(&fs::read(&approvals_path)?)?;
+    assert_eq!(approvals.as_array().expect("approvals").len(), 1);
+    assert_eq!(approvals[0]["action"], "dispatch.runtime");
+    assert_eq!(approvals[0]["status"], "approved");
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>게이트 승인됨</b>"));
+    assert!(preview.contains("approval만 해결했습니다."));
+    assert!(preview.contains("실행은 아직 시작하지 않았습니다."));
+    assert!(preview.contains("로컬에서 다음 단계 검토"));
+    assert!(!preview.contains(workspace_root.to_str().expect("workspace path")));
+    assert!(button_texts(&result).contains(&"실행 브리프 생성".to_string()));
+    assert_mobile_contract(&result);
+
+    let eleventh_update = temp.path().join("execution_brief_update.json");
+    write_text_update(&eleventh_update, 740, 916, "실행 브리프 생성")?;
+    let eleventh_out = temp.path().join("execution_brief_result.json");
+    let eleventh_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&eleventh_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--remote-plan-artifact-dir")
+        .arg(&plan_artifact_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&eleventh_out)
+        .output()?;
+    assert!(
+        eleventh_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&eleventh_output.stdout),
+        String::from_utf8_lossy(&eleventh_output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&eleventh_out)?)?;
+    assert_eq!(result["parsed_command"]["command"], "remote_plan_selection");
+    assert_eq!(
+        result["parsed_command"]["selection_status"],
+        "plan_execution_brief_created"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["stage"],
+        "plan_execution_brief_created"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_execution_brief"]["schema"],
+        "telegram_remote_plan_execution_brief.v1"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_execution_brief"]["status"],
+        "created"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_execution_brief"]["execution_brief_authorized"],
+        true
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_execution_brief"]["approval_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_execution_brief"]["gate_approval_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_execution_brief"]["execution_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_execution_brief"]["launch_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_execution_brief"]["enqueue_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_execution_brief"]["runtime_authorized"],
+        false
+    );
+    assert!(
+        result["remote_plan_session"]["plan_execution_brief"]["execution_brief_json"].is_null()
+    );
+    assert!(
+        result["remote_plan_session"]["plan_execution_brief"]["execution_brief_json_hash"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("sha256:")
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_execution_brief"]["execution_brief"]["approved"],
+        true
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_execution_brief"]["execution_brief"]
+            ["allowed_runtime_mutations"][0],
+        "dispatch.runtime"
+    );
+    let artifact_path = result["remote_plan_session"]["plan_execution_brief"]["artifact_path"]
+        .as_str()
+        .expect("execution brief receipt path");
+    let artifact: Value = serde_json::from_slice(&fs::read(artifact_path)?)?;
+    assert_eq!(
+        artifact["schema"],
+        "telegram_remote_plan_execution_brief.v1"
+    );
+    assert_eq!(artifact["status"], "created");
+    assert_eq!(artifact["execution_brief_authorized"], true);
+    assert_eq!(artifact["execution_authorized"], false);
+    assert_eq!(artifact["launch_authorized"], false);
+    assert_eq!(artifact["enqueue_authorized"], false);
+    assert_eq!(artifact["runtime_authorized"], false);
+    assert_eq!(artifact["execution_brief"]["approved"], true);
+    assert_eq!(
+        artifact["execution_brief"]["allowed_runtime_mutations"][0],
+        "dispatch.runtime"
+    );
+    let execution_brief_path = artifact["execution_brief_json"]
+        .as_str()
+        .expect("execution brief json path");
+    assert!(Path::new(execution_brief_path).exists());
+    let execution_brief: Value = serde_json::from_slice(&fs::read(execution_brief_path)?)?;
+    assert_eq!(execution_brief["approved"], true);
+    assert_eq!(execution_brief["project_key"], artifact["project_key"]);
+    assert_eq!(execution_brief["request_id"], artifact["request_id"]);
+    assert_eq!(execution_brief["task_id"], artifact["task_id"]);
+    assert_eq!(
+        execution_brief["allowed_runtime_mutations"][0],
+        "dispatch.runtime"
+    );
+    assert!(
+        !profile_dir(temp.path()).join("offdesk_tasks.json").exists(),
+        "execution brief creation must not enqueue a task"
+    );
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>실행 브리프 생성됨</b>"));
+    assert!(preview.contains("브리프 파일만 저장했습니다."));
+    assert!(preview.contains("실행은 아직 시작하지 않았습니다."));
+    assert!(preview.contains("로컬에서 enqueue 검토"));
+    assert!(!preview.contains(workspace_root.to_str().expect("workspace path")));
+    assert!(button_texts(&result).contains(&"큐 등록 검토".to_string()));
+    assert_mobile_contract(&result);
+
+    let twelfth_update = temp.path().join("enqueue_handoff_update.json");
+    write_text_update(&twelfth_update, 741, 916, "큐 등록 검토")?;
+    let twelfth_out = temp.path().join("enqueue_handoff_result.json");
+    let twelfth_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&twelfth_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--remote-plan-artifact-dir")
+        .arg(&plan_artifact_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&twelfth_out)
+        .output()?;
+    assert!(
+        twelfth_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&twelfth_output.stdout),
+        String::from_utf8_lossy(&twelfth_output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&twelfth_out)?)?;
+    assert_eq!(result["parsed_command"]["command"], "remote_plan_selection");
+    assert_eq!(
+        result["parsed_command"]["selection_status"],
+        "plan_enqueue_handoff_created"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["stage"],
+        "plan_enqueue_handoff_created"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_enqueue_handoff"]["schema"],
+        "telegram_remote_plan_enqueue_handoff.v1"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_enqueue_handoff"]["status"],
+        "created"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_enqueue_handoff"]["prepared_workload_required"],
+        true
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_enqueue_handoff"]["reviewed_workload_command_required"],
+        true
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_enqueue_handoff"]["approval_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_enqueue_handoff"]["gate_approval_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_enqueue_handoff"]["execution_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_enqueue_handoff"]["launch_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_enqueue_handoff"]["enqueue_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_enqueue_handoff"]["runtime_authorized"],
+        false
+    );
+    assert!(
+        result["remote_plan_session"]["plan_enqueue_handoff"]["execution_brief_json"].is_null()
+    );
+    assert!(
+        result["remote_plan_session"]["plan_enqueue_handoff"]["execution_brief_json_hash"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("sha256:")
+    );
+    let public_command = result["remote_plan_session"]["plan_enqueue_handoff"]["command_template"]
+        .as_array()
+        .expect("public command template")
+        .iter()
+        .map(|item| item.as_str().unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert!(public_command.contains(&"enqueue"));
+    assert!(public_command.contains(&"dispatch.runtime"));
+    assert!(public_command.contains(&"<execution_brief_json>"));
+    assert!(public_command.contains(&"<reviewed-workload-command-required>"));
+    let artifact_path = result["remote_plan_session"]["plan_enqueue_handoff"]["artifact_path"]
+        .as_str()
+        .expect("enqueue handoff receipt path");
+    let artifact: Value = serde_json::from_slice(&fs::read(artifact_path)?)?;
+    assert_eq!(
+        artifact["schema"],
+        "telegram_remote_plan_enqueue_handoff.v1"
+    );
+    assert_eq!(artifact["status"], "created");
+    assert_eq!(artifact["prepared_workload_required"], true);
+    assert_eq!(artifact["reviewed_workload_command_required"], true);
+    assert_eq!(artifact["enqueue_authorized"], false);
+    assert_eq!(artifact["runtime_authorized"], false);
+    assert_eq!(
+        artifact["execution_brief_json"],
+        Value::String(execution_brief_path.to_string())
+    );
+    let command = artifact["command_template"]
+        .as_array()
+        .expect("command template")
+        .iter()
+        .map(|item| item.as_str().unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert!(command.contains(&"enqueue"));
+    assert!(command.contains(&"dispatch.runtime"));
+    assert!(command.contains(&execution_brief_path));
+    assert!(command.contains(&"<reviewed-workload-command-required>"));
+    assert!(
+        !profile_dir(temp.path()).join("offdesk_tasks.json").exists(),
+        "enqueue handoff must not enqueue a task"
+    );
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>큐 등록 검토 준비됨</b>"));
+    assert!(preview.contains("명령 템플릿만 저장했습니다."));
+    assert!(preview.contains("실행은 아직 시작하지 않았습니다."));
+    assert!(!preview.contains(workspace_root.to_str().expect("workspace path")));
+    assert!(button_texts(&result).contains(&"워크로드 패킷 연결".to_string()));
+    assert_mobile_contract(&result);
+
+    let project_key = artifact["project_key"]
+        .as_str()
+        .expect("project key")
+        .to_string();
+    let request_id = artifact["request_id"]
+        .as_str()
+        .expect("request id")
+        .to_string();
+    let task_id = artifact["task_id"].as_str().expect("task id").to_string();
+    let prepared_dir = temp.path().join("prepared_workload");
+    fs::create_dir_all(&prepared_dir)?;
+    let wrapper_path = prepared_dir.join("run_workload.sh");
+    let workload_result_path = prepared_dir.join("result.json");
+    fs::write(
+        &wrapper_path,
+        format!(
+            "#!/usr/bin/env bash\nprintf 'ok\\n'\nprintf '{{\"status\":\"ok\"}}\\n' > {}\n",
+            workload_result_path.display()
+        ),
+    )?;
+    let prepared_task_path = prepared_dir.join("prepared_task.json");
+    let prepared_manifest = json!({
+        "created_at": "2026-06-17T00:00:00Z",
+        "kind": "forager_offdesk_prepared_workload",
+        "title": "Telegram prepared workload fixture",
+        "profile": "default",
+        "project_key": project_key,
+        "request_id": request_id,
+        "task_id": task_id,
+        "repo": workspace_root,
+        "out_dir": prepared_dir,
+        "duration_minutes": 0.1,
+        "max_iterations": 1,
+        "provider": "ollama",
+        "model": "qwen3-coder-next:latest",
+        "workload_command": ["bash", "-lc", "printf 'ok\\n'"],
+        "workload_command_text": "printf 'ok\\n'",
+        "workload_wrapper": wrapper_path,
+        "enqueue_args": [
+            env!("CARGO_BIN_EXE_forager"),
+            "--profile",
+            "default",
+            "offdesk",
+            "enqueue",
+            "dispatch.runtime",
+            "--runner",
+            "local-background",
+            "--project-key",
+            artifact["project_key"].as_str().expect("project key"),
+            "--request-id",
+            artifact["request_id"].as_str().expect("request id"),
+            "--task-id",
+            artifact["task_id"].as_str().expect("task id"),
+            "--cmd",
+            format!("bash {}", wrapper_path.display()),
+            "--workdir",
+            workspace_root,
+            "--artifact-kind",
+            "report",
+            "--agent-mode",
+            "critique",
+            "--provider-id",
+            "ollama",
+            "--model",
+            "qwen3-coder-next:latest",
+            "--log-artifact",
+            prepared_dir.join("offdesk-runner.log"),
+            "--result-artifact",
+            workload_result_path,
+            "--json"
+        ],
+        "safety": {
+            "repo_read_only": true,
+            "writes_only_under_out_dir": true,
+            "model_responses_not_executed": true,
+            "no_file_deletion_or_cleanup": true,
+            "no_reboot_shutdown_or_power_state_change": true,
+            "no_service_restart_or_system_config_change": true,
+            "no_storage_raid_nvme_or_mount_change": true,
+            "no_package_install_or_permission_change": true,
+            "no_process_termination_or_runner_interference": true,
+            "no_network_firewall_or_remote_access_change": true,
+            "no_kernel_driver_firmware_or_bios_change": true,
+            "operator_approval_required_for_system_mutation": true,
+            "capability": "dispatch.runtime",
+            "runner": "local-background",
+            "approval_required_before_dispatch": true,
+            "separate_review_artifact_required": true
+        },
+        "preflight": {
+            "ready_for_enqueue": true,
+            "blocking_reasons": [],
+            "warnings": [],
+            "role_gate": {
+                "ready": false,
+                "reason": "not_required_for_fixture"
+            },
+            "review_artifact": {
+                "ready": true,
+                "path": prepared_dir.join("workload_review").join("results.json"),
+                "decision": "needs_approval"
+            }
+        },
+        "artifacts": {
+            "prepared_task": prepared_task_path,
+            "preflight": prepared_dir.join("preflight.json"),
+            "runner_log": prepared_dir.join("offdesk-runner.log"),
+            "result": workload_result_path,
+            "report": prepared_dir.join("REPORT.md"),
+            "workload_wrapper": wrapper_path
+        }
+    });
+    fs::write(
+        &prepared_task_path,
+        serde_json::to_string_pretty(&prepared_manifest)?,
+    )?;
+
+    let thirteenth_update = temp.path().join("workload_binding_update.json");
+    write_text_update(
+        &thirteenth_update,
+        742,
+        916,
+        prepared_task_path.to_str().expect("prepared task path"),
+    )?;
+    let thirteenth_out = temp.path().join("workload_binding_result.json");
+    let thirteenth_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&thirteenth_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--remote-plan-artifact-dir")
+        .arg(&plan_artifact_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&thirteenth_out)
+        .output()?;
+    assert!(
+        thirteenth_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&thirteenth_output.stdout),
+        String::from_utf8_lossy(&thirteenth_output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&thirteenth_out)?)?;
+    assert_eq!(result["parsed_command"]["command"], "remote_plan_selection");
+    assert_eq!(
+        result["parsed_command"]["selection_status"],
+        "plan_workload_bound"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["stage"],
+        "plan_workload_bound"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_workload_binding"]["schema"],
+        "telegram_remote_plan_workload_binding.v1"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_workload_binding"]["status"],
+        "bound"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_workload_binding"]["ready_for_local_enqueue_review"],
+        true
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_workload_binding"]["execution_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_workload_binding"]["launch_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_workload_binding"]["enqueue_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_workload_binding"]["runtime_authorized"],
+        false
+    );
+    assert!(result["remote_plan_session"]["plan_workload_binding"]["prepared_task_json"].is_null());
+    assert!(
+        result["remote_plan_session"]["plan_workload_binding"]["prepared_task_json_hash"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("sha256:")
+    );
+    let public_bound_args = result["remote_plan_session"]["plan_workload_binding"]
+        ["bound_enqueue_args"]
+        .as_array()
+        .expect("public bound enqueue args")
+        .iter()
+        .map(|item| item.as_str().unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert!(public_bound_args.contains(&"enqueue"));
+    assert!(public_bound_args.contains(&"dispatch.runtime"));
+    assert!(public_bound_args.contains(&"<execution_brief_json>"));
+    assert!(public_bound_args
+        .iter()
+        .any(|item| item.contains("<workload_wrapper>")));
+    let artifact_path = result["remote_plan_session"]["plan_workload_binding"]["artifact_path"]
+        .as_str()
+        .expect("workload binding receipt path");
+    let artifact: Value = serde_json::from_slice(&fs::read(artifact_path)?)?;
+    assert_eq!(
+        artifact["schema"],
+        "telegram_remote_plan_workload_binding.v1"
+    );
+    assert_eq!(artifact["status"], "bound");
+    assert_eq!(artifact["ready_for_local_enqueue_review"], true);
+    assert_eq!(artifact["execution_authorized"], false);
+    assert_eq!(artifact["launch_authorized"], false);
+    assert_eq!(artifact["enqueue_authorized"], false);
+    assert_eq!(artifact["runtime_authorized"], false);
+    assert_eq!(
+        artifact["prepared_task_json"],
+        Value::String(prepared_task_path.to_string_lossy().into_owned())
+    );
+    let bound_args = artifact["bound_enqueue_args"]
+        .as_array()
+        .expect("bound enqueue args")
+        .iter()
+        .map(|item| item.as_str().unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert!(bound_args.contains(&"--brief"));
+    assert!(bound_args.contains(&execution_brief_path));
+    assert!(bound_args.contains(&"--mutation-class"));
+    assert!(bound_args.contains(&"dispatch.runtime"));
+    assert!(
+        !profile_dir(temp.path()).join("offdesk_tasks.json").exists(),
+        "workload binding must not enqueue a task"
+    );
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>워크로드 패킷 연결됨</b>"));
+    assert!(preview.contains("검토된 패킷만 연결했습니다."));
+    assert!(preview.contains("실행은 아직 시작하지 않았습니다."));
+    assert!(!preview.contains(workspace_root.to_str().expect("workspace path")));
+    assert!(button_texts(&result).contains(&"큐 등록 실행".to_string()));
+    assert_mobile_contract(&result);
+
+    let fourteenth_update = temp.path().join("enqueue_run_update.json");
+    write_text_update(&fourteenth_update, 743, 916, "큐 등록 실행")?;
+    let fourteenth_out = temp.path().join("enqueue_run_result.json");
+    let fourteenth_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&fourteenth_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--remote-plan-artifact-dir")
+        .arg(&plan_artifact_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&fourteenth_out)
+        .output()?;
+    assert!(
+        fourteenth_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&fourteenth_output.stdout),
+        String::from_utf8_lossy(&fourteenth_output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&fourteenth_out)?)?;
+    assert_eq!(result["parsed_command"]["command"], "remote_plan_selection");
+    assert_eq!(
+        result["parsed_command"]["selection_status"],
+        "plan_enqueued"
+    );
+    assert_eq!(result["remote_plan_session"]["stage"], "plan_enqueued");
+    assert_eq!(
+        result["remote_plan_session"]["plan_enqueue_run"]["schema"],
+        "telegram_remote_plan_enqueue_run.v1"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_enqueue_run"]["status"],
+        "queued"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_enqueue_run"]["queue_mutation_authorized"],
+        true
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_enqueue_run"]["enqueue_authorized"],
+        true
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_enqueue_run"]["execution_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_enqueue_run"]["launch_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_enqueue_run"]["runtime_authorized"],
+        false
+    );
+    assert!(result["remote_plan_session"]["plan_enqueue_run"]["enqueue_command"].is_null());
+    assert!(
+        result["remote_plan_session"]["plan_enqueue_run"]["enqueue_command_hash"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("sha256:")
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_enqueue_run"]["enqueue_output"]["status"],
+        "queued"
+    );
+    let artifact_path = result["remote_plan_session"]["plan_enqueue_run"]["artifact_path"]
+        .as_str()
+        .expect("enqueue run receipt path");
+    let artifact: Value = serde_json::from_slice(&fs::read(artifact_path)?)?;
+    assert_eq!(artifact["schema"], "telegram_remote_plan_enqueue_run.v1");
+    assert_eq!(artifact["status"], "queued");
+    assert_eq!(artifact["queue_mutation_authorized"], true);
+    assert_eq!(artifact["enqueue_authorized"], true);
+    assert_eq!(artifact["execution_authorized"], false);
+    assert_eq!(artifact["launch_authorized"], false);
+    assert_eq!(artifact["runtime_authorized"], false);
+    assert_eq!(artifact["enqueue_output"]["status"], "queued");
+    let tasks_path = profile_dir(temp.path()).join("offdesk_tasks.json");
+    assert!(tasks_path.exists(), "enqueue run must create a queued task");
+    let tasks: Value = serde_json::from_slice(&fs::read(&tasks_path)?)?;
+    assert_eq!(tasks[0]["task_id"], task_id);
+    assert_eq!(tasks[0]["status"], "queued");
+    assert!(tasks[0]["background_ticket_id"].is_null());
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>큐 등록됨</b>"));
+    assert!(preview.contains("Offdesk 큐에만 등록했습니다."));
+    assert!(preview.contains("실행은 아직 시작하지 않았습니다."));
+    assert!(!preview.contains(workspace_root.to_str().expect("workspace path")));
+    assert!(button_texts(&result).contains(&"실행 시작".to_string()));
+    assert_mobile_contract(&result);
+
+    let fifteenth_update = temp.path().join("runtime_start_update.json");
+    write_text_update(&fifteenth_update, 744, 916, "실행 시작")?;
+    let fifteenth_out = temp.path().join("runtime_start_result.json");
+    let fifteenth_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&fifteenth_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--remote-plan-artifact-dir")
+        .arg(&plan_artifact_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&fifteenth_out)
+        .output()?;
+    assert!(
+        fifteenth_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&fifteenth_output.stdout),
+        String::from_utf8_lossy(&fifteenth_output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&fifteenth_out)?)?;
+    assert_eq!(result["parsed_command"]["command"], "remote_plan_selection");
+    assert_eq!(
+        result["parsed_command"]["selection_status"],
+        "plan_runtime_started"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["stage"],
+        "plan_runtime_started"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_runtime_start"]["schema"],
+        "telegram_remote_plan_runtime_start.v1"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_runtime_start"]["status"],
+        "launched"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_runtime_start"]["runtime_start_authorized"],
+        true
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_runtime_start"]["tick_authorized"],
+        true
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_runtime_start"]["execution_authorized"],
+        true
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_runtime_start"]["closeout_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_runtime_start"]["accepted_truth_authorized"],
+        false
+    );
+    assert!(result["remote_plan_session"]["plan_runtime_start"]["tick_command"].is_null());
+    assert!(
+        result["remote_plan_session"]["plan_runtime_start"]["tick_command_hash"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("sha256:")
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_runtime_start"]["tick_output"]["launched"],
+        1
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_runtime_start"]["tick_output"]["updated_task_ids"][0],
+        task_id
+    );
+    let artifact_path = result["remote_plan_session"]["plan_runtime_start"]["artifact_path"]
+        .as_str()
+        .expect("runtime start receipt path");
+    let artifact: Value = serde_json::from_slice(&fs::read(artifact_path)?)?;
+    assert_eq!(artifact["schema"], "telegram_remote_plan_runtime_start.v1");
+    assert_eq!(artifact["status"], "launched");
+    assert_eq!(artifact["tick_output"]["launched"], 1);
+    assert_eq!(artifact["tick_output"]["updated_task_ids"][0], task_id);
+    assert_eq!(artifact["closeout_authorized"], false);
+    assert_eq!(artifact["accepted_truth_authorized"], false);
+    let tasks: Value = serde_json::from_slice(&fs::read(&tasks_path)?)?;
+    assert_eq!(tasks[0]["task_id"], task_id);
+    assert_eq!(tasks[0]["status"], "launched");
+    assert!(tasks[0]["background_ticket_id"].is_string());
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>실행 시작됨</b>"));
+    assert!(preview.contains("대상 task만 시작했습니다."));
+    assert!(preview.contains("완료 판정은 아직 없습니다."));
+    assert!(!preview.contains(workspace_root.to_str().expect("workspace path")));
+    assert!(button_texts(&result).contains(&"실행 상태 확인".to_string()));
+    assert_mobile_contract(&result);
+
+    thread::sleep(Duration::from_millis(250));
+    let sixteenth_update = temp.path().join("runtime_monitor_update.json");
+    write_text_update(&sixteenth_update, 745, 916, "실행 상태 확인")?;
+    let sixteenth_out = temp.path().join("runtime_monitor_result.json");
+    let sixteenth_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&sixteenth_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--remote-plan-artifact-dir")
+        .arg(&plan_artifact_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&sixteenth_out)
+        .output()?;
+    assert!(
+        sixteenth_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&sixteenth_output.stdout),
+        String::from_utf8_lossy(&sixteenth_output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&sixteenth_out)?)?;
+    assert_eq!(result["parsed_command"]["command"], "remote_plan_selection");
+    assert_eq!(
+        result["parsed_command"]["selection_status"],
+        "plan_runtime_monitored"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["stage"],
+        "plan_runtime_monitored"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_runtime_monitor"]["schema"],
+        "telegram_remote_plan_runtime_monitor.v1"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_runtime_monitor"]["status"],
+        "completed"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_runtime_monitor"]["task_status"],
+        "completed"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_runtime_monitor"]["poll_authorized"],
+        true
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_runtime_monitor"]["dispatch_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_runtime_monitor"]["closeout_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_runtime_monitor"]["accepted_truth_authorized"],
+        false
+    );
+    assert!(result["remote_plan_session"]["plan_runtime_monitor"]["tick_command"].is_null());
+    assert!(result["remote_plan_session"]["plan_runtime_monitor"]["tasks_command"].is_null());
+    assert!(
+        result["remote_plan_session"]["plan_runtime_monitor"]["tick_command_hash"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("sha256:")
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_runtime_monitor"]["tick_output"]["completed"],
+        1
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_runtime_monitor"]["tick_output"]["updated_task_ids"][0],
+        task_id
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_runtime_monitor"]["target_task"]["status"],
+        "completed"
+    );
+    let artifact_path = result["remote_plan_session"]["plan_runtime_monitor"]["artifact_path"]
+        .as_str()
+        .expect("runtime monitor receipt path");
+    let artifact: Value = serde_json::from_slice(&fs::read(artifact_path)?)?;
+    assert_eq!(
+        artifact["schema"],
+        "telegram_remote_plan_runtime_monitor.v1"
+    );
+    assert_eq!(artifact["status"], "completed");
+    assert_eq!(artifact["task_status"], "completed");
+    assert_eq!(artifact["tick_output"]["completed"], 1);
+    assert_eq!(artifact["tick_output"]["updated_task_ids"][0], task_id);
+    assert_eq!(artifact["dispatch_authorized"], false);
+    assert_eq!(artifact["closeout_authorized"], false);
+    assert_eq!(artifact["accepted_truth_authorized"], false);
+    let tasks: Value = serde_json::from_slice(&fs::read(&tasks_path)?)?;
+    assert_eq!(tasks[0]["task_id"], task_id);
+    assert_eq!(tasks[0]["status"], "completed");
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>실행 완료 확인</b>"));
+    assert!(preview.contains("로컬에서 closeout 검토"));
+    assert!(preview.contains("결과 승인은 아직 없습니다."));
+    assert!(!preview.contains(workspace_root.to_str().expect("workspace path")));
+    assert!(button_texts(&result).contains(&"실행 상태 확인".to_string()));
+    assert!(button_texts(&result).contains(&"마무리 패킷 생성".to_string()));
+    assert_mobile_contract(&result);
+
+    let seventeenth_update = temp.path().join("closeout_packet_update.json");
+    write_text_update(&seventeenth_update, 746, 916, "마무리 패킷 생성")?;
+    let seventeenth_out = temp.path().join("closeout_packet_result.json");
+    let seventeenth_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&seventeenth_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--remote-plan-artifact-dir")
+        .arg(&plan_artifact_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&seventeenth_out)
+        .output()?;
+    assert!(
+        seventeenth_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&seventeenth_output.stdout),
+        String::from_utf8_lossy(&seventeenth_output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&seventeenth_out)?)?;
+    assert_eq!(result["parsed_command"]["command"], "remote_plan_selection");
+    assert_eq!(
+        result["parsed_command"]["selection_status"],
+        "plan_closeout_packet_created"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["stage"],
+        "plan_closeout_packet_created"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_closeout_packet"]["schema"],
+        "telegram_remote_plan_closeout_packet.v1"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_closeout_packet"]["status"],
+        "created"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_closeout_packet"]["closeout_packet_authorized"],
+        true
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_closeout_packet"]["closeout_review_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_closeout_packet"]["accepted_truth_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_closeout_packet"]["file_mutation_authorized"],
+        false
+    );
+    assert!(result["remote_plan_session"]["plan_closeout_packet"]["closeout_command"].is_null());
+    assert!(
+        result["remote_plan_session"]["plan_closeout_packet"]["closeout_command_hash"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("sha256:")
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_closeout_packet"]["closeout_output"]["dry_run"],
+        true
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_closeout_packet"]["closeout_output"]
+            ["read_only_project_state"],
+        true
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_closeout_packet"]["closeout_output"]["review_contract"]
+            ["required"],
+        true
+    );
+    let artifact_path = result["remote_plan_session"]["plan_closeout_packet"]["artifact_path"]
+        .as_str()
+        .expect("closeout packet receipt path");
+    let artifact: Value = serde_json::from_slice(&fs::read(artifact_path)?)?;
+    assert_eq!(
+        artifact["schema"],
+        "telegram_remote_plan_closeout_packet.v1"
+    );
+    assert_eq!(artifact["status"], "created");
+    assert_eq!(artifact["closeout_packet_authorized"], true);
+    assert_eq!(artifact["closeout_review_authorized"], false);
+    assert_eq!(artifact["accepted_truth_authorized"], false);
+    assert_eq!(artifact["file_mutation_authorized"], false);
+    assert_eq!(artifact["closeout_output"]["dry_run"], true);
+    assert_eq!(artifact["closeout_output"]["read_only_project_state"], true);
+    assert_eq!(
+        artifact["closeout_output"]["operator_requested_dry_run"],
+        true
+    );
+    assert_eq!(artifact["closeout_output"]["tasks"][0]["task_id"], task_id);
+    assert_eq!(
+        artifact["closeout_output"]["tasks"][0]["status"],
+        "completed"
+    );
+    assert!(PathBuf::from(
+        artifact["closeout_output"]["artifacts"]["closeout_plan_json"]
+            .as_str()
+            .expect("closeout plan path")
+    )
+    .exists());
+    assert!(PathBuf::from(
+        artifact["closeout_output"]["artifacts"]["return_package_markdown"]
+            .as_str()
+            .expect("return package path")
+    )
+    .exists());
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>마무리 패킷 생성됨</b>"));
+    assert!(preview.contains("closeout 자료만 만들었습니다."));
+    assert!(preview.contains("결과 승인은 아직 없습니다."));
+    assert!(preview.contains("로컬에서 closeout-review 검토"));
+    assert!(!preview.contains(workspace_root.to_str().expect("workspace path")));
+    assert!(button_texts(&result).contains(&"마무리 검토 준비".to_string()));
+    assert_mobile_contract(&result);
+
+    let eighteenth_update = temp.path().join("closeout_review_handoff_update.json");
+    write_text_update(&eighteenth_update, 747, 917, "마무리 검토 준비")?;
+    let eighteenth_out = temp.path().join("closeout_review_handoff_result.json");
+    let eighteenth_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&eighteenth_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--remote-plan-artifact-dir")
+        .arg(&plan_artifact_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&eighteenth_out)
+        .output()?;
+    assert!(
+        eighteenth_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&eighteenth_output.stdout),
+        String::from_utf8_lossy(&eighteenth_output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&eighteenth_out)?)?;
+    assert_eq!(result["parsed_command"]["command"], "remote_plan_selection");
+    assert_eq!(
+        result["parsed_command"]["selection_status"],
+        "plan_closeout_review_handoff_created"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["stage"],
+        "plan_closeout_review_handoff_created"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_closeout_review_handoff"]["schema"],
+        "telegram_remote_plan_closeout_review_handoff.v1"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_closeout_review_handoff"]["status"],
+        "created"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_closeout_review_handoff"]
+            ["remote_closeout_review_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_closeout_review_handoff"]["accepted_truth_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_closeout_review_handoff"]["file_mutation_authorized"],
+        false
+    );
+    assert!(
+        result["remote_plan_session"]["plan_closeout_review_handoff"]["local_review_commands"]
+            .is_null()
+    );
+    assert!(
+        result["remote_plan_session"]["plan_closeout_review_handoff"]
+            ["local_review_command_hashes"]["approved"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("sha256:")
+    );
+    let artifact_path = result["remote_plan_session"]["plan_closeout_review_handoff"]
+        ["artifact_path"]
+        .as_str()
+        .expect("closeout review handoff receipt path");
+    let artifact: Value = serde_json::from_slice(&fs::read(artifact_path)?)?;
+    assert_eq!(
+        artifact["schema"],
+        "telegram_remote_plan_closeout_review_handoff.v1"
+    );
+    assert_eq!(artifact["status"], "created");
+    assert_eq!(artifact["remote_closeout_review_authorized"], false);
+    assert_eq!(artifact["closeout_review_authorized"], false);
+    assert_eq!(artifact["accepted_truth_authorized"], false);
+    assert_eq!(artifact["file_mutation_authorized"], false);
+    assert_eq!(artifact["local_review_required"], true);
+    assert!(artifact["approved_verdict_may_accept_truth"].is_boolean());
+    for (verdict, expected) in [
+        ("approved", "approved"),
+        ("revise", "revise"),
+        ("blocked", "blocked"),
+    ] {
+        let command = artifact["local_review_commands"][verdict]
+            .as_array()
+            .expect("local review command");
+        assert!(command.iter().any(|item| item == "closeout-review"));
+        assert!(command.iter().any(|item| item == expected));
+    }
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>마무리 검토 준비됨</b>"));
+    assert!(preview.contains("Telegram에서 verdict를 기록할 수 있습니다."));
+    assert!(preview.contains("아래 버튼에서 verdict 선택"));
+    assert!(!preview.contains(workspace_root.to_str().expect("workspace path")));
+    assert!(button_texts(&result).contains(&"승인 기록".to_string()));
+    assert!(button_texts(&result).contains(&"수정 요청 기록".to_string()));
+    assert!(button_texts(&result).contains(&"차단 기록".to_string()));
+    assert_mobile_contract(&result);
+
+    let nineteenth_update = temp.path().join("closeout_approved_update.json");
+    write_text_update(&nineteenth_update, 748, 918, "승인 기록")?;
+    let nineteenth_out = temp.path().join("closeout_approved_result.json");
+    let nineteenth_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&nineteenth_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--remote-plan-artifact-dir")
+        .arg(&plan_artifact_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&nineteenth_out)
+        .output()?;
+    assert!(
+        nineteenth_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&nineteenth_output.stdout),
+        String::from_utf8_lossy(&nineteenth_output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&nineteenth_out)?)?;
+    assert_eq!(
+        result["parsed_command"]["selection_status"],
+        "plan_closeout_verdict_recorded"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["stage"],
+        "plan_closeout_verdict_recorded"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_closeout_verdict"]["schema"],
+        "telegram_remote_plan_closeout_verdict.v1"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_closeout_verdict"]["status"],
+        "recorded"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_closeout_verdict"]["verdict"],
+        "approved"
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_closeout_verdict"]["accepted_truth_authorized"],
+        true
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_closeout_verdict"]["remote_closeout_review_authorized"],
+        true
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_closeout_verdict"]["closeout_review_authorized"],
+        true
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_closeout_verdict"]["project_file_mutation_authorized"],
+        false
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_closeout_verdict"]["file_mutation_authorized"],
+        false
+    );
+    assert!(
+        result["remote_plan_session"]["plan_closeout_verdict"]["closeout_review_command"].is_null()
+    );
+    assert!(
+        result["remote_plan_session"]["plan_closeout_verdict"]["closeout_review_command_hash"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("sha256:")
+    );
+    assert_eq!(
+        result["remote_plan_session"]["plan_closeout_verdict"]["closeout_review_output"]["verdict"],
+        "approved"
+    );
+    let acceptance_status = result["remote_plan_session"]["plan_closeout_verdict"]
+        ["closeout_review_output"]["closeout_receipt"]["acceptance_status"]
+        .as_str()
+        .expect("acceptance status");
+    assert!(matches!(
+        acceptance_status,
+        "accepted" | "approved_with_followups"
+    ));
+    assert_eq!(
+        result["remote_plan_session"]["plan_closeout_verdict"]["accepted_truth_recorded"],
+        acceptance_status == "accepted"
+    );
+    let artifact_path = result["remote_plan_session"]["plan_closeout_verdict"]["artifact_path"]
+        .as_str()
+        .expect("closeout verdict receipt path");
+    let artifact: Value = serde_json::from_slice(&fs::read(artifact_path)?)?;
+    assert_eq!(
+        artifact["schema"],
+        "telegram_remote_plan_closeout_verdict.v1"
+    );
+    assert_eq!(artifact["status"], "recorded");
+    assert_eq!(artifact["verdict"], "approved");
+    assert_eq!(artifact["accepted_truth_authorized"], true);
+    assert_eq!(
+        artifact["accepted_truth_recorded"],
+        artifact["acceptance_status"] == "accepted"
+    );
+    assert_eq!(artifact["project_file_mutation_authorized"], false);
+    assert_eq!(artifact["file_mutation_authorized"], false);
+    let artifact_acceptance = artifact["closeout_review_output"]["closeout_receipt"]
+        ["acceptance_status"]
+        .as_str()
+        .expect("artifact acceptance status");
+    assert!(matches!(
+        artifact_acceptance,
+        "accepted" | "approved_with_followups"
+    ));
+    assert_eq!(
+        artifact["closeout_review_output"]["closeout_receipt"]["acceptance_status"],
+        artifact["acceptance_status"]
+    );
+    assert_eq!(
+        artifact["closeout_review_output"]["applies_file_operations"],
+        false
+    );
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>마무리 verdict 기록됨</b>"));
+    assert!(preview.contains("approved"));
+    assert!(preview.contains(acceptance_status));
+    if acceptance_status == "accepted" {
+        assert!(preview.contains("accepted truth가 기록됐습니다."));
+    } else {
+        assert!(preview.contains("follow-up이 남아 아직 accepted는 아닙니다."));
+    }
     assert!(!preview.contains(workspace_root.to_str().expect("workspace path")));
     assert_mobile_contract(&result);
 
     let feedback_rows = fs::read_to_string(&feedback_file)?;
     assert_eq!(feedback_rows.lines().count(), 1);
     let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
-    assert_eq!(state["offset"], 737);
+    assert_eq!(state["offset"], 749);
     Ok(())
 }
 
@@ -2489,6 +4144,187 @@ fn remote_operator_telegram_health_reports_recent_poll_transport_error() -> Resu
 
 #[test]
 #[serial]
+fn remote_operator_watchdog_reports_stale_listener_without_listener_process() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let status_path = temp.path().join("loop_status.json");
+    fs::write(
+        &status_path,
+        serde_json::to_string_pretty(&json!({
+            "schema": "remote_operator_telegram_adapter_result.v1",
+            "mode": "live_loop",
+            "status": "polling",
+            "poll_count": 11,
+            "updates_seen": 3,
+            "handled_result_count": 2,
+            "last_result": {
+                "generated_at": "2000-01-01T00:00:00+00:00",
+                "status": "no_update"
+            }
+        }))?,
+    )?;
+    let out = temp.path().join("watchdog.json");
+
+    let output = watchdog_command(temp.path())
+        .arg("--dry-run")
+        .arg("--systemd-mode")
+        .arg("off")
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--loop-status-file")
+        .arg(&status_path)
+        .arg("--health-max-age-sec")
+        .arg("1")
+        .arg("--out")
+        .arg(&out)
+        .output()?;
+
+    assert!(
+        !output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["schema"], "remote_operator_telegram_watchdog.v1");
+    assert_eq!(result["health_status"], "unhealthy");
+    assert!(result["issues"]
+        .as_array()
+        .expect("issues")
+        .contains(&json!("last_poll_stale")));
+    assert_eq!(result["listener"]["listener_status"], "polling");
+    assert_eq!(result["systemd"]["active_state"], "not_checked");
+    assert_eq!(result["alert"]["needed"], true);
+    assert_eq!(result["alert"]["sent"], false);
+    assert_eq!(result["alert"]["reason"], "dry_run");
+    assert!(result["alert"]["line_count"].as_u64().unwrap() <= 5);
+    assert!(result["alert"]["char_count"].as_u64().unwrap() <= 360);
+    let message = result["alert"]["message_preview"]
+        .as_str()
+        .expect("message preview");
+    assert!(message.contains("Remote Operator 고장"));
+    assert!(message.contains("야간주행: 불가"));
+    assert!(message.contains("systemctl --user restart forager-telegram-operator.service"));
+    let serialized = serde_json::to_string(&result)?;
+    assert!(!serialized.contains("fake-token-for-test"));
+    assert!(!serialized.contains("999999:"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_watchdog_rate_limits_repeated_alerts() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let status_path = temp.path().join("loop_status.json");
+    let state_path = temp.path().join("watchdog_state.json");
+    fs::write(
+        &status_path,
+        serde_json::to_string_pretty(&json!({
+            "schema": "remote_operator_telegram_adapter_result.v1",
+            "mode": "live_loop",
+            "status": "polling",
+            "last_result": {
+                "generated_at": "2000-01-01T00:00:00+00:00",
+                "status": "no_update"
+            }
+        }))?,
+    )?;
+    fs::write(
+        &state_path,
+        serde_json::to_string_pretty(&json!({
+            "schema": "remote_operator_telegram_watchdog_state.v1",
+            "last_alert_key": "last_poll_stale",
+            "last_alert_at": "2099-01-01T00:00:00+00:00"
+        }))?,
+    )?;
+    let out = temp.path().join("watchdog_rate_limited.json");
+
+    let output = watchdog_command(temp.path())
+        .arg("--dry-run")
+        .arg("--systemd-mode")
+        .arg("off")
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--loop-status-file")
+        .arg(&status_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--health-max-age-sec")
+        .arg("1")
+        .arg("--out")
+        .arg(&out)
+        .output()?;
+
+    assert!(
+        !output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["health_status"], "unhealthy");
+    assert_eq!(result["alert"]["needed"], true);
+    assert_eq!(result["alert"]["suppressed"], true);
+    assert_eq!(result["alert"]["reason"], "rate_limited");
+    assert_eq!(result["alert"]["sent"], false);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_watchdog_accepts_fresh_listener() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let status_path = temp.path().join("loop_status.json");
+    fs::write(
+        &status_path,
+        serde_json::to_string_pretty(&json!({
+            "schema": "remote_operator_telegram_adapter_result.v1",
+            "mode": "live_loop",
+            "status": "polling",
+            "poll_count": 11,
+            "last_result": {
+                "generated_at": "2099-01-01T00:00:00+00:00",
+                "status": "no_update"
+            }
+        }))?,
+    )?;
+    let out = temp.path().join("watchdog_healthy.json");
+
+    let output = watchdog_command(temp.path())
+        .arg("--dry-run")
+        .arg("--systemd-mode")
+        .arg("off")
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--loop-status-file")
+        .arg(&status_path)
+        .arg("--health-max-age-sec")
+        .arg("999999999")
+        .arg("--out")
+        .arg(&out)
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["health_status"], "healthy");
+    assert_eq!(result["issues"], json!([]));
+    assert_eq!(result["alert"]["needed"], false);
+    assert_eq!(result["alert"]["reason"], "healthy");
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn telegram_operator_systemd_installer_dry_run_renders_unit() -> Result<()> {
     let temp = tempdir()?;
     let env_path = temp.path().join("telegram.env");
@@ -2530,6 +4366,56 @@ fn telegram_operator_systemd_installer_dry_run_renders_unit() -> Result<()> {
     assert!(unit.contains("StartLimitIntervalSec=0"));
     assert!(unit.contains("Restart=always"));
     assert!(!unit.contains("fake-token-for-test"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn telegram_operator_systemd_installer_dry_run_renders_watchdog_timer() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+
+    let output = Command::new("python3")
+        .arg(script_path("install_offdesk_telegram_operator_service.py"))
+        .arg("--dry-run")
+        .arg("--include-watchdog")
+        .arg("--repo-root")
+        .arg(temp.path())
+        .arg("--forager-bin")
+        .arg(temp.path().join("target/debug/forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--loop-status-file")
+        .arg(temp.path().join("loop.json"))
+        .env("HOME", temp.path())
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(result["watchdog_included"], true);
+    assert_eq!(result["watchdog_installed"], false);
+    let service_unit = result["watchdog_service_unit_preview"]
+        .as_str()
+        .expect("watchdog service unit");
+    let timer_unit = result["watchdog_timer_unit_preview"]
+        .as_str()
+        .expect("watchdog timer unit");
+    assert!(service_unit.contains("Type=oneshot"));
+    assert!(service_unit.contains("offdesk_remote_operator_watchdog.py"));
+    assert!(service_unit.contains("--systemd-mode required"));
+    assert!(service_unit.contains("--alert-min-interval-sec 1800"));
+    assert!(timer_unit.contains("OnBootSec=2min"));
+    assert!(timer_unit.contains("OnUnitActiveSec=120s"));
+    assert!(timer_unit.contains("WantedBy=timers.target"));
+    let serialized = serde_json::to_string(&result)?;
+    assert!(!serialized.contains("fake-token-for-test"));
+    assert!(!serialized.contains("999999:"));
     Ok(())
 }
 

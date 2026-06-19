@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Telegram adapter for read-only Forager Remote Operator projections.
+"""Telegram adapter for guarded Forager Remote Operator projections.
 
 This adapter is intentionally narrow. It maps a small Telegram command surface
-to `forager offdesk remote-operator ... --json` projections. It never executes
-arbitrary shell text and never resolves approvals, launches work, enqueues
-tasks, dispatches runtimes, or mutates project files.
+to read-only projections, remote Plan Mode receipts, exact gate resolution,
+reviewed enqueue, and task-scoped runtime start/monitor receipts. It never
+executes arbitrary shell text, starts unbound work, closes out completed work,
+accepts runtime output as truth, or mutates project files directly.
 """
 
 from __future__ import annotations
@@ -95,6 +96,18 @@ PROJECT_INIT_RUN_SCHEMA = "telegram_remote_project_init_run.v1"
 PLAN_DRAFT_SCHEMA = "telegram_remote_plan_draft.v1"
 PLAN_REGISTRATION_SCHEMA = "telegram_remote_plan_registration.v1"
 PLAN_REVIEW_SCHEMA = "telegram_remote_plan_review.v1"
+PLAN_LAUNCH_PREP_SCHEMA = "telegram_remote_plan_launch_prep.v1"
+PLAN_GATE_REQUEST_SCHEMA = "telegram_remote_plan_gate_request.v1"
+PLAN_GATE_RESOLUTION_SCHEMA = "telegram_remote_plan_gate_resolution.v1"
+PLAN_EXECUTION_BRIEF_SCHEMA = "telegram_remote_plan_execution_brief.v1"
+PLAN_ENQUEUE_HANDOFF_SCHEMA = "telegram_remote_plan_enqueue_handoff.v1"
+PLAN_WORKLOAD_BINDING_SCHEMA = "telegram_remote_plan_workload_binding.v1"
+PLAN_ENQUEUE_RUN_SCHEMA = "telegram_remote_plan_enqueue_run.v1"
+PLAN_RUNTIME_START_SCHEMA = "telegram_remote_plan_runtime_start.v1"
+PLAN_RUNTIME_MONITOR_SCHEMA = "telegram_remote_plan_runtime_monitor.v1"
+PLAN_CLOSEOUT_PACKET_SCHEMA = "telegram_remote_plan_closeout_packet.v1"
+PLAN_CLOSEOUT_REVIEW_HANDOFF_SCHEMA = "telegram_remote_plan_closeout_review_handoff.v1"
+PLAN_CLOSEOUT_VERDICT_SCHEMA = "telegram_remote_plan_closeout_verdict.v1"
 REMOTE_PLAN_SESSION_CONTEXT_KIND = "remote_plan_project_selection"
 REMOTE_PLAN_INIT_CONTEXT_KIND = "remote_plan_init_review"
 MOBILE_CARD_MAX_LINES = 5
@@ -221,6 +234,41 @@ def parse_args() -> argparse.Namespace:
         "--plan-review-timeout-sec",
         type=int,
         default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_PLAN_REVIEW_TIMEOUT_SEC", "60")),
+    )
+    parser.add_argument(
+        "--plan-launch-prep-timeout-sec",
+        type=int,
+        default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_PLAN_LAUNCH_PREP_TIMEOUT_SEC", "60")),
+    )
+    parser.add_argument(
+        "--gate-timeout-sec",
+        type=int,
+        default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_GATE_TIMEOUT_SEC", "60")),
+    )
+    parser.add_argument(
+        "--execution-brief-ttl-minutes",
+        type=int,
+        default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_EXECUTION_BRIEF_TTL_MINUTES", "30")),
+    )
+    parser.add_argument(
+        "--enqueue-timeout-sec",
+        type=int,
+        default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_ENQUEUE_TIMEOUT_SEC", "60")),
+    )
+    parser.add_argument(
+        "--runtime-start-timeout-sec",
+        type=int,
+        default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_RUNTIME_START_TIMEOUT_SEC", "60")),
+    )
+    parser.add_argument(
+        "--runtime-monitor-timeout-sec",
+        type=int,
+        default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_RUNTIME_MONITOR_TIMEOUT_SEC", "60")),
+    )
+    parser.add_argument(
+        "--closeout-timeout-sec",
+        type=int,
+        default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_CLOSEOUT_TIMEOUT_SEC", "60")),
     )
     parser.add_argument(
         "--workspace-root",
@@ -546,8 +594,8 @@ def readiness_from_agent_intent(agent_intent: dict[str, Any] | None) -> dict[str
         "healthy",
         reason="agent_intent_available",
         allowed_actions=["project_scan", "plan_draft"],
-        blocked_actions=["start_offdesk"],
-        recovery_hint="실행은 별도 로컬 승인 필요",
+        blocked_actions=["arbitrary_launch", "shell"],
+        recovery_hint="실행은 reviewed bound task만 가능",
     )
 
 
@@ -604,16 +652,16 @@ def health_action_readiness(
             if str(agent_runtime_status.get("status") or "") == "available"
             else "agent_runtime_disabled",
             allowed_actions=["project_scan", "plan_draft"],
-            blocked_actions=["start_offdesk"],
-            recovery_hint="실행은 별도 로컬 승인 필요",
+            blocked_actions=["arbitrary_launch", "shell"],
+            recovery_hint="실행은 reviewed bound task만 가능",
         )
     start_offdesk = action_readiness(
         "start_offdesk",
-        "blocked",
-        reason="remote_launch_not_authorized",
-        allowed_actions=["status", "plans"],
-        blocked_actions=["launch", "dispatch", "shell"],
-        recovery_hint="로컬에서 승인 및 실행 준비 검토",
+        "guarded",
+        reason="reviewed_bound_task_only",
+        allowed_actions=["bound_enqueue_run", "task_scoped_start", "task_scoped_monitor"],
+        blocked_actions=["arbitrary_launch", "shell", "accepted_truth"],
+        recovery_hint="계획 승인, 게이트, 브리프, 워크로드 binding 후 대상 task만 시작",
     )
     return [status_readiness, project_scan_readiness, build_plan, start_offdesk]
 
@@ -668,6 +716,25 @@ def sha256_hex(value: bytes) -> str:
 
 def sha256_id(value: str) -> str:
     return hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:16]
+
+
+def contains_secret_like_text(value: Any) -> bool:
+    text = json.dumps(value, ensure_ascii=False).lower()
+    markers = ("token=", "api_key=", "apikey=", "password=", "secret=")
+    return any(marker in text for marker in markers) or re.search(r"\bsk-[a-z0-9]{12,}", text) is not None
+
+
+def ensure_cli_option(argv: list[str], flag: str, value: str) -> list[str]:
+    output = [str(item) for item in argv]
+    if flag in output:
+        index = output.index(flag)
+        if index + 1 < len(output):
+            output[index + 1] = value
+        else:
+            output.append(value)
+    else:
+        output.extend([flag, value])
+    return output
 
 
 def resolve_telegram_config(env_file: pathlib.Path, *, required: bool) -> dict[str, Any]:
@@ -1611,6 +1678,44 @@ def public_remote_plan_session(session: dict[str, Any]) -> dict[str, Any]:
     review = session.get("plan_review")
     if isinstance(review, dict):
         public["plan_review"] = public_plan_review(review)
+    launch_prep = session.get("plan_launch_prep")
+    if isinstance(launch_prep, dict):
+        public["plan_launch_prep"] = public_plan_launch_prep(launch_prep)
+    gate_request = session.get("plan_gate_request")
+    if isinstance(gate_request, dict):
+        public["plan_gate_request"] = public_plan_gate_request(gate_request)
+    gate_resolution = session.get("plan_gate_resolution")
+    if isinstance(gate_resolution, dict):
+        public["plan_gate_resolution"] = public_plan_gate_resolution(gate_resolution)
+    execution_brief = session.get("plan_execution_brief")
+    if isinstance(execution_brief, dict):
+        public["plan_execution_brief"] = public_plan_execution_brief(execution_brief)
+    enqueue_handoff = session.get("plan_enqueue_handoff")
+    if isinstance(enqueue_handoff, dict):
+        public["plan_enqueue_handoff"] = public_plan_enqueue_handoff(enqueue_handoff)
+    workload_binding = session.get("plan_workload_binding")
+    if isinstance(workload_binding, dict):
+        public["plan_workload_binding"] = public_plan_workload_binding(workload_binding)
+    enqueue_run = session.get("plan_enqueue_run")
+    if isinstance(enqueue_run, dict):
+        public["plan_enqueue_run"] = public_plan_enqueue_run(enqueue_run)
+    runtime_start = session.get("plan_runtime_start")
+    if isinstance(runtime_start, dict):
+        public["plan_runtime_start"] = public_plan_runtime_start(runtime_start)
+    runtime_monitor = session.get("plan_runtime_monitor")
+    if isinstance(runtime_monitor, dict):
+        public["plan_runtime_monitor"] = public_plan_runtime_monitor(runtime_monitor)
+    closeout_packet = session.get("plan_closeout_packet")
+    if isinstance(closeout_packet, dict):
+        public["plan_closeout_packet"] = public_plan_closeout_packet(closeout_packet)
+    closeout_review_handoff = session.get("plan_closeout_review_handoff")
+    if isinstance(closeout_review_handoff, dict):
+        public["plan_closeout_review_handoff"] = public_plan_closeout_review_handoff(
+            closeout_review_handoff
+        )
+    closeout_verdict = session.get("plan_closeout_verdict")
+    if isinstance(closeout_verdict, dict):
+        public["plan_closeout_verdict"] = public_plan_closeout_verdict(closeout_verdict)
     return public
 
 
@@ -1748,6 +1853,378 @@ def public_offdesk_plan_review_output(output: dict[str, Any]) -> dict[str, Any]:
     return public
 
 
+def public_plan_launch_prep(prep: dict[str, Any]) -> dict[str, Any]:
+    public = dict(prep)
+    plan_ref = str(public.get("plan_ref") or "")
+    if plan_ref and ("/" in plan_ref or "\\" in plan_ref):
+        public["plan_ref_hash"] = sha256_short(str(public.pop("plan_ref")))
+    for key in ("copied_source_json", "review_record_json"):
+        value = str(public.pop(key, "") or "")
+        if value:
+            public[f"{key}_hash"] = sha256_short(value)
+    command = public.get("launch_prep_command")
+    if isinstance(command, list) and plan_ref and ("/" in plan_ref or "\\" in plan_ref):
+        public["launch_prep_command"] = [
+            "<plan_ref>" if str(item) == plan_ref else str(item)
+            for item in command
+        ]
+    output = public.get("launch_prep_output")
+    if isinstance(output, dict):
+        public["launch_prep_output"] = public_offdesk_plan_launch_prep_output(output)
+    return public
+
+
+def public_offdesk_plan_launch_prep_output(output: dict[str, Any]) -> dict[str, Any]:
+    public = dict(output)
+    for key in ("registration_path", "source_path", "review_record_json", "selected_plan_path"):
+        value = str(public.pop(key, "") or "")
+        if value:
+            public[f"{key}_hash"] = sha256_short(value)
+    reads = public.get("required_first_reads")
+    if isinstance(reads, list):
+        public["required_first_reads"] = [
+            sha256_short(str(item))
+            for item in reads
+            if str(item or "").strip()
+        ]
+    artifacts = public.get("artifacts")
+    if isinstance(artifacts, dict):
+        public["artifacts"] = {
+            key: sha256_short(str(value))
+            if str(value or "").strip()
+            else None
+            for key, value in artifacts.items()
+        }
+    return public
+
+
+def public_plan_gate_request(gate_request: dict[str, Any]) -> dict[str, Any]:
+    public = dict(gate_request)
+    launch_prep_json = str(public.pop("launch_prep_json", "") or "")
+    if launch_prep_json:
+        public["launch_prep_json_hash"] = sha256_short(launch_prep_json)
+    command = public.get("gate_command")
+    if isinstance(command, list) and launch_prep_json:
+        public["gate_command"] = [
+            "<launch_prep_json>" if str(item) == launch_prep_json else str(item)
+            for item in command
+        ]
+    return public
+
+
+def public_plan_gate_resolution(resolution: dict[str, Any]) -> dict[str, Any]:
+    public = dict(resolution)
+    launch_prep_json = str(public.pop("launch_prep_json", "") or "")
+    if launch_prep_json:
+        public["launch_prep_json_hash"] = sha256_short(launch_prep_json)
+    pending = public.get("pending_approval")
+    if isinstance(pending, dict):
+        public["pending_approval"] = public_approval_for_resolution(pending)
+    output = public.get("resolution_output")
+    if isinstance(output, dict):
+        public["resolution_output"] = public_approval_for_resolution(output)
+    return public
+
+
+def public_approval_for_resolution(approval: dict[str, Any]) -> dict[str, Any]:
+    public = dict(approval)
+    metadata = public.get("metadata")
+    if isinstance(metadata, dict):
+        public["metadata_hash"] = sha256_short(json.dumps(metadata, ensure_ascii=False, sort_keys=True))
+        public.pop("metadata", None)
+    return public
+
+
+def public_plan_execution_brief(brief: dict[str, Any]) -> dict[str, Any]:
+    public = dict(brief)
+    for key in ("execution_brief_json", "launch_prep_json"):
+        value = str(public.pop(key, "") or "")
+        if value:
+            public[f"{key}_hash"] = sha256_short(value)
+    output = public.get("execution_brief")
+    if isinstance(output, dict):
+        public["execution_brief"] = dict(output)
+    return public
+
+
+def public_plan_enqueue_handoff(handoff: dict[str, Any]) -> dict[str, Any]:
+    public = dict(handoff)
+    execution_brief_json = str(public.pop("execution_brief_json", "") or "")
+    if execution_brief_json:
+        public["execution_brief_json_hash"] = sha256_short(execution_brief_json)
+    command = public.get("command_template")
+    if isinstance(command, list) and execution_brief_json:
+        public["command_template"] = [
+            "<execution_brief_json>" if str(item) == execution_brief_json else str(item)
+            for item in command
+        ]
+    return public
+
+
+def public_plan_workload_binding(binding: dict[str, Any]) -> dict[str, Any]:
+    public = dict(binding)
+    path_values: dict[str, str] = {}
+    for key in ("prepared_task_json", "execution_brief_json", "repo", "out_dir", "workload_wrapper"):
+        value = str(public.pop(key, "") or "")
+        if value:
+            path_values[key] = value
+            public[f"{key}_hash"] = sha256_short(value)
+    for key in ("bound_enqueue_args", "manifest_enqueue_args"):
+        command = public.get(key)
+        if isinstance(command, list):
+            sanitized = []
+            for item in command:
+                item_text = str(item)
+                for path_key, path_value in sorted(
+                    path_values.items(),
+                    key=lambda item: len(item[1]),
+                    reverse=True,
+                ):
+                    if path_value and path_value in item_text:
+                        item_text = item_text.replace(path_value, f"<{path_key}>")
+                sanitized.append(item_text)
+            public[key] = sanitized
+    manifest_summary = public.get("manifest_summary")
+    if isinstance(manifest_summary, dict):
+        summary = dict(manifest_summary)
+        for key in ("repo", "out_dir", "workload_wrapper"):
+            value = str(summary.pop(key, "") or "")
+            if value:
+                summary[f"{key}_hash"] = sha256_short(value)
+        public["manifest_summary"] = summary
+    return public
+
+
+def public_plan_enqueue_run(enqueue_run: dict[str, Any]) -> dict[str, Any]:
+    public = dict(enqueue_run)
+    for key in ("workload_binding_json", "prepared_task_json", "execution_brief_json"):
+        value = str(public.pop(key, "") or "")
+        if value:
+            public[f"{key}_hash"] = sha256_short(value)
+    command = public.get("enqueue_command")
+    if isinstance(command, list):
+        public["enqueue_command_hash"] = sha256_short(json.dumps(command, ensure_ascii=False, sort_keys=True))
+        public.pop("enqueue_command", None)
+    output = public.get("enqueue_output")
+    if isinstance(output, dict):
+        public["enqueue_output"] = public_offdesk_task_view(output)
+    return public
+
+
+def public_plan_runtime_start(runtime_start: dict[str, Any]) -> dict[str, Any]:
+    public = dict(runtime_start)
+    for key in ("enqueue_run_json", "prepared_task_json", "execution_brief_json"):
+        value = str(public.pop(key, "") or "")
+        if value:
+            public[f"{key}_hash"] = sha256_short(value)
+    command = public.get("tick_command")
+    if isinstance(command, list):
+        public["tick_command_hash"] = sha256_short(json.dumps(command, ensure_ascii=False, sort_keys=True))
+        public.pop("tick_command", None)
+    output = public.get("tick_output")
+    if isinstance(output, dict):
+        public["tick_output"] = public_tick_output(output)
+    return public
+
+
+def public_plan_runtime_monitor(runtime_monitor: dict[str, Any]) -> dict[str, Any]:
+    public = dict(runtime_monitor)
+    for key in ("runtime_start_json",):
+        value = str(public.pop(key, "") or "")
+        if value:
+            public[f"{key}_hash"] = sha256_short(value)
+    for key in ("tick_command", "tasks_command"):
+        command = public.get(key)
+        if isinstance(command, list):
+            public[f"{key}_hash"] = sha256_short(json.dumps(command, ensure_ascii=False, sort_keys=True))
+            public.pop(key, None)
+    output = public.get("tick_output")
+    if isinstance(output, dict):
+        public["tick_output"] = public_tick_output(output)
+    target_task = public.get("target_task")
+    if isinstance(target_task, dict):
+        public["target_task"] = public_offdesk_task_view(target_task)
+    return public
+
+
+def public_plan_closeout_packet(closeout_packet: dict[str, Any]) -> dict[str, Any]:
+    public = dict(closeout_packet)
+    for key in ("runtime_monitor_json",):
+        value = str(public.pop(key, "") or "")
+        if value:
+            public[f"{key}_hash"] = sha256_short(value)
+    command = public.get("closeout_command")
+    if isinstance(command, list):
+        public["closeout_command_hash"] = sha256_short(json.dumps(command, ensure_ascii=False, sort_keys=True))
+        public.pop("closeout_command", None)
+    output = public.get("closeout_output")
+    if isinstance(output, dict):
+            public["closeout_output"] = public_closeout_output(output)
+    return public
+
+
+def public_plan_closeout_review_handoff(handoff: dict[str, Any]) -> dict[str, Any]:
+    public = dict(handoff)
+    for key in ("closeout_packet_json", "artifact_dir", "closeout_plan_json", "return_package_markdown"):
+        value = str(public.pop(key, "") or "")
+        if value:
+            public[f"{key}_hash"] = sha256_short(value)
+    commands = public.get("local_review_commands")
+    if isinstance(commands, dict):
+        public["local_review_command_hashes"] = {
+            str(key): sha256_short(json.dumps(value, ensure_ascii=False, sort_keys=True))
+            for key, value in commands.items()
+            if isinstance(value, list)
+        }
+        public.pop("local_review_commands", None)
+    return public
+
+
+def public_plan_closeout_verdict(verdict: dict[str, Any]) -> dict[str, Any]:
+    public = dict(verdict)
+    for key in ("closeout_review_handoff_json", "artifact_dir"):
+        value = str(public.pop(key, "") or "")
+        if value:
+            public[f"{key}_hash"] = sha256_short(value)
+    command = public.get("closeout_review_command")
+    if isinstance(command, list):
+        public["closeout_review_command_hash"] = sha256_short(
+            json.dumps(command, ensure_ascii=False, sort_keys=True)
+        )
+        public.pop("closeout_review_command", None)
+    output = public.get("closeout_review_output")
+    if isinstance(output, dict):
+        public["closeout_review_output"] = public_closeout_review_output(output)
+    return public
+
+
+def public_closeout_review_output(output: dict[str, Any]) -> dict[str, Any]:
+    public: dict[str, Any] = {}
+    for key in (
+        "review_id",
+        "closeout_id",
+        "verdict",
+        "read_only_project_state",
+        "applies_file_operations",
+    ):
+        if key in output:
+            public[key] = output.get(key)
+    receipt = output.get("closeout_receipt")
+    if isinstance(receipt, dict):
+        public["closeout_receipt"] = {
+            key: receipt.get(key)
+            for key in (
+                "schema",
+                "receipt_id",
+                "closeout_id",
+                "verdict",
+                "acceptance_status",
+                "evidence_status",
+                "verification_status",
+                "retention_review",
+                "wiki_promotion_state",
+                "stale_task_count",
+                "next_safe_action",
+            )
+            if key in receipt
+        }
+        for key in ("open_decisions", "missing_evidence", "required_first_reads", "unsafe_operations"):
+            value = receipt.get(key)
+            if isinstance(value, list):
+                public["closeout_receipt"][f"{key}_count"] = len(value)
+    artifacts = output.get("artifacts")
+    if isinstance(artifacts, dict):
+        public["artifacts"] = {
+            key: sha256_short(str(value))
+            for key, value in artifacts.items()
+            if str(value or "").strip()
+        }
+    return public
+
+
+def public_closeout_output(output: dict[str, Any]) -> dict[str, Any]:
+    public: dict[str, Any] = {}
+    for key in (
+        "closeout_id",
+        "dry_run",
+        "operator_requested_dry_run",
+        "read_only_project_state",
+    ):
+        if key in output:
+            public[key] = output.get(key)
+    for key in ("summary", "filters"):
+        value = output.get(key)
+        if isinstance(value, dict):
+            public[key] = value
+    review_contract = output.get("review_contract")
+    if isinstance(review_contract, dict):
+        public["review_contract"] = {
+            key: review_contract.get(key)
+            for key in ("provider", "required", "required_verdicts")
+            if key in review_contract
+        }
+    artifacts = output.get("artifacts")
+    if isinstance(artifacts, dict):
+        public["artifacts"] = {
+            key: sha256_short(str(value))
+            for key, value in artifacts.items()
+            if str(value or "").strip()
+        }
+    open_decisions = output.get("open_decisions")
+    if isinstance(open_decisions, list):
+        public["open_decision_count"] = len(open_decisions)
+    verification_commands = output.get("verification_commands")
+    if isinstance(verification_commands, list):
+        public["verification_command_count"] = len(verification_commands)
+    return public
+
+
+def public_tick_output(output: dict[str, Any]) -> dict[str, Any]:
+    allowed = {
+        "expired_approvals",
+        "polled_background",
+        "launched",
+        "pending_approval",
+        "completed",
+        "failed",
+        "resume_pending",
+        "provider_deferred",
+        "provider_retargeted",
+        "skipped",
+        "stale_lock_replaced",
+        "updated_task_ids",
+    }
+    return {key: value for key, value in output.items() if key in allowed}
+
+
+def public_offdesk_task_view(task: dict[str, Any]) -> dict[str, Any]:
+    allowed = {
+        "task_id",
+        "request_id",
+        "project_key",
+        "status",
+        "capability_id",
+        "runner_kind",
+        "background_ticket_id",
+        "attempt_count",
+        "last_gate_status",
+        "mutation_class",
+        "artifact_kind",
+        "agent_mode",
+        "provider_id",
+        "model",
+        "preview",
+        "reason",
+        "next_safe_action",
+    }
+    public = {key: value for key, value in task.items() if key in allowed}
+    for key in ("workdir", "log_artifact_path", "result_artifact_path"):
+        value = str(task.get(key) or "")
+        if value:
+            public[f"{key}_hash"] = sha256_short(value)
+    return public
+
+
 def remote_plan_choice_label(candidate: dict[str, Any]) -> str:
     rank = int(candidate.get("rank") or 0)
     name = truncate_label(candidate.get("display_name") or candidate.get("project_key"), max_chars=22)
@@ -1776,10 +2253,144 @@ def remote_plan_selection_context(session: dict[str, Any]) -> dict[str, Any]:
 def remote_plan_init_context(session: dict[str, Any]) -> dict[str, Any]:
     candidate = session.get("selected_candidate") if isinstance(session.get("selected_candidate"), dict) else {}
     stage = str(session.get("stage") or "")
+    if stage == "plan_gate_request_created":
+        return {
+            "schema": INTERACTION_CONTEXT_SCHEMA,
+            "command": "remote_plan_init_review",
+            "profile": session.get("profile") or "default",
+            "context_kind": REMOTE_PLAN_INIT_CONTEXT_KIND,
+            "focus_kind": "remote_plan_session",
+            "focus_ref": session.get("session_id"),
+            "focus_label": candidate.get("display_name") or "프로젝트",
+            "next_command": None,
+            "choice_labels": ["게이트 승인", "게이트 거절", "보류"],
+        }
+    if stage == "plan_gate_approved":
+        return {
+            "schema": INTERACTION_CONTEXT_SCHEMA,
+            "command": "remote_plan_init_review",
+            "profile": session.get("profile") or "default",
+            "context_kind": REMOTE_PLAN_INIT_CONTEXT_KIND,
+            "focus_kind": "remote_plan_session",
+            "focus_ref": session.get("session_id"),
+            "focus_label": candidate.get("display_name") or "프로젝트",
+            "next_command": None,
+            "choice_labels": ["실행 브리프 생성", "보류"],
+        }
+    if stage in {"plan_execution_brief_created", "plan_enqueue_handoff_failed"}:
+        return {
+            "schema": INTERACTION_CONTEXT_SCHEMA,
+            "command": "remote_plan_init_review",
+            "profile": session.get("profile") or "default",
+            "context_kind": REMOTE_PLAN_INIT_CONTEXT_KIND,
+            "focus_kind": "remote_plan_session",
+            "focus_ref": session.get("session_id"),
+            "focus_label": candidate.get("display_name") or "프로젝트",
+            "next_command": None,
+            "choice_labels": ["큐 등록 검토", "보류"],
+        }
+    if stage in {"plan_enqueue_handoff_created", "plan_workload_path_required", "plan_workload_binding_failed"}:
+        return {
+            "schema": INTERACTION_CONTEXT_SCHEMA,
+            "command": "remote_plan_init_review",
+            "profile": session.get("profile") or "default",
+            "context_kind": REMOTE_PLAN_INIT_CONTEXT_KIND,
+            "focus_kind": "remote_plan_session",
+            "focus_ref": session.get("session_id"),
+            "focus_label": candidate.get("display_name") or "프로젝트",
+            "next_command": None,
+            "choice_labels": ["워크로드 패킷 연결", "보류"],
+        }
+    if stage in {"plan_workload_bound", "plan_enqueue_run_failed"}:
+        return {
+            "schema": INTERACTION_CONTEXT_SCHEMA,
+            "command": "remote_plan_init_review",
+            "profile": session.get("profile") or "default",
+            "context_kind": REMOTE_PLAN_INIT_CONTEXT_KIND,
+            "focus_kind": "remote_plan_session",
+            "focus_ref": session.get("session_id"),
+            "focus_label": candidate.get("display_name") or "프로젝트",
+            "next_command": None,
+            "choice_labels": ["큐 등록 실행", "보류"],
+        }
+    if stage in {"plan_enqueued", "plan_runtime_start_failed"}:
+        return {
+            "schema": INTERACTION_CONTEXT_SCHEMA,
+            "command": "remote_plan_init_review",
+            "profile": session.get("profile") or "default",
+            "context_kind": REMOTE_PLAN_INIT_CONTEXT_KIND,
+            "focus_kind": "remote_plan_session",
+            "focus_ref": session.get("session_id"),
+            "focus_label": candidate.get("display_name") or "프로젝트",
+            "next_command": None,
+            "choice_labels": ["실행 시작", "보류"],
+        }
+    if stage in {"plan_runtime_started", "plan_runtime_monitored", "plan_runtime_monitor_failed"}:
+        monitor = session.get("plan_runtime_monitor") if isinstance(session.get("plan_runtime_monitor"), dict) else {}
+        if stage == "plan_runtime_monitored" and monitor.get("task_status") == "completed":
+            labels = ["마무리 패킷 생성", "실행 상태 확인", "보류"]
+        else:
+            labels = ["실행 상태 확인", "보류"]
+        return {
+            "schema": INTERACTION_CONTEXT_SCHEMA,
+            "command": "remote_plan_init_review",
+            "profile": session.get("profile") or "default",
+            "context_kind": REMOTE_PLAN_INIT_CONTEXT_KIND,
+            "focus_kind": "remote_plan_session",
+            "focus_ref": session.get("session_id"),
+            "focus_label": candidate.get("display_name") or "프로젝트",
+            "next_command": None,
+            "choice_labels": labels,
+        }
+    if stage in {
+        "plan_closeout_packet_created",
+        "plan_closeout_packet_failed",
+        "plan_closeout_review_handoff_created",
+        "plan_closeout_review_handoff_failed",
+    }:
+        labels = ["실행 상태 확인", "보류"]
+        if stage == "plan_closeout_packet_created":
+            labels = ["마무리 검토 준비", "실행 상태 확인", "보류"]
+        if stage == "plan_closeout_packet_failed":
+            labels = ["마무리 패킷 생성", "실행 상태 확인", "보류"]
+        if stage == "plan_closeout_review_handoff_failed":
+            labels = ["마무리 검토 준비", "실행 상태 확인", "보류"]
+        if stage == "plan_closeout_review_handoff_created":
+            labels = ["승인 기록", "수정 요청 기록", "차단 기록", "실행 상태 확인", "보류"]
+        return {
+            "schema": INTERACTION_CONTEXT_SCHEMA,
+            "command": "remote_plan_init_review",
+            "profile": session.get("profile") or "default",
+            "context_kind": REMOTE_PLAN_INIT_CONTEXT_KIND,
+            "focus_kind": "remote_plan_session",
+            "focus_ref": session.get("session_id"),
+            "focus_label": candidate.get("display_name") or "프로젝트",
+            "next_command": None,
+            "choice_labels": labels,
+        }
+    if stage in {"plan_closeout_verdict_recorded", "plan_closeout_verdict_failed"}:
+        labels = ["실행 상태 확인", "보류"]
+        if stage == "plan_closeout_verdict_failed":
+            labels = ["수정 요청 기록", "차단 기록", "실행 상태 확인", "보류"]
+        return {
+            "schema": INTERACTION_CONTEXT_SCHEMA,
+            "command": "remote_plan_init_review",
+            "profile": session.get("profile") or "default",
+            "context_kind": REMOTE_PLAN_INIT_CONTEXT_KIND,
+            "focus_kind": "remote_plan_session",
+            "focus_ref": session.get("session_id"),
+            "focus_label": candidate.get("display_name") or "프로젝트",
+            "next_command": None,
+            "choice_labels": labels,
+        }
     if stage == "project_init_previewed":
         primary = "초기화 생성"
     elif stage in {"plan_registered", "plan_review_failed"}:
         primary = "계획 승인"
+    elif stage in {"plan_review_approved", "plan_launch_prep_failed"}:
+        primary = "실행 준비 검토"
+    elif stage in {"plan_launch_prep_prepared", "plan_gate_request_failed"}:
+        primary = "게이트 요청"
     elif stage == "plan_draft_validated":
         primary = "계획 등록"
     elif stage in {"project_init_created", "plan_draft_failed"}:
@@ -2021,7 +2632,522 @@ def render_plan_review_approved_message(*, profile: Any, session: dict[str, Any]
             f"{html.escape(project_key)} · 실행 준비 후보",
             "계획 검토를 기록했습니다.",
             "실행 준비는 아직 하지 않았습니다.",
-            "로컬에서 실행 준비 검토",
+            "아래 버튼으로 실행 준비 검토",
+        ]
+    )
+
+
+def render_plan_launch_prep_required_message(*, profile: Any) -> str:
+    return "\n".join(
+        [
+            title_with_profile("계획 승인 필요", profile),
+            "먼저 계획 승인을 기록하세요.",
+            "실행 준비 패킷은 아직 없습니다.",
+            "아직 실행은 시작하지 않았습니다.",
+            "버튼 또는 의견 직접 입력",
+        ]
+    )
+
+
+def render_plan_launch_prep_prepared_message(*, profile: Any, session: dict[str, Any]) -> str:
+    prep = session.get("plan_launch_prep") if isinstance(session.get("plan_launch_prep"), dict) else {}
+    output = prep.get("launch_prep_output") if isinstance(prep.get("launch_prep_output"), dict) else {}
+    project_key = truncate_label(prep.get("project_key") or output.get("project_key") or "프로젝트", max_chars=24)
+    return "\n".join(
+        [
+            title_with_profile("실행 준비 패킷 생성됨", profile),
+            f"{html.escape(project_key)} · 게이트 검토 대기",
+            "패킷만 저장했습니다.",
+            "실행/승인은 아직 하지 않았습니다.",
+            "아래 버튼으로 게이트 요청",
+        ]
+    )
+
+
+def render_plan_launch_prep_failed_message(*, profile: Any, session: dict[str, Any]) -> str:
+    prep = session.get("plan_launch_prep") if isinstance(session.get("plan_launch_prep"), dict) else {}
+    reason = truncate_label(prep.get("error") or "실행 준비 실패", max_chars=42)
+    return "\n".join(
+        [
+            title_with_profile("실행 준비 실패", profile),
+            html.escape(reason),
+            "실행 준비 패킷을 만들지 못했습니다.",
+            "아직 실행은 시작하지 않았습니다.",
+            "로컬에서 원인 확인",
+        ]
+    )
+
+
+def render_plan_gate_request_required_message(*, profile: Any) -> str:
+    return "\n".join(
+        [
+            title_with_profile("실행 준비 필요", profile),
+            "먼저 실행 준비 패킷을 만드세요.",
+            "게이트 요청은 아직 없습니다.",
+            "아직 실행은 시작하지 않았습니다.",
+            "버튼 또는 의견 직접 입력",
+        ]
+    )
+
+
+def render_plan_gate_request_created_message(*, profile: Any, session: dict[str, Any]) -> str:
+    gate_request = session.get("plan_gate_request") if isinstance(session.get("plan_gate_request"), dict) else {}
+    output = gate_request.get("gate_output") if isinstance(gate_request.get("gate_output"), dict) else {}
+    approval = output.get("approval") if isinstance(output.get("approval"), dict) else {}
+    approval_id = truncate_label(approval.get("approval_id") or "approval", max_chars=28)
+    return "\n".join(
+        [
+            title_with_profile("게이트 요청 생성됨", profile),
+            f"{html.escape(approval_id)} · 승인 대기",
+            "승인 대기열에 올렸습니다.",
+            "실행은 아직 시작하지 않았습니다.",
+            "로컬에서 approval 확인",
+        ]
+    )
+
+
+def render_plan_gate_request_failed_message(*, profile: Any, session: dict[str, Any]) -> str:
+    gate_request = session.get("plan_gate_request") if isinstance(session.get("plan_gate_request"), dict) else {}
+    reason = truncate_label(gate_request.get("error") or "게이트 요청 실패", max_chars=42)
+    return "\n".join(
+        [
+            title_with_profile("게이트 요청 실패", profile),
+            html.escape(reason),
+            "승인 대기열을 만들지 못했습니다.",
+            "아직 실행은 시작하지 않았습니다.",
+            "로컬에서 원인 확인",
+        ]
+    )
+
+
+def render_plan_gate_resolution_required_message(*, profile: Any) -> str:
+    return "\n".join(
+        [
+            title_with_profile("게이트 요청 필요", profile),
+            "먼저 게이트 요청을 만드세요.",
+            "승인/거절은 아직 기록하지 않았습니다.",
+            "아직 실행은 시작하지 않았습니다.",
+            "버튼 또는 의견 직접 입력",
+        ]
+    )
+
+
+def render_plan_gate_resolution_done_message(*, profile: Any, session: dict[str, Any]) -> str:
+    resolution = session.get("plan_gate_resolution") if isinstance(session.get("plan_gate_resolution"), dict) else {}
+    decision = str(resolution.get("decision") or "")
+    label = "승인됨" if decision == "approved" else "거절됨"
+    approval_id = truncate_label(resolution.get("approval_id") or "approval", max_chars=28)
+    return "\n".join(
+        [
+            title_with_profile(f"게이트 {label}", profile),
+            f"{html.escape(approval_id)} · {label}",
+            "approval만 해결했습니다.",
+            "실행은 아직 시작하지 않았습니다.",
+            "로컬에서 다음 단계 검토",
+        ]
+    )
+
+
+def render_plan_gate_resolution_failed_message(*, profile: Any, session: dict[str, Any]) -> str:
+    resolution = session.get("plan_gate_resolution") if isinstance(session.get("plan_gate_resolution"), dict) else {}
+    reason = truncate_label(resolution.get("error") or "게이트 처리 실패", max_chars=42)
+    return "\n".join(
+        [
+            title_with_profile("게이트 처리 실패", profile),
+            html.escape(reason),
+            "approval을 해결하지 못했습니다.",
+            "아직 실행은 시작하지 않았습니다.",
+            "로컬에서 pending 상태 확인",
+        ]
+    )
+
+
+def render_plan_execution_brief_required_message(*, profile: Any) -> str:
+    return "\n".join(
+        [
+            title_with_profile("게이트 승인 필요", profile),
+            "먼저 게이트 승인을 완료하세요.",
+            "실행 브리프는 아직 없습니다.",
+            "아직 실행은 시작하지 않았습니다.",
+            "버튼 또는 의견 직접 입력",
+        ]
+    )
+
+
+def render_plan_execution_brief_created_message(*, profile: Any, session: dict[str, Any]) -> str:
+    brief = session.get("plan_execution_brief") if isinstance(session.get("plan_execution_brief"), dict) else {}
+    task_id = truncate_label(brief.get("task_id") or "task", max_chars=28)
+    return "\n".join(
+        [
+            title_with_profile("실행 브리프 생성됨", profile),
+            f"{html.escape(task_id)} · 로컬 enqueue 준비",
+            "브리프 파일만 저장했습니다.",
+            "실행은 아직 시작하지 않았습니다.",
+            "로컬에서 enqueue 검토",
+        ]
+    )
+
+
+def render_plan_execution_brief_failed_message(*, profile: Any, session: dict[str, Any]) -> str:
+    brief = session.get("plan_execution_brief") if isinstance(session.get("plan_execution_brief"), dict) else {}
+    reason = truncate_label(brief.get("error") or "브리프 생성 실패", max_chars=42)
+    return "\n".join(
+        [
+            title_with_profile("실행 브리프 실패", profile),
+            html.escape(reason),
+            "실행 브리프를 만들지 못했습니다.",
+            "아직 실행은 시작하지 않았습니다.",
+            "로컬에서 원인 확인",
+        ]
+    )
+
+
+def render_plan_enqueue_handoff_required_message(*, profile: Any) -> str:
+    return "\n".join(
+        [
+            title_with_profile("실행 브리프 필요", profile),
+            "먼저 실행 브리프를 생성하세요.",
+            "큐 등록 검토는 아직 없습니다.",
+            "아직 실행은 시작하지 않았습니다.",
+            "버튼 또는 의견 직접 입력",
+        ]
+    )
+
+
+def render_plan_enqueue_handoff_created_message(*, profile: Any, session: dict[str, Any]) -> str:
+    handoff = session.get("plan_enqueue_handoff") if isinstance(session.get("plan_enqueue_handoff"), dict) else {}
+    task_id = truncate_label(handoff.get("task_id") or "task", max_chars=28)
+    return "\n".join(
+        [
+            title_with_profile("큐 등록 검토 준비됨", profile),
+            f"{html.escape(task_id)} · 로컬 검토 필요",
+            "명령 템플릿만 저장했습니다.",
+            "실행은 아직 시작하지 않았습니다.",
+            "로컬에서 workload 명령 확인",
+        ]
+    )
+
+
+def render_plan_enqueue_handoff_failed_message(*, profile: Any, session: dict[str, Any]) -> str:
+    handoff = session.get("plan_enqueue_handoff") if isinstance(session.get("plan_enqueue_handoff"), dict) else {}
+    reason = truncate_label(handoff.get("error") or "큐 등록 검토 실패", max_chars=42)
+    return "\n".join(
+        [
+            title_with_profile("큐 등록 검토 실패", profile),
+            html.escape(reason),
+            "명령 템플릿을 만들지 못했습니다.",
+            "아직 실행은 시작하지 않았습니다.",
+            "로컬에서 원인 확인",
+        ]
+    )
+
+
+def render_plan_workload_path_required_message(*, profile: Any) -> str:
+    return "\n".join(
+        [
+            title_with_profile("워크로드 패킷 필요", profile),
+            "prepared_task.json 경로를 입력하세요.",
+            "검토된 패킷만 연결할 수 있습니다.",
+            "아직 실행은 시작하지 않았습니다.",
+            "버튼 또는 경로 직접 입력",
+        ]
+    )
+
+
+def render_plan_workload_bound_message(*, profile: Any, session: dict[str, Any]) -> str:
+    binding = session.get("plan_workload_binding") if isinstance(session.get("plan_workload_binding"), dict) else {}
+    task_id = truncate_label(binding.get("task_id") or "task", max_chars=28)
+    return "\n".join(
+        [
+            title_with_profile("워크로드 패킷 연결됨", profile),
+            f"{html.escape(task_id)} · 로컬 enqueue 검토 가능",
+            "검토된 패킷만 연결했습니다.",
+            "실행은 아직 시작하지 않았습니다.",
+            "로컬에서 enqueue 실행 검토",
+        ]
+    )
+
+
+def render_plan_workload_binding_failed_message(*, profile: Any, session: dict[str, Any]) -> str:
+    binding = session.get("plan_workload_binding") if isinstance(session.get("plan_workload_binding"), dict) else {}
+    reason = truncate_label(binding.get("error") or "패킷 연결 실패", max_chars=42)
+    return "\n".join(
+        [
+            title_with_profile("워크로드 패킷 실패", profile),
+            html.escape(reason),
+            "패킷을 연결하지 못했습니다.",
+            "아직 실행은 시작하지 않았습니다.",
+            "로컬에서 manifest 확인",
+        ]
+    )
+
+
+def render_plan_enqueue_run_required_message(*, profile: Any) -> str:
+    return "\n".join(
+        [
+            title_with_profile("워크로드 연결 필요", profile),
+            "먼저 prepared_task.json을 연결하세요.",
+            "큐 등록은 아직 하지 않았습니다.",
+            "아직 실행은 시작하지 않았습니다.",
+            "버튼 또는 경로 직접 입력",
+        ]
+    )
+
+
+def render_plan_enqueue_run_done_message(*, profile: Any, session: dict[str, Any]) -> str:
+    enqueue_run = session.get("plan_enqueue_run") if isinstance(session.get("plan_enqueue_run"), dict) else {}
+    task_id = truncate_label(enqueue_run.get("task_id") or "task", max_chars=28)
+    return "\n".join(
+        [
+            title_with_profile("큐 등록됨", profile),
+            f"{html.escape(task_id)} · queued",
+            "Offdesk 큐에만 등록했습니다.",
+            "실행은 아직 시작하지 않았습니다.",
+            "로컬에서 다음 실행 검토",
+        ]
+    )
+
+
+def render_plan_enqueue_run_failed_message(*, profile: Any, session: dict[str, Any]) -> str:
+    enqueue_run = session.get("plan_enqueue_run") if isinstance(session.get("plan_enqueue_run"), dict) else {}
+    reason = truncate_label(enqueue_run.get("error") or "큐 등록 실패", max_chars=42)
+    return "\n".join(
+        [
+            title_with_profile("큐 등록 실패", profile),
+            html.escape(reason),
+            "Offdesk 큐에 등록하지 못했습니다.",
+            "아직 실행은 시작하지 않았습니다.",
+            "로컬에서 queue 상태 확인",
+        ]
+    )
+
+
+def render_plan_runtime_start_required_message(*, profile: Any) -> str:
+    return "\n".join(
+        [
+            title_with_profile("큐 등록 필요", profile),
+            "먼저 큐 등록을 완료하세요.",
+            "실행 시작은 아직 하지 않았습니다.",
+            "완료 판정도 아직 없습니다.",
+            "버튼 또는 의견 직접 입력",
+        ]
+    )
+
+
+def render_plan_runtime_started_message(*, profile: Any, session: dict[str, Any]) -> str:
+    runtime_start = session.get("plan_runtime_start") if isinstance(session.get("plan_runtime_start"), dict) else {}
+    task_id = truncate_label(runtime_start.get("task_id") or "task", max_chars=28)
+    return "\n".join(
+        [
+            title_with_profile("실행 시작됨", profile),
+            f"{html.escape(task_id)} · launched",
+            "대상 task만 시작했습니다.",
+            "완료 판정은 아직 없습니다.",
+            "아래 버튼으로 상태 확인",
+        ]
+    )
+
+
+def runtime_monitor_next_action_label(target_task: dict[str, Any]) -> str:
+    next_action = target_task.get("next_safe_action") if isinstance(target_task.get("next_safe_action"), dict) else {}
+    kind = str(next_action.get("kind") or "").strip()
+    if kind in {"review_required", "closeout_check"}:
+        return "로컬에서 closeout 검토"
+    if kind in {"recovery_required", "resume_review_required", "result_artifact_missing"}:
+        return "로컬에서 복구 검토"
+    if kind == "runtime_monitoring":
+        return "잠시 후 다시 확인"
+    if kind in {"dispatch_pending", "approval_pending"}:
+        return "로컬에서 큐/승인 확인"
+    return "로컬에서 상태 확인"
+
+
+def render_plan_runtime_monitor_required_message(*, profile: Any) -> str:
+    return "\n".join(
+        [
+            title_with_profile("실행 시작 필요", profile),
+            "먼저 실행 시작을 완료하세요.",
+            "상태 확인은 대상 task만 봅니다.",
+            "완료 판정은 아직 없습니다.",
+            "버튼 또는 의견 직접 입력",
+        ]
+    )
+
+
+def render_plan_runtime_monitor_message(*, profile: Any, session: dict[str, Any]) -> str:
+    monitor = session.get("plan_runtime_monitor") if isinstance(session.get("plan_runtime_monitor"), dict) else {}
+    target_task = monitor.get("target_task") if isinstance(monitor.get("target_task"), dict) else {}
+    task_id = truncate_label(monitor.get("task_id") or target_task.get("task_id") or "task", max_chars=24)
+    task_status = str(monitor.get("task_status") or target_task.get("status") or "unknown")
+    status_labels = {
+        "completed": ("실행 완료 확인", "완료 상태를 확인했습니다."),
+        "failed": ("실행 실패 확인", "실패 상태입니다."),
+        "resume_pending": ("복구 검토 필요", "복구 검토가 필요합니다."),
+        "launched": ("실행 진행 중", "아직 실행 중입니다."),
+        "running": ("실행 진행 중", "아직 실행 중입니다."),
+        "queued": ("큐 대기 확인", "아직 큐에 있습니다."),
+        "pending_approval": ("승인 대기 확인", "아직 승인 대기입니다."),
+    }
+    title, summary = status_labels.get(task_status, ("실행 상태 확인", "상태를 갱신했습니다."))
+    return "\n".join(
+        [
+            title_with_profile(title, profile),
+            f"{html.escape(task_id)} · {html.escape(task_status)}",
+            summary,
+            runtime_monitor_next_action_label(target_task),
+            "결과 승인은 아직 없습니다.",
+        ]
+    )
+
+
+def render_plan_runtime_monitor_failed_message(*, profile: Any, session: dict[str, Any]) -> str:
+    monitor = session.get("plan_runtime_monitor") if isinstance(session.get("plan_runtime_monitor"), dict) else {}
+    reason = truncate_label(monitor.get("error") or "상태 확인 실패", max_chars=42)
+    return "\n".join(
+        [
+            title_with_profile("상태 확인 실패", profile),
+            html.escape(reason),
+            "대상 task만 확인하려 했습니다.",
+            "완료 판정은 아직 없습니다.",
+            "로컬에서 상태 확인",
+        ]
+    )
+
+
+def render_plan_closeout_required_message(*, profile: Any) -> str:
+    return "\n".join(
+        [
+            title_with_profile("완료 확인 필요", profile),
+            "먼저 completed 상태를 확인하세요.",
+            "마무리 패킷은 완료 task만 대상입니다.",
+            "결과 승인은 아직 없습니다.",
+            "아래 버튼으로 상태 확인",
+        ]
+    )
+
+
+def render_plan_closeout_packet_message(*, profile: Any, session: dict[str, Any]) -> str:
+    closeout_packet = session.get("plan_closeout_packet") if isinstance(session.get("plan_closeout_packet"), dict) else {}
+    closeout_output = closeout_packet.get("closeout_output") if isinstance(closeout_packet.get("closeout_output"), dict) else {}
+    closeout_id = truncate_label(closeout_output.get("closeout_id") or "closeout", max_chars=30)
+    summary = closeout_output.get("summary") if isinstance(closeout_output.get("summary"), dict) else {}
+    open_count = int(closeout_packet.get("open_decision_count") or summary.get("open_decision_records") or 0)
+    return "\n".join(
+        [
+            title_with_profile("마무리 패킷 생성됨", profile),
+            f"{html.escape(closeout_id)} · review needed",
+            "closeout 자료만 만들었습니다.",
+            f"열린 검토 {open_count}개 · 결과 승인은 아직 없습니다.",
+            "로컬에서 closeout-review 검토",
+        ]
+    )
+
+
+def render_plan_closeout_packet_failed_message(*, profile: Any, session: dict[str, Any]) -> str:
+    closeout_packet = session.get("plan_closeout_packet") if isinstance(session.get("plan_closeout_packet"), dict) else {}
+    reason = truncate_label(closeout_packet.get("error") or "마무리 패킷 실패", max_chars=42)
+    return "\n".join(
+        [
+            title_with_profile("마무리 패킷 실패", profile),
+            html.escape(reason),
+            "대상 task만 closeout하려 했습니다.",
+            "결과 승인은 아직 없습니다.",
+            "로컬에서 closeout 확인",
+        ]
+    )
+
+
+def render_plan_closeout_review_handoff_message(*, profile: Any, session: dict[str, Any]) -> str:
+    handoff = (
+        session.get("plan_closeout_review_handoff")
+        if isinstance(session.get("plan_closeout_review_handoff"), dict)
+        else {}
+    )
+    closeout_id = truncate_label(handoff.get("closeout_id") or "closeout", max_chars=30)
+    if handoff.get("approved_verdict_may_accept_truth"):
+        warning = "approved는 accepted truth가 될 수 있습니다."
+    else:
+        warning = "follow-up이 남아도 로컬 검토가 필요합니다."
+    return "\n".join(
+        [
+            title_with_profile("마무리 검토 준비됨", profile),
+            f"{html.escape(closeout_id)} · verdict ready",
+            "Telegram에서 verdict를 기록할 수 있습니다.",
+            warning,
+            "아래 버튼에서 verdict 선택",
+        ]
+    )
+
+
+def render_plan_closeout_review_handoff_failed_message(*, profile: Any, session: dict[str, Any]) -> str:
+    handoff = (
+        session.get("plan_closeout_review_handoff")
+        if isinstance(session.get("plan_closeout_review_handoff"), dict)
+        else {}
+    )
+    reason = truncate_label(handoff.get("error") or "마무리 검토 준비 실패", max_chars=42)
+    return "\n".join(
+        [
+            title_with_profile("마무리 검토 준비 실패", profile),
+            html.escape(reason),
+            "closeout packet만 참조하려 했습니다.",
+            "verdict 실행은 하지 않았습니다.",
+            "로컬에서 closeout 확인",
+        ]
+    )
+
+
+def render_plan_closeout_verdict_message(*, profile: Any, session: dict[str, Any]) -> str:
+    verdict = session.get("plan_closeout_verdict") if isinstance(session.get("plan_closeout_verdict"), dict) else {}
+    output = (
+        verdict.get("closeout_review_output")
+        if isinstance(verdict.get("closeout_review_output"), dict)
+        else {}
+    )
+    receipt = output.get("closeout_receipt") if isinstance(output.get("closeout_receipt"), dict) else {}
+    recorded_verdict = truncate_label(verdict.get("verdict") or output.get("verdict") or "verdict", max_chars=18)
+    acceptance = truncate_label(receipt.get("acceptance_status") or "not_accepted", max_chars=24)
+    if receipt.get("acceptance_status") == "accepted":
+        truth_line = "accepted truth가 기록됐습니다."
+    elif recorded_verdict == "approved":
+        truth_line = "follow-up이 남아 아직 accepted는 아닙니다."
+    else:
+        truth_line = "accepted truth는 아직 없습니다."
+    return "\n".join(
+        [
+            title_with_profile("마무리 verdict 기록됨", profile),
+            f"{html.escape(recorded_verdict)} · {html.escape(acceptance)}",
+            truth_line,
+            "프로젝트 파일 변경은 없습니다.",
+            "로컬에서 return package 확인",
+        ]
+    )
+
+
+def render_plan_closeout_verdict_failed_message(*, profile: Any, session: dict[str, Any]) -> str:
+    verdict = session.get("plan_closeout_verdict") if isinstance(session.get("plan_closeout_verdict"), dict) else {}
+    reason = truncate_label(verdict.get("error") or "verdict 기록 실패", max_chars=42)
+    return "\n".join(
+        [
+            title_with_profile("verdict 기록 실패", profile),
+            html.escape(reason),
+            "accepted truth는 만들지 않았습니다.",
+            "프로젝트 파일 변경은 없습니다.",
+            "로컬에서 closeout-review 확인",
+        ]
+    )
+
+
+def render_plan_runtime_start_failed_message(*, profile: Any, session: dict[str, Any]) -> str:
+    runtime_start = session.get("plan_runtime_start") if isinstance(session.get("plan_runtime_start"), dict) else {}
+    reason = truncate_label(runtime_start.get("error") or "실행 시작 실패", max_chars=42)
+    return "\n".join(
+        [
+            title_with_profile("실행 시작 실패", profile),
+            html.escape(reason),
+            "대상 task를 시작하지 못했습니다.",
+            "완료 판정은 아직 없습니다.",
+            "로컬에서 queue 상태 확인",
         ]
     )
 
@@ -2171,16 +3297,16 @@ def create_remote_plan_session(
                 "healthy",
                 reason="agent_intent_not_required",
                 allowed_actions=["project_scan", "plan_draft"],
-                blocked_actions=["start_offdesk"],
-                recovery_hint="실행은 별도 로컬 승인 필요",
+                blocked_actions=["arbitrary_launch", "shell"],
+                recovery_hint="실행은 reviewed bound task만 가능",
             ),
             "start_offdesk": action_readiness(
                 "start_offdesk",
-                "blocked",
-                reason="remote_launch_not_authorized",
-                allowed_actions=["status", "plans"],
-                blocked_actions=["launch", "dispatch", "shell"],
-                recovery_hint="로컬에서 승인 및 실행 준비 검토",
+                "guarded",
+                reason="reviewed_bound_task_only",
+                allowed_actions=["bound_enqueue_run", "task_scoped_start", "task_scoped_monitor"],
+                blocked_actions=["arbitrary_launch", "shell", "accepted_truth"],
+                recovery_hint="계획 승인, 게이트, 브리프, 워크로드 binding 후 대상 task만 시작",
             ),
         },
         "candidates": scan_project_candidates(
@@ -2397,6 +3523,213 @@ def plan_review_approve_text(text: str) -> bool:
         "approve plan",
         "approve",
     }
+
+
+def plan_launch_prep_create_text(text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    return normalized in {
+        "실행 준비 검토",
+        "실행준비 검토",
+        "실행 준비",
+        "실행준비",
+        "launch prep",
+        "plan launch prep",
+        "prepare launch",
+        "prepare launch packet",
+    }
+
+
+def plan_gate_request_text(text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    return normalized in {
+        "게이트 요청",
+        "게이트요청",
+        "승인 요청",
+        "승인요청",
+        "gate request",
+        "request gate",
+        "create gate request",
+        "request approval",
+    }
+
+
+def gate_approval_approve_text(text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    return normalized in {
+        "게이트 승인",
+        "게이트승인",
+        "실행 승인",
+        "실행승인",
+        "approve gate",
+        "gate approve",
+        "approve approval",
+    }
+
+
+def gate_approval_deny_text(text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    return normalized in {
+        "게이트 거절",
+        "게이트거절",
+        "게이트 반려",
+        "실행 거절",
+        "실행거절",
+        "deny gate",
+        "gate deny",
+        "deny approval",
+    }
+
+
+def execution_brief_create_text(text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    return normalized in {
+        "실행 브리프 생성",
+        "실행브리프 생성",
+        "브리프 생성",
+        "execution brief",
+        "create execution brief",
+        "runtime brief",
+    }
+
+
+def enqueue_handoff_create_text(text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    return normalized in {
+        "큐 등록 검토",
+        "큐등록 검토",
+        "큐 등록 준비",
+        "enqueue 검토",
+        "enqueue 준비",
+        "enqueue handoff",
+        "create enqueue handoff",
+        "prepare enqueue",
+    }
+
+
+def workload_binding_request_text(text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    return normalized in {
+        "워크로드 패킷 연결",
+        "워크로드패킷 연결",
+        "prepared_task 연결",
+        "prepared task 연결",
+        "bind workload",
+        "workload binding",
+        "connect workload",
+    }
+
+
+def enqueue_run_create_text(text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    return normalized in {
+        "큐 등록 실행",
+        "큐등록 실행",
+        "큐 등록",
+        "enqueue 실행",
+        "enqueue run",
+        "run enqueue",
+        "execute enqueue",
+    }
+
+
+def runtime_start_create_text(text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    return normalized in {
+        "실행 시작",
+        "실행시작",
+        "런타임 시작",
+        "start runtime",
+        "runtime start",
+        "start execution",
+    }
+
+
+def runtime_monitor_text(text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    return normalized in {
+        "실행 상태 확인",
+        "실행상태 확인",
+        "상태 확인",
+        "런타임 상태 확인",
+        "monitor runtime",
+        "runtime monitor",
+        "check runtime",
+        "check execution",
+    }
+
+
+def closeout_packet_create_text(text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    return normalized in {
+        "마무리 패킷 생성",
+        "마무리 생성",
+        "closeout 생성",
+        "closeout 패킷 생성",
+        "closeout packet",
+        "create closeout",
+        "create closeout packet",
+    }
+
+
+def closeout_review_handoff_create_text(text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    return normalized in {
+        "마무리 검토 준비",
+        "마무리검토 준비",
+        "closeout 검토 준비",
+        "closeout-review 준비",
+        "closeout review 준비",
+        "prepare closeout review",
+        "closeout review handoff",
+    }
+
+
+def closeout_verdict_request(text: str) -> tuple[str | None, str]:
+    raw = str(text or "").strip()
+    normalized = raw.lower()
+    aliases: list[tuple[str, tuple[str, ...]]] = [
+        (
+            "revise",
+            (
+                "수정 요청 기록",
+                "수정요청 기록",
+                "수정 필요 기록",
+                "revision required",
+                "record revise",
+                "revise closeout",
+            ),
+        ),
+        (
+            "blocked",
+            (
+                "차단 기록",
+                "블락 기록",
+                "blocked 기록",
+                "record blocked",
+                "block closeout",
+            ),
+        ),
+        (
+            "approved",
+            (
+                "승인 기록",
+                "승인",
+                "approved 기록",
+                "record approved",
+                "approve closeout",
+                "accept closeout",
+            ),
+        ),
+    ]
+    for verdict, values in aliases:
+        for value in values:
+            lowered = value.lower()
+            if normalized == lowered:
+                return verdict, ""
+            if normalized.startswith(f"{lowered}:") or normalized.startswith(f"{lowered} -"):
+                note = raw[len(value) :].lstrip(" :-")
+                return verdict, sanitize_text(note, max_chars=500)
+    return None, ""
 
 
 def build_multiturn_plan_draft(session: dict[str, Any], init_run: dict[str, Any]) -> dict[str, Any]:
@@ -2819,6 +4152,1914 @@ def approve_registered_plan(
     return receipt
 
 
+def prepare_plan_launch_packet(
+    args: argparse.Namespace,
+    *,
+    session: dict[str, Any],
+    review: dict[str, Any],
+) -> dict[str, Any]:
+    output = review.get("review_output") if isinstance(review.get("review_output"), dict) else {}
+    artifacts = output.get("artifacts") if isinstance(output.get("artifacts"), dict) else {}
+    project_key = str(output.get("project_key") or review.get("project_key") or "project")
+    plan_ref = str(review.get("plan_ref") or output.get("plan_id") or "").strip()
+    review_id = str(output.get("review_id") or "").strip()
+    artifact_dir = args.remote_plan_artifact_dir.expanduser() / str(session.get("session_id") or "session")
+    receipt_path = artifact_dir / "PLAN_LAUNCH_PREP.json"
+    copied_source_json = str(review.get("copied_source_json") or artifacts.get("copied_source_json") or "").strip()
+    expected_source_sha = str(review.get("expected_source_sha256") or output.get("source_sha256") or "").strip()
+    review_record_json = str(artifacts.get("review_record_json") or output.get("review_record_json") or "").strip()
+    receipt = {
+        "schema": PLAN_LAUNCH_PREP_SCHEMA,
+        "created_at": utc_now(),
+        "session_id": session.get("session_id"),
+        "profile": args.profile,
+        "project_key": project_key,
+        "plan_ref": plan_ref,
+        "review_id": review_id,
+        "copied_source_json": copied_source_json,
+        "review_record_json": review_record_json,
+        "expected_source_sha256": expected_source_sha,
+        "launch_preparation_authorized": True,
+        "approval_authorized": False,
+        "gate_approval_authorized": False,
+        "execution_authorized": False,
+        "launch_authorized": False,
+        "enqueue_authorized": False,
+        "runtime_authorized": False,
+    }
+    if not plan_ref or not review_id:
+        receipt.update(
+            {
+                "status": "error",
+                "error": "approved plan review id unavailable",
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    if copied_source_json and expected_source_sha:
+        try:
+            current_sha = sha256_hex(pathlib.Path(copied_source_json).read_bytes())
+        except OSError as error:
+            receipt.update(
+                {
+                    "status": "error",
+                    "error": sanitize_text(f"registered plan source unavailable: {error}", max_chars=400),
+                    "artifact_path": str(receipt_path),
+                }
+            )
+            write_json(receipt_path, receipt)
+            return receipt
+        receipt["current_source_sha256"] = current_sha
+        if current_sha != expected_source_sha:
+            receipt.update(
+                {
+                    "status": "stale",
+                    "error": "registered plan source changed after plan review",
+                    "artifact_path": str(receipt_path),
+                }
+            )
+            write_json(receipt_path, receipt)
+            return receipt
+    command = [args.forager_bin]
+    if args.profile:
+        command.extend(["--profile", args.profile])
+    command.extend(
+        [
+            "offdesk",
+            "plan-launch-prep",
+            plan_ref,
+            "--review-id",
+            review_id,
+            "--prepared-by",
+            "telegram",
+            "--notes",
+            "Telegram operator requested a launch-preparation packet; runtime gate approval remains separate.",
+            "--json",
+        ]
+    )
+    receipt["launch_prep_command"] = command
+    try:
+        process = subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=max(1, int(args.plan_launch_prep_timeout_sec)),
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"{type(error).__name__}: {error}", max_chars=400),
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt["returncode"] = process.returncode
+    if process.returncode != 0:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(process.stderr.strip() or process.stdout.strip(), max_chars=600),
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    try:
+        launch_prep_output = json.loads(process.stdout)
+    except json.JSONDecodeError as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"launch prep did not return JSON: {error}", max_chars=400),
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt.update(
+        {
+            "status": "prepared" if launch_prep_output.get("schema") == "offdesk_plan_launch_prep.v1" else "created",
+            "launch_prep_output": launch_prep_output,
+            "artifact_path": str(receipt_path),
+        }
+    )
+    artifacts = launch_prep_output.get("artifacts") if isinstance(launch_prep_output.get("artifacts"), dict) else {}
+    launch_prep_json = str(artifacts.get("launch_prep_json") or "").strip()
+    if launch_prep_json:
+        receipt["launch_prep_json"] = launch_prep_json
+        try:
+            receipt["launch_prep_sha256"] = sha256_hex(pathlib.Path(launch_prep_json).read_bytes())
+        except OSError as error:
+            receipt["launch_prep_hash_error"] = sanitize_text(str(error), max_chars=200)
+    write_json(receipt_path, receipt)
+    return receipt
+
+
+def request_gate_for_launch_prep(
+    args: argparse.Namespace,
+    *,
+    session: dict[str, Any],
+    launch_prep: dict[str, Any],
+) -> dict[str, Any]:
+    output = launch_prep.get("launch_prep_output") if isinstance(launch_prep.get("launch_prep_output"), dict) else {}
+    artifacts = output.get("artifacts") if isinstance(output.get("artifacts"), dict) else {}
+    project_key = str(output.get("project_key") or launch_prep.get("project_key") or "project")
+    request_id = str(output.get("request_id") or session.get("session_id") or "telegram_request")
+    task_id = str(output.get("task_id") or "").strip()
+    if not task_id:
+        task_id = f"telegram_gate_{sha256_id(str(session.get('session_id') or '') + ':' + str(output.get('prep_id') or 'launch_prep'))}"
+    launch_prep_json = str(launch_prep.get("launch_prep_json") or artifacts.get("launch_prep_json") or "").strip()
+    expected_launch_prep_sha = str(launch_prep.get("launch_prep_sha256") or "").strip()
+    artifact_dir = args.remote_plan_artifact_dir.expanduser() / str(session.get("session_id") or "session")
+    receipt_path = artifact_dir / "PLAN_GATE_REQUEST.json"
+    receipt = {
+        "schema": PLAN_GATE_REQUEST_SCHEMA,
+        "created_at": utc_now(),
+        "session_id": session.get("session_id"),
+        "profile": args.profile,
+        "project_key": project_key,
+        "request_id": request_id,
+        "task_id": task_id,
+        "capability_id": "dispatch.runtime",
+        "mutation_class": "dispatch.runtime",
+        "launch_prep_json": launch_prep_json,
+        "expected_launch_prep_sha256": expected_launch_prep_sha,
+        "gate_request_authorized": True,
+        "approval_authorized": False,
+        "gate_approval_authorized": False,
+        "execution_authorized": False,
+        "launch_authorized": False,
+        "enqueue_authorized": False,
+        "runtime_authorized": False,
+    }
+    if not launch_prep_json:
+        receipt.update(
+            {
+                "status": "error",
+                "error": "launch-preparation packet path unavailable",
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    try:
+        current_sha = sha256_hex(pathlib.Path(launch_prep_json).read_bytes())
+    except OSError as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"launch-preparation packet unavailable: {error}", max_chars=400),
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt["current_launch_prep_sha256"] = current_sha
+    if expected_launch_prep_sha and current_sha != expected_launch_prep_sha:
+        receipt.update(
+            {
+                "status": "stale",
+                "error": "launch-preparation packet changed after preparation",
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    prep_id = str(output.get("prep_id") or "launch-prep")
+    command = [args.forager_bin]
+    if args.profile:
+        command.extend(["--profile", args.profile])
+    command.extend(
+        [
+            "offdesk",
+            "gate",
+            "dispatch.runtime",
+            "--project-key",
+            project_key,
+            "--request-id",
+            request_id,
+            "--task-id",
+            task_id,
+            "--mutation-class",
+            "dispatch.runtime",
+            "--preview",
+            f"Prepare dispatch.runtime approval from launch-prep {prep_id}.",
+            "--reason",
+            "Telegram requested a gate evaluation from a read-only launch-preparation packet; local approval remains required.",
+            "--source-surface",
+            "telegram.remote_operator",
+            "--json",
+        ]
+    )
+    receipt["gate_command"] = command
+    try:
+        process = subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=max(1, int(args.gate_timeout_sec)),
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"{type(error).__name__}: {error}", max_chars=400),
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt["returncode"] = process.returncode
+    if process.returncode != 0:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(process.stderr.strip() or process.stdout.strip(), max_chars=600),
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    try:
+        gate_output = json.loads(process.stdout)
+    except json.JSONDecodeError as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"gate did not return JSON: {error}", max_chars=400),
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt.update(
+        {
+            "status": "pending_approval" if gate_output.get("status") == "pending_approval" else str(gate_output.get("status") or "evaluated"),
+            "gate_output": gate_output,
+            "artifact_path": str(receipt_path),
+        }
+    )
+    write_json(receipt_path, receipt)
+    return receipt
+
+
+def gate_request_approval(gate_request: dict[str, Any]) -> dict[str, Any]:
+    output = gate_request.get("gate_output") if isinstance(gate_request.get("gate_output"), dict) else {}
+    approval = output.get("approval") if isinstance(output.get("approval"), dict) else {}
+    return approval
+
+
+def pending_approval_snapshot(
+    args: argparse.Namespace,
+    *,
+    approval_id: str,
+) -> tuple[dict[str, Any] | None, str | None]:
+    command = [args.forager_bin]
+    if args.profile:
+        command.extend(["--profile", args.profile])
+    command.extend(["offdesk", "pending", "--json"])
+    try:
+        process = subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=max(1, int(args.gate_timeout_sec)),
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return None, sanitize_text(f"{type(error).__name__}: {error}", max_chars=400)
+    if process.returncode != 0:
+        return None, sanitize_text(process.stderr.strip() or process.stdout.strip(), max_chars=600)
+    try:
+        approvals = json.loads(process.stdout)
+    except json.JSONDecodeError as error:
+        return None, sanitize_text(f"pending approvals did not return JSON: {error}", max_chars=400)
+    if not isinstance(approvals, list):
+        return None, "pending approvals output was not a list"
+    for approval in approvals:
+        if isinstance(approval, dict) and str(approval.get("approval_id") or "") == approval_id:
+            return approval, None
+    return None, "pending approval not found"
+
+
+def approval_matches_gate_request(
+    approval: dict[str, Any],
+    expected: dict[str, Any],
+) -> list[str]:
+    mismatches: list[str] = []
+    for key in ("approval_id", "action", "project_key", "request_id", "task_id"):
+        if str(approval.get(key) or "") != str(expected.get(key) or ""):
+            mismatches.append(f"{key}_mismatch")
+    if str(approval.get("status") or "") != "pending":
+        mismatches.append("status_not_pending")
+    if str(approval.get("source_surface") or "") != "telegram.remote_operator":
+        mismatches.append("source_surface_mismatch")
+    return mismatches
+
+
+def resolve_gate_approval(
+    args: argparse.Namespace,
+    *,
+    session: dict[str, Any],
+    gate_request: dict[str, Any],
+    approve: bool,
+) -> dict[str, Any]:
+    expected = gate_request_approval(gate_request)
+    approval_id = str(expected.get("approval_id") or "").strip()
+    project_key = str(gate_request.get("project_key") or expected.get("project_key") or "project")
+    request_id = str(gate_request.get("request_id") or expected.get("request_id") or session.get("session_id") or "")
+    task_id = str(gate_request.get("task_id") or expected.get("task_id") or "")
+    launch_prep_json = str(gate_request.get("launch_prep_json") or "").strip()
+    expected_launch_prep_sha = str(gate_request.get("expected_launch_prep_sha256") or gate_request.get("current_launch_prep_sha256") or "").strip()
+    artifact_dir = args.remote_plan_artifact_dir.expanduser() / str(session.get("session_id") or "session")
+    receipt_path = artifact_dir / "PLAN_GATE_RESOLUTION.json"
+    decision = "approved" if approve else "denied"
+    receipt = {
+        "schema": PLAN_GATE_RESOLUTION_SCHEMA,
+        "created_at": utc_now(),
+        "session_id": session.get("session_id"),
+        "profile": args.profile,
+        "decision": decision,
+        "approval_id": approval_id,
+        "project_key": project_key,
+        "request_id": request_id,
+        "task_id": task_id,
+        "launch_prep_json": launch_prep_json,
+        "expected_launch_prep_sha256": expected_launch_prep_sha,
+        "approval_resolution_authorized": True,
+        "approval_authorized": bool(approve),
+        "gate_approval_authorized": bool(approve),
+        "execution_authorized": False,
+        "launch_authorized": False,
+        "enqueue_authorized": False,
+        "runtime_authorized": False,
+    }
+    if not approval_id:
+        receipt.update(
+            {
+                "status": "error",
+                "error": "approval id unavailable",
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    if launch_prep_json and expected_launch_prep_sha:
+        try:
+            current_sha = sha256_hex(pathlib.Path(launch_prep_json).read_bytes())
+        except OSError as error:
+            receipt.update(
+                {
+                    "status": "error",
+                    "error": sanitize_text(f"launch-preparation packet unavailable: {error}", max_chars=400),
+                    "artifact_path": str(receipt_path),
+                }
+            )
+            write_json(receipt_path, receipt)
+            return receipt
+        receipt["current_launch_prep_sha256"] = current_sha
+        if current_sha != expected_launch_prep_sha:
+            receipt.update(
+                {
+                    "status": "stale",
+                    "error": "launch-preparation packet changed after gate request",
+                    "artifact_path": str(receipt_path),
+                }
+            )
+            write_json(receipt_path, receipt)
+            return receipt
+    pending, pending_error = pending_approval_snapshot(args, approval_id=approval_id)
+    if pending_error or pending is None:
+        receipt.update(
+            {
+                "status": "stale",
+                "error": pending_error or "pending approval unavailable",
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt["pending_approval"] = pending
+    mismatches = approval_matches_gate_request(
+        pending,
+        {
+            "approval_id": approval_id,
+            "action": "dispatch.runtime",
+            "project_key": project_key,
+            "request_id": request_id,
+            "task_id": task_id,
+        },
+    )
+    if mismatches:
+        receipt.update(
+            {
+                "status": "stale",
+                "error": "pending approval no longer matches gate request",
+                "mismatches": mismatches,
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    command = [args.forager_bin]
+    if args.profile:
+        command.extend(["--profile", args.profile])
+    command.extend(
+        [
+            "offdesk",
+            "ok" if approve else "cancel",
+            approval_id,
+            "--by",
+            "telegram",
+            "--json",
+        ]
+    )
+    receipt["resolution_command"] = command
+    try:
+        process = subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=max(1, int(args.gate_timeout_sec)),
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"{type(error).__name__}: {error}", max_chars=400),
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt["returncode"] = process.returncode
+    if process.returncode != 0:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(process.stderr.strip() or process.stdout.strip(), max_chars=600),
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    try:
+        resolution_output = json.loads(process.stdout)
+    except json.JSONDecodeError as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"approval resolution did not return JSON: {error}", max_chars=400),
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt.update(
+        {
+            "status": decision,
+            "resolution_output": resolution_output,
+            "artifact_path": str(receipt_path),
+        }
+    )
+    write_json(receipt_path, receipt)
+    return receipt
+
+
+def create_execution_brief_from_gate_resolution(
+    args: argparse.Namespace,
+    *,
+    session: dict[str, Any],
+    gate_resolution: dict[str, Any],
+) -> dict[str, Any]:
+    resolution_output = (
+        gate_resolution.get("resolution_output")
+        if isinstance(gate_resolution.get("resolution_output"), dict)
+        else {}
+    )
+    decision = str(gate_resolution.get("decision") or "")
+    project_key = str(gate_resolution.get("project_key") or resolution_output.get("project_key") or "project")
+    request_id = str(gate_resolution.get("request_id") or resolution_output.get("request_id") or session.get("session_id") or "")
+    task_id = str(gate_resolution.get("task_id") or resolution_output.get("task_id") or "")
+    approval_id = str(gate_resolution.get("approval_id") or resolution_output.get("approval_id") or "")
+    launch_prep_json = str(gate_resolution.get("launch_prep_json") or "").strip()
+    expected_launch_prep_sha = str(gate_resolution.get("expected_launch_prep_sha256") or gate_resolution.get("current_launch_prep_sha256") or "").strip()
+    artifact_dir = args.remote_plan_artifact_dir.expanduser() / str(session.get("session_id") or "session")
+    brief_path = artifact_dir / "EXECUTION_BRIEF.json"
+    receipt_path = artifact_dir / "PLAN_EXECUTION_BRIEF.json"
+    receipt = {
+        "schema": PLAN_EXECUTION_BRIEF_SCHEMA,
+        "created_at": utc_now(),
+        "session_id": session.get("session_id"),
+        "profile": args.profile,
+        "approval_id": approval_id,
+        "project_key": project_key,
+        "request_id": request_id,
+        "task_id": task_id,
+        "launch_prep_json": launch_prep_json,
+        "expected_launch_prep_sha256": expected_launch_prep_sha,
+        "execution_brief_json": str(brief_path),
+        "execution_brief_authorized": True,
+        "approval_authorized": False,
+        "gate_approval_authorized": False,
+        "execution_authorized": False,
+        "launch_authorized": False,
+        "enqueue_authorized": False,
+        "runtime_authorized": False,
+    }
+    if decision != "approved" or str(resolution_output.get("status") or "") != "approved":
+        receipt.update(
+            {
+                "status": "error",
+                "error": "gate approval is not approved",
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    if not project_key or not request_id or not task_id or not approval_id:
+        receipt.update(
+            {
+                "status": "error",
+                "error": "approved gate resolution is missing execution context",
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    if launch_prep_json and expected_launch_prep_sha:
+        try:
+            current_sha = sha256_hex(pathlib.Path(launch_prep_json).read_bytes())
+        except OSError as error:
+            receipt.update(
+                {
+                    "status": "error",
+                    "error": sanitize_text(f"launch-preparation packet unavailable: {error}", max_chars=400),
+                    "artifact_path": str(receipt_path),
+                }
+            )
+            write_json(receipt_path, receipt)
+            return receipt
+        receipt["current_launch_prep_sha256"] = current_sha
+        if current_sha != expected_launch_prep_sha:
+            receipt.update(
+                {
+                    "status": "stale",
+                    "error": "launch-preparation packet changed after gate approval",
+                    "artifact_path": str(receipt_path),
+                }
+            )
+            write_json(receipt_path, receipt)
+            return receipt
+    fresh_until = dt.datetime.now(dt.timezone.utc) + dt.timedelta(
+        minutes=max(1, int(args.execution_brief_ttl_minutes))
+    )
+    execution_brief = {
+        "request_id": request_id,
+        "task_id": task_id,
+        "project_key": project_key,
+        "approved": True,
+        "allowed_runtime_mutations": ["dispatch.runtime"],
+        "allowed_canonical_mutations": [],
+        "fresh_until": fresh_until.isoformat(),
+    }
+    write_json(brief_path, execution_brief)
+    receipt.update(
+        {
+            "status": "created",
+            "execution_brief": execution_brief,
+            "execution_brief_sha256": sha256_hex(brief_path.read_bytes()),
+            "artifact_path": str(receipt_path),
+        }
+    )
+    write_json(receipt_path, receipt)
+    return receipt
+
+
+def create_enqueue_handoff_from_execution_brief(
+    args: argparse.Namespace,
+    *,
+    session: dict[str, Any],
+    execution_brief_receipt: dict[str, Any],
+) -> dict[str, Any]:
+    artifact_dir = args.remote_plan_artifact_dir.expanduser() / str(session.get("session_id") or "session")
+    receipt_path = artifact_dir / "PLAN_ENQUEUE_HANDOFF.json"
+    execution_brief_json = str(execution_brief_receipt.get("execution_brief_json") or "").strip()
+    project_key = str(execution_brief_receipt.get("project_key") or "project").strip()
+    request_id = str(execution_brief_receipt.get("request_id") or session.get("session_id") or "").strip()
+    task_id = str(execution_brief_receipt.get("task_id") or "").strip()
+    expected_brief_sha = str(execution_brief_receipt.get("execution_brief_sha256") or "").strip()
+    command_template = [args.forager_bin]
+    if args.profile:
+        command_template.extend(["--profile", args.profile])
+    command_template.extend(
+        [
+            "offdesk",
+            "enqueue",
+            "dispatch.runtime",
+            "--runner",
+            "local-background",
+            "--project-key",
+            project_key,
+            "--request-id",
+            request_id,
+            "--task-id",
+            task_id,
+            "--brief",
+            execution_brief_json,
+            "--mutation-class",
+            "dispatch.runtime",
+            "--cmd",
+            "<reviewed-workload-command-required>",
+            "--workdir",
+            "<reviewed-project-workdir-required>",
+            "--log-artifact",
+            "<reviewed-log-artifact-required>",
+            "--result-artifact",
+            "<reviewed-result-artifact-required>",
+            "--json",
+        ]
+    )
+    receipt = {
+        "schema": PLAN_ENQUEUE_HANDOFF_SCHEMA,
+        "created_at": utc_now(),
+        "session_id": session.get("session_id"),
+        "profile": args.profile,
+        "project_key": project_key,
+        "request_id": request_id,
+        "task_id": task_id,
+        "execution_brief_json": execution_brief_json,
+        "expected_execution_brief_sha256": expected_brief_sha,
+        "command_template": command_template,
+        "prepared_workload_required": True,
+        "reviewed_workload_command_required": True,
+        "required_local_review": [
+            "read EXECUTION_BRIEF.json",
+            "confirm a reviewed workload command",
+            "confirm workdir and artifacts",
+            "run enqueue locally only after review",
+        ],
+        "approval_authorized": False,
+        "gate_approval_authorized": False,
+        "execution_authorized": False,
+        "launch_authorized": False,
+        "enqueue_authorized": False,
+        "runtime_authorized": False,
+    }
+    if execution_brief_receipt.get("status") != "created" or not execution_brief_json:
+        receipt.update(
+            {
+                "status": "error",
+                "error": "execution brief receipt is not ready",
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    if not project_key or not request_id or not task_id:
+        receipt.update(
+            {
+                "status": "error",
+                "error": "execution brief is missing enqueue context",
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    try:
+        current_sha = sha256_hex(pathlib.Path(execution_brief_json).read_bytes())
+    except OSError as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"execution brief unavailable: {error}", max_chars=400),
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt["current_execution_brief_sha256"] = current_sha
+    if expected_brief_sha and current_sha != expected_brief_sha:
+        receipt.update(
+            {
+                "status": "stale",
+                "error": "execution brief changed after approval",
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt.update(
+        {
+            "status": "created",
+            "artifact_path": str(receipt_path),
+        }
+    )
+    write_json(receipt_path, receipt)
+    return receipt
+
+
+def resolve_prepared_task_path(text: str) -> pathlib.Path | None:
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    try:
+        tokens = shlex.split(raw)
+    except ValueError:
+        tokens = [raw]
+    candidates = tokens or [raw]
+    if raw.endswith(".json") and raw not in candidates:
+        candidates.append(raw)
+    for token in candidates:
+        if not token or token.startswith("-"):
+            continue
+        path = pathlib.Path(token).expanduser()
+        if not path.is_absolute():
+            path = (pathlib.Path.cwd() / path).resolve()
+        if path.exists() and path.is_file() and path.name == "prepared_task.json":
+            return path
+    return None
+
+
+def bind_prepared_workload_to_execution_brief(
+    args: argparse.Namespace,
+    *,
+    session: dict[str, Any],
+    enqueue_handoff: dict[str, Any],
+    manifest_path: pathlib.Path,
+) -> dict[str, Any]:
+    artifact_dir = args.remote_plan_artifact_dir.expanduser() / str(session.get("session_id") or "session")
+    receipt_path = artifact_dir / "PLAN_WORKLOAD_BINDING.json"
+    execution_brief_json = str(enqueue_handoff.get("execution_brief_json") or "").strip()
+    expected_brief_sha = str(enqueue_handoff.get("expected_execution_brief_sha256") or enqueue_handoff.get("current_execution_brief_sha256") or "").strip()
+    project_key = str(enqueue_handoff.get("project_key") or "").strip()
+    request_id = str(enqueue_handoff.get("request_id") or "").strip()
+    task_id = str(enqueue_handoff.get("task_id") or "").strip()
+    prepared_task_json = str(manifest_path.expanduser().resolve())
+    receipt = {
+        "schema": PLAN_WORKLOAD_BINDING_SCHEMA,
+        "created_at": utc_now(),
+        "session_id": session.get("session_id"),
+        "profile": args.profile,
+        "project_key": project_key,
+        "request_id": request_id,
+        "task_id": task_id,
+        "execution_brief_json": execution_brief_json,
+        "prepared_task_json": prepared_task_json,
+        "expected_execution_brief_sha256": expected_brief_sha,
+        "workload_binding_authorized": True,
+        "approval_authorized": False,
+        "gate_approval_authorized": False,
+        "execution_authorized": False,
+        "launch_authorized": False,
+        "enqueue_authorized": False,
+        "runtime_authorized": False,
+    }
+    if enqueue_handoff.get("status") != "created":
+        receipt.update(
+            {
+                "status": "error",
+                "error": "enqueue handoff is not ready",
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    try:
+        manifest = load_json(manifest_path)
+    except (OSError, json.JSONDecodeError) as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"prepared workload unreadable: {error}", max_chars=400),
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    if not isinstance(manifest, dict):
+        receipt.update(
+            {
+                "status": "error",
+                "error": "prepared workload manifest is not an object",
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    blockers: list[str] = []
+    if manifest.get("kind") != "forager_offdesk_prepared_workload":
+        blockers.append("prepared_workload_kind_mismatch")
+    preflight = manifest.get("preflight") if isinstance(manifest.get("preflight"), dict) else {}
+    if preflight.get("ready_for_enqueue") is not True:
+        blockers.append("preflight_not_ready_for_enqueue")
+    review = preflight.get("review_artifact") if isinstance(preflight.get("review_artifact"), dict) else {}
+    if review and (review.get("ready") is not True or str(review.get("decision") or "") != "needs_approval"):
+        blockers.append("workload_review_not_ready")
+    for key, expected in (("project_key", project_key), ("request_id", request_id), ("task_id", task_id)):
+        actual = str(manifest.get(key) or "").strip()
+        if not expected or actual != expected:
+            blockers.append(f"{key}_mismatch")
+    safety = manifest.get("safety") if isinstance(manifest.get("safety"), dict) else {}
+    if safety.get("capability") != "dispatch.runtime":
+        blockers.append("capability_not_dispatch_runtime")
+    if safety.get("approval_required_before_dispatch") is not True:
+        blockers.append("dispatch_approval_not_required")
+    workload_command = manifest.get("workload_command")
+    if not isinstance(workload_command, list) or not workload_command:
+        blockers.append("workload_command_missing")
+    enqueue_args = manifest.get("enqueue_args")
+    if not isinstance(enqueue_args, list) or not enqueue_args:
+        blockers.append("enqueue_args_missing")
+        enqueue_args = []
+    else:
+        enqueue_text = " ".join(str(item) for item in enqueue_args)
+        if "dispatch.runtime" not in enqueue_text:
+            blockers.append("enqueue_missing_dispatch_runtime")
+        if "--cmd" not in [str(item) for item in enqueue_args]:
+            blockers.append("enqueue_missing_workload_command")
+    repo = str(manifest.get("repo") or "").strip()
+    out_dir = str(manifest.get("out_dir") or "").strip()
+    workload_wrapper = str(manifest.get("workload_wrapper") or "").strip()
+    if repo and not pathlib.Path(repo).exists():
+        blockers.append("repo_path_missing")
+    if out_dir and not pathlib.Path(out_dir).exists():
+        blockers.append("out_dir_missing")
+    if not workload_wrapper or not pathlib.Path(workload_wrapper).exists():
+        blockers.append("workload_wrapper_missing")
+    if contains_secret_like_text(manifest):
+        blockers.append("manifest_contains_secret_like_text")
+    if execution_brief_json:
+        try:
+            current_sha = sha256_hex(pathlib.Path(execution_brief_json).read_bytes())
+        except OSError as error:
+            blockers.append("execution_brief_unavailable")
+            receipt["execution_brief_error"] = sanitize_text(str(error), max_chars=220)
+        else:
+            receipt["current_execution_brief_sha256"] = current_sha
+            if expected_brief_sha and current_sha != expected_brief_sha:
+                blockers.append("execution_brief_changed")
+    else:
+        blockers.append("execution_brief_missing")
+    receipt["prepared_task_sha256"] = sha256_hex(pathlib.Path(prepared_task_json).read_bytes())
+    receipt["manifest_summary"] = {
+        "title": sanitize_text(manifest.get("title") or "", max_chars=120),
+        "project_key": manifest.get("project_key"),
+        "request_id": manifest.get("request_id"),
+        "task_id": manifest.get("task_id"),
+        "duration_minutes": manifest.get("duration_minutes"),
+        "max_iterations": manifest.get("max_iterations"),
+        "provider": manifest.get("provider"),
+        "model": manifest.get("model"),
+        "repo": repo,
+        "out_dir": out_dir,
+        "workload_wrapper": workload_wrapper,
+    }
+    receipt["repo"] = repo
+    receipt["out_dir"] = out_dir
+    receipt["workload_wrapper"] = workload_wrapper
+    receipt["manifest_enqueue_args"] = [str(item) for item in enqueue_args]
+    if blockers:
+        receipt.update(
+            {
+                "status": "blocked",
+                "blocking_reasons": blockers,
+                "error": blockers[0],
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    bound_enqueue_args = [str(item) for item in enqueue_args]
+    bound_enqueue_args = ensure_cli_option(bound_enqueue_args, "--project-key", project_key)
+    bound_enqueue_args = ensure_cli_option(bound_enqueue_args, "--request-id", request_id)
+    bound_enqueue_args = ensure_cli_option(bound_enqueue_args, "--task-id", task_id)
+    bound_enqueue_args = ensure_cli_option(bound_enqueue_args, "--brief", execution_brief_json)
+    bound_enqueue_args = ensure_cli_option(bound_enqueue_args, "--mutation-class", "dispatch.runtime")
+    if "--json" not in bound_enqueue_args:
+        bound_enqueue_args.append("--json")
+    receipt.update(
+        {
+            "status": "bound",
+            "ready_for_local_enqueue_review": True,
+            "bound_enqueue_args": bound_enqueue_args,
+            "artifact_path": str(receipt_path),
+        }
+    )
+    write_json(receipt_path, receipt)
+    return receipt
+
+
+def command_contains_subsequence(command: list[str], subsequence: list[str]) -> bool:
+    if not subsequence:
+        return True
+    values = [str(item) for item in command]
+    limit = len(values) - len(subsequence) + 1
+    for index in range(max(0, limit)):
+        if values[index : index + len(subsequence)] == subsequence:
+            return True
+    return False
+
+
+def create_enqueue_run_from_workload_binding(
+    args: argparse.Namespace,
+    *,
+    session: dict[str, Any],
+    workload_binding: dict[str, Any],
+) -> dict[str, Any]:
+    artifact_dir = args.remote_plan_artifact_dir.expanduser() / str(session.get("session_id") or "session")
+    receipt_path = artifact_dir / "PLAN_ENQUEUE_RUN.json"
+    command = workload_binding.get("bound_enqueue_args")
+    if not isinstance(command, list):
+        command = []
+    command = [str(item) for item in command]
+    prepared_task_json = str(workload_binding.get("prepared_task_json") or "").strip()
+    execution_brief_json = str(workload_binding.get("execution_brief_json") or "").strip()
+    project_key = str(workload_binding.get("project_key") or "").strip()
+    request_id = str(workload_binding.get("request_id") or "").strip()
+    task_id = str(workload_binding.get("task_id") or "").strip()
+    receipt = {
+        "schema": PLAN_ENQUEUE_RUN_SCHEMA,
+        "created_at": utc_now(),
+        "session_id": session.get("session_id"),
+        "profile": args.profile,
+        "project_key": project_key,
+        "request_id": request_id,
+        "task_id": task_id,
+        "prepared_task_json": prepared_task_json,
+        "execution_brief_json": execution_brief_json,
+        "workload_binding_json": str(workload_binding.get("artifact_path") or ""),
+        "enqueue_command": command,
+        "queue_mutation_authorized": True,
+        "enqueue_authorized": True,
+        "approval_authorized": False,
+        "gate_approval_authorized": False,
+        "execution_authorized": False,
+        "launch_authorized": False,
+        "runtime_authorized": False,
+    }
+    blockers: list[str] = []
+    if workload_binding.get("status") != "bound":
+        blockers.append("workload_binding_not_bound")
+    if not command:
+        blockers.append("enqueue_command_missing")
+    elif not command_contains_subsequence(command, ["offdesk", "enqueue", "dispatch.runtime"]):
+        blockers.append("enqueue_command_not_dispatch_runtime")
+    forbidden_tokens = {"launch", "tick", "poll", "closeout", "ok", "cancel"}
+    if any(str(item) in forbidden_tokens for item in command):
+        blockers.append("enqueue_command_contains_forbidden_action")
+    expected_prepared_sha = str(workload_binding.get("prepared_task_sha256") or "").strip()
+    if prepared_task_json:
+        try:
+            current_prepared_sha = sha256_hex(pathlib.Path(prepared_task_json).read_bytes())
+        except OSError as error:
+            blockers.append("prepared_task_unavailable")
+            receipt["prepared_task_error"] = sanitize_text(str(error), max_chars=220)
+        else:
+            receipt["current_prepared_task_sha256"] = current_prepared_sha
+            if expected_prepared_sha and current_prepared_sha != expected_prepared_sha:
+                blockers.append("prepared_task_changed")
+    else:
+        blockers.append("prepared_task_missing")
+    expected_brief_sha = str(workload_binding.get("expected_execution_brief_sha256") or workload_binding.get("current_execution_brief_sha256") or "").strip()
+    if execution_brief_json:
+        try:
+            current_brief_sha = sha256_hex(pathlib.Path(execution_brief_json).read_bytes())
+        except OSError as error:
+            blockers.append("execution_brief_unavailable")
+            receipt["execution_brief_error"] = sanitize_text(str(error), max_chars=220)
+        else:
+            receipt["current_execution_brief_sha256"] = current_brief_sha
+            if expected_brief_sha and current_brief_sha != expected_brief_sha:
+                blockers.append("execution_brief_changed")
+    else:
+        blockers.append("execution_brief_missing")
+    if blockers:
+        receipt.update(
+            {
+                "status": "blocked",
+                "blocking_reasons": blockers,
+                "error": blockers[0],
+                "artifact_path": str(receipt_path),
+                "queue_mutation_authorized": False,
+                "enqueue_authorized": False,
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    try:
+        process = subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=max(1, int(args.enqueue_timeout_sec)),
+            cwd=REPO_ROOT,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"{type(error).__name__}: {error}", max_chars=400),
+                "artifact_path": str(receipt_path),
+                "queue_mutation_authorized": False,
+                "enqueue_authorized": False,
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt["returncode"] = process.returncode
+    if process.returncode != 0:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(process.stderr.strip() or process.stdout.strip(), max_chars=600),
+                "artifact_path": str(receipt_path),
+                "queue_mutation_authorized": False,
+                "enqueue_authorized": False,
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    try:
+        enqueue_output = json.loads(process.stdout)
+    except json.JSONDecodeError as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"enqueue did not return JSON: {error}", max_chars=400),
+                "artifact_path": str(receipt_path),
+                "queue_mutation_authorized": False,
+                "enqueue_authorized": False,
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt.update(
+        {
+            "status": "queued",
+            "enqueue_output": enqueue_output,
+            "task_status": enqueue_output.get("status") if isinstance(enqueue_output, dict) else None,
+            "artifact_path": str(receipt_path),
+        }
+    )
+    write_json(receipt_path, receipt)
+    return receipt
+
+
+def create_runtime_start_from_enqueue_run(
+    args: argparse.Namespace,
+    *,
+    session: dict[str, Any],
+    enqueue_run: dict[str, Any],
+) -> dict[str, Any]:
+    artifact_dir = args.remote_plan_artifact_dir.expanduser() / str(session.get("session_id") or "session")
+    receipt_path = artifact_dir / "PLAN_RUNTIME_START.json"
+    project_key = str(enqueue_run.get("project_key") or "").strip()
+    request_id = str(enqueue_run.get("request_id") or "").strip()
+    task_id = str(enqueue_run.get("task_id") or "").strip()
+    prepared_task_json = str(enqueue_run.get("prepared_task_json") or "").strip()
+    execution_brief_json = str(enqueue_run.get("execution_brief_json") or "").strip()
+    command = [args.forager_bin]
+    if args.profile:
+        command.extend(["--profile", args.profile])
+    command.extend(
+        [
+            "offdesk",
+            "tick",
+            "--project-key",
+            project_key,
+            "--task-id",
+            task_id,
+            "--limit",
+            "1",
+            "--json",
+        ]
+    )
+    receipt = {
+        "schema": PLAN_RUNTIME_START_SCHEMA,
+        "created_at": utc_now(),
+        "session_id": session.get("session_id"),
+        "profile": args.profile,
+        "project_key": project_key,
+        "request_id": request_id,
+        "task_id": task_id,
+        "prepared_task_json": prepared_task_json,
+        "execution_brief_json": execution_brief_json,
+        "enqueue_run_json": str(enqueue_run.get("artifact_path") or ""),
+        "tick_command": command,
+        "runtime_start_authorized": True,
+        "tick_authorized": True,
+        "execution_authorized": True,
+        "closeout_authorized": False,
+        "accepted_truth_authorized": False,
+    }
+    blockers: list[str] = []
+    if enqueue_run.get("status") != "queued":
+        blockers.append("enqueue_run_not_queued")
+    if not project_key or not task_id:
+        blockers.append("runtime_start_context_missing")
+    expected_prepared_sha = str(enqueue_run.get("current_prepared_task_sha256") or "").strip()
+    if prepared_task_json:
+        try:
+            current_prepared_sha = sha256_hex(pathlib.Path(prepared_task_json).read_bytes())
+        except OSError as error:
+            blockers.append("prepared_task_unavailable")
+            receipt["prepared_task_error"] = sanitize_text(str(error), max_chars=220)
+        else:
+            receipt["current_prepared_task_sha256"] = current_prepared_sha
+            if expected_prepared_sha and current_prepared_sha != expected_prepared_sha:
+                blockers.append("prepared_task_changed")
+    expected_brief_sha = str(enqueue_run.get("current_execution_brief_sha256") or "").strip()
+    if execution_brief_json:
+        try:
+            current_brief_sha = sha256_hex(pathlib.Path(execution_brief_json).read_bytes())
+        except OSError as error:
+            blockers.append("execution_brief_unavailable")
+            receipt["execution_brief_error"] = sanitize_text(str(error), max_chars=220)
+        else:
+            receipt["current_execution_brief_sha256"] = current_brief_sha
+            if expected_brief_sha and current_brief_sha != expected_brief_sha:
+                blockers.append("execution_brief_changed")
+    if blockers:
+        receipt.update(
+            {
+                "status": "blocked",
+                "blocking_reasons": blockers,
+                "error": blockers[0],
+                "artifact_path": str(receipt_path),
+                "runtime_start_authorized": False,
+                "tick_authorized": False,
+                "execution_authorized": False,
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    try:
+        process = subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=max(1, int(args.runtime_start_timeout_sec)),
+            cwd=REPO_ROOT,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"{type(error).__name__}: {error}", max_chars=400),
+                "artifact_path": str(receipt_path),
+                "runtime_start_authorized": False,
+                "tick_authorized": False,
+                "execution_authorized": False,
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt["returncode"] = process.returncode
+    if process.returncode != 0:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(process.stderr.strip() or process.stdout.strip(), max_chars=600),
+                "artifact_path": str(receipt_path),
+                "runtime_start_authorized": False,
+                "tick_authorized": False,
+                "execution_authorized": False,
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    try:
+        tick_output = json.loads(process.stdout)
+    except json.JSONDecodeError as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"tick did not return JSON: {error}", max_chars=400),
+                "artifact_path": str(receipt_path),
+                "runtime_start_authorized": False,
+                "tick_authorized": False,
+                "execution_authorized": False,
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    updated_task_ids = tick_output.get("updated_task_ids") if isinstance(tick_output, dict) else []
+    launched = int(tick_output.get("launched") or 0) if isinstance(tick_output, dict) else 0
+    if launched <= 0 or task_id not in [str(item) for item in updated_task_ids or []]:
+        receipt.update(
+            {
+                "status": "not_started",
+                "error": "target task was not launched",
+                "tick_output": tick_output,
+                "artifact_path": str(receipt_path),
+                "runtime_start_authorized": False,
+                "tick_authorized": False,
+                "execution_authorized": False,
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt.update(
+        {
+            "status": "launched",
+            "tick_output": tick_output,
+            "artifact_path": str(receipt_path),
+        }
+    )
+    write_json(receipt_path, receipt)
+    return receipt
+
+
+def create_runtime_monitor_from_runtime_start(
+    args: argparse.Namespace,
+    *,
+    session: dict[str, Any],
+    runtime_start: dict[str, Any],
+) -> dict[str, Any]:
+    artifact_dir = args.remote_plan_artifact_dir.expanduser() / str(session.get("session_id") or "session")
+    receipt_path = artifact_dir / "PLAN_RUNTIME_MONITOR.json"
+    project_key = str(runtime_start.get("project_key") or "").strip()
+    request_id = str(runtime_start.get("request_id") or "").strip()
+    task_id = str(runtime_start.get("task_id") or "").strip()
+    tick_command = [args.forager_bin]
+    tasks_command = [args.forager_bin]
+    if args.profile:
+        tick_command.extend(["--profile", args.profile])
+        tasks_command.extend(["--profile", args.profile])
+    tick_command.extend(
+        [
+            "offdesk",
+            "tick",
+            "--project-key",
+            project_key,
+            "--task-id",
+            task_id,
+            "--limit",
+            "0",
+            "--json",
+        ]
+    )
+    tasks_command.extend(
+        [
+            "offdesk",
+            "tasks",
+            "--project-key",
+            project_key,
+            "--task-id",
+            task_id,
+            "--json",
+        ]
+    )
+    receipt = {
+        "schema": PLAN_RUNTIME_MONITOR_SCHEMA,
+        "created_at": utc_now(),
+        "session_id": session.get("session_id"),
+        "profile": args.profile,
+        "project_key": project_key,
+        "request_id": request_id,
+        "task_id": task_id,
+        "runtime_start_json": str(runtime_start.get("artifact_path") or ""),
+        "tick_command": tick_command,
+        "tasks_command": tasks_command,
+        "monitor_authorized": True,
+        "poll_authorized": True,
+        "dispatch_authorized": False,
+        "closeout_authorized": False,
+        "accepted_truth_authorized": False,
+    }
+    blockers: list[str] = []
+    if runtime_start.get("status") != "launched":
+        blockers.append("runtime_start_not_launched")
+    if not project_key or not task_id:
+        blockers.append("runtime_monitor_context_missing")
+    if blockers:
+        receipt.update(
+            {
+                "status": "blocked",
+                "blocking_reasons": blockers,
+                "error": blockers[0],
+                "artifact_path": str(receipt_path),
+                "monitor_authorized": False,
+                "poll_authorized": False,
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    try:
+        tick_process = subprocess.run(
+            tick_command,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=max(1, int(args.runtime_monitor_timeout_sec)),
+            cwd=REPO_ROOT,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"{type(error).__name__}: {error}", max_chars=400),
+                "artifact_path": str(receipt_path),
+                "monitor_authorized": False,
+                "poll_authorized": False,
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt["tick_returncode"] = tick_process.returncode
+    if tick_process.returncode != 0:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(tick_process.stderr.strip() or tick_process.stdout.strip(), max_chars=600),
+                "artifact_path": str(receipt_path),
+                "monitor_authorized": False,
+                "poll_authorized": False,
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    try:
+        tick_output = json.loads(tick_process.stdout)
+    except json.JSONDecodeError as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"tick did not return JSON: {error}", max_chars=400),
+                "artifact_path": str(receipt_path),
+                "monitor_authorized": False,
+                "poll_authorized": False,
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    try:
+        tasks_process = subprocess.run(
+            tasks_command,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=max(1, int(args.runtime_monitor_timeout_sec)),
+            cwd=REPO_ROOT,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"{type(error).__name__}: {error}", max_chars=400),
+                "tick_output": tick_output,
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt["tasks_returncode"] = tasks_process.returncode
+    if tasks_process.returncode != 0:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(tasks_process.stderr.strip() or tasks_process.stdout.strip(), max_chars=600),
+                "tick_output": tick_output,
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    try:
+        tasks_output = json.loads(tasks_process.stdout)
+    except json.JSONDecodeError as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"tasks did not return JSON: {error}", max_chars=400),
+                "tick_output": tick_output,
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    target_task = None
+    if isinstance(tasks_output, list):
+        for task in tasks_output:
+            if isinstance(task, dict) and str(task.get("task_id") or "") == task_id:
+                target_task = task
+                break
+    if not isinstance(target_task, dict):
+        receipt.update(
+            {
+                "status": "error",
+                "error": "target task was not found",
+                "tick_output": tick_output,
+                "tasks_count": len(tasks_output) if isinstance(tasks_output, list) else None,
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    task_status = str(target_task.get("status") or "unknown")
+    if task_status in {"launched", "running"}:
+        monitor_status = "running"
+    elif task_status == "completed":
+        monitor_status = "completed"
+    elif task_status == "failed":
+        monitor_status = "failed"
+    elif task_status == "resume_pending":
+        monitor_status = "resume_pending"
+    else:
+        monitor_status = "observed"
+    receipt.update(
+        {
+            "status": monitor_status,
+            "task_status": task_status,
+            "tick_output": tick_output,
+            "target_task": target_task,
+            "artifact_path": str(receipt_path),
+        }
+    )
+    write_json(receipt_path, receipt)
+    return receipt
+
+
+def create_closeout_packet_from_runtime_monitor(
+    args: argparse.Namespace,
+    *,
+    session: dict[str, Any],
+    runtime_monitor: dict[str, Any],
+) -> dict[str, Any]:
+    artifact_dir = args.remote_plan_artifact_dir.expanduser() / str(session.get("session_id") or "session")
+    receipt_path = artifact_dir / "PLAN_CLOSEOUT_PACKET.json"
+    project_key = str(runtime_monitor.get("project_key") or "").strip()
+    request_id = str(runtime_monitor.get("request_id") or "").strip()
+    task_id = str(runtime_monitor.get("task_id") or "").strip()
+    command = [args.forager_bin]
+    if args.profile:
+        command.extend(["--profile", args.profile])
+    command.extend(
+        [
+            "offdesk",
+            "closeout",
+            "--project-key",
+            project_key,
+            "--task-id",
+            task_id,
+            "--dry-run",
+            "--json",
+        ]
+    )
+    receipt = {
+        "schema": PLAN_CLOSEOUT_PACKET_SCHEMA,
+        "created_at": utc_now(),
+        "session_id": session.get("session_id"),
+        "profile": args.profile,
+        "project_key": project_key,
+        "request_id": request_id,
+        "task_id": task_id,
+        "runtime_monitor_json": str(runtime_monitor.get("artifact_path") or ""),
+        "closeout_command": command,
+        "closeout_packet_authorized": True,
+        "closeout_review_authorized": False,
+        "accepted_truth_authorized": False,
+        "file_mutation_authorized": False,
+    }
+    blockers: list[str] = []
+    if runtime_monitor.get("status") != "completed" or runtime_monitor.get("task_status") != "completed":
+        blockers.append("runtime_monitor_not_completed")
+    if not project_key or not task_id:
+        blockers.append("closeout_context_missing")
+    if blockers:
+        receipt.update(
+            {
+                "status": "blocked",
+                "blocking_reasons": blockers,
+                "error": blockers[0],
+                "artifact_path": str(receipt_path),
+                "closeout_packet_authorized": False,
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    try:
+        process = subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=max(1, int(args.closeout_timeout_sec)),
+            cwd=REPO_ROOT,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"{type(error).__name__}: {error}", max_chars=400),
+                "artifact_path": str(receipt_path),
+                "closeout_packet_authorized": False,
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt["returncode"] = process.returncode
+    if process.returncode != 0:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(process.stderr.strip() or process.stdout.strip(), max_chars=600),
+                "artifact_path": str(receipt_path),
+                "closeout_packet_authorized": False,
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    try:
+        closeout_output = json.loads(process.stdout)
+    except json.JSONDecodeError as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"closeout did not return JSON: {error}", max_chars=400),
+                "artifact_path": str(receipt_path),
+                "closeout_packet_authorized": False,
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    summary = closeout_output.get("summary") if isinstance(closeout_output, dict) else {}
+    tasks = closeout_output.get("tasks") if isinstance(closeout_output, dict) else []
+    matched_task_ids = [
+        str(task.get("task_id") or "")
+        for task in tasks
+        if isinstance(task, dict) and str(task.get("task_id") or "")
+    ] if isinstance(tasks, list) else []
+    if task_id not in matched_task_ids:
+        receipt.update(
+            {
+                "status": "blocked",
+                "error": "closeout did not include target task",
+                "closeout_output": closeout_output,
+                "artifact_path": str(receipt_path),
+                "closeout_packet_authorized": False,
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    open_decisions = closeout_output.get("open_decisions") if isinstance(closeout_output, dict) else []
+    verification_commands = closeout_output.get("verification_commands") if isinstance(closeout_output, dict) else []
+    receipt.update(
+        {
+            "status": "created",
+            "closeout_id": closeout_output.get("closeout_id") if isinstance(closeout_output, dict) else None,
+            "closeout_output": closeout_output,
+            "completed_tasks": int(summary.get("completed_tasks") or 0) if isinstance(summary, dict) else 0,
+            "open_decision_count": len(open_decisions) if isinstance(open_decisions, list) else 0,
+            "verification_command_count": len(verification_commands) if isinstance(verification_commands, list) else 0,
+            "artifact_path": str(receipt_path),
+        }
+    )
+    write_json(receipt_path, receipt)
+    return receipt
+
+
+def closeout_review_artifact_dir(closeout_output: dict[str, Any]) -> str:
+    artifacts = closeout_output.get("artifacts") if isinstance(closeout_output.get("artifacts"), dict) else {}
+    closeout_plan = str(artifacts.get("closeout_plan_json") or "").strip()
+    if not closeout_plan:
+        return ""
+    return str(pathlib.Path(closeout_plan).expanduser().parent)
+
+
+def closeout_review_command_templates(
+    args: argparse.Namespace,
+    *,
+    artifact_dir: str,
+) -> dict[str, list[str]]:
+    base = [args.forager_bin]
+    if args.profile:
+        base.extend(["--profile", args.profile])
+    commands: dict[str, list[str]] = {}
+    for verdict in ("revise", "blocked", "approved"):
+        commands[verdict] = [
+            *base,
+            "offdesk",
+            "closeout-review",
+            "--artifact-dir",
+            artifact_dir,
+            "--verdict",
+            verdict,
+            "--reviewer",
+            "operator",
+            "--notes",
+            f"<{verdict}-review-notes>",
+            "--json",
+        ]
+    return commands
+
+
+def closeout_known_followups(closeout_output: dict[str, Any]) -> dict[str, int]:
+    summary = closeout_output.get("summary") if isinstance(closeout_output.get("summary"), dict) else {}
+    open_decisions = closeout_output.get("open_decisions") if isinstance(closeout_output.get("open_decisions"), list) else []
+    documentation = (
+        closeout_output.get("documentation_governance")
+        if isinstance(closeout_output.get("documentation_governance"), dict)
+        else {}
+    )
+    followups = {
+        "open_decisions": len(open_decisions),
+        "missing_artifacts": int(summary.get("missing_artifacts") or 0),
+        "commercial_review_operations": int(summary.get("operations_requiring_commercial_review") or 0),
+        "human_approval_operations": int(summary.get("operations_requiring_human_approval") or 0),
+        "archive_candidates": int(summary.get("archive_candidates") or 0),
+        "delete_candidates": int(summary.get("delete_candidates") or 0),
+        "documentation_recommendations": int(documentation.get("recommendation_count") or 0),
+        "documentation_audit_unavailable": 1 if documentation.get("error") else 0,
+    }
+    return {key: value for key, value in followups.items() if value > 0}
+
+
+def create_closeout_review_handoff_from_packet(
+    args: argparse.Namespace,
+    *,
+    session: dict[str, Any],
+    closeout_packet: dict[str, Any],
+) -> dict[str, Any]:
+    artifact_dir = args.remote_plan_artifact_dir.expanduser() / str(session.get("session_id") or "session")
+    receipt_path = artifact_dir / "PLAN_CLOSEOUT_REVIEW_HANDOFF.json"
+    closeout_output = (
+        closeout_packet.get("closeout_output")
+        if isinstance(closeout_packet.get("closeout_output"), dict)
+        else {}
+    )
+    closeout_artifact_dir = closeout_review_artifact_dir(closeout_output)
+    artifacts = closeout_output.get("artifacts") if isinstance(closeout_output.get("artifacts"), dict) else {}
+    closeout_plan_json = str(artifacts.get("closeout_plan_json") or "")
+    return_package_markdown = str(artifacts.get("return_package_markdown") or "")
+    known_followups = closeout_known_followups(closeout_output)
+    known_followup_count = sum(known_followups.values())
+    receipt = {
+        "schema": PLAN_CLOSEOUT_REVIEW_HANDOFF_SCHEMA,
+        "created_at": utc_now(),
+        "session_id": session.get("session_id"),
+        "profile": args.profile,
+        "project_key": closeout_packet.get("project_key"),
+        "request_id": closeout_packet.get("request_id"),
+        "task_id": closeout_packet.get("task_id"),
+        "closeout_id": closeout_output.get("closeout_id"),
+        "closeout_packet_json": str(closeout_packet.get("artifact_path") or ""),
+        "artifact_dir": closeout_artifact_dir,
+        "closeout_plan_json": closeout_plan_json,
+        "return_package_markdown": return_package_markdown,
+        "known_followups": known_followups,
+        "known_followup_count": known_followup_count,
+        "approved_verdict_may_accept_truth": known_followup_count == 0,
+        "closeout_review_handoff_authorized": True,
+        "remote_closeout_review_authorized": False,
+        "closeout_review_authorized": False,
+        "accepted_truth_authorized": False,
+        "file_mutation_authorized": False,
+        "local_review_required": True,
+        "recommended_next_action": "Run a local closeout-review verdict after reading the closeout artifacts.",
+        "artifact_path": str(receipt_path),
+    }
+    blockers: list[str] = []
+    if closeout_packet.get("status") != "created":
+        blockers.append("closeout_packet_not_created")
+    if not closeout_artifact_dir or not closeout_plan_json:
+        blockers.append("closeout_artifact_dir_missing")
+    if blockers:
+        receipt.update(
+            {
+                "status": "blocked",
+                "blocking_reasons": blockers,
+                "error": blockers[0],
+                "closeout_review_handoff_authorized": False,
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt.update(
+        {
+            "status": "created",
+            "local_review_commands": closeout_review_command_templates(
+                args,
+                artifact_dir=closeout_artifact_dir,
+            ),
+        }
+    )
+    write_json(receipt_path, receipt)
+    return receipt
+
+
+def closeout_verdict_note(verdict: str, note: str) -> str:
+    if note:
+        return sanitize_text(note, max_chars=500)
+    if verdict == "revise":
+        return "Remote Telegram operator recorded revision-required closeout verdict; accepted truth remains blocked."
+    if verdict == "approved":
+        return "Remote Telegram operator recorded approved closeout verdict; accepted truth follows closeout-review receipt status."
+    return "Remote Telegram operator recorded blocked closeout verdict; accepted truth remains blocked."
+
+
+def create_closeout_verdict_from_handoff(
+    args: argparse.Namespace,
+    *,
+    session: dict[str, Any],
+    handoff: dict[str, Any],
+    verdict: str,
+    note: str,
+) -> dict[str, Any]:
+    artifact_dir = args.remote_plan_artifact_dir.expanduser() / str(session.get("session_id") or "session")
+    receipt_path = artifact_dir / "PLAN_CLOSEOUT_VERDICT.json"
+    closeout_artifact_dir = str(handoff.get("artifact_dir") or "").strip()
+    command = [args.forager_bin]
+    if args.profile:
+        command.extend(["--profile", args.profile])
+    command.extend(
+        [
+            "offdesk",
+            "closeout-review",
+            "--artifact-dir",
+            closeout_artifact_dir,
+            "--verdict",
+            verdict,
+            "--reviewer",
+            "telegram-remote-operator",
+            "--review-provider",
+            "telegram-remote-operator",
+            "--notes",
+            closeout_verdict_note(verdict, note),
+            "--json",
+        ]
+    )
+    receipt = {
+        "schema": PLAN_CLOSEOUT_VERDICT_SCHEMA,
+        "created_at": utc_now(),
+        "session_id": session.get("session_id"),
+        "profile": args.profile,
+        "project_key": handoff.get("project_key"),
+        "request_id": handoff.get("request_id"),
+        "task_id": handoff.get("task_id"),
+        "closeout_id": handoff.get("closeout_id"),
+        "closeout_review_handoff_json": str(handoff.get("artifact_path") or ""),
+        "artifact_dir": closeout_artifact_dir,
+        "verdict": verdict,
+        "closeout_review_command": command,
+        "remote_closeout_review_authorized": verdict in {"approved", "revise", "blocked"},
+        "closeout_review_authorized": verdict in {"approved", "revise", "blocked"},
+        "closeout_artifact_write_authorized": verdict in {"approved", "revise", "blocked"},
+        "accepted_truth_authorized": verdict == "approved",
+        "accepted_truth_recorded": False,
+        "project_file_mutation_authorized": False,
+        "file_mutation_authorized": False,
+        "artifact_path": str(receipt_path),
+    }
+    blockers: list[str] = []
+    if verdict not in {"approved", "revise", "blocked"}:
+        blockers.append("unsupported_closeout_verdict")
+    if handoff.get("status") != "created":
+        blockers.append("closeout_review_handoff_not_created")
+    if not closeout_artifact_dir:
+        blockers.append("closeout_artifact_dir_missing")
+    if blockers:
+        receipt.update(
+            {
+                "status": "blocked",
+                "blocking_reasons": blockers,
+                "error": blockers[0],
+                "remote_closeout_review_authorized": False,
+                "closeout_review_authorized": False,
+                "closeout_artifact_write_authorized": False,
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    try:
+        process = subprocess.run(
+            command,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=max(1, int(args.closeout_timeout_sec)),
+            cwd=REPO_ROOT,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"{type(error).__name__}: {error}", max_chars=400),
+                "remote_closeout_review_authorized": False,
+                "closeout_review_authorized": False,
+                "closeout_artifact_write_authorized": False,
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt["returncode"] = process.returncode
+    if process.returncode != 0:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(process.stderr.strip() or process.stdout.strip(), max_chars=600),
+                "remote_closeout_review_authorized": False,
+                "closeout_review_authorized": False,
+                "closeout_artifact_write_authorized": False,
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    try:
+        closeout_review_output = json.loads(process.stdout)
+    except json.JSONDecodeError as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"closeout-review did not return JSON: {error}", max_chars=400),
+                "remote_closeout_review_authorized": False,
+                "closeout_review_authorized": False,
+                "closeout_artifact_write_authorized": False,
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    closeout_receipt = (
+        closeout_review_output.get("closeout_receipt")
+        if isinstance(closeout_review_output, dict)
+        else {}
+    )
+    acceptance_status = (
+        str(closeout_receipt.get("acceptance_status") or "")
+        if isinstance(closeout_receipt, dict)
+        else ""
+    )
+    receipt.update(
+        {
+            "status": "recorded",
+            "acceptance_status": acceptance_status or "unknown",
+            "accepted_truth_recorded": acceptance_status == "accepted",
+            "closeout_review_output": closeout_review_output,
+        }
+    )
+    write_json(receipt_path, receipt)
+    return receipt
+
+
 def remote_plan_sessions_by_chat(state: dict[str, Any]) -> dict[str, Any]:
     sessions = state.setdefault("remote_plan_sessions_by_chat", {})
     if not isinstance(sessions, dict):
@@ -2843,7 +6084,32 @@ def active_remote_plan_session(state: dict[str, Any], chat_hash: str) -> dict[st
         "plan_draft_failed",
         "plan_registered",
         "plan_registration_failed",
+        "plan_review_approved",
         "plan_review_failed",
+        "plan_launch_prep_prepared",
+        "plan_launch_prep_failed",
+        "plan_gate_request_created",
+        "plan_gate_request_failed",
+        "plan_gate_approved",
+        "plan_execution_brief_created",
+        "plan_execution_brief_failed",
+        "plan_enqueue_handoff_created",
+        "plan_enqueue_handoff_failed",
+        "plan_workload_path_required",
+        "plan_workload_binding_failed",
+        "plan_workload_bound",
+        "plan_enqueue_run_failed",
+        "plan_enqueued",
+        "plan_runtime_started",
+        "plan_runtime_start_failed",
+        "plan_runtime_monitored",
+        "plan_runtime_monitor_failed",
+        "plan_closeout_packet_created",
+        "plan_closeout_packet_failed",
+        "plan_closeout_review_handoff_created",
+        "plan_closeout_review_handoff_failed",
+        "plan_closeout_verdict_recorded",
+        "plan_closeout_verdict_failed",
     }:
         return session
     return None
@@ -3040,6 +6306,14 @@ def handle_remote_plan_session_input(
         session.pop("plan_draft", None)
         session.pop("plan_registration", None)
         session.pop("plan_review", None)
+        session.pop("plan_launch_prep", None)
+        session.pop("plan_gate_request", None)
+        session.pop("plan_gate_resolution", None)
+        session.pop("plan_execution_brief", None)
+        session.pop("plan_enqueue_handoff", None)
+        session.pop("plan_workload_binding", None)
+        session.pop("plan_enqueue_run", None)
+        session.pop("plan_runtime_start", None)
         store_remote_plan_session(state, chat_hash, session)
         result["parsed_command"] = {**parsed, "selection_status": "reselect"}
         message_preview = render_project_selection_message(profile=args.profile, session=session)
@@ -3155,6 +6429,462 @@ def handle_remote_plan_session_input(
                 "selected_project_key": selected.get("project_key"),
             }
             attach_choice_surface(result, remote_plan_init_context(session))
+    elif plan_launch_prep_create_text(normalized):
+        review = session.get("plan_review") if isinstance(session.get("plan_review"), dict) else {}
+        if stage not in {"plan_review_approved", "plan_launch_prep_failed"} or review.get("status") != "approved":
+            result["parsed_command"] = {**parsed, "selection_status": "plan_review_required"}
+            message_preview = render_plan_launch_prep_required_message(profile=args.profile)
+            attach_choice_surface(result, remote_plan_init_context(session))
+        else:
+            launch_prep = prepare_plan_launch_packet(args, session=session, review=review)
+            session["plan_launch_prep"] = launch_prep
+            if launch_prep.get("status") == "prepared":
+                session["stage"] = "plan_launch_prep_prepared"
+                message_preview = render_plan_launch_prep_prepared_message(profile=args.profile, session=session)
+                selection_status = "plan_launch_prep_prepared"
+                choice_context = remote_plan_init_context(session)
+            else:
+                session["stage"] = "plan_launch_prep_failed"
+                message_preview = render_plan_launch_prep_failed_message(profile=args.profile, session=session)
+                selection_status = (
+                    "plan_launch_prep_stale" if launch_prep.get("status") == "stale" else "plan_launch_prep_failed"
+                )
+                choice_context = remote_plan_init_context(session)
+            store_remote_plan_session(state, chat_hash, session)
+            result["parsed_command"] = {
+                **parsed,
+                "selection_status": selection_status,
+                "selected_project_key": launch_prep.get("project_key"),
+            }
+            attach_choice_surface(result, choice_context)
+    elif execution_brief_create_text(normalized):
+        gate_resolution = (
+            session.get("plan_gate_resolution")
+            if isinstance(session.get("plan_gate_resolution"), dict)
+            else {}
+        )
+        if stage not in {"plan_gate_approved", "plan_execution_brief_failed"} or gate_resolution.get("status") != "approved":
+            result["parsed_command"] = {**parsed, "selection_status": "gate_approval_required"}
+            message_preview = render_plan_execution_brief_required_message(profile=args.profile)
+            attach_choice_surface(result, remote_plan_init_context(session))
+        else:
+            brief = create_execution_brief_from_gate_resolution(
+                args,
+                session=session,
+                gate_resolution=gate_resolution,
+            )
+            session["plan_execution_brief"] = brief
+            if brief.get("status") == "created":
+                session["stage"] = "plan_execution_brief_created"
+                message_preview = render_plan_execution_brief_created_message(profile=args.profile, session=session)
+                selection_status = "plan_execution_brief_created"
+                choice_context = remote_plan_init_context(session)
+            else:
+                session["stage"] = "plan_execution_brief_failed"
+                message_preview = render_plan_execution_brief_failed_message(profile=args.profile, session=session)
+                selection_status = (
+                    "plan_execution_brief_stale"
+                    if brief.get("status") == "stale"
+                    else "plan_execution_brief_failed"
+                )
+                choice_context = remote_plan_init_context(session)
+            store_remote_plan_session(state, chat_hash, session)
+            result["parsed_command"] = {
+                **parsed,
+                "selection_status": selection_status,
+                "selected_project_key": brief.get("project_key"),
+            }
+            attach_choice_surface(result, choice_context)
+    elif enqueue_handoff_create_text(normalized):
+        execution_brief = (
+            session.get("plan_execution_brief")
+            if isinstance(session.get("plan_execution_brief"), dict)
+            else {}
+        )
+        if stage not in {"plan_execution_brief_created", "plan_enqueue_handoff_failed"} or execution_brief.get("status") != "created":
+            result["parsed_command"] = {**parsed, "selection_status": "execution_brief_required"}
+            message_preview = render_plan_enqueue_handoff_required_message(profile=args.profile)
+            attach_choice_surface(result, remote_plan_init_context(session))
+        else:
+            handoff = create_enqueue_handoff_from_execution_brief(
+                args,
+                session=session,
+                execution_brief_receipt=execution_brief,
+            )
+            session["plan_enqueue_handoff"] = handoff
+            if handoff.get("status") == "created":
+                session["stage"] = "plan_enqueue_handoff_created"
+                message_preview = render_plan_enqueue_handoff_created_message(profile=args.profile, session=session)
+                selection_status = "plan_enqueue_handoff_created"
+                choice_context = remote_plan_init_context(session)
+            else:
+                session["stage"] = "plan_enqueue_handoff_failed"
+                message_preview = render_plan_enqueue_handoff_failed_message(profile=args.profile, session=session)
+                selection_status = (
+                    "plan_enqueue_handoff_stale"
+                    if handoff.get("status") == "stale"
+                    else "plan_enqueue_handoff_failed"
+                )
+                choice_context = remote_plan_init_context(session)
+            store_remote_plan_session(state, chat_hash, session)
+            result["parsed_command"] = {
+                **parsed,
+                "selection_status": selection_status,
+                "selected_project_key": handoff.get("project_key"),
+            }
+            attach_choice_surface(result, choice_context)
+    elif enqueue_run_create_text(normalized):
+        workload_binding = (
+            session.get("plan_workload_binding")
+            if isinstance(session.get("plan_workload_binding"), dict)
+            else {}
+        )
+        if stage not in {"plan_workload_bound", "plan_enqueue_run_failed"} or workload_binding.get("status") != "bound":
+            result["parsed_command"] = {**parsed, "selection_status": "workload_binding_required"}
+            message_preview = render_plan_enqueue_run_required_message(profile=args.profile)
+            attach_choice_surface(result, remote_plan_init_context(session))
+        else:
+            enqueue_run = create_enqueue_run_from_workload_binding(
+                args,
+                session=session,
+                workload_binding=workload_binding,
+            )
+            session["plan_enqueue_run"] = enqueue_run
+            if enqueue_run.get("status") == "queued":
+                session["stage"] = "plan_enqueued"
+                message_preview = render_plan_enqueue_run_done_message(profile=args.profile, session=session)
+                selection_status = "plan_enqueued"
+                choice_context = remote_plan_init_context(session)
+            else:
+                session["stage"] = "plan_enqueue_run_failed"
+                message_preview = render_plan_enqueue_run_failed_message(profile=args.profile, session=session)
+                selection_status = "plan_enqueue_run_blocked" if enqueue_run.get("status") == "blocked" else "plan_enqueue_run_failed"
+                choice_context = remote_plan_init_context(session)
+            store_remote_plan_session(state, chat_hash, session)
+            result["parsed_command"] = {
+                **parsed,
+                "selection_status": selection_status,
+                "selected_project_key": enqueue_run.get("project_key"),
+            }
+            attach_choice_surface(result, choice_context)
+    elif runtime_start_create_text(normalized):
+        enqueue_run = (
+            session.get("plan_enqueue_run")
+            if isinstance(session.get("plan_enqueue_run"), dict)
+            else {}
+        )
+        if stage not in {"plan_enqueued", "plan_runtime_start_failed"} or enqueue_run.get("status") != "queued":
+            result["parsed_command"] = {**parsed, "selection_status": "enqueue_run_required"}
+            message_preview = render_plan_runtime_start_required_message(profile=args.profile)
+            attach_choice_surface(result, remote_plan_init_context(session))
+        else:
+            runtime_start = create_runtime_start_from_enqueue_run(
+                args,
+                session=session,
+                enqueue_run=enqueue_run,
+            )
+            session["plan_runtime_start"] = runtime_start
+            if runtime_start.get("status") == "launched":
+                session["stage"] = "plan_runtime_started"
+                message_preview = render_plan_runtime_started_message(profile=args.profile, session=session)
+                selection_status = "plan_runtime_started"
+                choice_context = remote_plan_init_context(session)
+            else:
+                session["stage"] = "plan_runtime_start_failed"
+                message_preview = render_plan_runtime_start_failed_message(profile=args.profile, session=session)
+                selection_status = (
+                    "plan_runtime_start_blocked"
+                    if runtime_start.get("status") in {"blocked", "not_started"}
+                    else "plan_runtime_start_failed"
+                )
+                choice_context = remote_plan_init_context(session)
+            store_remote_plan_session(state, chat_hash, session)
+            result["parsed_command"] = {
+                **parsed,
+                "selection_status": selection_status,
+                "selected_project_key": runtime_start.get("project_key"),
+            }
+            attach_choice_surface(result, choice_context)
+    elif runtime_monitor_text(normalized):
+        runtime_start = (
+            session.get("plan_runtime_start")
+            if isinstance(session.get("plan_runtime_start"), dict)
+            else {}
+        )
+        if stage not in {"plan_runtime_started", "plan_runtime_monitored", "plan_runtime_monitor_failed", "plan_closeout_packet_created"} or runtime_start.get("status") != "launched":
+            result["parsed_command"] = {**parsed, "selection_status": "runtime_start_required"}
+            message_preview = render_plan_runtime_monitor_required_message(profile=args.profile)
+            attach_choice_surface(result, remote_plan_init_context(session))
+        else:
+            runtime_monitor = create_runtime_monitor_from_runtime_start(
+                args,
+                session=session,
+                runtime_start=runtime_start,
+            )
+            session["plan_runtime_monitor"] = runtime_monitor
+            if runtime_monitor.get("status") in {"running", "completed", "failed", "resume_pending", "observed"}:
+                session["stage"] = "plan_runtime_monitored"
+                message_preview = render_plan_runtime_monitor_message(profile=args.profile, session=session)
+                selection_status = "plan_runtime_monitored"
+            else:
+                session["stage"] = "plan_runtime_monitor_failed"
+                message_preview = render_plan_runtime_monitor_failed_message(profile=args.profile, session=session)
+                selection_status = (
+                    "plan_runtime_monitor_blocked"
+                    if runtime_monitor.get("status") == "blocked"
+                    else "plan_runtime_monitor_failed"
+                )
+            store_remote_plan_session(state, chat_hash, session)
+            result["parsed_command"] = {
+                **parsed,
+                "selection_status": selection_status,
+                "selected_project_key": runtime_monitor.get("project_key"),
+            }
+            attach_choice_surface(result, remote_plan_init_context(session))
+    elif closeout_packet_create_text(normalized):
+        runtime_monitor = (
+            session.get("plan_runtime_monitor")
+            if isinstance(session.get("plan_runtime_monitor"), dict)
+            else {}
+        )
+        if stage not in {"plan_runtime_monitored", "plan_closeout_packet_failed"} or runtime_monitor.get("task_status") != "completed":
+            result["parsed_command"] = {**parsed, "selection_status": "runtime_completion_required"}
+            message_preview = render_plan_closeout_required_message(profile=args.profile)
+            attach_choice_surface(result, remote_plan_init_context(session))
+        else:
+            closeout_packet = create_closeout_packet_from_runtime_monitor(
+                args,
+                session=session,
+                runtime_monitor=runtime_monitor,
+            )
+            session["plan_closeout_packet"] = closeout_packet
+            if closeout_packet.get("status") == "created":
+                session["stage"] = "plan_closeout_packet_created"
+                message_preview = render_plan_closeout_packet_message(profile=args.profile, session=session)
+                selection_status = "plan_closeout_packet_created"
+            else:
+                session["stage"] = "plan_closeout_packet_failed"
+                message_preview = render_plan_closeout_packet_failed_message(profile=args.profile, session=session)
+                selection_status = (
+                    "plan_closeout_packet_blocked"
+                    if closeout_packet.get("status") == "blocked"
+                    else "plan_closeout_packet_failed"
+                )
+            store_remote_plan_session(state, chat_hash, session)
+            result["parsed_command"] = {
+                **parsed,
+                "selection_status": selection_status,
+                "selected_project_key": closeout_packet.get("project_key"),
+            }
+            attach_choice_surface(result, remote_plan_init_context(session))
+    elif closeout_review_handoff_create_text(normalized):
+        closeout_packet = (
+            session.get("plan_closeout_packet")
+            if isinstance(session.get("plan_closeout_packet"), dict)
+            else {}
+        )
+        if stage not in {"plan_closeout_packet_created", "plan_closeout_review_handoff_failed"} or closeout_packet.get("status") != "created":
+            result["parsed_command"] = {**parsed, "selection_status": "closeout_packet_required"}
+            message_preview = render_plan_closeout_required_message(profile=args.profile)
+            attach_choice_surface(result, remote_plan_init_context(session))
+        else:
+            handoff = create_closeout_review_handoff_from_packet(
+                args,
+                session=session,
+                closeout_packet=closeout_packet,
+            )
+            session["plan_closeout_review_handoff"] = handoff
+            if handoff.get("status") == "created":
+                session["stage"] = "plan_closeout_review_handoff_created"
+                message_preview = render_plan_closeout_review_handoff_message(
+                    profile=args.profile,
+                    session=session,
+                )
+                selection_status = "plan_closeout_review_handoff_created"
+            else:
+                session["stage"] = "plan_closeout_review_handoff_failed"
+                message_preview = render_plan_closeout_review_handoff_failed_message(
+                    profile=args.profile,
+                    session=session,
+                )
+                selection_status = (
+                    "plan_closeout_review_handoff_blocked"
+                    if handoff.get("status") == "blocked"
+                    else "plan_closeout_review_handoff_failed"
+                )
+            store_remote_plan_session(state, chat_hash, session)
+            result["parsed_command"] = {
+                **parsed,
+                "selection_status": selection_status,
+                "selected_project_key": handoff.get("project_key"),
+            }
+            attach_choice_surface(result, remote_plan_init_context(session))
+    elif closeout_verdict_request(normalized)[0] is not None:
+        requested_verdict, requested_note = closeout_verdict_request(normalized)
+        handoff = (
+            session.get("plan_closeout_review_handoff")
+            if isinstance(session.get("plan_closeout_review_handoff"), dict)
+            else {}
+        )
+        if stage not in {"plan_closeout_review_handoff_created", "plan_closeout_verdict_failed"} or handoff.get("status") != "created":
+            result["parsed_command"] = {**parsed, "selection_status": "closeout_review_handoff_required"}
+            message_preview = render_plan_closeout_review_handoff_failed_message(
+                profile=args.profile,
+                session={
+                    **session,
+                    "plan_closeout_review_handoff": {
+                        "error": "마무리 검토 준비가 먼저 필요합니다.",
+                    },
+                },
+            )
+            attach_choice_surface(result, remote_plan_init_context(session))
+        else:
+            closeout_verdict = create_closeout_verdict_from_handoff(
+                args,
+                session=session,
+                handoff=handoff,
+                verdict=str(requested_verdict or ""),
+                note=requested_note,
+            )
+            session["plan_closeout_verdict"] = closeout_verdict
+            if closeout_verdict.get("status") == "recorded":
+                session["stage"] = "plan_closeout_verdict_recorded"
+                message_preview = render_plan_closeout_verdict_message(profile=args.profile, session=session)
+                selection_status = "plan_closeout_verdict_recorded"
+            else:
+                session["stage"] = "plan_closeout_verdict_failed"
+                message_preview = render_plan_closeout_verdict_failed_message(
+                    profile=args.profile,
+                    session=session,
+                )
+                selection_status = (
+                    "plan_closeout_verdict_blocked"
+                    if closeout_verdict.get("status") == "blocked"
+                    else "plan_closeout_verdict_failed"
+                )
+            store_remote_plan_session(state, chat_hash, session)
+            result["parsed_command"] = {
+                **parsed,
+                "selection_status": selection_status,
+                "selected_project_key": closeout_verdict.get("project_key"),
+            }
+            attach_choice_surface(result, remote_plan_init_context(session))
+    elif workload_binding_request_text(normalized):
+        handoff = (
+            session.get("plan_enqueue_handoff")
+            if isinstance(session.get("plan_enqueue_handoff"), dict)
+            else {}
+        )
+        if stage not in {"plan_enqueue_handoff_created", "plan_workload_path_required", "plan_workload_binding_failed"} or handoff.get("status") != "created":
+            result["parsed_command"] = {**parsed, "selection_status": "enqueue_handoff_required"}
+            message_preview = render_plan_enqueue_handoff_required_message(profile=args.profile)
+            attach_choice_surface(result, remote_plan_init_context(session))
+        else:
+            session["stage"] = "plan_workload_path_required"
+            store_remote_plan_session(state, chat_hash, session)
+            result["parsed_command"] = {**parsed, "selection_status": "workload_path_required"}
+            message_preview = render_plan_workload_path_required_message(profile=args.profile)
+            attach_choice_surface(result, remote_plan_init_context(session))
+    elif stage in {"plan_enqueue_handoff_created", "plan_workload_path_required", "plan_workload_binding_failed"} and resolve_prepared_task_path(normalized):
+        handoff = (
+            session.get("plan_enqueue_handoff")
+            if isinstance(session.get("plan_enqueue_handoff"), dict)
+            else {}
+        )
+        manifest_path = resolve_prepared_task_path(normalized)
+        if handoff.get("status") != "created" or manifest_path is None:
+            result["parsed_command"] = {**parsed, "selection_status": "enqueue_handoff_required"}
+            message_preview = render_plan_enqueue_handoff_required_message(profile=args.profile)
+            attach_choice_surface(result, remote_plan_init_context(session))
+        else:
+            binding = bind_prepared_workload_to_execution_brief(
+                args,
+                session=session,
+                enqueue_handoff=handoff,
+                manifest_path=manifest_path,
+            )
+            session["plan_workload_binding"] = binding
+            if binding.get("status") == "bound":
+                session["stage"] = "plan_workload_bound"
+                message_preview = render_plan_workload_bound_message(profile=args.profile, session=session)
+                selection_status = "plan_workload_bound"
+                choice_context = remote_plan_init_context(session)
+            else:
+                session["stage"] = "plan_workload_binding_failed"
+                message_preview = render_plan_workload_binding_failed_message(profile=args.profile, session=session)
+                selection_status = "plan_workload_binding_blocked" if binding.get("status") == "blocked" else "plan_workload_binding_failed"
+                choice_context = remote_plan_init_context(session)
+            store_remote_plan_session(state, chat_hash, session)
+            result["parsed_command"] = {
+                **parsed,
+                "selection_status": selection_status,
+                "selected_project_key": binding.get("project_key"),
+            }
+            attach_choice_surface(result, choice_context)
+    elif gate_approval_approve_text(normalized) or gate_approval_deny_text(normalized):
+        gate_request = session.get("plan_gate_request") if isinstance(session.get("plan_gate_request"), dict) else {}
+        approve = gate_approval_approve_text(normalized)
+        if stage != "plan_gate_request_created" or gate_request.get("status") != "pending_approval":
+            result["parsed_command"] = {**parsed, "selection_status": "gate_request_required"}
+            message_preview = render_plan_gate_resolution_required_message(profile=args.profile)
+            attach_choice_surface(result, remote_plan_init_context(session))
+        else:
+            resolution = resolve_gate_approval(
+                args,
+                session=session,
+                gate_request=gate_request,
+                approve=approve,
+            )
+            session["plan_gate_resolution"] = resolution
+            if resolution.get("status") in {"approved", "denied"}:
+                session["stage"] = "plan_gate_approved" if resolution.get("status") == "approved" else "plan_gate_denied"
+                message_preview = render_plan_gate_resolution_done_message(profile=args.profile, session=session)
+                selection_status = f"plan_gate_{resolution.get('status')}"
+                choice_context = remote_plan_init_context(session) if resolution.get("status") == "approved" else None
+            else:
+                session["stage"] = "plan_gate_resolution_failed"
+                message_preview = render_plan_gate_resolution_failed_message(profile=args.profile, session=session)
+                selection_status = (
+                    "plan_gate_resolution_stale"
+                    if resolution.get("status") == "stale"
+                    else "plan_gate_resolution_failed"
+                )
+                choice_context = None
+            store_remote_plan_session(state, chat_hash, session)
+            result["parsed_command"] = {
+                **parsed,
+                "selection_status": selection_status,
+                "selected_project_key": resolution.get("project_key"),
+            }
+            attach_choice_surface(result, choice_context)
+    elif plan_gate_request_text(normalized):
+        launch_prep = session.get("plan_launch_prep") if isinstance(session.get("plan_launch_prep"), dict) else {}
+        if stage not in {"plan_launch_prep_prepared", "plan_gate_request_failed"} or launch_prep.get("status") != "prepared":
+            result["parsed_command"] = {**parsed, "selection_status": "launch_prep_required"}
+            message_preview = render_plan_gate_request_required_message(profile=args.profile)
+            attach_choice_surface(result, remote_plan_init_context(session))
+        else:
+            gate_request = request_gate_for_launch_prep(args, session=session, launch_prep=launch_prep)
+            session["plan_gate_request"] = gate_request
+            if gate_request.get("status") == "pending_approval":
+                session["stage"] = "plan_gate_request_created"
+                message_preview = render_plan_gate_request_created_message(profile=args.profile, session=session)
+                selection_status = "plan_gate_request_created"
+                choice_context = remote_plan_init_context(session)
+            else:
+                session["stage"] = "plan_gate_request_failed"
+                message_preview = render_plan_gate_request_failed_message(profile=args.profile, session=session)
+                selection_status = (
+                    "plan_gate_request_stale" if gate_request.get("status") == "stale" else "plan_gate_request_failed"
+                )
+                choice_context = remote_plan_init_context(session)
+            store_remote_plan_session(state, chat_hash, session)
+            result["parsed_command"] = {
+                **parsed,
+                "selection_status": selection_status,
+                "selected_project_key": gate_request.get("project_key"),
+            }
+            attach_choice_surface(result, choice_context)
     elif plan_review_approve_text(normalized):
         registration = session.get("plan_registration") if isinstance(session.get("plan_registration"), dict) else {}
         if stage not in {"plan_registered", "plan_review_failed"} or registration.get("status") != "registered":
@@ -3168,7 +6898,7 @@ def handle_remote_plan_session_input(
                 session["stage"] = "plan_review_approved"
                 message_preview = render_plan_review_approved_message(profile=args.profile, session=session)
                 selection_status = "plan_review_approved"
-                choice_context = None
+                choice_context = remote_plan_init_context(session)
             else:
                 session["stage"] = "plan_review_failed"
                 message_preview = render_plan_review_failed_message(profile=args.profile, session=session)
@@ -3258,6 +6988,12 @@ def handle_remote_plan_session_input(
             }
             message_preview = render_project_init_preview_message(profile=args.profile, session=session)
             attach_choice_surface(result, remote_plan_init_context(session))
+    elif stage == "plan_workload_path_required":
+        append_remote_plan_note(session, normalized)
+        store_remote_plan_session(state, chat_hash, session)
+        result["parsed_command"] = {**parsed, "selection_status": "workload_path_unresolved"}
+        message_preview = render_plan_workload_path_required_message(profile=args.profile)
+        attach_choice_surface(result, remote_plan_init_context(session))
     else:
         append_remote_plan_note(session, normalized)
         store_remote_plan_session(state, chat_hash, session)

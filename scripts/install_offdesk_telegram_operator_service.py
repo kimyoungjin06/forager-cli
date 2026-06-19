@@ -35,6 +35,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--feedback-file", type=pathlib.Path, default=DEFAULT_CACHE_DIR / "remote_operator_telegram_feedback.jsonl")
     parser.add_argument("--feedback-ingest-dir", type=pathlib.Path, default=DEFAULT_CACHE_DIR / "remote_operator_telegram_feedback_ingest")
     parser.add_argument("--loop-status-file", type=pathlib.Path, default=DEFAULT_CACHE_DIR / "remote_operator_telegram_loop.json")
+    parser.add_argument("--include-watchdog", action="store_true", help="Also install a timer-backed external watchdog.")
+    parser.add_argument("--watchdog-service-name", default="forager-telegram-operator-watchdog.service")
+    parser.add_argument("--watchdog-timer-name", default="forager-telegram-operator-watchdog.timer")
+    parser.add_argument("--watchdog-state-file", type=pathlib.Path, default=DEFAULT_CACHE_DIR / "remote_operator_telegram_watchdog_state.json")
+    parser.add_argument("--watchdog-interval-sec", type=int, default=120)
+    parser.add_argument("--watchdog-health-max-age-sec", type=int, default=180)
+    parser.add_argument("--watchdog-alert-min-interval-sec", type=int, default=1800)
     parser.add_argument("--poll-timeout-sec", type=int, default=30)
     parser.add_argument("--api-timeout-sec", type=int, default=45)
     parser.add_argument("--poll-error-backoff-sec", type=int, default=5)
@@ -112,6 +119,69 @@ def render_unit(args: argparse.Namespace) -> str:
     )
 
 
+def render_watchdog_service_unit(args: argparse.Namespace) -> str:
+    script = args.repo_root / "scripts" / "offdesk_remote_operator_watchdog.py"
+    command = [
+        args.python_bin,
+        script,
+        "--profile",
+        args.profile,
+        "--env-file",
+        args.env_file,
+        "--loop-status-file",
+        args.loop_status_file,
+        "--state-file",
+        args.watchdog_state_file,
+        "--service-name",
+        args.service_name,
+        "--systemd-mode",
+        "required",
+        "--health-max-age-sec",
+        args.watchdog_health_max_age_sec,
+        "--alert-min-interval-sec",
+        args.watchdog_alert_min_interval_sec,
+        "--api-timeout-sec",
+        args.api_timeout_sec,
+    ]
+    exec_start = " ".join(systemd_arg(item) for item in command)
+    return "\n".join(
+        [
+            "[Unit]",
+            "Description=Forager Telegram remote operator watchdog",
+            "After=network-online.target",
+            "Wants=network-online.target",
+            "",
+            "[Service]",
+            "Type=oneshot",
+            f"WorkingDirectory={systemd_arg(args.repo_root)}",
+            f"ExecStart={exec_start}",
+            "NoNewPrivileges=true",
+            "PrivateTmp=true",
+            "",
+        ]
+    )
+
+
+def render_watchdog_timer_unit(args: argparse.Namespace) -> str:
+    interval = max(30, int(args.watchdog_interval_sec))
+    return "\n".join(
+        [
+            "[Unit]",
+            "Description=Run Forager Telegram remote operator watchdog",
+            "",
+            "[Timer]",
+            "OnBootSec=2min",
+            f"OnUnitActiveSec={interval}s",
+            "AccuracySec=30s",
+            f"Unit={args.watchdog_service_name}",
+            "",
+            "[Install]",
+            "WantedBy=timers.target",
+            "",
+        ]
+    )
+
+
 def systemctl_user(*args: str) -> None:
     subprocess.run(["systemctl", "--user", *args], check=True)
 
@@ -120,34 +190,63 @@ def main() -> int:
     args = parse_args()
     unit = render_unit(args)
     path = service_path(args.service_name)
+    watchdog_service_unit = render_watchdog_service_unit(args) if args.include_watchdog else None
+    watchdog_timer_unit = render_watchdog_timer_unit(args) if args.include_watchdog else None
+    watchdog_service_path = service_path(args.watchdog_service_name)
+    watchdog_timer_path = service_path(args.watchdog_timer_name)
     report: dict[str, Any] = {
         "schema": "forager_telegram_operator_systemd_install.v1",
         "service_name": args.service_name,
         "service_path": str(path),
         "repo_root": str(args.repo_root),
         "loop_status_file": str(args.loop_status_file),
+        "watchdog_included": bool(args.include_watchdog),
+        "watchdog_service_name": args.watchdog_service_name if args.include_watchdog else None,
+        "watchdog_timer_name": args.watchdog_timer_name if args.include_watchdog else None,
+        "watchdog_service_path": str(watchdog_service_path) if args.include_watchdog else None,
+        "watchdog_timer_path": str(watchdog_timer_path) if args.include_watchdog else None,
+        "watchdog_state_file": str(args.watchdog_state_file) if args.include_watchdog else None,
         "installed": False,
         "enabled": False,
         "started": False,
         "restarted": False,
+        "watchdog_installed": False,
+        "watchdog_enabled": False,
+        "watchdog_started": False,
     }
     if args.dry_run or not args.install:
         report["unit_preview"] = unit
+        if args.include_watchdog:
+            report["watchdog_service_unit_preview"] = watchdog_service_unit
+            report["watchdog_timer_unit_preview"] = watchdog_timer_unit
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(unit, encoding="utf-8")
     report["installed"] = True
+    if args.include_watchdog:
+        watchdog_service_path.write_text(str(watchdog_service_unit), encoding="utf-8")
+        watchdog_timer_path.write_text(str(watchdog_timer_unit), encoding="utf-8")
+        report["watchdog_installed"] = True
     systemctl_user("daemon-reload")
     if args.enable:
         systemctl_user("enable", args.service_name)
         report["enabled"] = True
+        if args.include_watchdog:
+            systemctl_user("enable", args.watchdog_timer_name)
+            report["watchdog_enabled"] = True
     if args.restart:
         systemctl_user("restart", args.service_name)
         report["restarted"] = True
+        if args.include_watchdog:
+            systemctl_user("restart", args.watchdog_timer_name)
+            report["watchdog_started"] = True
     elif args.start:
         systemctl_user("start", args.service_name)
         report["started"] = True
+        if args.include_watchdog:
+            systemctl_user("start", args.watchdog_timer_name)
+            report["watchdog_started"] = True
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0
 
