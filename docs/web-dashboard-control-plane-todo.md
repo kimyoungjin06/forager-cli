@@ -347,10 +347,11 @@ parallel project state chips, selected-project provenance, read-only assistant
 prompts, and an attention path that consolidates decision/runtime/truth blockers
 with state refs, fallback commands, and action boundaries. It also includes
 read-only project filters for all, attention, blocked, running, and truth-gap
-views plus a read-only active-task drawer derived from decision, runtime,
-truth-recovery, and project-row state. A future slice should wire the drawer to
-exact task-store records and add accepted/stale filters once the read model
-exposes those per-project states.
+views plus a read-only active-task drawer that prefers exact
+`workstation_surface.v1` task-store rows from `projects[].task_items`, falling
+back to decision/runtime/truth/project-row state only when task-store rows are
+absent. Future slices should add richer task-store detail/action receipts and
+accepted/stale filters once the read model exposes those per-project states.
 
 ### P1 - `/graph`
 

@@ -23,6 +23,7 @@ export type ProjectRow = {
   closeout: string;
   truth: string;
   last_activity: string;
+  task_items: ProjectTaskItem[];
 };
 
 export type AssistantPrompt = {
@@ -81,6 +82,9 @@ export type ProjectTaskItem = {
   summary: string;
   reference: string;
   command: string;
+  task_id?: string;
+  next_safe_action_kind?: string;
+  requires_operator_review?: boolean;
 };
 
 export type DecisionItem = {
@@ -525,6 +529,7 @@ function projectRows(values: unknown[]): ProjectRow[] {
     closeout: fallbackString(stringAt(item, 'closeout'), '-'),
     truth: fallbackString(stringAt(item, 'truth'), '-'),
     last_activity: fallbackString(stringAt(item, 'last_activity'), '-'),
+    task_items: surfaceProjectTaskItems(arrayAt(item, 'task_items')),
   }));
 }
 
@@ -561,7 +566,9 @@ function projectDetailsFromSurface(
       truth_recovery_count: truthItems.length,
       primary_action: projectPrimaryAction(decisions, runtimeItems, truthItems),
       attention_items: projectAttentionItems(decisions, runtimeItems, truthItems),
-      task_items: projectTaskItems(project, decisions, runtimeItems, truthItems),
+      task_items: project.task_items.length
+        ? project.task_items
+        : projectTaskItems(project, decisions, runtimeItems, truthItems),
       decision_titles: decisions.map((item) => item.title).slice(0, 3),
       runtime_stages: runtimeItems.map((item) => `${formatLabel(item.stage)}: ${item.title}`).slice(0, 3),
       truth_recovery_stages: truthItems
@@ -574,6 +581,20 @@ function projectDetailsFromSurface(
       assistant_refs: projectAssistantRefs(project, decisions, runtimeItems, truthItems),
     };
   });
+}
+
+function surfaceProjectTaskItems(values: unknown[]): ProjectTaskItem[] {
+  return values.filter(isRecord).map((item) => ({
+    kind: fallbackString(stringAt(item, 'kind'), 'Task'),
+    title: fallbackString(stringAt(item, 'title'), stringAt(item, 'task_id'), 'Task'),
+    status: fallbackString(stringAt(item, 'status'), 'unknown'),
+    summary: fallbackString(stringAt(item, 'summary'), stringAt(item, 'next_safe_action_kind'), 'No task summary was provided.'),
+    reference: fallbackString(stringAt(item, 'reference'), stringAt(item, 'task_id'), 'offdesk_tasks.json'),
+    command: fallbackString(stringAt(item, 'command'), 'forager offdesk tasks --json'),
+    task_id: optionalStringAt(item, 'task_id'),
+    next_safe_action_kind: optionalStringAt(item, 'next_safe_action_kind'),
+    requires_operator_review: booleanAt(item, 'requires_operator_review'),
+  }));
 }
 
 function projectTaskItems(
@@ -1300,6 +1321,11 @@ function recordAt(value: Record<string, unknown>, key: string): Record<string, u
 function stringAt(value: Record<string, unknown>, key: string): string {
   const child = value[key];
   return typeof child === 'string' ? child.trim() : '';
+}
+
+function optionalStringAt(value: Record<string, unknown>, key: string): string | undefined {
+  const child = stringAt(value, key);
+  return child || undefined;
 }
 
 function numberAt(value: Record<string, unknown>, key: string): number {

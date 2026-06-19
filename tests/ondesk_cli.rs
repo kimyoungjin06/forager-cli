@@ -338,6 +338,34 @@ fn ondesk_workstation_surface_json_projects_current_status_into_dashboard() -> R
     assert_eq!(surface["projects"][0]["project_key"], "project");
     assert_eq!(surface["projects"][0]["decisions"], 1);
     assert_eq!(
+        surface["projects"][0]["task_items"][0]["task_id"],
+        "approval-task"
+    );
+    assert_eq!(
+        surface["projects"][0]["task_items"][0]["kind"],
+        "Approval task"
+    );
+    assert_eq!(
+        surface["projects"][0]["task_items"][0]["status"],
+        "pending_approval"
+    );
+    assert_eq!(
+        surface["projects"][0]["task_items"][0]["reference"],
+        "offdesk_tasks.json#approval-task"
+    );
+    assert_eq!(
+        surface["projects"][0]["task_items"][0]["command"],
+        "forager offdesk pending"
+    );
+    assert_eq!(
+        surface["projects"][0]["task_items"][0]["next_safe_action_kind"],
+        "approval_pending"
+    );
+    assert_eq!(
+        surface["projects"][0]["task_items"][0]["requires_operator_review"],
+        true
+    );
+    assert_eq!(
         surface["decision_inbox"]["schema"],
         "decision_inbox_surface.v1"
     );

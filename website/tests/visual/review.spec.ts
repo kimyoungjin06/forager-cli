@@ -13,6 +13,27 @@ const liveSurface = JSON.parse(
 const workstationSurface = JSON.parse(
   readFileSync(new URL('../../../tests/fixtures/ui/workstation_surface/attention.json', import.meta.url), 'utf8'),
 );
+const workstationWorkSurface = JSON.parse(JSON.stringify(workstationSurface));
+const harnessProject = workstationWorkSurface.projects.find((project) => project.project_key === 'Harness');
+if (harnessProject) {
+  harnessProject.task_items = [
+    {
+      kind: 'Live task store',
+      task_id: 'task-harness-live',
+      request_id: 'request-harness-live',
+      title: 'Run dashboard visual pass',
+      status: 'running',
+      capability_id: 'web.visual_review',
+      runner_kind: 'local_background',
+      summary: 'Task is running from offdesk_tasks.json.',
+      reference: 'offdesk_tasks.json#task-harness-live',
+      command: 'forager offdesk poll ticket-harness-live',
+      updated_at: '2026-06-18T03:12:00Z',
+      next_safe_action_kind: 'runtime_monitoring',
+      requires_operator_review: false,
+    },
+  ];
+}
 const workstationSettingsSurface = JSON.parse(JSON.stringify(workstationSurface));
 workstationSettingsSurface.source_label = 'Live workstation settings';
 workstationSettingsSurface.workspace_roots = [
@@ -229,7 +250,7 @@ test('work route renders project portfolio detail with graph and assistant conte
   await page.route('**/forager-cli/workstation-surface.json', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify(workstationSurface),
+      body: JSON.stringify(workstationWorkSurface),
     });
   });
 
@@ -318,9 +339,9 @@ test('work route renders project portfolio detail with graph and assistant conte
   await expect(page.locator('[data-work-projects]').getByRole('button', { name: /Science Atlas/ })).toHaveCount(0);
   await expect(page.locator('[data-work-graph-title]')).toHaveText('Forager Harness provenance path');
   await page.locator('[data-work-task-drawer] summary').click();
-  await expect(page.locator('[data-work-task-drawer]').getByText('Decision count')).toBeVisible();
-  await expect(page.locator('[data-work-task-drawer]').getByText('Runtime state', { exact: true })).toBeVisible();
-  await expect(page.locator('[data-work-task-drawer]').getByText('forager status --json')).toBeVisible();
+  await expect(page.locator('[data-work-task-drawer]').getByText('Live task store')).toBeVisible();
+  await expect(page.locator('[data-work-task-drawer]').getByText('task-harness-live')).toBeVisible();
+  await expect(page.locator('[data-work-task-drawer]').getByText('forager offdesk poll ticket-harness-live')).toBeVisible();
 
   await page.locator('[data-work-project-filters]').getByRole('button', { name: /Blocked 1/ }).click();
   await expect(page.locator('[data-work-filter-summary]')).toHaveText('Showing 1 of 3 projects matching blocked.');

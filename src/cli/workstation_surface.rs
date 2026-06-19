@@ -113,6 +113,38 @@ struct ProjectRow {
     closeout: String,
     truth: String,
     last_activity: String,
+    task_items: Vec<ProjectTaskItem>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProjectTaskItem {
+    kind: &'static str,
+    task_id: String,
+    request_id: String,
+    title: String,
+    status: String,
+    capability_id: String,
+    runner_kind: &'static str,
+    summary: String,
+    reference: String,
+    command: String,
+    updated_at: DateTime<Utc>,
+    next_safe_action_kind: String,
+    requires_operator_review: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    artifact_refs: Vec<ProjectTaskArtifactRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    log_artifact_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    result_artifact_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProjectTaskArtifactRef {
+    artifact_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    path: Option<String>,
+    present: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -567,6 +599,7 @@ struct ProjectAccumulator {
     cancelled: usize,
     open_decisions: usize,
     last_activity: Option<DateTime<Utc>>,
+    task_items: Vec<ProjectTaskItem>,
 }
 
 pub async fn run(profile: &str, args: WorkstationSurfaceArgs) -> Result<()> {
@@ -1024,6 +1057,7 @@ fn project_rows(tasks: &[OffdeskTask], decisions: &[DecisionRecord]) -> Vec<Proj
             OffdeskTaskStatus::ResumePending => project.resume_pending += 1,
             OffdeskTaskStatus::Cancelled => project.cancelled += 1,
         }
+        project.task_items.push(project_task_item(task));
         update_latest(&mut project.last_activity, task.updated_at);
     }
     for record in decisions
@@ -1057,6 +1091,16 @@ fn project_rows(tasks: &[OffdeskTask], decisions: &[DecisionRecord]) -> Vec<Proj
 }
 
 fn project_row(project: ProjectAccumulator) -> ProjectRow {
+    let mut task_items = project.task_items;
+    task_items.sort_by_key(|item| {
+        (
+            project_task_status_rank(&item.status),
+            std::cmp::Reverse(item.updated_at),
+            item.task_id.clone(),
+        )
+    });
+    task_items.truncate(6);
+
     let severity = if project.failed > 0 {
         "critical"
     } else if project.resume_pending > 0 {
@@ -1110,6 +1154,104 @@ fn project_row(project: ProjectAccumulator) -> ProjectRow {
             .last_activity
             .map(|value| value.to_rfc3339())
             .unwrap_or_else(|| "-".to_string()),
+        task_items,
+    }
+}
+
+fn project_task_item(task: &OffdeskTask) -> ProjectTaskItem {
+    let view = task.operator_view();
+    let command = view
+        .next_safe_action
+        .commands
+        .first()
+        .cloned()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| view.command.clone());
+    let title = if !view.preview.is_empty() {
+        view.preview.clone()
+    } else if !view.reason.is_empty() {
+        view.reason.clone()
+    } else {
+        format!("{} task", view.capability_id)
+    };
+    let summary = if !view.reason.is_empty() {
+        view.reason.clone()
+    } else {
+        view.next_safe_action.detail.clone()
+    };
+
+    ProjectTaskItem {
+        kind: project_task_kind(task.status),
+        task_id: view.task_id.clone(),
+        request_id: view.request_id,
+        title,
+        status: offdesk_task_status_label(task.status).to_string(),
+        capability_id: view.capability_id,
+        runner_kind: background_runner_kind_label(task.runner_kind),
+        summary,
+        reference: format!("offdesk_tasks.json#{}", view.task_id),
+        command,
+        updated_at: view.updated_at,
+        next_safe_action_kind: view.next_safe_action.kind,
+        requires_operator_review: view.next_safe_action.requires_operator_review,
+        artifact_refs: view
+            .artifact_refs
+            .into_iter()
+            .map(|artifact| ProjectTaskArtifactRef {
+                artifact_id: operator_safe_text(&artifact.artifact_id),
+                path: artifact.path.map(|path| operator_safe_text(&path)),
+                present: artifact.present,
+            })
+            .collect(),
+        log_artifact_path: view.log_artifact_path.map(|path| operator_safe_text(&path)),
+        result_artifact_path: view
+            .result_artifact_path
+            .map(|path| operator_safe_text(&path)),
+    }
+}
+
+fn project_task_kind(status: OffdeskTaskStatus) -> &'static str {
+    match status {
+        OffdeskTaskStatus::PendingApproval => "Approval task",
+        OffdeskTaskStatus::Failed | OffdeskTaskStatus::ResumePending => "Recovery task",
+        OffdeskTaskStatus::Launched | OffdeskTaskStatus::Running => "Runtime task",
+        OffdeskTaskStatus::Completed => "Closeout task",
+        OffdeskTaskStatus::Cancelled => "Cancelled task",
+        OffdeskTaskStatus::Queued => "Queued task",
+    }
+}
+
+fn offdesk_task_status_label(status: OffdeskTaskStatus) -> &'static str {
+    match status {
+        OffdeskTaskStatus::Queued => "queued",
+        OffdeskTaskStatus::PendingApproval => "pending_approval",
+        OffdeskTaskStatus::Launched => "launched",
+        OffdeskTaskStatus::Running => "running",
+        OffdeskTaskStatus::Completed => "completed",
+        OffdeskTaskStatus::Failed => "failed",
+        OffdeskTaskStatus::ResumePending => "resume_pending",
+        OffdeskTaskStatus::Cancelled => "cancelled",
+    }
+}
+
+fn project_task_status_rank(status: &str) -> u8 {
+    match status {
+        "failed" | "resume_pending" => 0,
+        "pending_approval" => 1,
+        "running" | "launched" => 2,
+        "queued" => 3,
+        "completed" => 4,
+        "cancelled" => 5,
+        _ => 6,
+    }
+}
+
+fn background_runner_kind_label(kind: crate::offdesk::BackgroundRunnerKind) -> &'static str {
+    match kind {
+        crate::offdesk::BackgroundRunnerKind::LocalTmux => "local_tmux",
+        crate::offdesk::BackgroundRunnerKind::LocalBackground => "local_background",
+        crate::offdesk::BackgroundRunnerKind::GithubRunner => "github_runner",
+        crate::offdesk::BackgroundRunnerKind::RemoteWorker => "remote_worker",
     }
 }
 
