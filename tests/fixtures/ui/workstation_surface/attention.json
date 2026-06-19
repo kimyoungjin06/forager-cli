@@ -1,0 +1,193 @@
+{
+  "schema": "workstation_surface.v1",
+  "generated_at": "2026-06-18T02:47:47Z",
+  "workstation_id": "workstation-default",
+  "profile": "default",
+  "source_label": "Fixture workstation_surface.v1",
+  "health": [
+    {
+      "id": "telegram",
+      "label": "Telegram operator",
+      "status": "ok",
+      "summary": "Polling listener is active and watchdog is enabled."
+    },
+    {
+      "id": "local_llm",
+      "label": "Local LLM",
+      "status": "attention",
+      "summary": "Configured local coding model is reachable, but provider fallback should remain visible."
+    },
+    {
+      "id": "runtime_store",
+      "label": "Runtime store",
+      "status": "ok",
+      "summary": "Task queue and closeout receipts are readable."
+    }
+  ],
+  "capacity": {
+    "active_runners": 2,
+    "queued_tasks": 3,
+    "provider_deferred": 1,
+    "budget_warnings": 0
+  },
+  "attention_counts": {
+    "pending_decisions": 4,
+    "blocked_tasks": 1,
+    "failed_tasks": 1,
+    "closeout_required": 2,
+    "accepted_truth_missing": 2,
+    "followup_decisions_required": 1
+  },
+  "top_attention": {
+    "kind": "closeout_followup",
+    "title": "Closeout follow-up needed",
+    "severity": "attention",
+    "project_key": "NanoClustering",
+    "summary": "A completed run has closeout evidence, but one follow-up decision still blocks a clean accepted-truth path.",
+    "action_label": "Open decision inbox"
+  },
+  "next_safe_actions": [
+    {
+      "label": "Review top closeout follow-up",
+      "reason": "Resolve the closeout follow-up before treating the result as accepted truth.",
+      "command": "forager offdesk closeout-decision --json"
+    }
+  ],
+  "projects": [
+    {
+      "project_key": "NanoClustering",
+      "display_name": "NanoClustering",
+      "severity": "attention",
+      "plan": "approved",
+      "runtime": "completed",
+      "decisions": 1,
+      "closeout": "approved_with_followups",
+      "truth": "missing",
+      "last_activity": "11m ago"
+    },
+    {
+      "project_key": "Harness",
+      "display_name": "Forager Harness",
+      "severity": "info",
+      "plan": "review",
+      "runtime": "running",
+      "decisions": 2,
+      "closeout": "not_ready",
+      "truth": "not_applicable",
+      "last_activity": "2m ago"
+    },
+    {
+      "project_key": "Atlas",
+      "display_name": "Science Atlas",
+      "severity": "blocked",
+      "plan": "needs_revision",
+      "runtime": "blocked",
+      "decisions": 1,
+      "closeout": "not_ready",
+      "truth": "missing",
+      "last_activity": "43m ago"
+    }
+  ],
+  "decisions": [
+    {
+      "decision_id": "decision-closeout-followup",
+      "kind": "closeout_followup",
+      "severity": "attention",
+      "project_key": "NanoClustering",
+      "title": "Resolve closeout follow-up",
+      "why_now": "The closeout verdict was approved with follow-ups, so accepted truth is not clean yet.",
+      "allowed_actions": ["Resolve follow-up", "Request evidence", "Retire closeout"],
+      "action_envelopes": [
+        {
+          "schema": "action_envelope.v1",
+          "action_id": "action_decision_closeout_followup_resolve_follow_up_f1c2d3e4a5b6c7d8",
+          "action_kind": "resolve_follow_up",
+          "profile": "default",
+          "project_key": "NanoClustering",
+          "target_ref": {
+            "kind": "decision_record.v1",
+            "decision_id": "decision-closeout-followup",
+            "status": "user_pending",
+            "updated_at": "2026-06-18T02:47:47Z"
+          },
+          "observed_hash": "sha256:f1c2d3e4a5b6c7d80000000000000000000000000000000000000000000000000000",
+          "nonce": "preview_f1c2d3e4a5b6c7d8",
+          "ttl": "PT10M",
+          "issued_at": "2026-06-18T02:47:47Z",
+          "expires_at": "2026-06-18T02:57:47Z",
+          "idempotency_key": "decision:decision-closeout-followup:resolve_follow_up:f1c2d3e4a5b6c7d8",
+          "preview": "Preview only: Resolve follow-up for decision decision-closeout-followup.",
+          "allowed_command": "forager offdesk decision show --json decision-closeout-followup",
+          "forbidden_effects": [
+            "project_file_mutation",
+            "runtime_dispatch",
+            "approval_ledger_mutation",
+            "accepted_truth_mutation",
+            "arbitrary_shell"
+          ],
+          "expected_receipt_schema": "action_envelope_receipt.v1",
+          "requires_confirmation": true,
+          "confirmation_phrase": "confirm decision_closeout_followup_resolve_follow_up",
+          "stale_rejection_reason": "Reject if the decision record status, updated_at, project, or selected action no longer matches observed_hash.",
+          "receipt_history_count": 1,
+          "latest_receipt": {
+            "schema": "action_envelope_receipt.v1",
+            "receipt_id": "action-receipt-f1c2d3e4a5b6c7d8",
+            "processed_at": "2026-06-18T02:49:12Z",
+            "result_status": "rejected",
+            "stale": true,
+            "reason": "Reject if the decision record status, updated_at, project, or selected action no longer matches observed_hash. Checks failed: observed_hash: expected sha256:fresh, got sha256:stale",
+            "current_hash": "sha256:fresh",
+            "failed_checks": ["observed_hash"]
+          },
+          "execution_history_count": 1,
+          "latest_execution": {
+            "schema": "decision_action_execution.v1",
+            "execution_id": "decision-action-f1c2d3e4a5b6c7d8",
+            "preflight_id": "action-preflight-f1c2d3e4a5b6c7d8",
+            "executed_at": "2026-06-18T02:50:11Z",
+            "result_status": "blocked",
+            "decision": "resolve_follow_up",
+            "decision_appended": false,
+            "mutation_allowed_by_this_command": false,
+            "reason": "Decision action blocked. Checks failed: supported_action: unsupported decision action resolve_follow_up",
+            "failed_checks": ["supported_action"]
+          }
+        }
+      ],
+      "authorization_boundary": "No project files are mutated from this dashboard."
+    },
+    {
+      "decision_id": "decision-runtime-recovery",
+      "kind": "runtime_recovery",
+      "severity": "blocked",
+      "project_key": "Atlas",
+      "title": "Runtime recovery required",
+      "why_now": "The last run is blocked and needs an explicit recovery or revise decision.",
+      "allowed_actions": ["Open recovery packet", "Record revise", "Keep blocked"],
+      "authorization_boundary": "Recovery actions must be task-scoped and receipt-backed."
+    }
+  ],
+  "graph_focus": {
+    "title": "Selected provenance path",
+    "nodes": [
+      { "id": "plan", "label": "Plan", "kind": "plan" },
+      { "id": "task", "label": "Task", "kind": "task" },
+      { "id": "artifact", "label": "Artifact", "kind": "artifact" },
+      { "id": "closeout", "label": "Closeout", "kind": "closeout" },
+      { "id": "receipt", "label": "Receipt", "kind": "receipt" },
+      { "id": "truth", "label": "Accepted truth", "kind": "truth" }
+    ],
+    "edges": [
+      { "from": "plan", "to": "task", "label": "queued" },
+      { "from": "task", "to": "artifact", "label": "produced" },
+      { "from": "artifact", "to": "closeout", "label": "supports" },
+      { "from": "closeout", "to": "receipt", "label": "reviewed" },
+      { "from": "receipt", "to": "truth", "label": "needs follow-up" }
+    ]
+  },
+  "stale_state": {
+    "status": "fresh",
+    "last_seen_at": "2026-06-18T02:47:47Z"
+  }
+}

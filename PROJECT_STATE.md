@@ -1,6 +1,6 @@
 # Project State
 
-Updated: 2026-06-17
+Updated: 2026-06-19
 
 This is the small current surface for Forager development work. It is separate
 from the public product README and from the mdBook user guides.
@@ -23,6 +23,9 @@ out of product-facing docs. The product direction is defined in
 - remote operator contract: `docs/remote-operator.md`
 - operation cycle: `docs/guides/operation-cycle.md`
 - current offdesk status: `docs/offdesk-operation-status.md`
+- UI surface TODO: `docs/ui-surface-todo.md`
+- Web dashboard control-plane TODO:
+  `docs/web-dashboard-control-plane-todo.md`
 - runtime smoke runbook: `docs/guides/offdesk-runtime-smoke.md`
 - long-run validation runbook: `docs/guides/offdesk-long-run-validation.md`
 - adaptive wiki contract: `docs/adaptive-wiki.md`
@@ -51,6 +54,9 @@ out of product-facing docs. The product direction is defined in
 - Telegram Remote Operator health is live for the default profile. It reports a
   polling listener, configured chat allowlist, local model availability, and a
   read-only action surface. Remote launch remains blocked by design.
+- The external Telegram Remote Operator watchdog can run outside the listener
+  process, read loop-status and systemd state, send rate-limited emergency
+  alerts, and render user-service/timer units through the installer.
 - Domain-specific validation notes have been moved out of mdBook product docs
   into `archive/domain-history/`. They remain available for historical
   inspection but should not shape public product language.
@@ -58,25 +64,105 @@ out of product-facing docs. The product direction is defined in
 ## Current Gaps
 
 - The Remote Operator can guide project selection, initialization preview,
-  plan draft creation, plan registration, and plan-review approval. It still
-  must not start runtime work from Telegram.
-- Launch-preparation, gate approval, monitoring, and closeout bridge phases
-  need a separate design and implementation pass.
-- The Telegram listener now survives known transport failures, but an external
-  watchdog is still needed for machine, process-manager, or service-wide
-  failures.
-- Website dependencies need a security refresh before treating the public site
-  build as release-clean.
+  plan draft creation, plan registration, plan-review approval, and read-only
+  launch-preparation packet creation. It can also create a pending
+  `dispatch.runtime` gate request, resolve that exact approval, and write a
+  bounded `ExecutionBrief`, a local-review enqueue handoff receipt, and a
+  prepared-workload binding receipt. It can enqueue only the bound
+  `dispatch.runtime` task, start it only through task-scoped tick, and monitor
+  only that same task through task-scoped tick with `--limit 0`. It can create
+  a closeout packet only for that completed monitored task, then write a local
+  `closeout-review` handoff with verdict command templates. It can record only
+  handoff-bound `approved`, `revise`, or `blocked` closeout-review verdicts
+  from Telegram. Accepted truth is recorded only when the resulting
+  `closeout_receipt.v1` status is `accepted`.
+- Closeout follow-up decision resolution and accepted-truth recovery surfaces
+  still need a separate design and implementation pass.
+- The Telegram listener now survives known transport failures, and the external
+  watchdog covers stale listener, failed service, and emergency alert paths.
+- Website dependencies were refreshed to close `npm audit` findings; Astro 6,
+  Tailwind 4, and an esbuild security override are now part of the verified
+  site build path.
+- UI surfaces now have a first shared operator-state contract, compact Telegram
+  decision relay cards, semantic TUI Offdesk summaries, a fixture-backed WebUI
+  review route, live `review_surface.v1` export/hydration for the WebUI route,
+  Playwright desktop/mobile screenshot coverage, and a TUI preview summary.
+- The long-term Web dashboard/control-plane direction is captured in
+  `docs/web-dashboard-control-plane-todo.md`: workstation overview, project
+  portfolio, decision inbox, scoped provenance graph, action envelope, and
+  dashboard-aware assistant.
+- The first Web dashboard slice is live: `forager ondesk workstation-surface
+  --json`, `npm run export:workstation-surface`, and the static `/dashboard/`
+  route now share `workstation_surface.v1`.
+- The workstation dashboard now has fixture coverage for healthy idle, agent
+  outage, active run, accepted closeout, and accepted-truth recovery states.
+- The `/dashboard/` project portfolio now behaves as a selectable work queue:
+  selecting a project shows a focused detail panel with plan/runtime/closeout/
+  truth chips, decision/runtime/truth-recovery counts, and a project-specific
+  next action derived from the existing `workstation_surface.v1`. The
+  dashboard's Scoped Graph now follows the selected project and shows that
+  project's plan/runtime/closeout/accepted-truth path plus local blockers. The
+  read-only Assistant panel now follows the same selected project and exposes
+  scoped prompts plus state or receipt refs before any future action-card work.
+- The read-only Web decision action center is live: `workstation_surface.v1`
+  now embeds `decision_inbox_surface.v1`, and `/decisions/` renders open
+  decision records with allowed action previews, stale guards, authorization
+  boundary, and CLI fallback.
+- Decision action previews now carry `action_envelope.v1` cards with observed
+  hashes, nonce/TTL, issued/expiry timestamps, idempotency keys, forbidden
+  effects, confirmation phrases, expected receipt schema, and safe CLI
+  inspection fallback. `forager ondesk action-envelope --envelope <PATH>
+  --json` now validates those envelopes against the current decision ledger and
+  writes idempotent `action_envelope_receipt.v1` acceptance or stale-rejection
+  receipts. `workstation_surface.v1` now attaches matching latest receipt
+  verdicts back onto action cards, and `/decisions/` renders those verdicts
+  without exposing full logs. `forager ondesk action-preflight --receipt-id
+  <ID> --json` now starts only from a validated action-envelope receipt,
+  rejects stale or non-latest receipts, rechecks the current decision hash, and
+  writes an idempotent `action_execution_preflight.v1` without mutating runtime
+  or project state. `forager ondesk action-decision --preflight-id <ID>
+  --note <TEXT> --json` is the first action-specific executor: it requires a
+  ready preflight, supports only bounded decision choices, appends canonical
+  decision handoff records, records idempotent `decision_action_execution.v1`
+  receipts, and still does not dispatch runtime work or update accepted truth.
+  `workstation_surface.v1` now attaches the latest matching
+  `decision_action_execution.v1` result back onto decision action cards, and
+  `/decisions/` renders applied/blocked execution summaries without exposing
+  full execution logs. `forager ondesk action-closeout --execution-id <ID>
+  --json` now closes an applied decision action handoff into a canonical
+  `DecisionReceipt`, writes `decision_action_closeout.v1`, and keeps runtime
+  dispatch/project-file/accepted-truth mutation out of this stage. The
+  workstation surface projects the append-only decision ledger through the
+  latest record per decision id, so receipted decisions no longer remain open
+  through stale ledger entries. `forager ondesk runtime-preflight
+  --closeout-id <ID> --json` now verifies a receipted closeout against the
+  latest canonical decision receipt and writes `runtime_dispatch_preflight.v1`.
+  `forager ondesk runtime-dispatch --preflight-id <ID> --runner <RUNNER>
+  --cmd <CMD> --json` queues a durable `OffdeskTask` and records
+  `runtime_dispatch_receipt.v1`; it does not launch a process, so actual
+  runtime execution still passes through `forager offdesk tick` and the
+  scheduler gate. `workstation_surface.v1` now exposes a separate
+  `runtime_dispatch_surface.v1` for receipted post-closeout handoffs, and
+  `/decisions/` renders preflight, queue-dispatch, and tick CLI fallbacks
+  without re-opening the decision inbox. The workstation surface also exposes
+  `accepted_truth_recovery_surface.v1` for latest closeout receipts that are
+  not accepted truth, and `/dashboard/` renders those follow-up, blocked, or
+  retired-incomplete states with short local CLI fallback commands plus
+  receipt-backed `accepted_truth_recovery_action_envelope.v1` previews. The
+  matching `forager ondesk accepted-truth-recovery-envelope --envelope <PATH>
+  --json` command writes only
+  `accepted_truth_recovery_action_receipt.v1` validation/stale receipts and
+  never executes the fallback or records accepted truth.
 - Large Offdesk and Telegram adapter modules need staged decomposition before
   adding more mutation-capable remote actions.
 
 ## Next Work Candidates
 
-1. Add an external Remote Operator watchdog that reports stale listener health.
-2. Refresh website dependencies and verify `npm audit`.
-3. Update `docs/remote-operator.md` phase status for the implemented Plan Mode
-   bridge and the remaining launch/monitor/closeout bridge.
-4. Split the large Offdesk CLI and Telegram adapter into smaller modules.
+1. Add the next guarded executor stage for accepted-truth recovery only if it
+   starts from a current `accepted_truth_recovery_action_receipt.v1` and keeps
+   accepted-truth recording as a separate explicit closeout receipt step.
+2. Split the large Offdesk CLI and Telegram adapter into smaller modules before
+   adding more mutation-capable remote actions.
 
 ## Refresh Rule
 

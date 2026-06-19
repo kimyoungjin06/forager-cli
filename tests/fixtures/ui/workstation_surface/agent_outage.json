@@ -1,0 +1,116 @@
+{
+  "schema": "workstation_surface.v1",
+  "generated_at": "2026-06-18T03:10:00Z",
+  "workstation_id": "workstation-default",
+  "profile": "default",
+  "source_label": "Fixture agent outage",
+  "workspace_roots": ["/workspace/harness"],
+  "health": [
+    {
+      "id": "telegram",
+      "label": "Telegram operator",
+      "status": "blocked",
+      "summary": "Listener status is error; stale=true."
+    },
+    {
+      "id": "runtime_store",
+      "label": "Runtime store",
+      "status": "ok",
+      "summary": "Profile store is readable; blocked runtime item remains visible."
+    },
+    {
+      "id": "closeout",
+      "label": "Closeout state",
+      "status": "ok",
+      "summary": "0 required, 0 accepted, 0 approved with follow-ups."
+    },
+    {
+      "id": "local_llm",
+      "label": "Local LLM",
+      "status": "blocked",
+      "summary": "Configured local coding model endpoint is unreachable."
+    }
+  ],
+  "capacity": {
+    "active_runners": 0,
+    "queued_tasks": 1,
+    "provider_deferred": 1,
+    "budget_warnings": 0
+  },
+  "attention_counts": {
+    "pending_approvals": 0,
+    "pending_decisions": 1,
+    "blocked_tasks": 1,
+    "failed_tasks": 1,
+    "closeout_required": 0,
+    "accepted_truth_missing": 0,
+    "followup_decisions_required": 1
+  },
+  "top_attention": {
+    "kind": "runtime_failure",
+    "title": "Agent runtime outage",
+    "severity": "critical",
+    "project_key": "Harness",
+    "summary": "The local agent endpoint and Telegram listener are not healthy enough for remote autonomous work.",
+    "action_label": "Open recovery evidence"
+  },
+  "next_safe_actions": [
+    {
+      "kind": "recovery_required",
+      "label": "Recovery required",
+      "reason": "Restore the local model or choose an approved provider fallback before starting new runtime work.",
+      "command": "forager offdesk remote-operator status --json",
+      "requires_operator_review": true
+    }
+  ],
+  "projects": [
+    {
+      "project_key": "Harness",
+      "display_name": "Forager Harness",
+      "severity": "critical",
+      "plan": "needs_decision",
+      "runtime": "blocked",
+      "decisions": 1,
+      "closeout": "not_ready",
+      "truth": "not_applicable",
+      "last_activity": "2026-06-18T03:09:00Z"
+    }
+  ],
+  "decisions": [
+    {
+      "decision_id": "decision-agent-outage",
+      "kind": "runtime_recovery",
+      "severity": "critical",
+      "project_key": "Harness",
+      "title": "Recover local agent runtime",
+      "why_now": "Remote offdesk work cannot safely start while the configured local model is unreachable.",
+      "allowed_actions": ["Retry health check", "Use approved fallback", "Keep blocked"],
+      "authorization_boundary": "No runtime launch is authorized by acknowledging this outage."
+    }
+  ],
+  "graph_focus": {
+    "title": "Selected provenance path",
+    "nodes": [
+      { "id": "status", "label": "Status", "kind": "source" },
+      { "id": "attention", "label": "Attention", "kind": "summary" },
+      { "id": "decision", "label": "Decision", "kind": "decision" },
+      { "id": "action", "label": "Next safe action", "kind": "action" },
+      { "id": "receipt", "label": "Receipt", "kind": "receipt" }
+    ],
+    "edges": [
+      { "from": "status", "to": "attention", "label": "projects" },
+      { "from": "attention", "to": "decision", "label": "prioritizes" },
+      { "from": "decision", "to": "action", "label": "permits" },
+      { "from": "action", "to": "receipt", "label": "must produce" }
+    ]
+  },
+  "stale_state": {
+    "status": "stale",
+    "last_seen_at": "2026-06-18T03:04:00Z",
+    "summary": "Listener state is stale and runtime launch should be treated as unavailable."
+  },
+  "redaction": {
+    "operator_safe": true,
+    "path_policy": "summary_first"
+  }
+}

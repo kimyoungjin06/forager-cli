@@ -564,35 +564,27 @@ impl HomeView {
                 Span::styled(summary.focus_label(), accent_style),
             ]),
             Line::from(vec![
-                Span::styled("Tasks: ", label_style),
+                Span::styled("Work:  ", label_style),
                 Span::styled(
                     format!(
-                        "p/q/a/r/f/c {}/{}/{}/{}/{}/{}",
-                        summary.pending_approvals,
-                        summary.queued_tasks,
-                        summary.active_tasks,
-                        summary.resume_pending_tasks,
-                        summary.failed_tasks,
-                        summary.cancelled_tasks
+                        "approval {}  queued {}  active {}",
+                        summary.pending_approvals, summary.queued_tasks, summary.active_tasks
                     ),
                     value_style,
                 ),
             ]),
             Line::from(vec![
-                Span::styled("Runs:  ", label_style),
+                Span::styled("Review: ", label_style),
                 Span::styled(
                     format!(
-                        "resume fresh/stale {}/{}  bg stale/failed {}/{}",
-                        summary.fresh_pending,
-                        summary.stale_pending,
-                        summary.stale_background,
-                        summary.failed_background
+                        "resume {}  failed {}  cancelled {}",
+                        summary.resume_pending_tasks, summary.failed_tasks, summary.cancelled_tasks
                     ),
                     value_style,
                 ),
             ]),
             Line::from(vec![
-                Span::styled("Close: ", label_style),
+                Span::styled("Closeout: ", label_style),
                 Span::styled(
                     summary.closeout_label(),
                     if summary.closeout_required > 0 {
@@ -603,7 +595,7 @@ impl HomeView {
                 ),
             ]),
             Line::from(vec![
-                Span::styled("Next:  ", label_style),
+                Span::styled("Next action: ", label_style),
                 Span::styled(summary.next_action_label(), accent_style),
             ]),
         ];
@@ -678,11 +670,9 @@ impl HomeView {
                 Span::styled("│", sep_style),
                 Span::styled(
                     format!(
-                        " Offdesk p/q/a/r/f/x {}/{}/{}/{}/{}/{} ",
+                        " Offdesk approval {} active {} failed {} closeout {} ",
                         self.offdesk_resume.pending_approvals,
-                        self.offdesk_resume.queued_tasks,
                         self.offdesk_resume.active_tasks,
-                        self.offdesk_resume.resume_pending_tasks,
                         self.offdesk_resume.failed_tasks,
                         self.offdesk_resume.closeout_required
                     ),

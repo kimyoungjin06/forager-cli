@@ -1,0 +1,514 @@
+---
+import Base from '../layouts/Base.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import { sitePath } from '../lib/paths';
+import {
+  dashboardViewFromSurface,
+  formatLabel,
+  severityClasses,
+  severityLabels,
+  type DashboardView,
+  type DecisionItem,
+  type RuntimeDispatchItem,
+} from '../lib/dashboardSurface';
+
+import workstationSurface from '../../../tests/fixtures/ui/workstation_surface/attention.json';
+
+const decisionView = dashboardViewFromSurface(workstationSurface) as DashboardView;
+const selectedDecision = decisionView.decisionInbox.items[0] as DecisionItem | undefined;
+const selectedRuntimeDispatch = decisionView.runtimeDispatch.items[0] as RuntimeDispatchItem | undefined;
+---
+
+<Base
+  title="Forager Decisions"
+  description="Read-only Forager decision inbox for operator choices, evidence refs, action boundaries, and CLI fallbacks."
+>
+  <Nav />
+
+  <main
+    id="decision-app"
+    class="min-h-screen bg-[#08111d] pt-24 text-slate-100"
+    data-live-surface-url={sitePath('/workstation-surface.json')}
+  >
+    <section class="border-y border-slate-700/70 bg-[#101a27] px-6 py-5">
+      <div class="mx-auto flex max-w-7xl flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div class="min-w-0">
+          <p class="text-xs font-semibold uppercase tracking-[0.16em] text-brand-300">Forager Decisions</p>
+          <h1 class="mt-2 text-3xl font-semibold tracking-tight text-white md:text-4xl">Decision action center</h1>
+          <p class="mt-2 max-w-3xl text-sm leading-relaxed text-slate-400" data-decision-summary>{decisionView.decisionInbox.summary}</p>
+        </div>
+        <div class="grid gap-3 text-sm sm:grid-cols-3">
+          <div class="border border-slate-700 bg-slate-950/55 px-4 py-3">
+            <p class="text-slate-400">Open</p>
+            <p class="mt-1 font-mono text-slate-100" data-decision-open-count>{decisionView.decisionInbox.openCount}</p>
+          </div>
+          <div class="border border-slate-700 bg-slate-950/55 px-4 py-3">
+            <p class="text-slate-400">Visible</p>
+            <p class="mt-1 font-mono text-slate-100" data-decision-visible-count>{decisionView.decisionInbox.visibleCount}</p>
+          </div>
+          <div class="border border-slate-700 bg-slate-950/55 px-4 py-3">
+            <p class="text-slate-400">Mode</p>
+            <p class="mt-1 font-mono text-slate-100" data-decision-mode>{decisionView.decisionInbox.actionMode}</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="mx-auto grid max-w-7xl gap-6 px-6 py-8 lg:grid-cols-[22rem_1fr]">
+      <aside class="min-w-0 space-y-3">
+        <div class="flex items-center justify-between gap-3">
+          <h2 class="text-sm font-semibold uppercase tracking-[0.16em] text-slate-400">Queue</h2>
+          <a href={sitePath('/dashboard/')} class="text-sm font-semibold text-brand-200 hover:text-white">Dashboard</a>
+        </div>
+        <div class="space-y-3" data-decision-queue>
+          {decisionView.decisionInbox.items.length ? (
+            decisionView.decisionInbox.items.map((decision, index) => (
+              <article class={`min-w-0 border p-4 ${index === 0 ? severityClasses[decision.severity] : 'border-slate-700 bg-slate-900/70 text-slate-200'}`}>
+                <div class="flex items-start justify-between gap-3">
+                  <h3 class="text-base font-semibold">{decision.title}</h3>
+                  <span class="whitespace-nowrap text-xs font-semibold uppercase tracking-[0.12em] opacity-75">{severityLabels[decision.severity]}</span>
+                </div>
+                <p class="mt-2 font-mono text-xs uppercase tracking-[0.12em] opacity-70">{decision.project_key} · {formatLabel(decision.kind)}</p>
+                <p class="mt-2 text-sm leading-relaxed opacity-85">{decision.why_now}</p>
+              </article>
+            ))
+          ) : (
+            <article class="border border-emerald-400/35 bg-emerald-400/10 p-4 text-emerald-100">
+              <h3 class="font-semibold">{decisionView.decisionInbox.emptyTitle}</h3>
+              <p class="mt-2 text-sm leading-relaxed opacity-85">{decisionView.decisionInbox.emptySummary}</p>
+            </article>
+          )}
+          {decisionView.runtimeDispatch.items.length ? (
+            <section class="border border-slate-700 bg-slate-950/55 p-4">
+              <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Runtime handoff</p>
+              <p class="mt-2 text-sm leading-relaxed text-slate-300">{decisionView.runtimeDispatch.summary}</p>
+              <div class="mt-3 space-y-2">
+                {decisionView.runtimeDispatch.items.map((item) => (
+                  <article class={`border p-3 ${severityClasses[item.severity]}`}>
+                    <div class="flex items-start justify-between gap-3">
+                      <h3 class="text-sm font-semibold">{item.title}</h3>
+                      <span class="whitespace-nowrap text-xs font-semibold uppercase tracking-[0.12em] opacity-75">{formatLabel(item.stage)}</span>
+                    </div>
+                    <p class="mt-2 break-all font-mono text-xs opacity-80">{item.closeout_id}</p>
+                  </article>
+                ))}
+              </div>
+            </section>
+          ) : null}
+        </div>
+      </aside>
+
+      <section class="min-w-0 space-y-6" data-decision-detail>
+        {selectedDecision ? (
+          <article class={`min-w-0 border p-6 ${severityClasses[selectedDecision.severity]}`}>
+            <p class="text-sm font-semibold uppercase tracking-[0.14em] opacity-75">{selectedDecision.project_key} · {formatLabel(selectedDecision.kind)}</p>
+            <h2 class="mt-3 text-3xl font-semibold tracking-tight text-white">{selectedDecision.title}</h2>
+            <p class="mt-4 text-base leading-relaxed text-slate-100">{selectedDecision.what_changed}</p>
+            <div class="mt-6 grid gap-4 md:grid-cols-2">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.12em] opacity-75">Why now</p>
+                <p class="mt-2 text-sm leading-relaxed opacity-90">{selectedDecision.why_now}</p>
+              </div>
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.12em] opacity-75">Risk</p>
+                <p class="mt-2 text-sm leading-relaxed opacity-90">{selectedDecision.risk}</p>
+              </div>
+            </div>
+          </article>
+          <div class="min-w-0 border border-slate-700 bg-slate-950/55 p-6">
+            <p class="text-sm font-semibold uppercase tracking-[0.16em] text-brand-200">Action envelope preview</p>
+            <div class="mt-4 space-y-3">
+              {selectedDecision.action_envelopes.length ? (
+                selectedDecision.action_envelopes.map((envelope) => (
+                  <article class="border border-slate-700 bg-slate-900/70 p-4">
+                    <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <p class="font-mono text-xs uppercase tracking-[0.12em] text-slate-400">{envelope.schema}</p>
+                        <h3 class="mt-2 font-semibold text-white">{formatLabel(envelope.action_kind)}</h3>
+                      </div>
+                      <span class="whitespace-nowrap border border-slate-600 px-2 py-1 text-xs font-semibold text-slate-300">
+                        {envelope.expires_at ? `Expires ${envelope.expires_at}` : envelope.ttl}
+                      </span>
+                    </div>
+                    <p class="mt-3 text-sm leading-relaxed text-slate-300">{envelope.preview}</p>
+                    <p class="mt-3 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Receipt</p>
+                    {envelope.latest_receipt ? (
+                      <div class={`mt-2 border px-3 py-2 text-xs ${envelope.latest_receipt.stale ? 'border-amber-300/45 bg-amber-300/10 text-amber-100' : 'border-emerald-400/35 bg-emerald-400/10 text-emerald-100'}`}>
+                        <p class="font-semibold uppercase tracking-[0.12em]">{formatLabel(envelope.latest_receipt.result_status)}</p>
+                        <p class="mt-1 font-mono opacity-90">{envelope.latest_receipt.processed_at}</p>
+                        <p class="mt-2 leading-relaxed opacity-90">{envelope.latest_receipt.reason}</p>
+                        {envelope.latest_receipt.failed_checks.length ? (
+                          <p class="mt-2 font-mono opacity-90">Failed: {envelope.latest_receipt.failed_checks.join(' / ')}</p>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <p class="mt-1 font-mono text-xs text-slate-200">{envelope.expected_receipt_schema}</p>
+                    )}
+                    {envelope.latest_execution ? (
+                      <div class={`mt-2 border px-3 py-2 text-xs ${envelope.latest_execution.result_status === 'applied' ? 'border-emerald-400/35 bg-emerald-400/10 text-emerald-100' : 'border-amber-300/45 bg-amber-300/10 text-amber-100'}`}>
+                        <p class="font-semibold uppercase tracking-[0.12em]">Execution {formatLabel(envelope.latest_execution.result_status)}</p>
+                        <p class="mt-1 font-mono opacity-90">{envelope.latest_execution.executed_at}</p>
+                        <p class="mt-2 leading-relaxed opacity-90">{envelope.latest_execution.reason}</p>
+                        {envelope.latest_execution.handoff_id ? (
+                          <p class="mt-2 font-mono opacity-90">{envelope.latest_execution.handoff_id}</p>
+                        ) : null}
+                        {envelope.latest_execution.closeout_command ? (
+                          <code class="mt-2 block break-all border border-white/15 bg-slate-950/35 px-3 py-2 font-mono text-[11px] text-slate-100">{envelope.latest_execution.closeout_command}</code>
+                        ) : null}
+                        {envelope.latest_execution.failed_checks.length ? (
+                          <p class="mt-2 font-mono opacity-90">Failed: {envelope.latest_execution.failed_checks.join(' / ')}</p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    <details class="mt-3">
+                      <summary class="cursor-pointer text-sm font-semibold text-white">Envelope boundary</summary>
+                      <code class="mt-3 block whitespace-pre-wrap break-all border border-slate-700 bg-[#050a12] px-4 py-3 font-mono text-xs text-slate-200">{envelope.allowed_command}</code>
+                    </details>
+                  </article>
+                ))
+              ) : (
+                <p class="text-sm text-slate-400">No action envelope previews were included in this workstation surface.</p>
+              )}
+            </div>
+          </div>
+        ) : selectedRuntimeDispatch ? (
+          <article class={`min-w-0 border p-6 ${severityClasses[selectedRuntimeDispatch.severity]}`}>
+            <p class="text-sm font-semibold uppercase tracking-[0.14em] opacity-75">{selectedRuntimeDispatch.project_key} · {formatLabel(selectedRuntimeDispatch.stage)}</p>
+            <h2 class="mt-3 text-3xl font-semibold tracking-tight text-white">Runtime handoff</h2>
+            <p class="mt-4 text-base leading-relaxed text-slate-100">{selectedRuntimeDispatch.boundary}</p>
+            <div class="mt-6 grid gap-4 md:grid-cols-2">
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.12em] opacity-75">Decision</p>
+                <p class="mt-2 break-all font-mono text-xs opacity-90">{selectedRuntimeDispatch.decision_id}</p>
+              </div>
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.12em] opacity-75">Closeout</p>
+                <p class="mt-2 break-all font-mono text-xs opacity-90">{selectedRuntimeDispatch.closeout_id}</p>
+              </div>
+            </div>
+            <div class="mt-6 space-y-3">
+              <code class="block break-all border border-white/15 bg-slate-950/35 px-3 py-2 font-mono text-[11px] text-slate-100">{selectedRuntimeDispatch.preflight_command}</code>
+              {selectedRuntimeDispatch.dispatch_command ? (
+                <code class="block break-all border border-white/15 bg-slate-950/35 px-3 py-2 font-mono text-[11px] text-slate-100">{selectedRuntimeDispatch.dispatch_command}</code>
+              ) : null}
+              {selectedRuntimeDispatch.tick_command ? (
+                <code class="block break-all border border-white/15 bg-slate-950/35 px-3 py-2 font-mono text-[11px] text-slate-100">{selectedRuntimeDispatch.tick_command}</code>
+              ) : null}
+            </div>
+          </article>
+        ) : (
+          <article class="min-w-0 border border-emerald-400/35 bg-emerald-400/10 p-6 text-emerald-100">
+            <h2 class="text-2xl font-semibold">{decisionView.decisionInbox.emptyTitle}</h2>
+            <p class="mt-3 leading-relaxed opacity-85">{decisionView.decisionInbox.emptySummary}</p>
+          </article>
+        )}
+      </section>
+    </section>
+  </main>
+
+  <script id="decision-fallback-data" type="application/json" set:html={JSON.stringify(decisionView)}></script>
+  <script>
+    import {
+      dashboardViewFromSurface,
+      formatLabel,
+      severityClasses,
+      severityLabels,
+    } from '../lib/dashboardSurface';
+
+    const app = document.getElementById('decision-app');
+    const fallbackElement = document.getElementById('decision-fallback-data');
+    const fallbackView = fallbackElement?.textContent ? JSON.parse(fallbackElement.textContent) : null;
+
+    if (app && fallbackView) {
+      fetchDecisionSurface(app, fallbackView);
+    }
+
+    async function fetchDecisionSurface(root, fallback) {
+      const liveSurfaceUrl = root.dataset.liveSurfaceUrl;
+      if (!liveSurfaceUrl) {
+        renderDecisionCenter(root, fallback);
+        return;
+      }
+
+      try {
+        const response = await fetch(liveSurfaceUrl, { cache: 'no-store' });
+        if (!response.ok) {
+          throw new Error(`workstation surface unavailable: ${response.status}`);
+        }
+
+        renderDecisionCenter(root, dashboardViewFromSurface(await response.json()));
+      } catch {
+        renderDecisionCenter(root, fallback);
+      }
+    }
+
+    function renderDecisionCenter(root, view) {
+      const inbox = view.decisionInbox;
+      setText(root, '[data-decision-summary]', inbox.summary);
+      setText(root, '[data-decision-open-count]', inbox.openCount);
+      setText(root, '[data-decision-visible-count]', inbox.visibleCount);
+      setText(root, '[data-decision-mode]', inbox.actionMode);
+      setHtml(root, '[data-decision-queue]', queueHtml(inbox.items, inbox, view.runtimeDispatch));
+      setHtml(root, '[data-decision-detail]', detailHtml(inbox.items[0], inbox, view.runtimeDispatch));
+    }
+
+    function queueHtml(items, inbox, runtimeDispatch) {
+      const runtimeHtml = runtimeDispatchQueueHtml(runtimeDispatch);
+      if (!items.length) {
+        const emptyDecision = runtimeDispatch.items.length ? '' : `<article class="border border-emerald-400/35 bg-emerald-400/10 p-4 text-emerald-100">
+          <h3 class="font-semibold">${escapeHtml(inbox.emptyTitle)}</h3>
+          <p class="mt-2 text-sm leading-relaxed opacity-85">${escapeHtml(inbox.emptySummary)}</p>
+        </article>`;
+        return `${emptyDecision}${runtimeHtml}`;
+      }
+
+      const decisionHtml = items.map((decision, index) => {
+        const classes = index === 0 ? severityClasses[decision.severity] : 'border-slate-700 bg-slate-900/70 text-slate-200';
+        return `<article class="min-w-0 border p-4 ${classes}">
+          <div class="flex items-start justify-between gap-3">
+            <h3 class="text-base font-semibold">${escapeHtml(decision.title)}</h3>
+            <span class="whitespace-nowrap text-xs font-semibold uppercase tracking-[0.12em] opacity-75">${escapeHtml(severityLabels[decision.severity])}</span>
+          </div>
+          <p class="mt-2 font-mono text-xs uppercase tracking-[0.12em] opacity-70">${escapeHtml(decision.project_key)} · ${escapeHtml(formatLabel(decision.kind))}</p>
+          <p class="mt-2 text-sm leading-relaxed opacity-85">${escapeHtml(decision.why_now)}</p>
+        </article>`;
+      }).join('');
+      return `${decisionHtml}${runtimeHtml}`;
+    }
+
+    function detailHtml(decision, inbox, runtimeDispatch) {
+      if (!decision) {
+        if (runtimeDispatch.items.length) {
+          return runtimeDispatchDetailHtml(runtimeDispatch.items[0]);
+        }
+        return `<article class="min-w-0 border border-emerald-400/35 bg-emerald-400/10 p-6 text-emerald-100">
+          <h2 class="text-2xl font-semibold">${escapeHtml(inbox.emptyTitle)}</h2>
+          <p class="mt-3 leading-relaxed opacity-85">${escapeHtml(inbox.emptySummary)}</p>
+          <code class="mt-4 block whitespace-pre-wrap break-all border border-emerald-300/40 bg-slate-950/35 px-4 py-3 font-mono text-xs">${escapeHtml(inbox.emptyCliFallback)}</code>
+        </article>`;
+      }
+
+      return `<article class="min-w-0 border p-6 ${severityClasses[decision.severity]}">
+        <p class="text-sm font-semibold uppercase tracking-[0.14em] opacity-75">${escapeHtml(decision.project_key)} · ${escapeHtml(formatLabel(decision.kind))}</p>
+        <h2 class="mt-3 text-3xl font-semibold tracking-tight text-white">${escapeHtml(decision.title)}</h2>
+        <p class="mt-4 text-base leading-relaxed text-slate-100">${escapeHtml(decision.what_changed)}</p>
+        <div class="mt-6 grid gap-4 md:grid-cols-2">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.12em] opacity-75">Why now</p>
+            <p class="mt-2 text-sm leading-relaxed opacity-90">${escapeHtml(decision.why_now)}</p>
+          </div>
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.12em] opacity-75">Risk</p>
+            <p class="mt-2 text-sm leading-relaxed opacity-90">${escapeHtml(decision.risk)}</p>
+          </div>
+        </div>
+        <div class="mt-6 border-t border-white/15 pt-5">
+          <p class="text-xs font-semibold uppercase tracking-[0.12em] opacity-75">Action envelope preview</p>
+          <div class="mt-3 space-y-3">${envelopeCardsHtml(decision)}</div>
+          <p class="mt-4 text-xs font-semibold uppercase tracking-[0.12em] opacity-75">Authorization boundary</p>
+          <p class="mt-2 text-sm leading-relaxed opacity-90">${escapeHtml(decision.authorization_boundary)}</p>
+          <p class="mt-4 text-xs font-semibold uppercase tracking-[0.12em] opacity-75">Stale guard</p>
+          <p class="mt-2 text-sm leading-relaxed opacity-90">${escapeHtml(decision.stale_guard)}</p>
+          <details class="mt-5">
+            <summary class="cursor-pointer text-sm font-semibold text-white">CLI fallback</summary>
+            <code class="mt-3 block whitespace-pre-wrap break-all border border-white/20 bg-slate-950/35 px-4 py-3 font-mono text-xs">${escapeHtml(decision.cli_fallback)}</code>
+          </details>
+        </div>
+      </article>`;
+    }
+
+    function runtimeDispatchQueueHtml(runtimeDispatch) {
+      if (!runtimeDispatch.items.length) {
+        return '';
+      }
+
+      const items = runtimeDispatch.items.map((item) => `<article class="border p-3 ${severityClasses[item.severity]}">
+        <div class="flex items-start justify-between gap-3">
+          <h3 class="text-sm font-semibold">${escapeHtml(item.title)}</h3>
+          <span class="whitespace-nowrap text-xs font-semibold uppercase tracking-[0.12em] opacity-75">${escapeHtml(formatLabel(item.stage))}</span>
+        </div>
+        <p class="mt-2 break-all font-mono text-xs opacity-80">${escapeHtml(item.closeout_id)}</p>
+      </article>`).join('');
+
+      return `<section class="border border-slate-700 bg-slate-950/55 p-4">
+        <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Runtime handoff</p>
+        <p class="mt-2 text-sm leading-relaxed text-slate-300">${escapeHtml(runtimeDispatch.summary)}</p>
+        <div class="mt-3 space-y-2">${items}</div>
+      </section>`;
+    }
+
+    function runtimeDispatchDetailHtml(item) {
+      const preflight = item.latest_preflight
+        ? `<div class="border border-white/15 bg-slate-950/35 px-3 py-2 text-xs">
+            <p class="font-semibold uppercase tracking-[0.12em] opacity-75">Preflight ${escapeHtml(formatLabel(item.latest_preflight.result_status))}</p>
+            <p class="mt-1 break-all font-mono opacity-90">${escapeHtml(item.latest_preflight.preflight_id)}</p>
+            <p class="mt-2 leading-relaxed opacity-90">${escapeHtml(item.latest_preflight.reason)}</p>
+          </div>`
+        : '';
+      const receipt = item.latest_receipt
+        ? `<div class="border border-white/15 bg-slate-950/35 px-3 py-2 text-xs">
+            <p class="font-semibold uppercase tracking-[0.12em] opacity-75">Receipt ${escapeHtml(formatLabel(item.latest_receipt.result_status))}</p>
+            <p class="mt-1 break-all font-mono opacity-90">${escapeHtml(item.latest_receipt.receipt_id)}</p>
+            <p class="mt-1 break-all font-mono opacity-90">Task ${escapeHtml(item.latest_receipt.task_id)}</p>
+            <p class="mt-2 leading-relaxed opacity-90">${escapeHtml(item.latest_receipt.reason)}</p>
+          </div>`
+        : '';
+      const dispatch = item.dispatch_command
+        ? `<code class="block break-all border border-white/15 bg-slate-950/35 px-3 py-2 font-mono text-[11px] text-slate-100">${escapeHtml(item.dispatch_command)}</code>`
+        : '';
+      const tick = item.tick_command
+        ? `<code class="block break-all border border-white/15 bg-slate-950/35 px-3 py-2 font-mono text-[11px] text-slate-100">${escapeHtml(item.tick_command)}</code>`
+        : '';
+
+      return `<article class="min-w-0 border p-6 ${severityClasses[item.severity]}">
+        <p class="text-sm font-semibold uppercase tracking-[0.14em] opacity-75">${escapeHtml(item.project_key)} · ${escapeHtml(formatLabel(item.stage))}</p>
+        <h2 class="mt-3 text-3xl font-semibold tracking-tight text-white">Runtime handoff</h2>
+        <p class="mt-4 text-base leading-relaxed text-slate-100">${escapeHtml(item.boundary)}</p>
+        <div class="mt-6 grid gap-4 md:grid-cols-2">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.12em] opacity-75">Decision</p>
+            <p class="mt-2 break-all font-mono text-xs opacity-90">${escapeHtml(item.decision_id)}</p>
+          </div>
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.12em] opacity-75">Closeout</p>
+            <p class="mt-2 break-all font-mono text-xs opacity-90">${escapeHtml(item.closeout_id)}</p>
+          </div>
+        </div>
+        <div class="mt-5 grid gap-3 md:grid-cols-2">${preflight}${receipt}</div>
+        <div class="mt-6 space-y-3">
+          <code class="block break-all border border-white/15 bg-slate-950/35 px-3 py-2 font-mono text-[11px] text-slate-100">${escapeHtml(item.preflight_command)}</code>
+          ${dispatch}
+          ${tick}
+        </div>
+      </article>`;
+    }
+
+    function envelopeCardsHtml(decision) {
+      if (!decision.action_envelopes.length) {
+        const visible = decision.allowed_actions.length ? decision.allowed_actions.slice(0, 3) : ['Review decision'];
+        return visible.map((action) => `<span class="inline-flex border border-white/20 bg-slate-950/35 px-3 py-2 text-xs font-semibold">${escapeHtml(action)}</span>`).join(' ');
+      }
+
+      return decision.action_envelopes.map((envelope) => `<article class="border border-white/15 bg-slate-950/35 p-4">
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p class="font-mono text-xs uppercase tracking-[0.12em] opacity-75">${escapeHtml(envelope.schema)}</p>
+            <h3 class="mt-2 font-semibold text-white">${escapeHtml(formatLabel(envelope.action_kind))}</h3>
+          </div>
+          <span class="whitespace-nowrap border border-white/15 px-2 py-1 text-xs font-semibold opacity-80">${escapeHtml(envelope.expires_at ? `Expires ${envelope.expires_at}` : envelope.ttl)}</span>
+        </div>
+        <p class="mt-3 text-sm leading-relaxed opacity-90">${escapeHtml(envelope.preview)}</p>
+        ${receiptHtml(envelope)}
+        ${executionHtml(envelope)}
+        <div class="mt-4 grid gap-3 text-xs md:grid-cols-2">
+          <div>
+            <p class="font-semibold uppercase tracking-[0.12em] opacity-75">Observed hash</p>
+            <p class="mt-1 break-all font-mono opacity-90">${escapeHtml(envelope.observed_hash)}</p>
+          </div>
+          <div>
+            <p class="font-semibold uppercase tracking-[0.12em] opacity-75">Idempotency</p>
+            <p class="mt-1 break-all font-mono opacity-90">${escapeHtml(envelope.idempotency_key)}</p>
+          </div>
+          <div>
+            <p class="font-semibold uppercase tracking-[0.12em] opacity-75">Expected receipt</p>
+            <p class="mt-1 break-all font-mono opacity-90">${escapeHtml(envelope.expected_receipt_schema)}</p>
+          </div>
+          <div>
+            <p class="font-semibold uppercase tracking-[0.12em] opacity-75">Confirmation</p>
+            <p class="mt-1 break-all font-mono opacity-90">${escapeHtml(envelope.confirmation_phrase || 'not required')}</p>
+          </div>
+        </div>
+        <details class="mt-4">
+          <summary class="cursor-pointer text-sm font-semibold text-white">Envelope boundary</summary>
+          <code class="mt-3 block whitespace-pre-wrap break-all border border-white/20 bg-slate-950/35 px-4 py-3 font-mono text-xs">${escapeHtml(envelope.allowed_command)}</code>
+          <p class="mt-3 text-xs leading-relaxed opacity-85">${escapeHtml(envelope.stale_rejection_reason)}</p>
+          <p class="mt-2 text-xs leading-relaxed opacity-85">Forbidden: ${escapeHtml(envelope.forbidden_effects.join(' / '))}</p>
+        </details>
+      </article>`).join('');
+    }
+
+    function receiptHtml(envelope) {
+      if (!envelope.latest_receipt) {
+        return `<p class="mt-3 text-xs font-semibold uppercase tracking-[0.12em] opacity-75">No action receipt recorded yet</p>`;
+      }
+
+      const receipt = envelope.latest_receipt;
+      const statusClass = receipt.stale
+        ? 'border-amber-300/45 bg-amber-300/10 text-amber-100'
+        : 'border-emerald-400/35 bg-emerald-400/10 text-emerald-100';
+      const failed = receipt.failed_checks.length
+        ? `<p class="mt-2 break-all font-mono opacity-90">Failed: ${escapeHtml(receipt.failed_checks.join(' / '))}</p>`
+        : '';
+      return `<div class="mt-3 border px-3 py-2 text-xs ${statusClass}">
+        <p class="font-semibold uppercase tracking-[0.12em]">${escapeHtml(formatLabel(receipt.result_status))}</p>
+        <p class="mt-1 font-mono opacity-90">${escapeHtml(receipt.processed_at)}</p>
+        <p class="mt-2 leading-relaxed opacity-90">${escapeHtml(receipt.reason)}</p>
+        ${failed}
+      </div>`;
+    }
+
+    function executionHtml(envelope) {
+      if (!envelope.latest_execution) {
+        return '';
+      }
+
+      const execution = envelope.latest_execution;
+      const statusClass = execution.result_status === 'applied'
+        ? 'border-emerald-400/35 bg-emerald-400/10 text-emerald-100'
+        : 'border-amber-300/45 bg-amber-300/10 text-amber-100';
+      const handoff = execution.handoff_id
+        ? `<p class="mt-2 break-all font-mono opacity-90">${escapeHtml(execution.handoff_id)}</p>`
+        : '';
+      const closeout = execution.closeout_command
+        ? `<code class="mt-2 block break-all border border-white/15 bg-slate-950/35 px-3 py-2 font-mono text-[11px] text-slate-100">${escapeHtml(execution.closeout_command)}</code>`
+        : '';
+      const failed = execution.failed_checks.length
+        ? `<p class="mt-2 break-all font-mono opacity-90">Failed: ${escapeHtml(execution.failed_checks.join(' / '))}</p>`
+        : '';
+      return `<div class="mt-3 border px-3 py-2 text-xs ${statusClass}">
+        <p class="font-semibold uppercase tracking-[0.12em]">Execution ${escapeHtml(formatLabel(execution.result_status))}</p>
+        <p class="mt-1 font-mono opacity-90">${escapeHtml(execution.executed_at)}</p>
+        <p class="mt-2 leading-relaxed opacity-90">${escapeHtml(execution.reason)}</p>
+        ${handoff}
+        ${closeout}
+        ${failed}
+      </div>`;
+    }
+
+    function setText(root, selector, value) {
+      const element = root.querySelector(selector);
+      if (element) {
+        element.textContent = String(value ?? '');
+      }
+    }
+
+    function setHtml(root, selector, value) {
+      const element = root.querySelector(selector);
+      if (element) {
+        element.innerHTML = value;
+      }
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (char) => {
+        switch (char) {
+          case '&':
+            return '&amp;';
+          case '<':
+            return '&lt;';
+          case '>':
+            return '&gt;';
+          case '"':
+            return '&quot;';
+          case "'":
+            return '&#39;';
+          default:
+            return char;
+        }
+      });
+    }
+  </script>
+
+  <Footer />
+</Base>

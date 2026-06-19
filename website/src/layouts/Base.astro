@@ -8,6 +8,7 @@ interface Props {
 }
 
 import { sitePath } from '../lib/paths';
+import '../styles/global.css';
 
 const siteUrl = Astro.site?.toString().replace(/\/$/, '') ?? '';
 const publicSiteUrl = `${siteUrl}${sitePath('/')}`.replace(/\/$/, '');
@@ -94,7 +95,6 @@ const structuredData = {
   <link rel="preload" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" as="style">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href={sitePath('/styles.css')}>
 </head>
 <body class="gradient-bg min-h-screen text-gray-100 antialiased">
   <slot />

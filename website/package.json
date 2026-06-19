@@ -4,12 +4,21 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "export:review-surface": "node scripts/export-review-surface.mjs",
+    "export:workstation-surface": "node scripts/export-workstation-surface.mjs",
+    "test:visual": "npm run build && playwright test"
   },
   "dependencies": {
-    "@astrojs/sitemap": "3.7.0",
-    "@astrojs/tailwind": "^6.0.2",
-    "astro": "5.16.13",
-    "tailwindcss": "^3.4.0"
+    "@astrojs/sitemap": "^3.7.3",
+    "@tailwindcss/vite": "^4.3.1",
+    "astro": "^6.4.7",
+    "tailwindcss": "^4.3.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.0"
+  },
+  "overrides": {
+    "esbuild": "0.28.1"
   }
 }

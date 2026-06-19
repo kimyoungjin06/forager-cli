@@ -1,0 +1,92 @@
+{
+  "schema": "workstation_surface.v1",
+  "generated_at": "2026-06-18T03:00:00Z",
+  "workstation_id": "workstation-default",
+  "profile": "default",
+  "source_label": "Fixture healthy idle",
+  "workspace_roots": [],
+  "health": [
+    {
+      "id": "telegram",
+      "label": "Telegram operator",
+      "status": "ok",
+      "summary": "Listener status is polling; stale=false."
+    },
+    {
+      "id": "runtime_store",
+      "label": "Runtime store",
+      "status": "ok",
+      "summary": "Profile store is readable; no active Offdesk tasks."
+    },
+    {
+      "id": "closeout",
+      "label": "Closeout state",
+      "status": "ok",
+      "summary": "0 required, 1 accepted, 0 approved with follow-ups."
+    },
+    {
+      "id": "local_llm",
+      "label": "Local LLM",
+      "status": "unknown",
+      "summary": "The dashboard surface does not actively probe local model endpoints yet."
+    }
+  ],
+  "capacity": {
+    "active_runners": 0,
+    "queued_tasks": 0,
+    "provider_deferred": 0,
+    "budget_warnings": 0
+  },
+  "attention_counts": {
+    "pending_approvals": 0,
+    "pending_decisions": 0,
+    "blocked_tasks": 0,
+    "failed_tasks": 0,
+    "closeout_required": 0,
+    "accepted_truth_missing": 0,
+    "followup_decisions_required": 0
+  },
+  "top_attention": {
+    "kind": "clear",
+    "title": "No blocking attention item",
+    "severity": "ok",
+    "summary": "No blocking Forager action is currently visible.",
+    "action_label": "Open review"
+  },
+  "next_safe_actions": [
+    {
+      "kind": "review_dashboard",
+      "label": "Review dashboard",
+      "reason": "No blocking next safe action was reported; inspect the dashboard before starting new work.",
+      "command": "forager status --json",
+      "requires_operator_review": false
+    }
+  ],
+  "projects": [],
+  "decisions": [],
+  "graph_focus": {
+    "title": "Selected provenance path",
+    "nodes": [
+      { "id": "status", "label": "Status", "kind": "source" },
+      { "id": "attention", "label": "Attention", "kind": "summary" },
+      { "id": "decision", "label": "Decision", "kind": "decision" },
+      { "id": "action", "label": "Next safe action", "kind": "action" },
+      { "id": "receipt", "label": "Receipt", "kind": "receipt" }
+    ],
+    "edges": [
+      { "from": "status", "to": "attention", "label": "projects" },
+      { "from": "attention", "to": "decision", "label": "prioritizes" },
+      { "from": "decision", "to": "action", "label": "permits" },
+      { "from": "action", "to": "receipt", "label": "must produce" }
+    ]
+  },
+  "stale_state": {
+    "status": "fresh",
+    "last_seen_at": "2026-06-18T03:00:00Z",
+    "summary": "Surface was generated from current local Forager state."
+  },
+  "redaction": {
+    "operator_safe": true,
+    "path_policy": "summary_first"
+  }
+}
