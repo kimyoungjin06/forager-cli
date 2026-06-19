@@ -132,6 +132,14 @@ This document contains the help content for the `forager` command-line program.
 * [`forager ondesk capture`↴](#forager-ondesk-capture)
 * [`forager ondesk prompt-package`↴](#forager-ondesk-prompt-package)
 * [`forager ondesk review-surface`↴](#forager-ondesk-review-surface)
+* [`forager ondesk workstation-surface`↴](#forager-ondesk-workstation-surface)
+* [`forager ondesk action-envelope`↴](#forager-ondesk-action-envelope)
+* [`forager ondesk accepted-truth-recovery-envelope`↴](#forager-ondesk-accepted-truth-recovery-envelope)
+* [`forager ondesk action-preflight`↴](#forager-ondesk-action-preflight)
+* [`forager ondesk action-decision`↴](#forager-ondesk-action-decision)
+* [`forager ondesk action-closeout`↴](#forager-ondesk-action-closeout)
+* [`forager ondesk runtime-preflight`↴](#forager-ondesk-runtime-preflight)
+* [`forager ondesk runtime-dispatch`↴](#forager-ondesk-runtime-dispatch)
 * [`forager tmux`↴](#forager-tmux)
 * [`forager tmux status`↴](#forager-tmux-status)
 * [`forager sounds`↴](#forager-sounds)
@@ -1273,6 +1281,8 @@ Run one offdesk control-loop pass
 * `--limit <LIMIT>` — Maximum queued tasks to dispatch in this tick
 
   Default value: `10`
+* `--project-key <PROJECT_KEY>` — Restrict this tick to one project key
+* `--task-id <TASK_ID>` — Restrict this tick to one task ID
 * `--lock-stale-minutes <LOCK_STALE_MINUTES>` — Treat previous free lock metadata as stale after this many minutes
 
   Default value: `30`
@@ -2524,6 +2534,14 @@ Capture ondesk notes and prompt context from external harness work
 * `capture` — Capture live harness scrollback into an inspectable prompt package
 * `prompt-package` — Build a markdown prompt package from recent notes and optional capture
 * `review-surface` — Emit the shared review surface for Ondesk and future rich UIs
+* `workstation-surface` — Emit the workstation dashboard surface for the Web UI control plane
+* `action-envelope` — Validate a Web UI action envelope and record a receipt
+* `accepted-truth-recovery-envelope` — Validate an accepted-truth recovery envelope and record a receipt
+* `action-preflight` — Preflight a validated action receipt before any mutation-capable executor
+* `action-decision` — Execute a supported decision action from a ready action preflight
+* `action-closeout` — Close an applied decision action execution with a canonical decision receipt
+* `runtime-preflight` — Preflight a receipted decision action closeout before runtime dispatch
+* `runtime-dispatch` — Queue runtime work from a ready runtime dispatch preflight
 
 
 
@@ -2599,6 +2617,202 @@ Emit the shared review surface for Ondesk and future rich UIs
 
 * `--project-key <PROJECT_KEY>` — Stable project key to focus the review packet. Defaults to all projects
 * `--json` — Emit compact JSON. Without this flag, a human summary is printed
+
+
+
+## `forager ondesk workstation-surface`
+
+Emit the workstation dashboard surface for the Web UI control plane
+
+**Usage:** `forager ondesk workstation-surface [OPTIONS]`
+
+The JSON output uses `workstation_surface.v1` and embeds the read-only
+`decision_inbox_surface.v1` projection used by the Web dashboard and
+`/decisions/` action center. Decision actions include preview-only
+`action_envelope.v1` cards with observed hashes, expiry timestamps,
+idempotency keys, forbidden effects, expected receipt schemas, and any matching
+latest `action_envelope_receipt.v1` verdict. The surface also attaches latest
+matching `decision_action_execution.v1` applied/blocked results when present.
+It also includes a separate `runtime_dispatch_surface.v1` for post-closeout
+handoffs, showing runtime preflight, queue-dispatch, and scheduler-gated tick
+fallback commands without re-opening receipted decisions. It also includes
+`accepted_truth_recovery_surface.v1` for closeout receipts that are not
+accepted truth, showing follow-up, blocked/revision, receipt-missing, and
+retired-incomplete states with local CLI fallbacks plus
+`accepted_truth_recovery_action_envelope.v1` previews. These UI projections
+remain non-mutating; accepted-truth recovery fallback validation writes only
+`accepted_truth_recovery_action_receipt.v1` receipts and does not execute the
+fallback or record accepted truth.
+
+###### **Options:**
+
+* `--json` — Emit compact JSON. Without this flag, a human summary is printed
+
+
+
+## `forager ondesk action-envelope`
+
+Validate a Web UI action envelope and record a receipt
+
+**Usage:** `forager ondesk action-envelope [OPTIONS] --envelope <ENVELOPE>`
+
+Reads an `action_envelope.v1` JSON file, verifies the target decision record,
+observed hash, expiry, allowed read-only command, forbidden effects, and
+expected receipt schema, then writes an idempotent
+`action_envelope_receipt.v1` line to the active profile. This command remains
+read-only with respect to project files, runtime dispatch, approval ledgers,
+and accepted-truth state.
+
+###### **Options:**
+
+* `--envelope <ENVELOPE>` — JSON file containing an `action_envelope.v1` preview
+* `--dry-run` — Validate without writing `action_envelope_receipts.jsonl`
+* `--json` — Output as JSON
+
+
+## `forager ondesk accepted-truth-recovery-envelope`
+
+Validate an accepted-truth recovery envelope and record a receipt
+
+**Usage:** `forager ondesk accepted-truth-recovery-envelope [OPTIONS] --envelope <ENVELOPE>`
+
+Reads an `accepted_truth_recovery_action_envelope.v1` JSON file, regenerates
+the current `accepted_truth_recovery_surface.v1`, verifies the closeout review
+target, observed hash, expiry, allowed fallback command, forbidden effects,
+confirmation phrase, and expected receipt schema, then writes an idempotent
+`accepted_truth_recovery_action_receipt.v1` line to the active profile. This
+command is receipt-only: it does not run `closeout-decision`, retire closeouts,
+move files, promote wiki state, dispatch runtime work, or record accepted
+truth.
+
+###### **Options:**
+
+* `--envelope <ENVELOPE>` — JSON file containing an `accepted_truth_recovery_action_envelope.v1` preview
+* `--dry-run` — Validate without writing `accepted_truth_recovery_action_receipts.jsonl`
+* `--json` — Output as JSON
+
+
+
+## `forager ondesk action-preflight`
+
+Preflight a validated action receipt before any mutation-capable executor
+
+**Usage:** `forager ondesk action-preflight [OPTIONS] --receipt-id <RECEIPT_ID>`
+
+Reads `action_envelope_receipts.jsonl`, finds the requested
+`action_envelope_receipt.v1`, verifies that it is validated, non-stale, latest
+for that action, and still matches the live decision ledger hash, then writes
+an idempotent `action_execution_preflight.v1` record. This command does not
+mutate project files, runtime state, approval ledgers, or accepted-truth state;
+future action-specific executors must require a ready preflight id.
+
+###### **Options:**
+
+* `--receipt-id <RECEIPT_ID>` — Receipt ID from `action_envelope_receipts.jsonl`
+* `--dry-run` — Validate without writing `action_execution_preflights.jsonl`
+* `--json` — Output as JSON
+
+
+
+## `forager ondesk action-decision`
+
+Execute a supported decision action from a ready action preflight
+
+**Usage:** `forager ondesk action-decision [OPTIONS] --preflight-id <PREFLIGHT_ID>`
+
+Reads `action_execution_preflights.jsonl`, verifies that the requested
+`action_execution_preflight.v1` is ready for execution, maps supported action
+kinds such as `revise`, `block`, `continue`, `stop`, `deny`, and `defer` into
+the canonical decision ledger, and writes an idempotent
+`decision_action_execution.v1` receipt. For `revise` and `block`, `--note` is
+required. This executor may append a decision handoff record, but it still does
+not dispatch runtime work, mutate project files, write accepted truth, or close
+the decision receipt.
+
+###### **Options:**
+
+* `--preflight-id <PREFLIGHT_ID>` — Ready `action_execution_preflight.v1` ID
+* `--note <NOTE>` — Required bounded direction for revise/block/custom decisions
+* `--by <BY>` — Actor recording the decision action
+* `--target <TARGET>` — Override execution handoff target
+* `--dry-run` — Validate without appending the decision record or execution receipt
+* `--json` — Output as JSON
+
+
+
+## `forager ondesk action-closeout`
+
+Close an applied decision action execution with a canonical decision receipt
+
+**Usage:** `forager ondesk action-closeout [OPTIONS] --execution-id <EXECUTION_ID>`
+
+Reads `decision_action_executions.jsonl`, verifies that the requested
+`decision_action_execution.v1` was applied, verifies that the latest canonical
+decision record is still `handoff_ready` with the matching execution handoff,
+then appends a `receipted` decision record plus an idempotent
+`decision_action_closeout.v1` receipt. This closes the Web/mobile decision
+handoff loop; it still does not dispatch runtime work, mutate project files,
+retarget providers, promote wiki state, or update accepted truth.
+
+###### **Options:**
+
+* `--execution-id <EXECUTION_ID>` — Applied `decision_action_execution.v1` ID
+* `--by <BY>` — Actor recording the closeout receipt
+* `--result-status <RESULT_STATUS>` — Result status for the consumed decision action handoff
+* `--evidence <EVIDENCE_SUMMARY>` — Evidence summary line. Repeat for multiple lines.
+* `--remaining-review <REMAINING_REVIEW>` — Remaining review item. Repeat for multiple lines.
+* `--dry-run` — Validate without appending the decision receipt or closeout record
+* `--json` — Output as JSON
+
+
+
+## `forager ondesk runtime-preflight`
+
+Preflight a receipted decision action closeout before runtime dispatch
+
+**Usage:** `forager ondesk runtime-preflight [OPTIONS] --closeout-id <CLOSEOUT_ID>`
+
+Reads `decision_action_closeouts.jsonl`, verifies that the requested
+`decision_action_closeout.v1` is receipted, and checks that the latest
+canonical decision record is still `receipted` with the matching
+`DecisionReceipt`. It writes an idempotent `runtime_dispatch_preflight.v1`.
+This command is non-mutating with respect to runtime work: it does not write
+`offdesk_tasks.json` and does not launch a process.
+
+###### **Options:**
+
+* `--closeout-id <CLOSEOUT_ID>` — Receipted `decision_action_closeout.v1` ID
+* `--dry-run` — Validate without writing `runtime_dispatch_preflights.jsonl`
+* `--json` — Output as JSON
+
+
+
+## `forager ondesk runtime-dispatch`
+
+Queue runtime work from a ready runtime dispatch preflight
+
+**Usage:** `forager ondesk runtime-dispatch [OPTIONS] --preflight-id <PREFLIGHT_ID> --runner <RUNNER> --cmd <COMMAND>`
+
+Reads `runtime_dispatch_preflights.jsonl`, requires a ready
+`runtime_dispatch_preflight.v1`, records an idempotent
+`runtime_dispatch_receipt.v1`, and queues a durable `OffdeskTask`. This command
+does not launch a process; actual runtime launch remains under
+`forager offdesk tick` and the existing scheduler gate.
+
+###### **Options:**
+
+* `--preflight-id <PREFLIGHT_ID>` — Ready `runtime_dispatch_preflight.v1` ID
+* `--runner <RUNNER>` — Runner backend to queue for later offdesk tick dispatch
+* `--cmd <COMMAND>` — Shell command to execute when the queued task is dispatched
+* `--workdir <WORKDIR>` — Working directory for `--cmd`. Defaults to the current directory.
+* `--task-id <TASK_ID>` — Task ID. Generated deterministically if omitted.
+* `--capability-id <CAPABILITY_ID>` — Capability ID. Currently restricted to `dispatch.runtime`.
+* `--provider-id <PROVIDER_ID>` — Provider ID to check against provider capacity cooldown state when dispatched
+* `--model <MODEL>` — Provider model to check against provider capacity cooldown state when dispatched
+* `--log-artifact <LOG_ARTIFACT>` — Log artifact path for command stdout and stderr
+* `--result-artifact <RESULT_ARTIFACT>` — Result sidecar path used by tick to mark the task completed
+* `--dry-run` — Validate without writing `offdesk_tasks.json` or `runtime_dispatch_receipts.jsonl`
+* `--json` — Output as JSON
 
 
 

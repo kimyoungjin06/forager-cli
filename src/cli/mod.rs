@@ -20,6 +20,7 @@ pub mod sounds;
 pub mod status;
 pub mod tmux;
 pub mod uninstall;
+pub mod workstation_surface;
 pub mod worktree;
 
 pub use definition::{Cli, Commands};

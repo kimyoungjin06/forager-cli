@@ -6409,6 +6409,131 @@ fn offdesk_tick_launches_briefed_task_and_completes_from_sidecar() -> Result<()>
 
 #[test]
 #[serial]
+fn offdesk_tick_project_task_filter_dispatches_only_matching_task() -> Result<()> {
+    let temp = tempdir()?;
+    let brief_path = temp.path().join("target-brief.json");
+    let target_result_path = temp.path().join("target-result.txt");
+    let other_result_path = temp.path().join("other-result.txt");
+    let now = Utc::now();
+    fs::write(
+        &brief_path,
+        serde_json::to_string_pretty(&json!({
+            "request_id": "target-request",
+            "task_id": "target-task",
+            "project_key": "project",
+            "approved": true,
+            "allowed_runtime_mutations": ["dispatch.runtime"],
+            "allowed_canonical_mutations": [],
+            "fresh_until": now + Duration::minutes(10)
+        }))?,
+    )?;
+    let target_command = format!("printf target > {}", target_result_path.display());
+    let other_command = format!("printf other > {}", other_result_path.display());
+
+    let target_enqueue = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "enqueue",
+            "dispatch.runtime",
+            "--runner",
+            "local-background",
+            "--project-key",
+            "project",
+            "--request-id",
+            "target-request",
+            "--task-id",
+            "target-task",
+            "--brief",
+            brief_path.to_str().expect("utf-8 path"),
+            "--cmd",
+            target_command.as_str(),
+            "--workdir",
+            temp.path().to_str().expect("utf-8 path"),
+            "--result-artifact",
+            target_result_path.to_str().expect("utf-8 path"),
+            "--json",
+        ])
+        .output()?;
+    assert!(target_enqueue.status.success());
+
+    let other_enqueue = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "enqueue",
+            "dispatch.runtime",
+            "--runner",
+            "local-background",
+            "--project-key",
+            "project",
+            "--request-id",
+            "other-request",
+            "--task-id",
+            "other-task",
+            "--cmd",
+            other_command.as_str(),
+            "--workdir",
+            temp.path().to_str().expect("utf-8 path"),
+            "--result-artifact",
+            other_result_path.to_str().expect("utf-8 path"),
+            "--json",
+        ])
+        .output()?;
+    assert!(other_enqueue.status.success());
+
+    let tick_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "tick",
+            "--project-key",
+            "project",
+            "--task-id",
+            "target-task",
+            "--limit",
+            "1",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        tick_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&tick_output.stdout),
+        String::from_utf8_lossy(&tick_output.stderr)
+    );
+    let tick: serde_json::Value = serde_json::from_slice(&tick_output.stdout)?;
+    assert_eq!(tick["launched"], 1);
+    assert_eq!(tick["pending_approval"], 0);
+    assert_eq!(tick["updated_task_ids"], json!(["target-task"]));
+
+    let tasks: serde_json::Value = serde_json::from_str(&fs::read_to_string(
+        profile_dir(temp.path()).join("offdesk_tasks.json"),
+    )?)?;
+    let target = tasks
+        .as_array()
+        .expect("tasks")
+        .iter()
+        .find(|task| task["task_id"] == "target-task")
+        .expect("target task");
+    let other = tasks
+        .as_array()
+        .expect("tasks")
+        .iter()
+        .find(|task| task["task_id"] == "other-task")
+        .expect("other task");
+    assert_eq!(target["status"], "launched");
+    assert_eq!(other["status"], "queued");
+    assert!(target["background_ticket_id"].is_string());
+    assert!(other["background_ticket_id"].is_null());
+    assert!(
+        !profile_dir(temp.path())
+            .join("pending_action_approvals.json")
+            .exists(),
+        "scoped tick must not create approval for the non-target task"
+    );
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn offdesk_tick_emits_runner_work_slice_receipts_for_packet() -> Result<()> {
     let temp = tempdir()?;
     write_implementation_packet_fixture(temp.path(), "project", "packet-runner-receipts")?;

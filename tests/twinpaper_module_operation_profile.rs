@@ -75,7 +75,11 @@ fn assert_telegram_card_quality(result: &Value, spec: TelegramCardQualitySpec<'_
         .map(|label| label.as_str().unwrap_or_default().to_string())
         .collect();
 
-    assert_contains_all("message_preview", message_preview, &["<b>", "질문", "범위"]);
+    assert_contains_all(
+        "message_preview",
+        message_preview,
+        &["<b>", "다음 조치:", "권한:"],
+    );
     assert_contains_all("message_preview", message_preview, spec.required_message);
     assert_contains_all("detail_preview", detail_preview, &["<b>", "선택별 의미"]);
     assert_contains_all("detail_preview", detail_preview, spec.required_detail);
@@ -105,6 +109,29 @@ fn assert_telegram_card_quality(result: &Value, spec: TelegramCardQualitySpec<'_
             "keyboard labels should include {expected:?}; actual: {labels:?}"
         );
     }
+    let contract = &result["mobile_card_contract"];
+    assert_eq!(contract["schema"], "telegram_mobile_card_contract.v1");
+    assert!(
+        contract["warnings"]
+            .as_array()
+            .expect("mobile card warnings")
+            .is_empty(),
+        "mobile card warnings should be empty: {:?}\n{}",
+        contract["warnings"],
+        message_preview
+    );
+    assert!(
+        contract["line_count"].as_u64().expect("line count")
+            <= contract["max_lines"].as_u64().expect("max lines"),
+        "mobile line budget exceeded:\n{}",
+        message_preview
+    );
+    assert!(
+        contract["char_count"].as_u64().expect("char count")
+            <= contract["max_chars"].as_u64().expect("max chars"),
+        "mobile char budget exceeded:\n{}",
+        message_preview
+    );
     assert!(
         non_empty_line_count(message_preview) <= spec.max_primary_lines,
         "primary card exceeded line budget ({} > {}):\n{}",
@@ -702,9 +729,9 @@ fn telegram_decision_relay_accepts_request_id_scoped_decision_without_leaking_se
                 "수정 권고",
                 "보고 가능성 상태 점검",
                 "현재 결과는 reportable claim으로 승격할 수 없습니다",
-                "Council: 수정 권고, 리뷰어 합의",
+                "이유: primary_objective_gate 미통과",
                 "어떻게 진행할까요",
-                "다음 episode 진행 방식만 승인",
+                "파일 변경, 정리, 모델 변경, wiki 승인은 별도 승인",
             ],
             required_detail: &[
                 "왜 이 추천인가",
@@ -715,7 +742,7 @@ fn telegram_decision_relay_accepts_request_id_scoped_decision_without_leaking_se
             ],
             required_buttons: &["계속", "수정(권장)", "보류", "중단", "근거 보기"],
             forbidden_user_surface: &["relay-test-1", "episode.json", "council_decision"],
-            max_primary_lines: 14,
+            max_primary_lines: 5,
         },
     );
     assert_eq!(result["status"], "accepted");
@@ -770,11 +797,9 @@ fn telegram_decision_relay_accepts_request_id_scoped_decision_without_leaking_se
     assert!(message_preview.contains("보고 가능성 상태 점검"));
     assert!(message_preview.contains("현재 결과는 reportable claim으로 승격할 수 없습니다"));
     assert!(message_preview.contains("이유: primary_objective_gate 미통과"));
-    assert!(message_preview.contains("Council: 수정 권고, 리뷰어 합의"));
-    assert!(message_preview.contains("질문"));
+    assert!(message_preview.contains("다음 조치"));
     assert!(message_preview.contains("어떻게 진행할까요"));
-    assert!(message_preview.contains("수정/보류"));
-    assert!(message_preview.contains("설명 답장"));
+    assert!(message_preview.contains("권한"));
     assert!(!message_preview.contains("실패 요약"));
     assert!(!message_preview.contains("핵심 근거"));
     assert!(!message_preview.contains("Council 판단"));
@@ -882,9 +907,8 @@ fn telegram_decision_relay_accepts_request_id_scoped_decision_without_leaking_se
             required_message: &[
                 "승인 권고: provider fallback",
                 "Provider/model retargeting is waiting for operator approval",
-                "선택지",
                 "Approve this provider fallback retargeting?",
-                "does not approve runtime dispatch",
+                "권한",
             ],
             required_detail: &[
                 "왜 이 추천인가",
@@ -900,7 +924,7 @@ fn telegram_decision_relay_accepts_request_id_scoped_decision_without_leaking_se
                 "근거 보기",
             ],
             forbidden_user_surface: &["approval-test-1"],
-            max_primary_lines: 16,
+            max_primary_lines: 5,
         },
     );
     assert_eq!(explicit["status"], "accepted");
@@ -920,10 +944,8 @@ fn telegram_decision_relay_accepts_request_id_scoped_decision_without_leaking_se
         .as_str()
         .expect("explicit message preview");
     assert!(explicit_preview.contains("승인 권고: provider fallback"));
-    assert!(explicit_preview.contains("선택지"));
-    assert!(explicit_preview.contains("1. Approve fallback"));
     assert!(explicit_preview.contains("Approve this provider fallback retargeting?"));
-    assert!(explicit_preview.contains("does not approve runtime dispatch"));
+    assert!(explicit_preview.contains("권한"));
     assert!(!explicit_preview.contains("approval-test-1"));
     let explicit_detail = explicit["detail_preview"]
         .as_str()
@@ -1669,7 +1691,7 @@ print(json.dumps({"registry": registry_json, "state_files": state_files}, ensure
             message_type: "direction_choice",
             required_message: &[
                 "방향 선택",
-                "선택지",
+                "선택:",
                 "1. 안정화 먼저",
                 "2. 템플릿 확장",
                 "기타",
@@ -1678,7 +1700,7 @@ print(json.dumps({"registry": registry_json, "state_files": state_files}, ensure
             required_detail: &["증거 충분성", "선택별 의미"],
             required_buttons: &["1. 안정화 먼저", "2. 템플릿 확장", "기타", "근거 보기"],
             forbidden_user_surface: &["plan-choice-1"],
-            max_primary_lines: 16,
+            max_primary_lines: 5,
         },
     );
     assert_eq!(direction["status"], "accepted");
@@ -1693,7 +1715,7 @@ print(json.dumps({"registry": registry_json, "state_files": state_files}, ensure
         .as_str()
         .expect("direction preview");
     assert!(direction_preview.contains("방향 선택"));
-    assert!(direction_preview.contains("선택지"));
+    assert!(direction_preview.contains("선택:"));
     assert!(direction_preview.contains("1. 안정화 먼저"));
     assert!(direction_preview.contains("기타"));
     assert!(direction["reason"]
@@ -2060,12 +2082,8 @@ fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
             required_message: &[
                 "Ondesk 전환 브리핑: TwinPaper",
                 "08:30 Asia/Seoul",
-                "Closeout 요약",
-                "남은 사용자 결정 3건",
-                "approved with follow-ups",
-                "accepted truth 아님",
                 "WebUI에서 ondesk 검토를 시작할까요",
-                "Telegram은 ondesk 검토 진입/대기만 기록",
+                "wiki 승격",
             ],
             required_detail: &[
                 "Ondesk 전환 상세",
@@ -2093,7 +2111,7 @@ fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
                 "근거 보기",
             ],
             forbidden_user_surface: &ondesk_forbidden,
-            max_primary_lines: 16,
+            max_primary_lines: 5,
         },
     );
     assert_eq!(result["status"], "accepted");
@@ -2104,12 +2122,8 @@ fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
     let message_preview = result["message_preview"].as_str().expect("message preview");
     assert!(message_preview.contains("Ondesk 전환 브리핑: TwinPaper"));
     assert!(message_preview.contains("08:30 Asia/Seoul"));
-    assert!(message_preview.contains("Closeout 요약"));
-    assert!(message_preview.contains("남은 사용자 결정 3건"));
-    assert!(message_preview.contains("approved with follow-ups"));
-    assert!(message_preview.contains("accepted truth 아님"));
     assert!(message_preview.contains("WebUI에서 ondesk 검토를 시작할까요"));
-    assert!(message_preview.contains("Telegram은 ondesk 검토 진입/대기만 기록"));
+    assert!(message_preview.contains("권한"));
     assert!(!message_preview.contains("closeout_test"));
     assert!(!message_preview.contains("closeout_plan.json"));
     assert!(!message_preview.contains(temp.path().to_str().expect("temp path")));

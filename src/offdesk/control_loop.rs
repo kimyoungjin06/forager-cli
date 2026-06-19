@@ -45,6 +45,8 @@ pub struct OffdeskTickOptions {
     pub now: DateTime<Utc>,
     pub notification_cooldown: Option<Duration>,
     pub lock_stale_after: Duration,
+    pub project_key: Option<String>,
+    pub task_id: Option<String>,
 }
 
 impl OffdeskTickOptions {
@@ -54,6 +56,8 @@ impl OffdeskTickOptions {
             now,
             notification_cooldown: None,
             lock_stale_after: Duration::minutes(30),
+            project_key: None,
+            task_id: None,
         }
     }
 }
@@ -108,12 +112,23 @@ pub fn run_offdesk_tick(
     )
     .with_adaptive_wiki(adaptive_wiki_store.clone());
     let (mut approval_session, expired) = approval_ledger.begin_session(options.now)?;
-    let background_outcomes = poll_background_runs(
-        &background_store,
-        None,
-        options.now,
-        options.notification_cooldown,
-    )?;
+    let mut tasks = task_store.load()?;
+    let scoped_ticket_id = task_scoped_background_ticket_id(&tasks, &options);
+    let background_outcomes = match scoped_ticket_id {
+        ScopedBackgroundTicket::All => poll_background_runs(
+            &background_store,
+            None,
+            options.now,
+            options.notification_cooldown,
+        )?,
+        ScopedBackgroundTicket::One(ticket_id) => poll_background_runs(
+            &background_store,
+            Some(&ticket_id),
+            options.now,
+            options.notification_cooldown,
+        )?,
+        ScopedBackgroundTicket::None => Vec::new(),
+    };
     let background_by_ticket = background_outcomes
         .iter()
         .map(|outcome| (outcome.probe.ticket_id.clone(), outcome))
@@ -126,8 +141,10 @@ pub fn run_offdesk_tick(
         ..OffdeskTickReport::default()
     };
 
-    let mut tasks = task_store.load()?;
     for task in tasks.iter_mut() {
+        if !task_matches_tick_filter(task, &options) {
+            continue;
+        }
         apply_background_outcome(
             task,
             &background_by_ticket,
@@ -142,10 +159,15 @@ pub fn run_offdesk_tick(
         &provider_capacity_store,
         options.now,
         &mut report,
+        options.project_key.as_deref(),
+        options.task_id.as_deref(),
     )?;
 
     let mut dispatched = 0usize;
     for task in tasks.iter_mut() {
+        if !task_matches_tick_filter(task, &options) {
+            continue;
+        }
         if dispatched >= options.limit {
             if task.can_dispatch_at(options.now) {
                 report.skipped += 1;
@@ -178,6 +200,44 @@ pub fn run_offdesk_tick(
     refresh_tick_next_safe_actions(&mut report);
     task_store.save(&tasks)?;
     Ok(report)
+}
+
+enum ScopedBackgroundTicket {
+    All,
+    One(String),
+    None,
+}
+
+fn task_matches_tick_filter(task: &OffdeskTask, options: &OffdeskTickOptions) -> bool {
+    if let Some(project_key) = options.project_key.as_deref() {
+        if task.project_key != project_key {
+            return false;
+        }
+    }
+    if let Some(task_id) = options.task_id.as_deref() {
+        if task.task_id != task_id {
+            return false;
+        }
+    }
+    true
+}
+
+fn task_scoped_background_ticket_id(
+    tasks: &[OffdeskTask],
+    options: &OffdeskTickOptions,
+) -> ScopedBackgroundTicket {
+    if options.project_key.is_none() && options.task_id.is_none() {
+        return ScopedBackgroundTicket::All;
+    }
+    let Some(task_id) = options.task_id.as_deref() else {
+        return ScopedBackgroundTicket::All;
+    };
+    tasks
+        .iter()
+        .find(|task| task.task_id == task_id && task_matches_tick_filter(task, options))
+        .and_then(|task| task.background_ticket_id.clone())
+        .map(ScopedBackgroundTicket::One)
+        .unwrap_or(ScopedBackgroundTicket::None)
 }
 
 pub fn reconcile_tasks_with_background_outcomes(
@@ -520,6 +580,8 @@ fn apply_approved_provider_fallbacks(
     provider_capacity_store: &ProviderCapacityStore,
     now: DateTime<Utc>,
     report: &mut OffdeskTickReport,
+    project_key: Option<&str>,
+    task_id: Option<&str>,
 ) -> Result<()> {
     for approval in approvals.approved_provider_fallbacks(now) {
         if approval.action != PROVIDER_FALLBACK_ACTION {
@@ -547,10 +609,11 @@ fn apply_approved_provider_fallbacks(
         };
 
         let mut applied = 0usize;
-        for task in tasks
-            .iter_mut()
-            .filter(|task| provider_fallback_task_matches_scope(task, &approval, metadata))
-        {
+        for task in tasks.iter_mut().filter(|task| {
+            project_key.map_or(true, |expected| task.project_key == expected)
+                && task_id.map_or(true, |expected| task.task_id == expected)
+                && provider_fallback_task_matches_scope(task, &approval, metadata)
+        }) {
             task.provider_id = Some(candidate.provider_id.clone());
             task.model = candidate.model.clone();
             task.not_before = None;

@@ -471,6 +471,14 @@ pub struct TickArgs {
     #[arg(long, default_value_t = 10)]
     limit: usize,
 
+    /// Restrict this tick to one project key
+    #[arg(long)]
+    project_key: Option<String>,
+
+    /// Restrict this tick to one task ID
+    #[arg(long)]
+    task_id: Option<String>,
+
     /// Treat previous free lock metadata as stale after this many minutes
     #[arg(long, default_value_t = 30)]
     lock_stale_minutes: i64,
@@ -3741,6 +3749,8 @@ async fn enqueue(profile: &str, args: EnqueueArgs) -> Result<()> {
 async fn tick(profile: &str, args: TickArgs) -> Result<()> {
     let mut options = OffdeskTickOptions::new(Utc::now());
     options.limit = args.limit.max(1);
+    options.project_key = args.project_key;
+    options.task_id = args.task_id;
     options.lock_stale_after = Duration::minutes(args.lock_stale_minutes.max(1));
     options.notification_cooldown = args
         .notify_cooldown_minutes
