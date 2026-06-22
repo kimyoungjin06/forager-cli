@@ -346,15 +346,15 @@ Status: implemented as a first selectable portfolio route. `/work/` now shows
 parallel project state chips, selected-project provenance, read-only assistant
 prompts, and an attention path that consolidates decision/runtime/truth blockers
 with state refs, fallback commands, and action boundaries. It also includes
-read-only project filters for all, attention, blocked, running, and truth-gap
-views plus a read-only active-task drawer that prefers exact
+read-only project filters for all, attention, blocked, running, review,
+recovery, and truth-gap views plus a read-only active-task drawer that prefers exact
 `workstation_surface.v1` task-store rows from `projects[].task_items`, falling
 back to decision/runtime/truth/project-row state only when task-store rows are
 absent. Task-store rows now include compact inspection details for runner,
 ticket, gate, attempts, artifacts, mode, provider, and errors so operators can
 judge whether to monitor, review, or recover without opening raw logs. Future
 slices should add task-linked action receipts and accepted/stale filters once
-the read model exposes those per-project states.
+the read model exposes accepted/stale per-project states.
 
 ### P1 - `/graph`
 

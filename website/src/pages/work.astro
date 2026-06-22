@@ -22,11 +22,22 @@ const selectedGraphEdges = selectedProjectDetail?.graph_edges.length
   : workView.graphEdges;
 const runtimeHandoffCount = workView.projectDetails.reduce((sum, project) => sum + project.runtime_handoff_count, 0);
 const truthItemCount = workView.projectDetails.reduce((sum, project) => sum + project.truth_recovery_count, 0);
+const projectNeedsTaskReview = (project) =>
+  project.task_items.some((item) =>
+    item.requires_operator_review || ['failed', 'resume_pending', 'pending_approval'].includes(item.status)
+  );
+const projectNeedsTaskRecovery = (project) =>
+  project.task_items.some((item) =>
+    ['failed', 'resume_pending'].includes(item.status)
+    || ['recovery_required', 'resume_review_required'].includes(item.next_safe_action_kind ?? '')
+  );
 const workFilterOptions = [
   ['all', 'All', workView.projectDetails.length],
   ['attention', 'Attention', workView.projectDetails.filter((project) => project.attention_count > 0 || project.severity === 'attention').length],
   ['blocked', 'Blocked', workView.projectDetails.filter((project) => project.severity === 'blocked' || project.runtime.includes('blocked')).length],
   ['running', 'Running', workView.projectDetails.filter((project) => project.runtime.includes('running')).length],
+  ['needs_review', 'Review', workView.projectDetails.filter(projectNeedsTaskReview).length],
+  ['recovery', 'Recovery', workView.projectDetails.filter(projectNeedsTaskRecovery).length],
   ['truth_gap', 'Truth gap', workView.projectDetails.filter((project) => project.truth.includes('missing') || project.truth_recovery_count > 0).length],
 ];
 const taskInspectionToneClasses = {
@@ -545,6 +556,16 @@ const taskInspectionToneClasses = {
           count: filterProjects(projects, 'running').length,
         },
         {
+          id: 'needs_review',
+          label: 'Review',
+          count: filterProjects(projects, 'needs_review').length,
+        },
+        {
+          id: 'recovery',
+          label: 'Recovery',
+          count: filterProjects(projects, 'recovery').length,
+        },
+        {
           id: 'truth_gap',
           label: 'Truth gap',
           count: filterProjects(projects, 'truth_gap').length,
@@ -576,11 +597,31 @@ const taskInspectionToneClasses = {
           return projects.filter((project) => project.severity === 'blocked' || String(project.runtime ?? '').includes('blocked'));
         case 'running':
           return projects.filter((project) => String(project.runtime ?? '').includes('running'));
+        case 'needs_review':
+          return projects.filter(projectNeedsTaskReview);
+        case 'recovery':
+          return projects.filter(projectNeedsTaskRecovery);
         case 'truth_gap':
           return projects.filter((project) => String(project.truth ?? '').includes('missing') || Number(project.truth_recovery_count ?? 0) > 0);
         default:
           return projects;
       }
+    }
+
+    function projectNeedsTaskReview(project) {
+      const items = project.task_items ?? [];
+      return items.some((item) =>
+        Boolean(item.requires_operator_review)
+        || ['failed', 'resume_pending', 'pending_approval'].includes(String(item.status ?? ''))
+      );
+    }
+
+    function projectNeedsTaskRecovery(project) {
+      const items = project.task_items ?? [];
+      return items.some((item) =>
+        ['failed', 'resume_pending'].includes(String(item.status ?? ''))
+        || ['recovery_required', 'resume_review_required'].includes(String(item.next_safe_action_kind ?? ''))
+      );
     }
 
     function projectSelectHtml(project, selected) {

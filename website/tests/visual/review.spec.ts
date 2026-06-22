@@ -14,6 +14,43 @@ const workstationSurface = JSON.parse(
   readFileSync(new URL('../../../tests/fixtures/ui/workstation_surface/attention.json', import.meta.url), 'utf8'),
 );
 const workstationWorkSurface = JSON.parse(JSON.stringify(workstationSurface));
+const nanoProject = workstationWorkSurface.projects.find((project) => project.project_key === 'NanoClustering');
+if (nanoProject) {
+  nanoProject.task_items = [
+    {
+      kind: 'Recovery task',
+      task_id: 'task-nano-recovery',
+      request_id: 'request-nano-recovery',
+      title: 'Recover stale closeout follow-up',
+      status: 'resume_pending',
+      capability_id: 'offdesk.closeout_recovery',
+      runner_kind: 'local_background',
+      summary: 'Task needs recovery review before the harness resumes or abandons it.',
+      reference: 'offdesk_tasks.json#task-nano-recovery',
+      command: 'forager offdesk resume-task task-nano-recovery',
+      updated_at: '2026-06-18T03:08:00Z',
+      next_safe_action_kind: 'resume_review_required',
+      requires_operator_review: true,
+      inspection_items: [
+        {
+          label: 'Runner',
+          value: 'local_background / offdesk.closeout_recovery',
+          tone: 'neutral',
+        },
+        {
+          label: 'Gate',
+          value: 'blocked',
+          tone: 'danger',
+        },
+        {
+          label: 'Error',
+          value: 'heartbeat is stale',
+          tone: 'danger',
+        },
+      ],
+    },
+  ];
+}
 const harnessProject = workstationWorkSurface.projects.find((project) => project.project_key === 'Harness');
 if (harnessProject) {
   harnessProject.task_items = [
@@ -286,6 +323,8 @@ test('work route renders project portfolio detail with graph and assistant conte
   await expect(page.locator('[data-work-project-filters]').getByRole('button', { name: /Attention 2/ })).toBeVisible();
   await expect(page.locator('[data-work-project-filters]').getByRole('button', { name: /Blocked 1/ })).toBeVisible();
   await expect(page.locator('[data-work-project-filters]').getByRole('button', { name: /Running 1/ })).toBeVisible();
+  await expect(page.locator('[data-work-project-filters]').getByRole('button', { name: /Review 1/ })).toBeVisible();
+  await expect(page.locator('[data-work-project-filters]').getByRole('button', { name: /Recovery 1/ })).toBeVisible();
   await expect(page.locator('[data-work-project-filters]').getByRole('button', { name: /Truth gap 2/ })).toBeVisible();
   await expect(page.locator('[data-work-filter-summary]')).toHaveText('Showing all 3 projects from the current workstation surface.');
   await expect(page.locator('[data-work-project-detail]').getByRole('heading', { name: 'NanoClustering' })).toBeVisible();
@@ -366,6 +405,17 @@ test('work route renders project portfolio detail with graph and assistant conte
   await expect(page.locator('[data-work-task-drawer]').getByText('local_background / web.visual_review')).toBeVisible();
   await expect(page.locator('[data-work-task-drawer]').getByText('1/2 refs; log ready; result missing')).toBeVisible();
   await expect(page.locator('[data-work-task-drawer]').getByText('forager offdesk poll ticket-harness-live')).toBeVisible();
+
+  await page.locator('[data-work-project-filters]').getByRole('button', { name: /Recovery 1/ }).click();
+  await expect(page.locator('[data-work-filter-summary]')).toHaveText('Showing 1 of 3 projects matching recovery.');
+  await expect(page.locator('[data-work-project-detail]').getByRole('heading', { name: 'NanoClustering' })).toBeVisible();
+  await page.locator('[data-work-task-drawer] summary').click();
+  await expect(page.locator('[data-work-task-drawer]').getByText('Recovery task')).toBeVisible();
+  await expect(page.locator('[data-work-task-drawer]').getByText('heartbeat is stale')).toBeVisible();
+
+  await page.locator('[data-work-project-filters]').getByRole('button', { name: /Review 1/ }).click();
+  await expect(page.locator('[data-work-filter-summary]')).toHaveText('Showing 1 of 3 projects matching review.');
+  await expect(page.locator('[data-work-project-detail]').getByRole('heading', { name: 'NanoClustering' })).toBeVisible();
 
   await page.locator('[data-work-project-filters]').getByRole('button', { name: /Blocked 1/ }).click();
   await expect(page.locator('[data-work-filter-summary]')).toHaveText('Showing 1 of 3 projects matching blocked.');
