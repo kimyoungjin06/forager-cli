@@ -580,6 +580,11 @@ test('decisions route renders read-only action center from workstation surface',
   await expect(page.getByText('Queue', { exact: true })).toBeVisible();
   await expect(page.locator('[data-decision-detail]').getByRole('heading', { name: 'Resolve closeout follow-up' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Resolve closeout follow-up/ })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('heading', { name: 'Decision readout' })).toBeVisible();
+  await expect(page.locator('[data-decision-assistant-answer]')).toContainText('Resolve closeout follow-up');
+  await expect(page.locator('[data-decision-assistant-actions]').getByText('Refresh decision envelope')).toBeVisible();
+  await expect(page.locator('[data-decision-assistant-refs]').getByText('decision:decision-closeout-followup')).toBeVisible();
+  await expect(page.locator('[data-decision-assistant-prompts]').getByRole('button', { name: 'Can this advance?' })).toBeVisible();
   await expect(page.getByText('Action envelope preview')).toBeVisible();
   await expect(page.getByText('action_envelope.v1')).toBeVisible();
   await expect(page.getByText('action_envelope_receipt.v1')).toBeVisible();
@@ -588,9 +593,12 @@ test('decisions route renders read-only action center from workstation surface',
   await expect(page.getByText('forager offdesk decision show --json decision-closeout-followup')).toBeVisible();
   await page.getByText('CLI fallback').click();
   await expect(page.getByText('forager offdesk decisions --json')).toBeVisible();
+  await page.getByRole('button', { name: 'Copy decision prompt: Can this advance?' }).click();
+  await expect(page.locator('[data-decision-assistant-copy-status]')).toContainText(/Prompt (copied|ready)/);
   await page.getByRole('button', { name: /Runtime recovery required/ }).click();
   await expect(page.locator('[data-decision-detail]').getByRole('heading', { name: 'Runtime recovery required' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Runtime recovery required/ })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('[data-decision-assistant-answer]')).toContainText('Runtime recovery required');
 
   const overflow = await page.evaluate(() => ({
     width: document.documentElement.clientWidth,

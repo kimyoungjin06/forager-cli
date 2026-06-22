@@ -626,6 +626,125 @@ function dashboardAssistantScope(view: DashboardView): ChatContextScope | null {
     ?? null;
 }
 
+export function decisionAssistantScope(view: DashboardView, decision: DecisionItem): ChatContextScope {
+  return view.chatContext.scopes.find((scope) => scope.scope_id === `decision:${decision.decision_id}`)
+    ?? synthesizedDecisionAssistantScope(decision);
+}
+
+function synthesizedDecisionAssistantScope(decision: DecisionItem): ChatContextScope {
+  const latestReceipt = decision.action_envelopes.find((envelope) => envelope.latest_receipt)?.latest_receipt;
+  const latestExecution = decision.action_envelopes.find((envelope) => envelope.latest_execution)?.latest_execution;
+  const answer = latestReceipt?.stale
+    ? `"${decision.title}" should not advance from the current receipt. The latest action receipt is stale, so refresh the decision state and regenerate the envelope before any execution path.`
+    : latestExecution
+      ? `"${decision.title}" has latest execution status ${latestExecution.result_status}. Verify the execution receipt, closeout or handoff refs, and stale guard before treating the decision as resolved.`
+      : latestReceipt
+        ? `"${decision.title}" has a non-stale action receipt with status ${latestReceipt.result_status}. It can be discussed as validated preview state, but execution still requires the preflight and receipt path outside this assistant panel.`
+        : `"${decision.title}" is still awaiting operator judgment. Explain risk and options from the decision record, then validate an action envelope before any state change.`;
+  const citations: AssistantRef[] = [
+    {
+      label: 'Decision',
+      reference: `decision:${decision.decision_id}`,
+      trust: 'state-ref',
+    },
+    {
+      label: 'Decision inbox',
+      reference: 'decision_inbox_surface.v1',
+      trust: 'state-ref',
+    },
+    ...decision.evidence_refs.slice(0, 2).map((evidence) => ({
+      label: `Evidence: ${evidence.label}`,
+      reference: evidence.reference,
+      trust: 'state-ref' as const,
+    })),
+  ];
+  if (decision.receipt_ref) {
+    citations.push({
+      label: 'Decision receipt',
+      reference: decision.receipt_ref,
+      trust: 'receipt-backed',
+    });
+  }
+  if (latestReceipt) {
+    citations.push({
+      label: 'Latest action receipt',
+      reference: latestReceipt.receipt_id,
+      trust: 'receipt-backed',
+    });
+  }
+  if (latestExecution) {
+    citations.push({
+      label: 'Latest execution',
+      reference: latestExecution.execution_id,
+      trust: 'receipt-backed',
+    });
+  }
+
+  return {
+    scope_id: `decision:${decision.decision_id}`,
+    label: decision.title,
+    kind: 'decision',
+    answer,
+    confidence: 'surface-derived',
+    citations,
+    inference_notes: [
+      'Synthesized from workstation_surface.v1 because a decision chat scope was not present.',
+    ],
+    suggested_actions: [decisionAssistantAction(decision, latestReceipt, latestExecution)],
+    prompts: [
+      {
+        label: 'Can this advance?',
+        prompt: `Explain whether "${decision.title}" can advance. Cite the decision record, stale guard, latest receipt or execution, and mark any inference.`,
+      },
+      {
+        label: 'Explain risk',
+        prompt: `Explain the risk and safe next step for decision ${decision.decision_id} without executing any action.`,
+      },
+    ],
+  };
+}
+
+function decisionAssistantAction(
+  decision: DecisionItem,
+  latestReceipt: ActionEnvelopeReceiptSummary | null | undefined,
+  latestExecution: DecisionActionExecutionSummary | null | undefined,
+): AssistantAction {
+  if (latestReceipt?.stale) {
+    return {
+      label: 'Refresh decision envelope',
+      kind: 'inspect_state',
+      boundary: 'Proposal only; stale receipts must be rejected before any execution path.',
+      target_ref: `decision:${decision.decision_id}`,
+      command: decision.cli_fallback,
+    };
+  }
+  if (latestExecution) {
+    return {
+      label: 'Review execution receipt',
+      kind: 'inspect_receipt',
+      boundary: 'Proposal only; execution result must be reviewed before closeout or runtime handoff.',
+      target_ref: latestExecution.execution_id,
+      command: latestExecution.closeout_command || decision.cli_fallback,
+    };
+  }
+  if (latestReceipt) {
+    return {
+      label: 'Run action preflight',
+      kind: 'inspect_receipt',
+      boundary: 'Proposal only; preflight and execution remain outside the assistant panel.',
+      target_ref: latestReceipt.receipt_id,
+      command: `forager ondesk action-preflight --receipt-id ${latestReceipt.receipt_id} --json`,
+    };
+  }
+  return {
+    label: 'Validate action envelope',
+    kind: 'inspect_state',
+    boundary: 'Proposal only; validation must produce an action_envelope_receipt.v1 before execution.',
+    target_ref: `decision:${decision.decision_id}`,
+    command: decision.action_envelopes[0]?.allowed_command || decision.cli_fallback,
+  };
+}
+
 type ChatContextFallback = {
   workstationId: string;
   profile: string;

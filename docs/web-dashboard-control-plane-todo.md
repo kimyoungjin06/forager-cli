@@ -413,11 +413,11 @@ Suggested prompts:
 
 Status: first deterministic read-only answer surface implemented.
 `workstation_surface.v1` now carries `chat_context_surface.v1` with overview
-and project scopes, cited answers, inference notes, prompt seeds, and review-only
-suggested action cards. `/dashboard/` and `/work/` render those answer/action
-surfaces while keeping copyable prompts as a fallback. Retrieval-backed answers,
-selected decision/graph-node/receipt scopes, and executable action-card proposal
-preflight loops remain deferred.
+project, and selected-decision scopes, cited answers, inference notes, prompt
+seeds, and review-only suggested action cards. `/dashboard/`, `/work/`, and
+`/decisions/` render those answer/action surfaces while keeping copyable prompts
+as a fallback. Retrieval-backed answers, graph-node/receipt scopes, and
+executable action-card proposal preflight loops remain deferred.
 
 ## Risk Register
 

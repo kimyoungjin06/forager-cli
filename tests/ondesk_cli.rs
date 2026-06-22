@@ -450,11 +450,26 @@ fn ondesk_workstation_surface_json_projects_current_status_into_dashboard() -> R
         surface["chat_context"]["scopes"][0]["suggested_actions"][0]["label"],
         "Open decision inbox"
     );
+    let chat_scopes = surface["chat_context"]["scopes"]
+        .as_array()
+        .expect("chat scopes");
+    let decision_scope = chat_scopes
+        .iter()
+        .find(|scope| scope["scope_id"] == "decision:decision-user")
+        .expect("decision chat scope");
+    assert!(decision_scope["answer"]
+        .as_str()
+        .expect("decision answer")
+        .contains("awaiting operator judgment"));
     assert_eq!(
-        surface["chat_context"]["scopes"][1]["scope_id"],
-        "project:project"
+        decision_scope["suggested_actions"][0]["label"],
+        "Validate action envelope"
     );
-    assert!(surface["chat_context"]["scopes"][1]["citations"]
+    let project_scope = chat_scopes
+        .iter()
+        .find(|scope| scope["scope_id"] == "project:project")
+        .expect("project chat scope");
+    assert!(project_scope["citations"]
         .as_array()
         .expect("project citations")
         .iter()

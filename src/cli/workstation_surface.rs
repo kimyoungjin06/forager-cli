@@ -1463,6 +1463,7 @@ fn chat_context_surface(
         runtime_dispatch,
         accepted_truth_recovery,
     )];
+    scopes.extend(decision_inbox.items.iter().map(chat_decision_scope));
     scopes.extend(projects.iter().map(chat_project_scope));
 
     ChatContextSurface {
@@ -1483,6 +1484,10 @@ fn chat_context_surface(
             (
                 "decision_inbox".to_string(),
                 DECISION_INBOX_SURFACE_SCHEMA.to_string(),
+            ),
+            (
+                "decision_scope".to_string(),
+                "chat_context_surface.v1#decision:{decision_id}".to_string(),
             ),
             (
                 "runtime_dispatch".to_string(),
@@ -1636,6 +1641,169 @@ fn chat_overview_action(
         boundary: "Proposal only; inspect current state before starting new work.",
         target_ref: "workstation_surface.v1".to_string(),
         command: "forager status --json".to_string(),
+    }
+}
+
+fn chat_decision_scope(decision: &DecisionItem) -> ChatContextScope {
+    let latest_receipt = decision
+        .action_envelopes
+        .iter()
+        .find_map(|action| action.latest_receipt.as_ref());
+    let latest_execution = decision
+        .action_envelopes
+        .iter()
+        .find_map(|action| action.latest_execution.as_ref());
+    let answer = if latest_receipt.is_some_and(|receipt| receipt.stale) {
+        format!(
+            "\"{}\" should not advance from the current receipt. The latest action receipt is stale, so refresh the decision state and regenerate the envelope before any execution path.",
+            decision.title
+        )
+    } else if let Some(execution) = latest_execution {
+        format!(
+            "\"{}\" has latest execution status {}. Verify the execution receipt, closeout or handoff refs, and stale guard before treating the decision as resolved.",
+            decision.title, execution.result_status
+        )
+    } else if let Some(receipt) = latest_receipt {
+        format!(
+            "\"{}\" has a non-stale action receipt with status {}. It can be discussed as validated preview state, but execution still requires the preflight and receipt path outside this assistant panel.",
+            decision.title, receipt.result_status
+        )
+    } else {
+        format!(
+            "\"{}\" is still awaiting operator judgment. Explain risk and options from the decision record, then validate an action envelope before any state change.",
+            decision.title
+        )
+    };
+    let mut citations = vec![
+        ChatCitation {
+            label: "Decision".to_string(),
+            reference: format!("decision:{}", decision.decision_id),
+            trust: "state-ref",
+        },
+        ChatCitation {
+            label: "Decision inbox".to_string(),
+            reference: DECISION_INBOX_SURFACE_SCHEMA.to_string(),
+            trust: "state-ref",
+        },
+    ];
+    citations.extend(
+        decision
+            .evidence_refs
+            .iter()
+            .take(2)
+            .map(|evidence| ChatCitation {
+                label: format!("Evidence: {}", evidence.label),
+                reference: evidence.reference.clone(),
+                trust: "state-ref",
+            }),
+    );
+    if let Some(receipt_ref) = &decision.receipt_ref {
+        citations.push(ChatCitation {
+            label: "Decision receipt".to_string(),
+            reference: receipt_ref.clone(),
+            trust: "receipt-backed",
+        });
+    }
+    if let Some(receipt) = latest_receipt {
+        citations.push(ChatCitation {
+            label: "Latest action receipt".to_string(),
+            reference: receipt.receipt_id.clone(),
+            trust: "receipt-backed",
+        });
+    }
+    if let Some(execution) = latest_execution {
+        citations.push(ChatCitation {
+            label: "Latest execution".to_string(),
+            reference: execution.execution_id.clone(),
+            trust: "receipt-backed",
+        });
+    }
+
+    ChatContextScope {
+        scope_id: format!("decision:{}", decision.decision_id),
+        label: decision.title.clone(),
+        kind: "decision",
+        answer,
+        confidence: "surface-derived",
+        citations,
+        inference_notes: vec![
+            "Decision answer is synthesized from the decision record, action envelope previews, receipts, and execution summaries only."
+                .to_string(),
+        ],
+        suggested_actions: vec![chat_decision_action(
+            decision,
+            latest_receipt,
+            latest_execution,
+        )],
+        prompts: vec![
+            ChatPrompt {
+                label: "Can this advance?".to_string(),
+                prompt: format!(
+                    "Explain whether \"{}\" can advance. Cite the decision record, stale guard, latest receipt or execution, and mark any inference.",
+                    decision.title
+                ),
+            },
+            ChatPrompt {
+                label: "Explain risk".to_string(),
+                prompt: format!(
+                    "Explain the risk and safe next step for decision {} without executing any action.",
+                    decision.decision_id
+                ),
+            },
+        ],
+    }
+}
+
+fn chat_decision_action(
+    decision: &DecisionItem,
+    latest_receipt: Option<&ActionEnvelopeReceiptSummary>,
+    latest_execution: Option<&DecisionActionExecutionSummary>,
+) -> ChatSuggestedAction {
+    if latest_receipt.is_some_and(|receipt| receipt.stale) {
+        return ChatSuggestedAction {
+            label: "Refresh decision envelope".to_string(),
+            kind: "inspect_state",
+            boundary: "Proposal only; stale receipts must be rejected before any execution path.",
+            target_ref: format!("decision:{}", decision.decision_id),
+            command: decision.cli_fallback.clone(),
+        };
+    }
+    if let Some(execution) = latest_execution {
+        return ChatSuggestedAction {
+            label: "Review execution receipt".to_string(),
+            kind: "inspect_receipt",
+            boundary:
+                "Proposal only; execution result must be reviewed before closeout or runtime handoff.",
+            target_ref: execution.execution_id.clone(),
+            command: execution
+                .closeout_command
+                .clone()
+                .unwrap_or_else(|| decision.cli_fallback.clone()),
+        };
+    }
+    if let Some(receipt) = latest_receipt {
+        return ChatSuggestedAction {
+            label: "Run action preflight".to_string(),
+            kind: "inspect_receipt",
+            boundary: "Proposal only; preflight and execution remain outside the assistant panel.",
+            target_ref: receipt.receipt_id.clone(),
+            command: format!(
+                "forager ondesk action-preflight --receipt-id {} --json",
+                receipt.receipt_id
+            ),
+        };
+    }
+    ChatSuggestedAction {
+        label: "Validate action envelope".to_string(),
+        kind: "inspect_state",
+        boundary:
+            "Proposal only; validation must produce an action_envelope_receipt.v1 before execution.",
+        target_ref: format!("decision:{}", decision.decision_id),
+        command: decision
+            .action_envelopes
+            .first()
+            .map(|envelope| envelope.allowed_command.clone())
+            .unwrap_or_else(|| decision.cli_fallback.clone()),
     }
 }
 
