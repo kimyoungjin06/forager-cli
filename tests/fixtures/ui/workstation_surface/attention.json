@@ -63,7 +63,46 @@
       "decisions": 1,
       "closeout": "approved_with_followups",
       "truth": "missing",
-      "last_activity": "11m ago"
+      "last_activity": "11m ago",
+      "task_items": [
+        {
+          "kind": "Closeout task",
+          "task_id": "completed-task",
+          "request_id": "request-completed-task",
+          "title": "Closeout follow-up needs receipt review",
+          "status": "completed",
+          "capability_id": "dispatch.runtime",
+          "runner_kind": "local_background",
+          "summary": "Completed work is waiting on a receipt-backed closeout follow-up decision.",
+          "reference": "offdesk_tasks.json#completed-task",
+          "command": "forager offdesk closeout-decision --json",
+          "updated_at": "2026-06-18T02:47:47Z",
+          "next_safe_action_kind": "closeout_check",
+          "requires_operator_review": true,
+          "inspection_items": [
+            {
+              "label": "Runner",
+              "value": "local_background / dispatch.runtime",
+              "tone": "neutral"
+            },
+            {
+              "label": "Gate",
+              "value": "proceed",
+              "tone": "success"
+            }
+          ],
+          "receipt_links": [
+            {
+              "source": "action_envelope",
+              "schema": "action_envelope_receipt.v1",
+              "record_id": "action-receipt-f1c2d3e4a5b6c7d8",
+              "result_status": "rejected",
+              "recorded_at": "2026-06-18T02:49:12Z",
+              "summary": "Receipt rejected because the observed decision hash was stale."
+            }
+          ]
+        }
+      ]
     },
     {
       "project_key": "Harness",

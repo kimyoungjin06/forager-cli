@@ -83,9 +83,19 @@ export type ProjectTaskItem = {
   reference: string;
   command: string;
   inspection_items: ProjectTaskInspectionItem[];
+  receipt_links: ProjectTaskReceiptLink[];
   task_id?: string;
   next_safe_action_kind?: string;
   requires_operator_review?: boolean;
+};
+
+export type ProjectTaskReceiptLink = {
+  source: string;
+  schema: string;
+  record_id: string;
+  result_status: string;
+  recorded_at: string;
+  summary: string;
 };
 
 export type ProjectTaskInspectionItem = {
@@ -599,9 +609,21 @@ function surfaceProjectTaskItems(values: unknown[]): ProjectTaskItem[] {
     reference: fallbackString(stringAt(item, 'reference'), stringAt(item, 'task_id'), 'offdesk_tasks.json'),
     command: fallbackString(stringAt(item, 'command'), 'forager offdesk tasks --json'),
     inspection_items: surfaceProjectTaskInspectionItems(arrayAt(item, 'inspection_items')),
+    receipt_links: surfaceProjectTaskReceiptLinks(arrayAt(item, 'receipt_links')),
     task_id: optionalStringAt(item, 'task_id'),
     next_safe_action_kind: optionalStringAt(item, 'next_safe_action_kind'),
     requires_operator_review: booleanAt(item, 'requires_operator_review'),
+  }));
+}
+
+function surfaceProjectTaskReceiptLinks(values: unknown[]): ProjectTaskReceiptLink[] {
+  return values.filter(isRecord).map((item) => ({
+    source: fallbackString(stringAt(item, 'source'), 'receipt'),
+    schema: fallbackString(stringAt(item, 'schema'), 'unknown_schema'),
+    record_id: fallbackString(stringAt(item, 'record_id'), 'unknown_record'),
+    result_status: fallbackString(stringAt(item, 'result_status'), 'unknown'),
+    recorded_at: fallbackString(stringAt(item, 'recorded_at'), '-'),
+    summary: fallbackString(stringAt(item, 'summary'), ''),
   }));
 }
 
@@ -638,6 +660,7 @@ function projectTaskItems(
       reference: item.receipt_ref || item.decision_id,
       command: action?.allowed_command || item.cli_fallback,
       inspection_items: [],
+      receipt_links: [],
     };
   });
 
@@ -649,6 +672,7 @@ function projectTaskItems(
     reference: item.latest_receipt?.receipt_id || item.handoff_id || item.closeout_id || item.decision_id,
     command: item.tick_command || item.dispatch_command || item.preflight_command,
     inspection_items: [],
+    receipt_links: [],
   }));
 
   const truthTasks = truthItems.map((item) => ({
@@ -659,6 +683,7 @@ function projectTaskItems(
     reference: item.receipt_id || item.closeout_id || item.review_id,
     command: item.resolve_command || item.retire_command,
     inspection_items: [],
+    receipt_links: [],
   }));
 
   const derivedTasks: ProjectTaskItem[] = [];
@@ -671,6 +696,7 @@ function projectTaskItems(
       reference: `workstation_surface.v1#project:${project.project_key}`,
       command: 'forager offdesk decisions --json',
       inspection_items: [],
+      receipt_links: [],
     });
   }
   if (runtimeTasks.length === 0 && project.runtime !== '-' && project.runtime !== 'completed') {
@@ -682,6 +708,7 @@ function projectTaskItems(
       reference: `workstation_surface.v1#project:${project.project_key}`,
       command: 'forager status --json',
       inspection_items: [],
+      receipt_links: [],
     });
   }
 

@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const previewPort = Number(process.env.FORAGER_PLAYWRIGHT_PORT ?? 4322);
+const previewOrigin = `http://127.0.0.1:${previewPort}`;
+
 export default defineConfig({
   testDir: './tests/visual',
   outputDir: './test-results',
@@ -8,13 +11,13 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
-    baseURL: 'http://127.0.0.1:4322',
+    baseURL: previewOrigin,
     trace: 'retain-on-failure',
   },
   webServer: {
-    command: 'npm run preview -- --host 127.0.0.1 --port 4322',
-    url: 'http://127.0.0.1:4322/forager-cli/review/',
-    reuseExistingServer: !process.env.CI,
+    command: `npm run preview -- --host 127.0.0.1 --port ${previewPort}`,
+    url: `${previewOrigin}/forager-cli/review/`,
+    reuseExistingServer: false,
     timeout: 30_000,
   },
   projects: [

@@ -352,9 +352,10 @@ recovery, accepted, stale, and truth-gap views plus a read-only active-task draw
 back to decision/runtime/truth/project-row state only when task-store rows are
 absent. Task-store rows now include compact inspection details for runner,
 ticket, gate, attempts, artifacts, mode, provider, and errors so operators can
-judge whether to monitor, review, or recover without opening raw logs. Future
-slices should add task-linked action receipts once task-to-action receipt
-matching is exposed in the read model.
+judge whether to monitor, review, or recover without opening raw logs. The same
+drawer now surfaces task-linked action records from decision envelope receipts,
+decision executions, decision closeouts, and runtime dispatch receipts when
+those append-only records can be matched to the task.
 
 ### P1 - `/graph`
 
@@ -431,10 +432,13 @@ retrieval path, and action-card proposal loop remain deferred.
 
 ## Current Completeness Review - 2026-06-19
 
-Current baseline checked with `npm run test:visual`: 24 Playwright tests pass
-across desktop and mobile. That is now a useful route-level smoke baseline, but
-it still misses deeper product gaps such as backend action API wiring, a real
-assistant answer surface, and expanded graph exploration.
+Current baseline checked with `npm run test:visual`: 26 Playwright tests pass
+across desktop and mobile. Visual tests now build and run under a website build
+lock and use an isolated Playwright preview port instead of reusing an existing
+local server, reducing stale-preview and concurrent-`dist` race failures. This
+is now a useful route-level smoke baseline, but it still misses deeper product
+gaps such as backend action API wiring, a real assistant answer surface, and
+expanded graph exploration.
 
 ### P0 - Make `/decisions/` a selectable action center
 

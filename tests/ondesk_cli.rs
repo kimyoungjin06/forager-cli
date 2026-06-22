@@ -231,6 +231,22 @@ fn ondesk_workstation_surface_json_projects_current_status_into_dashboard() -> R
             offdesk_task_fixture("completed-task", "completed", now)
         ]))?,
     )?;
+    fs::write(
+        profile_dir.join("runtime_dispatch_receipts.jsonl"),
+        format!(
+            "{}\n",
+            serde_json::to_string(&json!({
+                "schema": "runtime_dispatch_receipt.v1",
+                "receipt_id": "runtime-receipt-approval-task",
+                "preflight_id": "runtime-preflight-approval-task",
+                "source_closeout_id": "closeout-approval-task",
+                "task_id": "approval-task",
+                "recorded_at": now + Duration::minutes(2),
+                "result_status": "queued",
+                "reason": "Runtime dispatch queued approval-task."
+            }))?
+        ),
+    )?;
     let closeout_dir = profile_dir.join("offdesk_closeouts").join("completed-task");
     fs::create_dir_all(&closeout_dir)?;
     fs::write(
@@ -410,6 +426,18 @@ fn ondesk_workstation_surface_json_projects_current_status_into_dashboard() -> R
     assert_eq!(
         surface["projects"][0]["task_items"][0]["inspection_items"][6]["value"],
         "local-llm / qwen-coder"
+    );
+    assert_eq!(
+        surface["projects"][0]["task_items"][0]["receipt_links"][0]["source"],
+        "runtime_dispatch"
+    );
+    assert_eq!(
+        surface["projects"][0]["task_items"][0]["receipt_links"][0]["record_id"],
+        "runtime-receipt-approval-task"
+    );
+    assert_eq!(
+        surface["projects"][0]["task_items"][0]["receipt_links"][0]["result_status"],
+        "queued"
     );
     assert_eq!(
         surface["decision_inbox"]["schema"],
@@ -1512,6 +1540,18 @@ fn ondesk_action_decision_requires_ready_preflight_and_is_idempotent() -> Result
     assert_eq!(
         runtime_item["tick_command"],
         "forager offdesk tick --task-id runtime-task"
+    );
+    assert_eq!(
+        closed_surface["projects"][0]["task_items"][0]["receipt_links"][0]["source"],
+        "runtime_dispatch"
+    );
+    assert_eq!(
+        closed_surface["projects"][0]["task_items"][0]["receipt_links"][0]["record_id"],
+        runtime_dispatch["receipt"]["receipt_id"]
+    );
+    assert_eq!(
+        closed_surface["projects"][0]["task_items"][0]["receipt_links"][0]["result_status"],
+        "queued"
     );
     Ok(())
 }

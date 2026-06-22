@@ -40,6 +40,7 @@ const MAX_RUNTIME_DISPATCH_ITEMS: usize = 6;
 const MAX_ACCEPTED_TRUTH_RECOVERY_ITEMS: usize = 6;
 const MAX_DECISION_EVIDENCE_REFS: usize = 6;
 const MAX_ACTION_ENVELOPES_PER_DECISION: usize = 3;
+const MAX_TASK_RECEIPT_LINKS: usize = 4;
 const MAX_ACTION_RECEIPT_FAILED_CHECKS: usize = 4;
 const MAX_ACTION_EXECUTION_FAILED_CHECKS: usize = 4;
 const TELEGRAM_LOOP_STATUS_MAX_AGE_SECONDS: i64 = 180;
@@ -136,6 +137,8 @@ struct ProjectTaskItem {
     inspection_items: Vec<ProjectTaskInspectionItem>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     artifact_refs: Vec<ProjectTaskArtifactRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    receipt_links: Vec<ProjectTaskReceiptLink>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     log_artifact_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -155,6 +158,16 @@ struct ProjectTaskArtifactRef {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     path: Option<String>,
     present: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProjectTaskReceiptLink {
+    source: &'static str,
+    schema: String,
+    record_id: String,
+    result_status: String,
+    recorded_at: DateTime<Utc>,
+    summary: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -612,6 +625,16 @@ struct ProjectAccumulator {
     task_items: Vec<ProjectTaskItem>,
 }
 
+struct TaskReceiptContext<'a> {
+    profile: &'a str,
+    generated_at: DateTime<Utc>,
+    decisions: &'a [DecisionRecord],
+    action_receipts: &'a [StoredActionEnvelopeReceipt],
+    action_executions: &'a [StoredDecisionActionExecution],
+    action_closeouts: &'a [StoredDecisionActionCloseout],
+    runtime_receipts: &'a [StoredRuntimeDispatchReceipt],
+}
+
 pub async fn run(profile: &str, args: WorkstationSurfaceArgs) -> Result<()> {
     let surface = build_workstation_surface(profile)?;
     if args.json {
@@ -685,7 +708,19 @@ fn build_workstation_surface(profile: &str) -> Result<WorkstationSurface> {
         attention_counts: attention_counts(&status_json, open_decisions.len()),
         top_attention,
         next_safe_actions: ensure_dashboard_actions(next_safe_actions),
-        projects: project_rows(&tasks, &latest_decisions),
+        projects: project_rows(
+            &tasks,
+            &latest_decisions,
+            &TaskReceiptContext {
+                profile,
+                generated_at,
+                decisions: &latest_decisions,
+                action_receipts: &action_receipts,
+                action_executions: &action_executions,
+                action_closeouts: &action_closeouts,
+                runtime_receipts: &runtime_receipts,
+            },
+        ),
         decision_inbox: decision_inbox_surface(decision_items.clone(), open_decisions.len()),
         runtime_dispatch,
         accepted_truth_recovery,
@@ -1048,7 +1083,11 @@ fn ensure_dashboard_actions(actions: Vec<DashboardAction>) -> Vec<DashboardActio
     }
 }
 
-fn project_rows(tasks: &[OffdeskTask], decisions: &[DecisionRecord]) -> Vec<ProjectRow> {
+fn project_rows(
+    tasks: &[OffdeskTask],
+    decisions: &[DecisionRecord],
+    receipt_context: &TaskReceiptContext<'_>,
+) -> Vec<ProjectRow> {
     let mut projects = BTreeMap::<String, ProjectAccumulator>::new();
     for task in tasks {
         let key = operator_safe_text(&task.project_key);
@@ -1067,7 +1106,10 @@ fn project_rows(tasks: &[OffdeskTask], decisions: &[DecisionRecord]) -> Vec<Proj
             OffdeskTaskStatus::ResumePending => project.resume_pending += 1,
             OffdeskTaskStatus::Cancelled => project.cancelled += 1,
         }
-        project.task_items.push(project_task_item(task));
+        let receipt_links = project_task_receipt_links(task, receipt_context);
+        project
+            .task_items
+            .push(project_task_item(task, receipt_links));
         update_latest(&mut project.last_activity, task.updated_at);
     }
     for record in decisions
@@ -1168,7 +1210,10 @@ fn project_row(project: ProjectAccumulator) -> ProjectRow {
     }
 }
 
-fn project_task_item(task: &OffdeskTask) -> ProjectTaskItem {
+fn project_task_item(
+    task: &OffdeskTask,
+    receipt_links: Vec<ProjectTaskReceiptLink>,
+) -> ProjectTaskItem {
     let view = task.operator_view();
     let runner_kind = background_runner_kind_label(task.runner_kind);
     let command = view
@@ -1224,10 +1269,118 @@ fn project_task_item(task: &OffdeskTask) -> ProjectTaskItem {
         requires_operator_review: view.next_safe_action.requires_operator_review,
         inspection_items,
         artifact_refs,
+        receipt_links,
         log_artifact_path: view.log_artifact_path.map(|path| operator_safe_text(&path)),
         result_artifact_path: view
             .result_artifact_path
             .map(|path| operator_safe_text(&path)),
+    }
+}
+
+fn project_task_receipt_links(
+    task: &OffdeskTask,
+    context: &TaskReceiptContext<'_>,
+) -> Vec<ProjectTaskReceiptLink> {
+    let mut links = Vec::new();
+    let mut seen = BTreeSet::new();
+    for record in context
+        .decisions
+        .iter()
+        .filter(|record| record.project_key == task.project_key && record.task_id == task.task_id)
+    {
+        for action in decision_action_envelopes(
+            record,
+            context.profile,
+            &decision_allowed_actions(record),
+            context.generated_at,
+            context.action_receipts,
+            context.action_executions,
+        ) {
+            if let Some(receipt) = action.latest_receipt {
+                push_project_task_receipt_link(
+                    &mut links,
+                    &mut seen,
+                    ProjectTaskReceiptLink {
+                        source: "action_envelope",
+                        schema: receipt.schema,
+                        record_id: receipt.receipt_id,
+                        result_status: receipt.result_status,
+                        recorded_at: receipt.processed_at,
+                        summary: receipt.reason,
+                    },
+                );
+            }
+            if let Some(execution) = action.latest_execution {
+                push_project_task_receipt_link(
+                    &mut links,
+                    &mut seen,
+                    ProjectTaskReceiptLink {
+                        source: "decision_execution",
+                        schema: execution.schema,
+                        record_id: execution.execution_id,
+                        result_status: execution.result_status,
+                        recorded_at: execution.executed_at,
+                        summary: execution.reason,
+                    },
+                );
+            }
+        }
+        if let Some(closeout) = latest_matching_closeout(record, context.action_closeouts) {
+            push_project_task_receipt_link(
+                &mut links,
+                &mut seen,
+                ProjectTaskReceiptLink {
+                    source: "decision_closeout",
+                    schema: operator_safe_text(&closeout.schema),
+                    record_id: operator_safe_text(&closeout.closeout_id),
+                    result_status: operator_safe_text(&closeout.result_status),
+                    recorded_at: closeout.recorded_at,
+                    summary: format!(
+                        "{} decision action closeout for {}",
+                        operator_safe_text(&closeout.decision),
+                        operator_safe_text(&closeout.decision_id)
+                    ),
+                },
+            );
+        }
+    }
+    for receipt in context
+        .runtime_receipts
+        .iter()
+        .filter(|receipt| receipt.task_id == task.task_id)
+    {
+        push_project_task_receipt_link(
+            &mut links,
+            &mut seen,
+            ProjectTaskReceiptLink {
+                source: "runtime_dispatch",
+                schema: operator_safe_text(&receipt.schema),
+                record_id: operator_safe_text(&receipt.receipt_id),
+                result_status: operator_safe_text(&receipt.result_status),
+                recorded_at: receipt.recorded_at,
+                summary: operator_safe_text(&receipt.reason),
+            },
+        );
+    }
+    links.sort_by_key(|link| {
+        (
+            std::cmp::Reverse(link.recorded_at),
+            link.source,
+            link.record_id.clone(),
+        )
+    });
+    links.truncate(MAX_TASK_RECEIPT_LINKS);
+    links
+}
+
+fn push_project_task_receipt_link(
+    links: &mut Vec<ProjectTaskReceiptLink>,
+    seen: &mut BTreeSet<String>,
+    link: ProjectTaskReceiptLink,
+) {
+    let key = format!("{}:{}:{}", link.source, link.schema, link.record_id);
+    if seen.insert(key) {
+        links.push(link);
     }
 }
 
