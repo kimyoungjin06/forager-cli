@@ -13,6 +13,9 @@ const liveSurface = JSON.parse(
 const workstationSurface = JSON.parse(
   readFileSync(new URL('../../../tests/fixtures/ui/workstation_surface/attention.json', import.meta.url), 'utf8'),
 );
+const acceptedWorkSurface = JSON.parse(
+  readFileSync(new URL('../../../tests/fixtures/ui/workstation_surface/closeout_accepted.json', import.meta.url), 'utf8'),
+);
 const workstationWorkSurface = JSON.parse(JSON.stringify(workstationSurface));
 const nanoProject = workstationWorkSurface.projects.find((project) => project.project_key === 'NanoClustering');
 if (nanoProject) {
@@ -325,6 +328,8 @@ test('work route renders project portfolio detail with graph and assistant conte
   await expect(page.locator('[data-work-project-filters]').getByRole('button', { name: /Running 1/ })).toBeVisible();
   await expect(page.locator('[data-work-project-filters]').getByRole('button', { name: /Review 1/ })).toBeVisible();
   await expect(page.locator('[data-work-project-filters]').getByRole('button', { name: /Recovery 1/ })).toBeVisible();
+  await expect(page.locator('[data-work-project-filters]').getByRole('button', { name: /Accepted 0/ })).toBeVisible();
+  await expect(page.locator('[data-work-project-filters]').getByRole('button', { name: /Stale 1/ })).toBeVisible();
   await expect(page.locator('[data-work-project-filters]').getByRole('button', { name: /Truth gap 2/ })).toBeVisible();
   await expect(page.locator('[data-work-filter-summary]')).toHaveText('Showing all 3 projects from the current workstation surface.');
   await expect(page.locator('[data-work-project-detail]').getByRole('heading', { name: 'NanoClustering' })).toBeVisible();
@@ -413,6 +418,10 @@ test('work route renders project portfolio detail with graph and assistant conte
   await expect(page.locator('[data-work-task-drawer]').getByText('Recovery task')).toBeVisible();
   await expect(page.locator('[data-work-task-drawer]').getByText('heartbeat is stale')).toBeVisible();
 
+  await page.locator('[data-work-project-filters]').getByRole('button', { name: /Stale 1/ }).click();
+  await expect(page.locator('[data-work-filter-summary]')).toHaveText('Showing 1 of 3 projects matching stale.');
+  await expect(page.locator('[data-work-project-detail]').getByRole('heading', { name: 'NanoClustering' })).toBeVisible();
+
   await page.locator('[data-work-project-filters]').getByRole('button', { name: /Review 1/ }).click();
   await expect(page.locator('[data-work-filter-summary]')).toHaveText('Showing 1 of 3 projects matching review.');
   await expect(page.locator('[data-work-project-detail]').getByRole('heading', { name: 'NanoClustering' })).toBeVisible();
@@ -421,6 +430,25 @@ test('work route renders project portfolio detail with graph and assistant conte
   await expect(page.locator('[data-work-filter-summary]')).toHaveText('Showing 1 of 3 projects matching blocked.');
   await expect(page.locator('[data-work-project-detail]').getByRole('heading', { name: 'Science Atlas' })).toBeVisible();
   await expect(page.locator('[data-work-assistant-scope]')).toHaveText('Scope: Science Atlas');
+});
+
+test('work route can filter accepted truth projects', async ({ page }) => {
+  await page.route('**/forager-cli/workstation-surface.json', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(acceptedWorkSurface),
+    });
+  });
+
+  await page.goto(WORK_ROUTE);
+
+  await expect(page.getByText('Live source loaded')).toBeVisible();
+  await expect(page.locator('[data-work-project-filters]').getByRole('button', { name: /Accepted 1/ })).toBeVisible();
+  await expect(page.locator('[data-work-project-filters]').getByRole('button', { name: /Stale 0/ })).toBeVisible();
+  await page.locator('[data-work-project-filters]').getByRole('button', { name: /Accepted 1/ }).click();
+  await expect(page.locator('[data-work-filter-summary]')).toHaveText('Showing 1 of 1 projects matching accepted.');
+  await expect(page.locator('[data-work-project-detail]').getByRole('heading', { name: 'NanoClustering' })).toBeVisible();
+  await expect(page.locator('[data-work-project-state-chips]').getByText('accepted')).toHaveCount(2);
 });
 
 test('graph route renders scoped provenance and project blockers', async ({ page }, testInfo) => {

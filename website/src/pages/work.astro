@@ -31,6 +31,17 @@ const projectNeedsTaskRecovery = (project) =>
     ['failed', 'resume_pending'].includes(item.status)
     || ['recovery_required', 'resume_review_required'].includes(item.next_safe_action_kind ?? '')
   );
+const projectHasAcceptedTruth = (project) => project.truth === 'accepted' || project.closeout === 'accepted';
+const projectHasStaleEvidence = (project) => {
+  const taskStale = project.task_items.some((item) =>
+    [item.status, item.summary, item.next_safe_action_kind ?? '', ...item.inspection_items.map((inspection) => inspection.value)]
+      .some((value) => value.toLowerCase().includes('stale'))
+  );
+  const attentionStale = project.attention_items.some((item) =>
+    [item.status, item.summary, item.boundary].some((value) => value.toLowerCase().includes('stale'))
+  );
+  return taskStale || attentionStale;
+};
 const workFilterOptions = [
   ['all', 'All', workView.projectDetails.length],
   ['attention', 'Attention', workView.projectDetails.filter((project) => project.attention_count > 0 || project.severity === 'attention').length],
@@ -38,6 +49,8 @@ const workFilterOptions = [
   ['running', 'Running', workView.projectDetails.filter((project) => project.runtime.includes('running')).length],
   ['needs_review', 'Review', workView.projectDetails.filter(projectNeedsTaskReview).length],
   ['recovery', 'Recovery', workView.projectDetails.filter(projectNeedsTaskRecovery).length],
+  ['accepted', 'Accepted', workView.projectDetails.filter(projectHasAcceptedTruth).length],
+  ['stale', 'Stale', workView.projectDetails.filter(projectHasStaleEvidence).length],
   ['truth_gap', 'Truth gap', workView.projectDetails.filter((project) => project.truth.includes('missing') || project.truth_recovery_count > 0).length],
 ];
 const taskInspectionToneClasses = {
@@ -566,6 +579,16 @@ const taskInspectionToneClasses = {
           count: filterProjects(projects, 'recovery').length,
         },
         {
+          id: 'accepted',
+          label: 'Accepted',
+          count: filterProjects(projects, 'accepted').length,
+        },
+        {
+          id: 'stale',
+          label: 'Stale',
+          count: filterProjects(projects, 'stale').length,
+        },
+        {
           id: 'truth_gap',
           label: 'Truth gap',
           count: filterProjects(projects, 'truth_gap').length,
@@ -601,6 +624,10 @@ const taskInspectionToneClasses = {
           return projects.filter(projectNeedsTaskReview);
         case 'recovery':
           return projects.filter(projectNeedsTaskRecovery);
+        case 'accepted':
+          return projects.filter(projectHasAcceptedTruth);
+        case 'stale':
+          return projects.filter(projectHasStaleEvidence);
         case 'truth_gap':
           return projects.filter((project) => String(project.truth ?? '').includes('missing') || Number(project.truth_recovery_count ?? 0) > 0);
         default:
@@ -622,6 +649,27 @@ const taskInspectionToneClasses = {
         ['failed', 'resume_pending'].includes(String(item.status ?? ''))
         || ['recovery_required', 'resume_review_required'].includes(String(item.next_safe_action_kind ?? ''))
       );
+    }
+
+    function projectHasAcceptedTruth(project) {
+      return project.truth === 'accepted' || project.closeout === 'accepted';
+    }
+
+    function projectHasStaleEvidence(project) {
+      const tasks = project.task_items ?? [];
+      const taskStale = tasks.some((item) =>
+        [
+          item.status,
+          item.summary,
+          item.next_safe_action_kind,
+          ...(item.inspection_items ?? []).map((inspection) => inspection.value),
+        ].some((value) => String(value ?? '').toLowerCase().includes('stale'))
+      );
+      const attention = project.attention_items ?? [];
+      const attentionStale = attention.some((item) =>
+        [item.status, item.summary, item.boundary].some((value) => String(value ?? '').toLowerCase().includes('stale'))
+      );
+      return taskStale || attentionStale;
     }
 
     function projectSelectHtml(project, selected) {
