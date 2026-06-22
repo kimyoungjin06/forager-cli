@@ -206,10 +206,28 @@ fn ondesk_workstation_surface_json_projects_current_status_into_dashboard() -> R
     let profile_dir = profile_dir(temp.path());
     fs::create_dir_all(&profile_dir)?;
     let now = Utc::now();
+    let mut approval_task = offdesk_task_fixture("approval-task", "pending_approval", now);
+    approval_task["attempt_count"] = json!(1);
+    approval_task["last_gate_status"] = json!("pending_approval");
+    approval_task["artifact_refs"] = json!([
+        {
+            "artifact_id": "task-log",
+            "path": "artifacts/approval-task.log",
+            "present": true
+        },
+        {
+            "artifact_id": "task-result",
+            "path": "artifacts/approval-task-result.json",
+            "present": false
+        }
+    ]);
+    approval_task["log_artifact_path"] = json!("artifacts/approval-task.log");
+    approval_task["provider_id"] = json!("local-llm");
+    approval_task["model"] = json!("qwen-coder");
     fs::write(
         profile_dir.join("offdesk_tasks.json"),
         serde_json::to_string_pretty(&json!([
-            offdesk_task_fixture("approval-task", "pending_approval", now),
+            approval_task,
             offdesk_task_fixture("completed-task", "completed", now)
         ]))?,
     )?;
@@ -364,6 +382,34 @@ fn ondesk_workstation_surface_json_projects_current_status_into_dashboard() -> R
     assert_eq!(
         surface["projects"][0]["task_items"][0]["requires_operator_review"],
         true
+    );
+    assert_eq!(
+        surface["projects"][0]["task_items"][0]["inspection_items"][0]["label"],
+        "Runner"
+    );
+    assert_eq!(
+        surface["projects"][0]["task_items"][0]["inspection_items"][0]["value"],
+        "local_background / dispatch.runtime"
+    );
+    assert_eq!(
+        surface["projects"][0]["task_items"][0]["inspection_items"][2]["label"],
+        "Attempts"
+    );
+    assert_eq!(
+        surface["projects"][0]["task_items"][0]["inspection_items"][2]["value"],
+        "1"
+    );
+    assert_eq!(
+        surface["projects"][0]["task_items"][0]["inspection_items"][3]["value"],
+        "pending_approval"
+    );
+    assert_eq!(
+        surface["projects"][0]["task_items"][0]["inspection_items"][4]["value"],
+        "1/2 refs; log ready; result missing"
+    );
+    assert_eq!(
+        surface["projects"][0]["task_items"][0]["inspection_items"][6]["value"],
+        "local-llm / qwen-coder"
     );
     assert_eq!(
         surface["decision_inbox"]["schema"],

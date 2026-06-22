@@ -31,6 +31,28 @@ if (harnessProject) {
       updated_at: '2026-06-18T03:12:00Z',
       next_safe_action_kind: 'runtime_monitoring',
       requires_operator_review: false,
+      inspection_items: [
+        {
+          label: 'Runner',
+          value: 'local_background / web.visual_review',
+          tone: 'neutral',
+        },
+        {
+          label: 'Ticket',
+          value: 'ticket-harness-live',
+          tone: 'neutral',
+        },
+        {
+          label: 'Artifacts',
+          value: '1/2 refs; log ready; result missing',
+          tone: 'attention',
+        },
+        {
+          label: 'Mode',
+          value: 'running / awaiting_runtime_evidence',
+          tone: 'neutral',
+        },
+      ],
     },
   ];
 }
@@ -340,7 +362,9 @@ test('work route renders project portfolio detail with graph and assistant conte
   await expect(page.locator('[data-work-graph-title]')).toHaveText('Forager Harness provenance path');
   await page.locator('[data-work-task-drawer] summary').click();
   await expect(page.locator('[data-work-task-drawer]').getByText('Live task store')).toBeVisible();
-  await expect(page.locator('[data-work-task-drawer]').getByText('task-harness-live')).toBeVisible();
+  await expect(page.locator('[data-work-task-drawer]').getByText('task-harness-live', { exact: true })).toBeVisible();
+  await expect(page.locator('[data-work-task-drawer]').getByText('local_background / web.visual_review')).toBeVisible();
+  await expect(page.locator('[data-work-task-drawer]').getByText('1/2 refs; log ready; result missing')).toBeVisible();
   await expect(page.locator('[data-work-task-drawer]').getByText('forager offdesk poll ticket-harness-live')).toBeVisible();
 
   await page.locator('[data-work-project-filters]').getByRole('button', { name: /Blocked 1/ }).click();

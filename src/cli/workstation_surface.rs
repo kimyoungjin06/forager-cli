@@ -14,6 +14,7 @@ use super::status::current_status_json_value;
 use crate::offdesk::{
     load_offdesk_status_summary, operator_safe_text, DecisionLedger, DecisionRecord,
     DecisionStatus, OffdeskStatusSummary, OffdeskTask, OffdeskTaskStatus, OffdeskTaskStore,
+    SchedulerGateStatus,
 };
 use crate::session::get_profile_dir;
 
@@ -132,11 +133,20 @@ struct ProjectTaskItem {
     next_safe_action_kind: String,
     requires_operator_review: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    inspection_items: Vec<ProjectTaskInspectionItem>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     artifact_refs: Vec<ProjectTaskArtifactRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     log_artifact_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     result_artifact_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProjectTaskInspectionItem {
+    label: &'static str,
+    value: String,
+    tone: &'static str,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1160,6 +1170,7 @@ fn project_row(project: ProjectAccumulator) -> ProjectRow {
 
 fn project_task_item(task: &OffdeskTask) -> ProjectTaskItem {
     let view = task.operator_view();
+    let runner_kind = background_runner_kind_label(task.runner_kind);
     let command = view
         .next_safe_action
         .commands
@@ -1179,6 +1190,23 @@ fn project_task_item(task: &OffdeskTask) -> ProjectTaskItem {
     } else {
         view.next_safe_action.detail.clone()
     };
+    let artifact_count = view.artifact_refs.len();
+    let present_artifact_count = view
+        .artifact_refs
+        .iter()
+        .filter(|artifact| artifact.present)
+        .count();
+    let inspection_items =
+        project_task_inspection_items(&view, runner_kind, artifact_count, present_artifact_count);
+    let artifact_refs: Vec<ProjectTaskArtifactRef> = view
+        .artifact_refs
+        .into_iter()
+        .map(|artifact| ProjectTaskArtifactRef {
+            artifact_id: operator_safe_text(&artifact.artifact_id),
+            path: artifact.path.map(|path| operator_safe_text(&path)),
+            present: artifact.present,
+        })
+        .collect();
 
     ProjectTaskItem {
         kind: project_task_kind(task.status),
@@ -1187,26 +1215,159 @@ fn project_task_item(task: &OffdeskTask) -> ProjectTaskItem {
         title,
         status: offdesk_task_status_label(task.status).to_string(),
         capability_id: view.capability_id,
-        runner_kind: background_runner_kind_label(task.runner_kind),
+        runner_kind,
         summary,
         reference: format!("offdesk_tasks.json#{}", view.task_id),
         command,
         updated_at: view.updated_at,
         next_safe_action_kind: view.next_safe_action.kind,
         requires_operator_review: view.next_safe_action.requires_operator_review,
-        artifact_refs: view
-            .artifact_refs
-            .into_iter()
-            .map(|artifact| ProjectTaskArtifactRef {
-                artifact_id: operator_safe_text(&artifact.artifact_id),
-                path: artifact.path.map(|path| operator_safe_text(&path)),
-                present: artifact.present,
-            })
-            .collect(),
+        inspection_items,
+        artifact_refs,
         log_artifact_path: view.log_artifact_path.map(|path| operator_safe_text(&path)),
         result_artifact_path: view
             .result_artifact_path
             .map(|path| operator_safe_text(&path)),
+    }
+}
+
+fn project_task_inspection_items(
+    view: &crate::offdesk::OffdeskTaskView,
+    runner_kind: &'static str,
+    artifact_count: usize,
+    present_artifact_count: usize,
+) -> Vec<ProjectTaskInspectionItem> {
+    let mut items = vec![
+        ProjectTaskInspectionItem {
+            label: "Runner",
+            value: format!("{runner_kind} / {}", view.capability_id),
+            tone: "neutral",
+        },
+        ProjectTaskInspectionItem {
+            label: "Ticket",
+            value: view
+                .background_ticket_id
+                .as_deref()
+                .map(operator_safe_text)
+                .unwrap_or_else(|| "not launched".to_string()),
+            tone: if view.background_ticket_id.is_some() {
+                "neutral"
+            } else {
+                "muted"
+            },
+        },
+        ProjectTaskInspectionItem {
+            label: "Attempts",
+            value: view.attempt_count.to_string(),
+            tone: if view.attempt_count > 0 {
+                "attention"
+            } else {
+                "muted"
+            },
+        },
+        ProjectTaskInspectionItem {
+            label: "Gate",
+            value: view
+                .last_gate_status
+                .map(scheduler_gate_status_label)
+                .unwrap_or("not gated")
+                .to_string(),
+            tone: view
+                .last_gate_status
+                .map(scheduler_gate_status_tone)
+                .unwrap_or("muted"),
+        },
+        ProjectTaskInspectionItem {
+            label: "Artifacts",
+            value: project_task_artifact_summary(
+                artifact_count,
+                present_artifact_count,
+                view.log_artifact_path.is_some(),
+                view.result_artifact_path.is_some(),
+            ),
+            tone: project_task_artifact_tone(
+                artifact_count,
+                present_artifact_count,
+                view.result_artifact_path.is_some(),
+            ),
+        },
+        ProjectTaskInspectionItem {
+            label: "Mode",
+            value: format!(
+                "{} / {}",
+                view.mode_assessment.mode_verdict.label(),
+                view.mode_assessment.mode_risk.label()
+            ),
+            tone: if view.mode_assessment.review_stage_required {
+                "attention"
+            } else if view.mode_assessment.mode_risk.label() == "none" {
+                "success"
+            } else {
+                "neutral"
+            },
+        },
+    ];
+
+    if let Some(not_before) = view.not_before {
+        items.push(ProjectTaskInspectionItem {
+            label: "Wait until",
+            value: not_before.to_rfc3339(),
+            tone: "attention",
+        });
+    }
+    if let Some(provider_id) = &view.provider_id {
+        let model = view.model.as_deref().unwrap_or("model unspecified");
+        items.push(ProjectTaskInspectionItem {
+            label: "Provider",
+            value: format!(
+                "{} / {}",
+                operator_safe_text(provider_id),
+                operator_safe_text(model)
+            ),
+            tone: "neutral",
+        });
+    }
+    if let Some(last_error) = &view.last_error {
+        items.push(ProjectTaskInspectionItem {
+            label: "Error",
+            value: operator_safe_text(last_error),
+            tone: "danger",
+        });
+    }
+
+    items
+}
+
+fn project_task_artifact_summary(
+    artifact_count: usize,
+    present_artifact_count: usize,
+    has_log_artifact: bool,
+    has_result_artifact: bool,
+) -> String {
+    let log = if has_log_artifact {
+        "log ready"
+    } else {
+        "log missing"
+    };
+    let result = if has_result_artifact {
+        "result ready"
+    } else {
+        "result missing"
+    };
+    format!("{present_artifact_count}/{artifact_count} refs; {log}; {result}")
+}
+
+fn project_task_artifact_tone(
+    artifact_count: usize,
+    present_artifact_count: usize,
+    has_result_artifact: bool,
+) -> &'static str {
+    if has_result_artifact || (artifact_count > 0 && present_artifact_count == artifact_count) {
+        "success"
+    } else if artifact_count == 0 {
+        "muted"
+    } else {
+        "attention"
     }
 }
 
@@ -1243,6 +1404,23 @@ fn project_task_status_rank(status: &str) -> u8 {
         "completed" => 4,
         "cancelled" => 5,
         _ => 6,
+    }
+}
+
+fn scheduler_gate_status_label(status: SchedulerGateStatus) -> &'static str {
+    match status {
+        SchedulerGateStatus::Proceed => "proceed",
+        SchedulerGateStatus::PendingApproval => "pending_approval",
+        SchedulerGateStatus::Denied => "denied",
+        SchedulerGateStatus::Blocked => "blocked",
+    }
+}
+
+fn scheduler_gate_status_tone(status: SchedulerGateStatus) -> &'static str {
+    match status {
+        SchedulerGateStatus::Proceed => "success",
+        SchedulerGateStatus::PendingApproval => "attention",
+        SchedulerGateStatus::Denied | SchedulerGateStatus::Blocked => "danger",
     }
 }
 

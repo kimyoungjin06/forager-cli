@@ -82,9 +82,16 @@ export type ProjectTaskItem = {
   summary: string;
   reference: string;
   command: string;
+  inspection_items: ProjectTaskInspectionItem[];
   task_id?: string;
   next_safe_action_kind?: string;
   requires_operator_review?: boolean;
+};
+
+export type ProjectTaskInspectionItem = {
+  label: string;
+  value: string;
+  tone: 'neutral' | 'muted' | 'attention' | 'success' | 'danger';
 };
 
 export type DecisionItem = {
@@ -591,10 +598,26 @@ function surfaceProjectTaskItems(values: unknown[]): ProjectTaskItem[] {
     summary: fallbackString(stringAt(item, 'summary'), stringAt(item, 'next_safe_action_kind'), 'No task summary was provided.'),
     reference: fallbackString(stringAt(item, 'reference'), stringAt(item, 'task_id'), 'offdesk_tasks.json'),
     command: fallbackString(stringAt(item, 'command'), 'forager offdesk tasks --json'),
+    inspection_items: surfaceProjectTaskInspectionItems(arrayAt(item, 'inspection_items')),
     task_id: optionalStringAt(item, 'task_id'),
     next_safe_action_kind: optionalStringAt(item, 'next_safe_action_kind'),
     requires_operator_review: booleanAt(item, 'requires_operator_review'),
   }));
+}
+
+function surfaceProjectTaskInspectionItems(values: unknown[]): ProjectTaskInspectionItem[] {
+  return values.filter(isRecord).map((item) => ({
+    label: fallbackString(stringAt(item, 'label'), 'State'),
+    value: fallbackString(stringAt(item, 'value'), '-'),
+    tone: normalizeInspectionTone(stringAt(item, 'tone')),
+  }));
+}
+
+function normalizeInspectionTone(value: string): ProjectTaskInspectionItem['tone'] {
+  if (value === 'muted' || value === 'attention' || value === 'success' || value === 'danger') {
+    return value;
+  }
+  return 'neutral';
 }
 
 function projectTaskItems(
@@ -614,6 +637,7 @@ function projectTaskItems(
       summary: item.recommendation || item.why_now,
       reference: item.receipt_ref || item.decision_id,
       command: action?.allowed_command || item.cli_fallback,
+      inspection_items: [],
     };
   });
 
@@ -624,6 +648,7 @@ function projectTaskItems(
     summary: item.latest_preflight?.reason || item.latest_receipt?.reason || item.boundary,
     reference: item.latest_receipt?.receipt_id || item.handoff_id || item.closeout_id || item.decision_id,
     command: item.tick_command || item.dispatch_command || item.preflight_command,
+    inspection_items: [],
   }));
 
   const truthTasks = truthItems.map((item) => ({
@@ -633,6 +658,7 @@ function projectTaskItems(
     summary: item.next_safe_action,
     reference: item.receipt_id || item.closeout_id || item.review_id,
     command: item.resolve_command || item.retire_command,
+    inspection_items: [],
   }));
 
   const derivedTasks: ProjectTaskItem[] = [];
@@ -644,6 +670,7 @@ function projectTaskItems(
       summary: 'The workstation surface reports decision pressure, but no scoped decision records were included for this project.',
       reference: `workstation_surface.v1#project:${project.project_key}`,
       command: 'forager offdesk decisions --json',
+      inspection_items: [],
     });
   }
   if (runtimeTasks.length === 0 && project.runtime !== '-' && project.runtime !== 'completed') {
@@ -654,6 +681,7 @@ function projectTaskItems(
       summary: 'Runtime state is visible in the project row; inspect the queue before launching or stopping work.',
       reference: `workstation_surface.v1#project:${project.project_key}`,
       command: 'forager status --json',
+      inspection_items: [],
     });
   }
 
