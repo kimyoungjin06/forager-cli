@@ -20,6 +20,7 @@ use crate::session::get_profile_dir;
 
 const WORKSTATION_SURFACE_SCHEMA: &str = "workstation_surface.v1";
 const DECISION_INBOX_SURFACE_SCHEMA: &str = "decision_inbox_surface.v1";
+const CHAT_CONTEXT_SURFACE_SCHEMA: &str = "chat_context_surface.v1";
 const ACTION_ENVELOPE_SCHEMA: &str = "action_envelope.v1";
 const ACTION_ENVELOPE_RECEIPTS_FILE: &str = "action_envelope_receipts.jsonl";
 const DECISION_ACTION_EXECUTIONS_FILE: &str = "decision_action_executions.jsonl";
@@ -69,6 +70,7 @@ struct WorkstationSurface {
     decision_inbox: DecisionInboxSurface,
     runtime_dispatch: RuntimeDispatchSurface,
     accepted_truth_recovery: AcceptedTruthRecoverySurface,
+    chat_context: ChatContextSurface,
     decisions: Vec<DecisionItem>,
     graph_focus: GraphFocus,
     stale_state: StaleState,
@@ -487,6 +489,52 @@ struct AcceptedTruthRecoveryActionReceiptSummary {
     current_hash: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+struct ChatContextSurface {
+    schema: &'static str,
+    status: &'static str,
+    mode: &'static str,
+    summary: String,
+    action_policy: &'static str,
+    scopes: Vec<ChatContextScope>,
+    source_refs: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ChatContextScope {
+    scope_id: String,
+    label: String,
+    kind: &'static str,
+    answer: String,
+    confidence: &'static str,
+    citations: Vec<ChatCitation>,
+    inference_notes: Vec<String>,
+    suggested_actions: Vec<ChatSuggestedAction>,
+    prompts: Vec<ChatPrompt>,
+}
+
+#[derive(Debug, Serialize)]
+struct ChatCitation {
+    label: String,
+    reference: String,
+    trust: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct ChatSuggestedAction {
+    label: String,
+    kind: &'static str,
+    boundary: &'static str,
+    target_ref: String,
+    command: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ChatPrompt {
+    label: String,
+    prompt: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct StoredAcceptedTruthRecoveryActionReceipt {
     schema: String,
@@ -695,6 +743,27 @@ fn build_workstation_surface(profile: &str) -> Result<WorkstationSurface> {
         &recovery_action_receipts,
     )
     .unwrap_or_else(|_| accepted_truth_recovery_surface_from_items(Vec::new()));
+    let projects = project_rows(
+        &tasks,
+        &latest_decisions,
+        &TaskReceiptContext {
+            profile,
+            generated_at,
+            decisions: &latest_decisions,
+            action_receipts: &action_receipts,
+            action_executions: &action_executions,
+            action_closeouts: &action_closeouts,
+            runtime_receipts: &runtime_receipts,
+        },
+    );
+    let decision_inbox = decision_inbox_surface(decision_items.clone(), open_decisions.len());
+    let chat_context = chat_context_surface(
+        &top_attention,
+        &decision_inbox,
+        &runtime_dispatch,
+        &accepted_truth_recovery,
+        &projects,
+    );
 
     Ok(WorkstationSurface {
         schema: WORKSTATION_SURFACE_SCHEMA,
@@ -708,22 +777,11 @@ fn build_workstation_surface(profile: &str) -> Result<WorkstationSurface> {
         attention_counts: attention_counts(&status_json, open_decisions.len()),
         top_attention,
         next_safe_actions: ensure_dashboard_actions(next_safe_actions),
-        projects: project_rows(
-            &tasks,
-            &latest_decisions,
-            &TaskReceiptContext {
-                profile,
-                generated_at,
-                decisions: &latest_decisions,
-                action_receipts: &action_receipts,
-                action_executions: &action_executions,
-                action_closeouts: &action_closeouts,
-                runtime_receipts: &runtime_receipts,
-            },
-        ),
-        decision_inbox: decision_inbox_surface(decision_items.clone(), open_decisions.len()),
+        projects,
+        decision_inbox,
         runtime_dispatch,
         accepted_truth_recovery,
+        chat_context,
         decisions: decision_items,
         graph_focus: graph_focus(),
         stale_state: StaleState {
@@ -1381,6 +1439,303 @@ fn push_project_task_receipt_link(
     let key = format!("{}:{}:{}", link.source, link.schema, link.record_id);
     if seen.insert(key) {
         links.push(link);
+    }
+}
+
+fn chat_context_surface(
+    top_attention: &TopAttention,
+    decision_inbox: &DecisionInboxSurface,
+    runtime_dispatch: &RuntimeDispatchSurface,
+    accepted_truth_recovery: &AcceptedTruthRecoverySurface,
+    projects: &[ProjectRow],
+) -> ChatContextSurface {
+    let status = if decision_inbox.open_count > 0
+        || runtime_dispatch.candidate_count > 0
+        || accepted_truth_recovery.candidate_count > 0
+    {
+        "attention"
+    } else {
+        "clear"
+    };
+    let mut scopes = vec![chat_overview_scope(
+        top_attention,
+        decision_inbox,
+        runtime_dispatch,
+        accepted_truth_recovery,
+    )];
+    scopes.extend(projects.iter().map(chat_project_scope));
+
+    ChatContextSurface {
+        schema: CHAT_CONTEXT_SURFACE_SCHEMA,
+        status,
+        mode: "read_only_cited_answer",
+        summary: format!(
+            "{} assistant scope(s) are available; answers cite state or receipt refs and cannot execute actions.",
+            scopes.len()
+        ),
+        action_policy: "Suggested actions are review cards only. Execution still requires action envelopes, preflight checks, and receipts.",
+        scopes,
+        source_refs: BTreeMap::from([
+            (
+                "overview".to_string(),
+                "workstation_surface.v1#top_attention".to_string(),
+            ),
+            (
+                "decision_inbox".to_string(),
+                DECISION_INBOX_SURFACE_SCHEMA.to_string(),
+            ),
+            (
+                "runtime_dispatch".to_string(),
+                RUNTIME_DISPATCH_SURFACE_SCHEMA.to_string(),
+            ),
+            (
+                "accepted_truth_recovery".to_string(),
+                ACCEPTED_TRUTH_RECOVERY_SURFACE_SCHEMA.to_string(),
+            ),
+        ]),
+    }
+}
+
+fn chat_overview_scope(
+    top_attention: &TopAttention,
+    decision_inbox: &DecisionInboxSurface,
+    runtime_dispatch: &RuntimeDispatchSurface,
+    accepted_truth_recovery: &AcceptedTruthRecoverySurface,
+) -> ChatContextScope {
+    let answer = if decision_inbox.open_count > 0 {
+        format!(
+            "{} open decision item(s) need operator attention. Start with \"{}\". This assistant can explain and draft a safe note, but execution still needs action envelopes and receipts.",
+            decision_inbox.open_count, top_attention.title
+        )
+    } else if accepted_truth_recovery.candidate_count > 0 {
+        format!(
+            "{} accepted-truth recovery item(s) are visible. Review closeout evidence and follow-up state before treating any output as accepted truth.",
+            accepted_truth_recovery.candidate_count
+        )
+    } else if runtime_dispatch.candidate_count > 0 {
+        format!(
+            "{} runtime handoff candidate(s) are visible. Distinguish queueing, launch, and monitoring before proposing a runtime action.",
+            runtime_dispatch.candidate_count
+        )
+    } else {
+        format!(
+            "No blocking assistant item is visible. Current top attention is \"{}\"; summarize health and capacity before starting new work.",
+            top_attention.title
+        )
+    };
+    let mut citations = vec![
+        ChatCitation {
+            label: "Top attention".to_string(),
+            reference: "workstation_surface.v1#top_attention".to_string(),
+            trust: "state-ref",
+        },
+        ChatCitation {
+            label: "Decision inbox".to_string(),
+            reference: decision_inbox.schema.to_string(),
+            trust: "state-ref",
+        },
+        ChatCitation {
+            label: "Capacity".to_string(),
+            reference: "workstation_surface.v1#capacity".to_string(),
+            trust: "state-ref",
+        },
+    ];
+    if let Some(decision) = decision_inbox.items.first() {
+        citations.push(ChatCitation {
+            label: "Leading decision".to_string(),
+            reference: format!("decision:{}", decision.decision_id),
+            trust: if decision.receipt_ref.is_some() {
+                "receipt-backed"
+            } else {
+                "state-ref"
+            },
+        });
+        if let Some(receipt) = decision
+            .action_envelopes
+            .iter()
+            .find_map(|action| action.latest_receipt.as_ref())
+        {
+            citations.push(ChatCitation {
+                label: "Latest action receipt".to_string(),
+                reference: receipt.receipt_id.clone(),
+                trust: "receipt-backed",
+            });
+        }
+    }
+
+    ChatContextScope {
+        scope_id: "overview".to_string(),
+        label: "Workstation".to_string(),
+        kind: "overview",
+        answer,
+        confidence: "surface-derived",
+        citations,
+        inference_notes: vec![
+            "This answer is deterministic surface synthesis, not an external model call."
+                .to_string(),
+        ],
+        suggested_actions: vec![chat_overview_action(
+            decision_inbox,
+            runtime_dispatch,
+            accepted_truth_recovery,
+        )],
+        prompts: vec![
+            ChatPrompt {
+                label: "What needs attention?".to_string(),
+                prompt:
+                    "Summarize the current Forager workstation state from workstation_surface.v1. Cite top_attention, decision_inbox, capacity, and health refs; mark any inference."
+                        .to_string(),
+            },
+            ChatPrompt {
+                label: "Explain top item".to_string(),
+                prompt: format!(
+                    "Explain why \"{}\" needs attention. Include the risk, next safe action, and which receipt or state refs must be checked before action.",
+                    top_attention.title
+                ),
+            },
+        ],
+    }
+}
+
+fn chat_overview_action(
+    decision_inbox: &DecisionInboxSurface,
+    runtime_dispatch: &RuntimeDispatchSurface,
+    accepted_truth_recovery: &AcceptedTruthRecoverySurface,
+) -> ChatSuggestedAction {
+    if decision_inbox.open_count > 0 {
+        return ChatSuggestedAction {
+            label: "Open decision inbox".to_string(),
+            kind: "open_surface",
+            boundary: "Proposal only; no decision is applied from the assistant panel.",
+            target_ref: DECISION_INBOX_SURFACE_SCHEMA.to_string(),
+            command: "forager offdesk decisions --json".to_string(),
+        };
+    }
+    if accepted_truth_recovery.candidate_count > 0 {
+        return ChatSuggestedAction {
+            label: "Review truth recovery".to_string(),
+            kind: "open_surface",
+            boundary:
+                "Proposal only; accepted truth requires the recovery action envelope and receipt.",
+            target_ref: ACCEPTED_TRUTH_RECOVERY_SURFACE_SCHEMA.to_string(),
+            command: "forager ondesk review-surface --json".to_string(),
+        };
+    }
+    if runtime_dispatch.candidate_count > 0 {
+        return ChatSuggestedAction {
+            label: "Inspect runtime handoffs".to_string(),
+            kind: "open_surface",
+            boundary: "Proposal only; runtime launch remains outside the assistant panel.",
+            target_ref: RUNTIME_DISPATCH_SURFACE_SCHEMA.to_string(),
+            command: "forager ondesk workstation-surface --json".to_string(),
+        };
+    }
+    ChatSuggestedAction {
+        label: "Review dashboard".to_string(),
+        kind: "open_surface",
+        boundary: "Proposal only; inspect current state before starting new work.",
+        target_ref: "workstation_surface.v1".to_string(),
+        command: "forager status --json".to_string(),
+    }
+}
+
+fn chat_project_scope(project: &ProjectRow) -> ChatContextScope {
+    let task_count = project.task_items.len();
+    let leading_task = project
+        .task_items
+        .first()
+        .map(|task| format!(" Leading task: {}.", task.title))
+        .unwrap_or_default();
+    let answer = format!(
+        "{} is {}: plan {}, runtime {}, closeout {}, truth {}. {} open decision(s) and {} task row(s) are visible.{} Treat this as read-only context until an action envelope or receipt is reviewed.",
+        project.display_name,
+        project.severity,
+        project.plan,
+        project.runtime,
+        project.closeout,
+        project.truth,
+        project.decisions,
+        task_count,
+        leading_task
+    );
+    let mut citations = vec![ChatCitation {
+        label: "Project state".to_string(),
+        reference: format!("workstation_surface.v1#project:{}", project.project_key),
+        trust: "state-ref",
+    }];
+    if let Some(task) = project.task_items.first() {
+        citations.push(ChatCitation {
+            label: "Leading task".to_string(),
+            reference: task.reference.clone(),
+            trust: "state-ref",
+        });
+        if let Some(receipt) = task.receipt_links.first() {
+            citations.push(ChatCitation {
+                label: "Latest task receipt".to_string(),
+                reference: receipt.record_id.clone(),
+                trust: "receipt-backed",
+            });
+        }
+    }
+
+    ChatContextScope {
+        scope_id: format!("project:{}", project.project_key),
+        label: project.display_name.clone(),
+        kind: "project",
+        answer,
+        confidence: "surface-derived",
+        citations,
+        inference_notes: vec![
+            "Project answer is synthesized from project row, task drawer, and receipt links only."
+                .to_string(),
+        ],
+        suggested_actions: vec![chat_project_action(project)],
+        prompts: vec![
+            ChatPrompt {
+                label: if project.decisions > 0 {
+                    "Can this advance?".to_string()
+                } else {
+                    "Summarize state".to_string()
+                },
+                prompt: format!(
+                    "Summarize {} from workstation_surface.v1 and cite project state, task refs, and receipt links before proposing any action.",
+                    project.display_name
+                ),
+            },
+            ChatPrompt {
+                label: "Show provenance".to_string(),
+                prompt: format!("Trace the scoped provenance path for {}.", project.display_name),
+            },
+        ],
+    }
+}
+
+fn chat_project_action(project: &ProjectRow) -> ChatSuggestedAction {
+    if project.decisions > 0 {
+        return ChatSuggestedAction {
+            label: "Review project decision".to_string(),
+            kind: "open_surface",
+            boundary: "Proposal only; decision changes require an action envelope and receipt.",
+            target_ref: format!("workstation_surface.v1#project:{}", project.project_key),
+            command: "forager offdesk decisions --json".to_string(),
+        };
+    }
+    if let Some(task) = project.task_items.first() {
+        return ChatSuggestedAction {
+            label: "Inspect task drawer".to_string(),
+            kind: "inspect_state",
+            boundary:
+                "Proposal only; task execution remains controlled by Offdesk commands and receipts.",
+            target_ref: task.reference.clone(),
+            command: task.command.clone(),
+        };
+    }
+    ChatSuggestedAction {
+        label: "Review project state".to_string(),
+        kind: "inspect_state",
+        boundary: "Proposal only; no mutation is authorized from this assistant panel.",
+        target_ref: format!("workstation_surface.v1#project:{}", project.project_key),
+        command: "forager status --json".to_string(),
     }
 }
 

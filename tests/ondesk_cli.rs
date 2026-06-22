@@ -439,6 +439,29 @@ fn ondesk_workstation_surface_json_projects_current_status_into_dashboard() -> R
         surface["projects"][0]["task_items"][0]["receipt_links"][0]["result_status"],
         "queued"
     );
+    assert_eq!(surface["chat_context"]["schema"], "chat_context_surface.v1");
+    assert_eq!(surface["chat_context"]["mode"], "read_only_cited_answer");
+    assert_eq!(surface["chat_context"]["scopes"][0]["scope_id"], "overview");
+    assert!(surface["chat_context"]["scopes"][0]["answer"]
+        .as_str()
+        .expect("overview answer")
+        .contains("open decision"));
+    assert_eq!(
+        surface["chat_context"]["scopes"][0]["suggested_actions"][0]["label"],
+        "Open decision inbox"
+    );
+    assert_eq!(
+        surface["chat_context"]["scopes"][1]["scope_id"],
+        "project:project"
+    );
+    assert!(surface["chat_context"]["scopes"][1]["citations"]
+        .as_array()
+        .expect("project citations")
+        .iter()
+        .any(
+            |citation| citation["reference"] == "runtime-receipt-approval-task"
+                && citation["trust"] == "receipt-backed"
+        ));
     assert_eq!(
         surface["decision_inbox"]["schema"],
         "decision_inbox_surface.v1"

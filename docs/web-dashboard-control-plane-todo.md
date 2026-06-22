@@ -411,10 +411,13 @@ Suggested prompts:
 - "Show the provenance path."
 - "Draft a safe action note."
 
-Status: partially implemented as read-only prompt composers. `/dashboard/` now
-has a workstation-level State briefing with cited refs and copyable prompts,
-and `/work/` has selected-project context prompts. A real answer surface,
-retrieval path, and action-card proposal loop remain deferred.
+Status: first deterministic read-only answer surface implemented.
+`workstation_surface.v1` now carries `chat_context_surface.v1` with overview
+and project scopes, cited answers, inference notes, prompt seeds, and review-only
+suggested action cards. `/dashboard/` and `/work/` render those answer/action
+surfaces while keeping copyable prompts as a fallback. Retrieval-backed answers,
+selected decision/graph-node/receipt scopes, and executable action-card proposal
+preflight loops remain deferred.
 
 ## Risk Register
 

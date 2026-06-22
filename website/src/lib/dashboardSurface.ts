@@ -37,6 +37,36 @@ export type AssistantRef = {
   trust: 'receipt-backed' | 'state-ref' | 'inference';
 };
 
+export type AssistantAction = {
+  label: string;
+  kind: string;
+  boundary: string;
+  target_ref: string;
+  command: string;
+};
+
+export type ChatContextSurface = {
+  schema: string;
+  status: string;
+  mode: string;
+  summary: string;
+  actionPolicy: string;
+  sourceRefs: SourceRef[];
+  scopes: ChatContextScope[];
+};
+
+export type ChatContextScope = {
+  scope_id: string;
+  label: string;
+  kind: string;
+  answer: string;
+  confidence: string;
+  citations: AssistantRef[];
+  inference_notes: string[];
+  suggested_actions: AssistantAction[];
+  prompts: AssistantPrompt[];
+};
+
 export type ProjectDetail = {
   project_key: string;
   display_name: string;
@@ -60,8 +90,11 @@ export type ProjectDetail = {
   graph_title: string;
   graph_edges: GraphEdge[];
   assistant_context: string;
+  assistant_answer: string;
   assistant_prompts: AssistantPrompt[];
   assistant_refs: AssistantRef[];
+  assistant_suggested_actions: AssistantAction[];
+  assistant_inference_notes: string[];
 };
 
 export type ProjectAttentionItem = {
@@ -366,6 +399,7 @@ export type DashboardView = {
   decisionInbox: DecisionInboxView;
   runtimeDispatch: RuntimeDispatchView;
   acceptedTruthRecovery: AcceptedTruthRecoveryView;
+  chatContext: ChatContextSurface;
   decisions: DecisionItem[];
   graphTitle: string;
   graphNodes: GraphNode[];
@@ -390,17 +424,35 @@ export function dashboardViewFromSurface(surface: unknown): DashboardView {
   const runtimeDispatch = runtimeDispatchView(recordAt(surface, 'runtime_dispatch'));
   const acceptedTruthRecovery = acceptedTruthRecoveryView(recordAt(surface, 'accepted_truth_recovery'));
   const projects = projectRows(arrayAt(surface, 'projects'));
-  const projectDetails = projectDetailsFromSurface(projects, decisionInbox, runtimeDispatch, acceptedTruthRecovery);
+  const workstationId = fallbackString(stringAt(surface, 'workstation_id'), 'workstation');
+  const profile = fallbackString(stringAt(surface, 'profile'), 'default');
+  const topTitle = fallbackString(stringAt(top, 'title'), 'No top attention item');
+  const chatContext = chatContextViewFromSurface(recordAt(surface, 'chat_context'), {
+    workstationId,
+    profile,
+    topTitle,
+    decisionInbox,
+    runtimeDispatch,
+    acceptedTruthRecovery,
+    projects,
+  });
+  const projectDetails = projectDetailsFromSurface(
+    projects,
+    decisionInbox,
+    runtimeDispatch,
+    acceptedTruthRecovery,
+    chatContext,
+  );
 
   return {
     sourceLabel: fallbackString(stringAt(surface, 'source_label'), 'workstation_surface.v1'),
-    workstationId: fallbackString(stringAt(surface, 'workstation_id'), 'workstation'),
-    profile: fallbackString(stringAt(surface, 'profile'), 'default'),
+    workstationId,
+    profile,
     generatedAt: fallbackString(stringAt(surface, 'generated_at'), '-'),
     staleLabel: fallbackString(stringAt(stale, 'status'), 'unknown'),
     workspaceRoots: stringArrayAt(surface, 'workspace_roots'),
     sourceRefs: sourceRefsFromRecord(recordAt(surface, 'source_refs')),
-    topTitle: fallbackString(stringAt(top, 'title'), 'No top attention item'),
+    topTitle,
     topSummary: fallbackString(
       stringAt(top, 'summary'),
       'No urgent operator attention was reported by the workstation surface.',
@@ -421,6 +473,7 @@ export function dashboardViewFromSurface(surface: unknown): DashboardView {
     decisionInbox,
     runtimeDispatch,
     acceptedTruthRecovery,
+    chatContext,
     decisions: decisionInbox.items,
     graphTitle: fallbackString(stringAt(graph, 'title'), 'Scoped provenance'),
     graphNodes: graphNodes(arrayAt(graph, 'nodes')),
@@ -448,6 +501,10 @@ export function statusClasses(status: HealthStatus): string {
 }
 
 export function dashboardAssistantContext(view: DashboardView): string {
+  const scope = dashboardAssistantScope(view);
+  if (scope) {
+    return scope.answer;
+  }
   if (view.decisionInbox.openCount > 0) {
     return `${view.workstationId} has ${view.decisionInbox.openCount} open decision item(s). Start from "${view.topTitle}", cite the decision inbox and capacity state, and mark anything beyond the surface as inference.`;
   }
@@ -461,7 +518,15 @@ export function dashboardAssistantContext(view: DashboardView): string {
   return `${view.workstationId} has no open decision item in the current surface. Summarize health, capacity, and project state, and call out stale or inferred claims explicitly.`;
 }
 
+export function dashboardAssistantAnswer(view: DashboardView): string {
+  return dashboardAssistantContext(view);
+}
+
 export function dashboardAssistantPrompts(view: DashboardView): AssistantPrompt[] {
+  const scope = dashboardAssistantScope(view);
+  if (scope?.prompts.length) {
+    return scope.prompts.slice(0, 3);
+  }
   const prompts: AssistantPrompt[] = [
     {
       label: 'What needs attention?',
@@ -489,6 +554,10 @@ export function dashboardAssistantPrompts(view: DashboardView): AssistantPrompt[
 }
 
 export function dashboardAssistantRefs(view: DashboardView): AssistantRef[] {
+  const scope = dashboardAssistantScope(view);
+  if (scope?.citations.length) {
+    return scope.citations.slice(0, 4);
+  }
   const refs: AssistantRef[] = [
     {
       label: 'Top attention',
@@ -517,6 +586,224 @@ export function dashboardAssistantRefs(view: DashboardView): AssistantRef[] {
   }
 
   return refs.slice(0, 4);
+}
+
+export function dashboardAssistantActions(view: DashboardView): AssistantAction[] {
+  const scope = dashboardAssistantScope(view);
+  if (scope?.suggested_actions.length) {
+    return scope.suggested_actions.slice(0, 2);
+  }
+  if (view.decisionInbox.openCount > 0) {
+    return [{
+      label: 'Open decision inbox',
+      kind: 'open_surface',
+      boundary: 'Proposal only; no decision is applied from the assistant panel.',
+      target_ref: view.decisionInbox.schema,
+      command: 'forager offdesk decisions --json',
+    }];
+  }
+  if (view.acceptedTruthRecovery.visibleCount > 0) {
+    return [{
+      label: 'Review truth recovery',
+      kind: 'open_surface',
+      boundary: 'Proposal only; accepted truth requires review and receipt.',
+      target_ref: view.acceptedTruthRecovery.schema,
+      command: 'forager ondesk review-surface --json',
+    }];
+  }
+  return [{
+    label: 'Review dashboard',
+    kind: 'inspect_state',
+    boundary: 'Proposal only; inspect current state before starting new work.',
+    target_ref: 'workstation_surface.v1',
+    command: 'forager status --json',
+  }];
+}
+
+function dashboardAssistantScope(view: DashboardView): ChatContextScope | null {
+  return view.chatContext.scopes.find((scope) => scope.scope_id === 'overview')
+    ?? view.chatContext.scopes[0]
+    ?? null;
+}
+
+type ChatContextFallback = {
+  workstationId: string;
+  profile: string;
+  topTitle: string;
+  decisionInbox: DecisionInboxView;
+  runtimeDispatch: RuntimeDispatchView;
+  acceptedTruthRecovery: AcceptedTruthRecoveryView;
+  projects: ProjectRow[];
+};
+
+function chatContextViewFromSurface(
+  surface: Record<string, unknown>,
+  fallback: ChatContextFallback,
+): ChatContextSurface {
+  const scopes = chatContextScopes(arrayAt(surface, 'scopes'));
+  if (fallbackString(stringAt(surface, 'schema')) === 'chat_context_surface.v1' && scopes.length > 0) {
+    return {
+      schema: 'chat_context_surface.v1',
+      status: fallbackString(stringAt(surface, 'status'), 'unknown'),
+      mode: fallbackString(stringAt(surface, 'mode'), 'read_only_cited_answer'),
+      summary: fallbackString(
+        stringAt(surface, 'summary'),
+        'Assistant scopes cite state or receipt refs and cannot execute actions.',
+      ),
+      actionPolicy: fallbackString(
+        stringAt(surface, 'action_policy'),
+        'Suggested actions are review cards only.',
+      ),
+      sourceRefs: sourceRefsFromRecord(recordAt(surface, 'source_refs')),
+      scopes,
+    };
+  }
+
+  return synthesizedChatContext(fallback);
+}
+
+function synthesizedChatContext(fallback: ChatContextFallback): ChatContextSurface {
+  const openDecisionCount = fallback.decisionInbox.openCount;
+  const answer = openDecisionCount > 0
+    ? `${fallback.workstationId} has ${openDecisionCount} open decision item(s). Start from "${fallback.topTitle}". This assistant only explains, drafts, and cites refs; execution still requires action envelopes and receipts.`
+    : fallback.acceptedTruthRecovery.visibleCount > 0
+      ? `${fallback.workstationId} has accepted-truth recovery work visible. Review closeout evidence and follow-up state before treating output as accepted truth.`
+      : fallback.runtimeDispatch.visibleCount > 0
+        ? `${fallback.workstationId} has runtime handoffs visible. Distinguish queueing, launch, and monitoring before proposing a runtime action.`
+        : `${fallback.workstationId} has no open decision item in the current surface. Summarize health, capacity, and project state, and mark inference explicitly.`;
+  const overviewScope: ChatContextScope = {
+    scope_id: 'overview',
+    label: 'Workstation',
+    kind: 'overview',
+    answer,
+    confidence: 'surface-derived',
+    citations: [
+      {
+        label: 'Top attention',
+        reference: 'workstation_surface.v1#top_attention',
+        trust: 'state-ref',
+      },
+      {
+        label: 'Decision inbox',
+        reference: fallback.decisionInbox.schema,
+        trust: 'state-ref',
+      },
+      {
+        label: 'Capacity',
+        reference: 'workstation_surface.v1#capacity',
+        trust: 'state-ref',
+      },
+    ],
+    inference_notes: ['Synthesized from workstation_surface.v1 because chat_context_surface.v1 was not present.'],
+    suggested_actions: dashboardFallbackActions(fallback),
+    prompts: [
+      {
+        label: 'What needs attention?',
+        prompt: `Summarize the current Forager workstation state from workstation_surface.v1 for profile ${fallback.profile}. Cite top_attention, decision_inbox, capacity, and health refs; mark any inference.`,
+      },
+      {
+        label: 'Explain top item',
+        prompt: `Explain why "${fallback.topTitle}" needs attention. Include the risk, next safe action, and which receipt or state refs must be checked before action.`,
+      },
+    ],
+  };
+
+  return {
+    schema: 'chat_context_surface.v1',
+    status: openDecisionCount > 0 || fallback.runtimeDispatch.visibleCount > 0 || fallback.acceptedTruthRecovery.visibleCount > 0
+      ? 'attention'
+      : 'clear',
+    mode: 'read_only_cited_answer',
+    summary: `1 fallback assistant scope is available for ${fallback.projects.length} project row(s).`,
+    actionPolicy: 'Suggested actions are review cards only; execution still requires action envelopes and receipts.',
+    sourceRefs: [
+      {
+        label: 'overview',
+        reference: 'workstation_surface.v1#top_attention',
+      },
+    ],
+    scopes: [overviewScope],
+  };
+}
+
+function dashboardFallbackActions(fallback: ChatContextFallback): AssistantAction[] {
+  if (fallback.decisionInbox.openCount > 0) {
+    return [{
+      label: 'Open decision inbox',
+      kind: 'open_surface',
+      boundary: 'Proposal only; no decision is applied from the assistant panel.',
+      target_ref: fallback.decisionInbox.schema,
+      command: 'forager offdesk decisions --json',
+    }];
+  }
+  if (fallback.acceptedTruthRecovery.visibleCount > 0) {
+    return [{
+      label: 'Review truth recovery',
+      kind: 'open_surface',
+      boundary: 'Proposal only; accepted truth requires review and receipt.',
+      target_ref: fallback.acceptedTruthRecovery.schema,
+      command: 'forager ondesk review-surface --json',
+    }];
+  }
+  return [{
+    label: 'Review dashboard',
+    kind: 'inspect_state',
+    boundary: 'Proposal only; inspect current state before starting new work.',
+    target_ref: 'workstation_surface.v1',
+    command: 'forager status --json',
+  }];
+}
+
+function chatContextScopes(values: unknown[]): ChatContextScope[] {
+  return values.filter(isRecord).map((scope) => ({
+    scope_id: fallbackString(stringAt(scope, 'scope_id'), 'scope'),
+    label: fallbackString(stringAt(scope, 'label'), 'Assistant scope'),
+    kind: fallbackString(stringAt(scope, 'kind'), 'overview'),
+    answer: fallbackString(
+      stringAt(scope, 'answer'),
+      'No assistant answer was provided; inspect the cited state refs.',
+    ),
+    confidence: fallbackString(stringAt(scope, 'confidence'), 'unknown'),
+    citations: assistantRefs(arrayAt(scope, 'citations')),
+    inference_notes: stringArrayAt(scope, 'inference_notes'),
+    suggested_actions: assistantActions(arrayAt(scope, 'suggested_actions')),
+    prompts: assistantPrompts(arrayAt(scope, 'prompts')),
+  }));
+}
+
+function assistantRefs(values: unknown[]): AssistantRef[] {
+  return values.filter(isRecord).map((item) => ({
+    label: fallbackString(stringAt(item, 'label'), 'Reference'),
+    reference: fallbackString(stringAt(item, 'reference'), '-'),
+    trust: normalizeAssistantTrust(stringAt(item, 'trust')),
+  }));
+}
+
+function assistantPrompts(values: unknown[]): AssistantPrompt[] {
+  return values.filter(isRecord).map((item) => ({
+    label: fallbackString(stringAt(item, 'label'), 'Ask'),
+    prompt: fallbackString(stringAt(item, 'prompt'), ''),
+  })).filter((item) => item.prompt.length > 0);
+}
+
+function assistantActions(values: unknown[]): AssistantAction[] {
+  return values.filter(isRecord).map((item) => ({
+    label: fallbackString(stringAt(item, 'label'), 'Review state'),
+    kind: fallbackString(stringAt(item, 'kind'), 'inspect_state'),
+    boundary: fallbackString(
+      stringAt(item, 'boundary'),
+      'Proposal only; execution requires the relevant control-plane receipt.',
+    ),
+    target_ref: fallbackString(stringAt(item, 'target_ref'), 'workstation_surface.v1'),
+    command: fallbackString(stringAt(item, 'command'), ''),
+  }));
+}
+
+function normalizeAssistantTrust(value: string): AssistantRef['trust'] {
+  if (value === 'receipt-backed' || value === 'state-ref' || value === 'inference') {
+    return value;
+  }
+  return 'inference';
 }
 
 function healthItems(values: unknown[]): HealthItem[] {
@@ -555,12 +842,15 @@ function projectDetailsFromSurface(
   decisionInbox: DecisionInboxView,
   runtimeDispatch: RuntimeDispatchView,
   acceptedTruthRecovery: AcceptedTruthRecoveryView,
+  chatContext: ChatContextSurface,
 ): ProjectDetail[] {
   return projects.map((project) => {
     const decisions = decisionInbox.items.filter((item) => item.project_key === project.project_key);
     const runtimeItems = runtimeDispatch.items.filter((item) => item.project_key === project.project_key);
     const truthItems = acceptedTruthRecovery.items.filter((item) => item.project_key === project.project_key);
     const attentionCount = decisions.length + runtimeItems.length + truthItems.length;
+    const chatScope = chatContext.scopes.find((scope) => scope.scope_id === `project:${project.project_key}`);
+    const assistantContext = projectAssistantContext(project, decisions, runtimeItems, truthItems);
 
     return {
       project_key: project.project_key,
@@ -593,9 +883,18 @@ function projectDetailsFromSurface(
         .slice(0, 3),
       graph_title: `${project.display_name} provenance path`,
       graph_edges: projectGraphEdges(project, decisions, runtimeItems, truthItems),
-      assistant_context: projectAssistantContext(project, decisions, runtimeItems, truthItems),
-      assistant_prompts: projectAssistantPrompts(project, decisions, runtimeItems, truthItems),
-      assistant_refs: projectAssistantRefs(project, decisions, runtimeItems, truthItems),
+      assistant_context: assistantContext,
+      assistant_answer: chatScope?.answer || assistantContext,
+      assistant_prompts: chatScope?.prompts.length
+        ? chatScope.prompts
+        : projectAssistantPrompts(project, decisions, runtimeItems, truthItems),
+      assistant_refs: chatScope?.citations.length
+        ? chatScope.citations
+        : projectAssistantRefs(project, decisions, runtimeItems, truthItems),
+      assistant_suggested_actions: chatScope?.suggested_actions.length
+        ? chatScope.suggested_actions
+        : projectAssistantActions(project, decisions, runtimeItems, truthItems),
+      assistant_inference_notes: chatScope?.inference_notes ?? [],
     };
   });
 }
@@ -944,6 +1243,61 @@ function projectAssistantRefs(
   }
 
   return refs.slice(0, 3);
+}
+
+function projectAssistantActions(
+  project: ProjectRow,
+  decisions: DecisionItem[],
+  runtimeItems: RuntimeDispatchItem[],
+  truthItems: AcceptedTruthRecoveryItem[],
+): AssistantAction[] {
+  const decision = decisions[0];
+  if (decision) {
+    return [{
+      label: 'Review project decision',
+      kind: 'open_surface',
+      boundary: 'Proposal only; decision changes require an action envelope and receipt.',
+      target_ref: `decision:${decision.decision_id}`,
+      command: decision.action_envelopes[0]?.allowed_command || decision.cli_fallback,
+    }];
+  }
+  const truthItem = truthItems[0];
+  if (truthItem) {
+    return [{
+      label: 'Review truth recovery',
+      kind: 'open_surface',
+      boundary: truthItem.boundary,
+      target_ref: truthItem.receipt_id || truthItem.closeout_id,
+      command: truthItem.resolve_command || truthItem.retire_command,
+    }];
+  }
+  const runtimeItem = runtimeItems[0];
+  if (runtimeItem) {
+    return [{
+      label: 'Inspect runtime handoff',
+      kind: 'inspect_state',
+      boundary: runtimeItem.boundary,
+      target_ref: runtimeItem.latest_receipt?.receipt_id || runtimeItem.closeout_id || runtimeItem.decision_id,
+      command: runtimeItem.tick_command || runtimeItem.dispatch_command || runtimeItem.preflight_command,
+    }];
+  }
+  const task = project.task_items[0];
+  if (task) {
+    return [{
+      label: 'Inspect task drawer',
+      kind: 'inspect_state',
+      boundary: 'Proposal only; task execution remains controlled by Offdesk commands and receipts.',
+      target_ref: task.reference,
+      command: task.command,
+    }];
+  }
+  return [{
+    label: 'Review project state',
+    kind: 'inspect_state',
+    boundary: 'Proposal only; no mutation is authorized from this assistant panel.',
+    target_ref: `workstation_surface.v1#project:${project.project_key}`,
+    command: 'forager status --json',
+  }];
 }
 
 function projectPrimaryAction(

@@ -271,8 +271,11 @@ test('dashboard route renders the workstation surface and captures screenshots',
   await expect(page.getByText('Scoped Graph', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'State briefing' })).toBeVisible();
   await expect(page.locator('[data-dashboard-assistant-context]')).toContainText('open decision');
+  await expect(page.locator('[data-dashboard-assistant-answer]')).toContainText('execution still requires action envelopes and receipts');
   await expect(page.locator('[data-dashboard-assistant-refs]').getByText('workstation_surface.v1#top_attention')).toBeVisible();
   await expect(page.locator('[data-dashboard-assistant-refs]').getByText('decision_inbox_surface.v1')).toBeVisible();
+  await expect(page.locator('[data-dashboard-assistant-actions]').getByText('Open decision inbox')).toBeVisible();
+  await expect(page.locator('[data-dashboard-assistant-actions]').getByText('Proposal only')).toBeVisible();
   await expect(page.locator('[data-dashboard-assistant-prompts]').getByRole('button', { name: 'What needs attention?' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Open review' })).toHaveAttribute(
     'href',
@@ -337,6 +340,8 @@ test('work route renders project portfolio detail with graph and assistant conte
   await expect(page.locator('[data-work-graph]').getByText('NanoClustering accepted truth')).toBeVisible();
   await expect(page.locator('[data-work-assistant-scope]')).toHaveText('Scope: NanoClustering');
   await expect(page.locator('[data-work-assistant-context]')).toContainText('Resolve closeout follow-up');
+  await expect(page.locator('[data-work-assistant-answer]')).toContainText('Resolve closeout follow-up');
+  await expect(page.locator('[data-work-assistant-actions]').getByText('Review project decision')).toBeVisible();
   await expect(page.locator('[data-work-assistant-prompts]').getByRole('button', { name: /Can this advance/ })).toBeVisible();
   await expect(page.locator('[data-work-attention-path]').getByText('Attention path')).toBeVisible();
   await expect(page.locator('[data-work-attention-path]').getByText('latest execution blocked')).toBeVisible();
@@ -357,6 +362,7 @@ test('work route renders project portfolio detail with graph and assistant conte
   await expect(page.locator('[data-work-assistant-scope]')).toHaveText('Scope: Science Atlas');
   await expect(page.locator('[data-work-assistant-context]')).toContainText('Runtime recovery required');
   await expect(page.locator('[data-work-assistant-refs]').getByText('decision:decision-runtime-recovery')).toBeVisible();
+  await expect(page.locator('[data-work-assistant-actions]').getByText('Review project decision')).toBeVisible();
   await expect(page.getByRole('main').getByRole('link', { name: 'Dashboard' })).toHaveAttribute('href', DASHBOARD_ROUTE);
 
   const overflow = await page.evaluate(() => ({

@@ -337,8 +337,8 @@ const taskInspectionToneClasses = {
                 <p class="mt-3 font-mono text-xs uppercase tracking-[0.12em] text-brand-200" data-work-assistant-scope>
                   Scope: {selectedProjectDetail.display_name}
                 </p>
-                <p class="mt-3 text-sm leading-relaxed text-slate-300" data-work-assistant-context>
-                  {selectedProjectDetail.assistant_context}
+                <p class="mt-3 text-sm leading-relaxed text-slate-200" data-work-assistant-context data-work-assistant-answer>
+                  {selectedProjectDetail.assistant_answer}
                 </p>
                 <div class="mt-4 space-y-2" data-work-assistant-refs>
                   {selectedProjectDetail.assistant_refs.map((ref) => (
@@ -349,6 +349,18 @@ const taskInspectionToneClasses = {
                       </div>
                       <p class="mt-1 break-all font-mono text-[10px] text-slate-400">{ref.reference}</p>
                     </div>
+                  ))}
+                </div>
+                <div class="mt-4 space-y-2" data-work-assistant-actions>
+                  {selectedProjectDetail.assistant_suggested_actions.map((action) => (
+                    <article class="border border-brand-300/25 bg-brand-300/10 px-3 py-2">
+                      <div class="flex flex-wrap items-center justify-between gap-2">
+                        <span class="text-xs font-semibold text-brand-100">{action.label}</span>
+                        <span class="font-mono text-[10px] uppercase tracking-[0.1em] text-brand-200">{formatLabel(action.kind)}</span>
+                      </div>
+                      <p class="mt-1 text-xs leading-relaxed text-slate-300">{action.boundary}</p>
+                      <p class="mt-2 break-all font-mono text-[10px] text-slate-500">{action.target_ref}</p>
+                    </article>
                   ))}
                 </div>
                 <div class="mt-4 flex flex-wrap gap-2" data-work-assistant-prompts>
@@ -369,7 +381,7 @@ const taskInspectionToneClasses = {
                 </p>
               </>
             ) : (
-              <p class="mt-3 text-sm leading-relaxed text-slate-300" data-work-assistant-context>
+              <p class="mt-3 text-sm leading-relaxed text-slate-300" data-work-assistant-context data-work-assistant-answer>
                 No selected project is available. Review workstation health and decision inbox first.
               </p>
             )}
@@ -934,7 +946,7 @@ const taskInspectionToneClasses = {
 
     function assistantPanelHtml(project) {
       if (!project) {
-        return `<p class="mt-3 text-sm leading-relaxed text-slate-300" data-work-assistant-context>
+        return `<p class="mt-3 text-sm leading-relaxed text-slate-300" data-work-assistant-context data-work-assistant-answer>
           No selected project is available. Review workstation health and decision inbox first.
         </p>`;
       }
@@ -942,11 +954,14 @@ const taskInspectionToneClasses = {
       return `<p class="mt-3 font-mono text-xs uppercase tracking-[0.12em] text-brand-200" data-work-assistant-scope>
           Scope: ${escapeHtml(project.display_name)}
         </p>
-        <p class="mt-3 text-sm leading-relaxed text-slate-300" data-work-assistant-context>
-          ${escapeHtml(project.assistant_context)}
+        <p class="mt-3 text-sm leading-relaxed text-slate-200" data-work-assistant-context data-work-assistant-answer>
+          ${escapeHtml(project.assistant_answer || project.assistant_context)}
         </p>
         <div class="mt-4 space-y-2" data-work-assistant-refs>
           ${project.assistant_refs.map(assistantRefHtml).join('')}
+        </div>
+        <div class="mt-4 space-y-2" data-work-assistant-actions>
+          ${project.assistant_suggested_actions.map(assistantActionHtml).join('')}
         </div>
         <div class="mt-4 flex flex-wrap gap-2" data-work-assistant-prompts>
           ${project.assistant_prompts.map(assistantPromptHtml).join('')}
@@ -955,6 +970,17 @@ const taskInspectionToneClasses = {
         <p class="mt-4 text-xs leading-relaxed text-slate-500" data-work-assistant-boundary>
           Read-only: answers must cite these refs or mark inference; execution still requires action envelopes and receipts.
         </p>`;
+    }
+
+    function assistantActionHtml(action) {
+      return `<article class="border border-brand-300/25 bg-brand-300/10 px-3 py-2">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <span class="text-xs font-semibold text-brand-100">${escapeHtml(action.label)}</span>
+          <span class="font-mono text-[10px] uppercase tracking-[0.1em] text-brand-200">${escapeHtml(formatLabel(action.kind))}</span>
+        </div>
+        <p class="mt-1 text-xs leading-relaxed text-slate-300">${escapeHtml(action.boundary)}</p>
+        <p class="mt-2 break-all font-mono text-[10px] text-slate-500">${escapeHtml(action.target_ref)}</p>
+      </article>`;
     }
 
     function assistantRefHtml(ref) {
