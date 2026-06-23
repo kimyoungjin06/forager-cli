@@ -2,13 +2,13 @@
 import Base from '../layouts/Base.astro';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
+import AssistantReadout from '../components/AssistantReadout.astro';
 import SourceStatus from '../components/SourceStatus.astro';
 import { sitePath } from '../lib/paths';
 import {
   dashboardViewFromSurface,
   dashboardAssistantActions,
   dashboardAssistantAnswer,
-  dashboardAssistantContext,
   dashboardAssistantPrompts,
   dashboardAssistantRefs,
   formatLabel,
@@ -23,7 +23,6 @@ import workstationSurface from '../../../tests/fixtures/ui/workstation_surface/a
 const dashboardView = dashboardViewFromSurface(workstationSurface) as DashboardView;
 const dashboardAssistant = {
   answer: dashboardAssistantAnswer(dashboardView),
-  context: dashboardAssistantContext(dashboardView),
   prompts: dashboardAssistantPrompts(dashboardView),
   refs: dashboardAssistantRefs(dashboardView),
   actions: dashboardAssistantActions(dashboardView),
@@ -217,48 +216,20 @@ const dashboardAssistant = {
           <p class="text-sm font-semibold uppercase tracking-[0.16em] text-brand-200">Assistant</p>
           <h2 class="mt-2 text-xl font-semibold text-white">State briefing</h2>
           <div data-dashboard-assistant>
-            <p class="mt-3 text-sm leading-relaxed text-slate-200" data-dashboard-assistant-context data-dashboard-assistant-answer>
-              {dashboardAssistant.answer}
-            </p>
-            <div class="mt-4 space-y-2" data-dashboard-assistant-refs>
-              {dashboardAssistant.refs.map((ref) => (
-                <div class="border border-slate-700 bg-slate-950/35 px-3 py-2">
-                  <div class="flex flex-wrap items-center justify-between gap-2">
-                    <span class="text-xs font-semibold text-slate-100">{ref.label}</span>
-                    <span class="font-mono text-[10px] uppercase tracking-[0.1em] text-slate-500">{formatLabel(ref.trust)}</span>
-                  </div>
-                  <p class="mt-1 break-all font-mono text-[10px] text-slate-400">{ref.reference}</p>
-                </div>
-              ))}
-            </div>
-            <div class="mt-4 space-y-2" data-dashboard-assistant-actions>
-              {dashboardAssistant.actions.map((action) => (
-                <article class="border border-brand-300/25 bg-brand-300/10 px-3 py-2">
-                  <div class="flex flex-wrap items-center justify-between gap-2">
-                    <span class="text-xs font-semibold text-brand-100">{action.label}</span>
-                    <span class="font-mono text-[10px] uppercase tracking-[0.1em] text-brand-200">{formatLabel(action.kind)}</span>
-                  </div>
-                  <p class="mt-1 text-xs leading-relaxed text-slate-300">{action.boundary}</p>
-                  <p class="mt-2 break-all font-mono text-[10px] text-slate-500">{action.target_ref}</p>
-                </article>
-              ))}
-            </div>
-            <div class="mt-4 flex flex-wrap gap-2" data-dashboard-assistant-prompts>
-              {dashboardAssistant.prompts.map((prompt) => (
-                <button
-                  class="border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-brand-300/70 hover:text-white"
-                  type="button"
-                  data-dashboard-assistant-copy-prompt={prompt.prompt}
-                  aria-label={`Copy dashboard prompt: ${prompt.label}`}
-                >
-                  {prompt.label}
-                </button>
-              ))}
-            </div>
-            <p class="mt-3 text-xs text-brand-200" data-dashboard-assistant-copy-status aria-live="polite"></p>
-            <p class="mt-4 text-xs leading-relaxed text-slate-500">
-              Read-only: this assistant entry prepares a cited prompt. It does not run shell commands or bypass action envelopes.
-            </p>
+            <AssistantReadout
+              answer={dashboardAssistant.answer}
+              refs={dashboardAssistant.refs}
+              actions={dashboardAssistant.actions}
+              prompts={dashboardAssistant.prompts}
+              answerAttrs={['data-dashboard-assistant-context', 'data-dashboard-assistant-answer']}
+              refsAttr="data-dashboard-assistant-refs"
+              actionsAttr="data-dashboard-assistant-actions"
+              promptsAttr="data-dashboard-assistant-prompts"
+              copyPromptAttr="data-dashboard-assistant-copy-prompt"
+              copyStatusAttr="data-dashboard-assistant-copy-status"
+              copyAriaPrefix="Copy dashboard prompt"
+              boundaryText="Read-only: this assistant entry prepares a cited prompt. It does not run shell commands or bypass action envelopes."
+            />
           </div>
         </section>
 
@@ -336,7 +307,6 @@ const dashboardAssistant = {
       dashboardViewFromSurface,
       dashboardAssistantActions,
       dashboardAssistantAnswer,
-      dashboardAssistantContext,
       dashboardAssistantPrompts,
       dashboardAssistantRefs,
       formatLabel,
@@ -348,6 +318,10 @@ const dashboardAssistant = {
       sourceStatusClasses,
       sourceStatusLabels,
     } from '../lib/sourceStatus';
+    import {
+      assistantReadoutHtml,
+      bindAssistantPromptCopies,
+    } from '../lib/assistantReadout';
 
     const WORKSTATION_REFRESH_COMMAND = 'npm run export:workstation-surface';
 
@@ -596,76 +570,29 @@ const dashboardAssistant = {
 
       function dashboardAssistantHtml(view) {
         const answer = dashboardAssistantAnswer(view);
-        const context = dashboardAssistantContext(view);
         const refs = dashboardAssistantRefs(view);
         const actions = dashboardAssistantActions(view);
         const prompts = dashboardAssistantPrompts(view);
-        return `<p class="mt-3 text-sm leading-relaxed text-slate-200" data-dashboard-assistant-context data-dashboard-assistant-answer>
-          ${escapeHtml(answer || context)}
-        </p>
-        <div class="mt-4 space-y-2" data-dashboard-assistant-refs>
-          ${refs.map(assistantRefHtml).join('')}
-        </div>
-        <div class="mt-4 space-y-2" data-dashboard-assistant-actions>
-          ${actions.map(assistantActionHtml).join('')}
-        </div>
-        <div class="mt-4 flex flex-wrap gap-2" data-dashboard-assistant-prompts>
-          ${prompts.map(assistantPromptHtml).join('')}
-        </div>
-        <p class="mt-3 text-xs text-brand-200" data-dashboard-assistant-copy-status aria-live="polite"></p>
-        <p class="mt-4 text-xs leading-relaxed text-slate-500">
-          Read-only: this assistant entry prepares a cited prompt. It does not run shell commands or bypass action envelopes.
-        </p>`;
-      }
-
-      function assistantRefHtml(ref) {
-        return `<div class="border border-slate-700 bg-slate-950/35 px-3 py-2">
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <span class="text-xs font-semibold text-slate-100">${escapeHtml(ref.label)}</span>
-            <span class="font-mono text-[10px] uppercase tracking-[0.1em] text-slate-500">${escapeHtml(formatLabel(ref.trust))}</span>
-          </div>
-          <p class="mt-1 break-all font-mono text-[10px] text-slate-400">${escapeHtml(ref.reference)}</p>
-        </div>`;
-      }
-
-      function assistantActionHtml(action) {
-        return `<article class="border border-brand-300/25 bg-brand-300/10 px-3 py-2">
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <span class="text-xs font-semibold text-brand-100">${escapeHtml(action.label)}</span>
-            <span class="font-mono text-[10px] uppercase tracking-[0.1em] text-brand-200">${escapeHtml(formatLabel(action.kind))}</span>
-          </div>
-          <p class="mt-1 text-xs leading-relaxed text-slate-300">${escapeHtml(action.boundary)}</p>
-          <p class="mt-2 break-all font-mono text-[10px] text-slate-500">${escapeHtml(action.target_ref)}</p>
-        </article>`;
-      }
-
-      function assistantPromptHtml(prompt) {
-        return `<button
-          class="border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-brand-300/70 hover:text-white"
-          type="button"
-          data-dashboard-assistant-copy-prompt="${escapeHtml(prompt.prompt)}"
-          aria-label="Copy dashboard prompt: ${escapeHtml(prompt.label)}"
-        >
-          ${escapeHtml(prompt.label)}
-        </button>`;
+        return assistantReadoutHtml({
+          answer,
+          refs,
+          actions,
+          prompts,
+          answerAttrs: ['data-dashboard-assistant-context', 'data-dashboard-assistant-answer'],
+          refsAttr: 'data-dashboard-assistant-refs',
+          actionsAttr: 'data-dashboard-assistant-actions',
+          promptsAttr: 'data-dashboard-assistant-prompts',
+          copyPromptAttr: 'data-dashboard-assistant-copy-prompt',
+          copyStatusAttr: 'data-dashboard-assistant-copy-status',
+          copyAriaPrefix: 'Copy dashboard prompt',
+          boundaryText: 'Read-only: this assistant entry prepares a cited prompt. It does not run shell commands or bypass action envelopes.',
+        });
       }
 
       function bindDashboardAssistantPrompts(root) {
-        const status = root.querySelector('[data-dashboard-assistant-copy-status]');
-        root.querySelectorAll('[data-dashboard-assistant-copy-prompt]').forEach((button) => {
-          button.addEventListener('click', async () => {
-            const prompt = button.dataset.dashboardAssistantCopyPrompt ?? '';
-            try {
-              await navigator.clipboard?.writeText(prompt);
-              if (status) {
-                status.textContent = 'Prompt copied.';
-              }
-            } catch {
-              if (status) {
-                status.textContent = prompt ? `Prompt ready: ${prompt}` : 'Prompt unavailable.';
-              }
-            }
-          });
+        bindAssistantPromptCopies(root, {
+          copyPromptAttr: 'data-dashboard-assistant-copy-prompt',
+          copyStatusAttr: 'data-dashboard-assistant-copy-status',
         });
       }
 
