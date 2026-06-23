@@ -376,6 +376,16 @@ export type SourceRef = {
   reference: string;
 };
 
+export type OperatorPriority = {
+  rank: string;
+  label: string;
+  title: string;
+  summary: string;
+  severity: Severity;
+  href: string;
+  meta: string;
+};
+
 export type DashboardView = {
   sourceLabel: string;
   workstationId: string;
@@ -391,6 +401,7 @@ export type DashboardView = {
   nextActionLabel: string;
   nextActionReason: string;
   nextActionCommand: string;
+  operatorPriorities: OperatorPriority[];
   attentionCounts: { label: string; value: number }[];
   health: HealthItem[];
   capacity: { label: string; value: number }[];
@@ -424,6 +435,7 @@ export function dashboardViewFromSurface(surface: unknown): DashboardView {
   const runtimeDispatch = runtimeDispatchView(recordAt(surface, 'runtime_dispatch'));
   const acceptedTruthRecovery = acceptedTruthRecoveryView(recordAt(surface, 'accepted_truth_recovery'));
   const projects = projectRows(arrayAt(surface, 'projects'));
+  const health = healthItems(arrayAt(surface, 'health'));
   const workstationId = fallbackString(stringAt(surface, 'workstation_id'), 'workstation');
   const profile = fallbackString(stringAt(surface, 'profile'), 'default');
   const topTitle = fallbackString(stringAt(top, 'title'), 'No top attention item');
@@ -465,8 +477,21 @@ export function dashboardViewFromSurface(surface: unknown): DashboardView {
       'Inspect current state before taking action.',
     ),
     nextActionCommand: stringAt(nextAction, 'command'),
+    operatorPriorities: operatorPrioritiesFromSurface(
+      topTitle,
+      fallbackString(
+        stringAt(top, 'summary'),
+        'No urgent operator attention was reported by the workstation surface.',
+      ),
+      normalizeSeverity(stringAt(top, 'severity')),
+      decisionInbox,
+      runtimeDispatch,
+      acceptedTruthRecovery,
+      projectDetails,
+      health,
+    ),
     attentionCounts: positiveEntriesFromRecord(recordAt(surface, 'attention_counts')),
-    health: healthItems(arrayAt(surface, 'health')),
+    health,
     capacity: entriesFromRecord(recordAt(surface, 'capacity')),
     projects,
     projectDetails,
@@ -498,6 +523,120 @@ export function statusClasses(status: HealthStatus): string {
     default:
       return 'border-slate-700 bg-slate-900/70 text-slate-200';
   }
+}
+
+function operatorPrioritiesFromSurface(
+  topTitle: string,
+  topSummary: string,
+  topSeverity: Severity,
+  decisionInbox: DecisionInboxView,
+  runtimeDispatch: RuntimeDispatchView,
+  acceptedTruthRecovery: AcceptedTruthRecoveryView,
+  projectDetails: ProjectDetail[],
+  health: HealthItem[],
+): OperatorPriority[] {
+  const priorities: Omit<OperatorPriority, 'rank'>[] = [];
+  const firstDecision = decisionInbox.items[0];
+  if (decisionInbox.openCount > 0) {
+    priorities.push({
+      label: 'Decision',
+      title: firstDecision?.title || `${decisionInbox.openCount} open decision item(s)`,
+      summary: firstDecision?.why_now || decisionInbox.summary,
+      severity: firstDecision?.severity || 'attention',
+      href: '/decisions/',
+      meta: `${decisionInbox.openCount} open`,
+    });
+  }
+
+  const blockedProject = projectDetails.find((project) => project.severity === 'critical' || project.severity === 'blocked')
+    ?? projectDetails.find((project) => project.attention_count > 0 || project.severity === 'attention');
+  if (blockedProject) {
+    priorities.push({
+      label: 'Project',
+      title: blockedProject.display_name,
+      summary: blockedProject.primary_action,
+      severity: blockedProject.severity,
+      href: '/work/',
+      meta: `${blockedProject.open_decision_count} decisions / ${blockedProject.runtime_handoff_count} handoffs`,
+    });
+  }
+
+  const truthItem = acceptedTruthRecovery.items[0];
+  if (truthItem) {
+    priorities.push({
+      label: 'Truth',
+      title: formatLabel(truthItem.stage),
+      summary: truthItem.next_safe_action,
+      severity: truthItem.severity,
+      href: '/review/',
+      meta: `${acceptedTruthRecovery.visibleCount} visible`,
+    });
+  }
+
+  const runtimeItem = runtimeDispatch.items[0];
+  if (runtimeItem) {
+    priorities.push({
+      label: 'Runtime',
+      title: runtimeItem.title,
+      summary: runtimeItem.latest_receipt?.reason || runtimeItem.latest_preflight?.reason || runtimeItem.boundary,
+      severity: runtimeItem.severity,
+      href: '/decisions/',
+      meta: formatLabel(runtimeItem.stage),
+    });
+  }
+
+  const unhealthy = health.find((item) => item.status === 'critical' || item.status === 'blocked' || item.status === 'attention');
+  if (unhealthy) {
+    priorities.push({
+      label: 'Health',
+      title: unhealthy.label,
+      summary: unhealthy.summary,
+      severity: healthSeverity(unhealthy.status),
+      href: '/settings/',
+      meta: unhealthy.status,
+    });
+  }
+
+  if (!priorities.length) {
+    priorities.push({
+      label: 'Ready',
+      title: topTitle,
+      summary: topSummary,
+      severity: topSeverity,
+      href: '/work/',
+      meta: 'no blocker',
+    });
+  }
+
+  return uniquePriorities(priorities).slice(0, 3).map((priority, index) => ({
+    rank: `P${index + 1}`,
+    ...priority,
+  }));
+}
+
+function uniquePriorities(priorities: Omit<OperatorPriority, 'rank'>[]): Omit<OperatorPriority, 'rank'>[] {
+  const seen = new Set<string>();
+  return priorities.filter((priority) => {
+    const key = `${priority.label}:${priority.title}:${priority.href}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function healthSeverity(status: HealthStatus): Severity {
+  if (status === 'critical') {
+    return 'critical';
+  }
+  if (status === 'blocked') {
+    return 'blocked';
+  }
+  if (status === 'attention') {
+    return 'attention';
+  }
+  return 'info';
 }
 
 export function dashboardAssistantContext(view: DashboardView): string {

@@ -264,6 +264,10 @@ test('dashboard route renders the workstation surface and captures screenshots',
   await expect(page.locator('#decisions').getByText('Decision Inbox', { exact: true })).toBeVisible();
   await expect(page.getByText('Work Portfolio', { exact: true })).toBeVisible();
   await expect(page.getByText('Project attention summary')).toBeVisible();
+  await expect(page.getByText('Operator Priorities', { exact: true })).toBeVisible();
+  await expect(page.locator('[data-dashboard-priorities]').getByText('P1 · Decision')).toBeVisible();
+  await expect(page.locator('[data-dashboard-priorities]').getByText('Resolve closeout follow-up')).toBeVisible();
+  await expect(page.locator('[data-dashboard-priorities]').getByRole('link', { name: /Resolve closeout follow-up/ })).toHaveAttribute('href', DECISIONS_ROUTE);
   await expect(page.getByRole('link', { name: 'Open work' })).toHaveAttribute('href', WORK_ROUTE);
   await expect(page.locator('[data-dashboard-work-summary]').getByRole('heading', { name: 'NanoClustering' })).toBeVisible();
   await expect(page.locator('[data-dashboard-work-summary]').getByRole('heading', { name: 'Science Atlas' })).toBeVisible();
@@ -697,7 +701,7 @@ test('dashboard route renders workstation fixture variants without empty-state g
       await expect(page.getByText('No project activity is currently visible.')).toBeVisible();
     }
     if (variant.name === 'accepted_truth_recovery') {
-      await expect(page.getByText('Resolve archive review before accepting truth.', { exact: true })).toBeVisible();
+      await expect(page.getByRole('complementary').getByText('Resolve archive review before accepting truth.', { exact: true })).toBeVisible();
       await expect(page.locator('[data-dashboard-top-title]')).toHaveText('Accepted truth recovery needed');
     }
 

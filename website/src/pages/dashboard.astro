@@ -110,6 +110,30 @@ const dashboardAssistant = {
           </div>
         </div>
 
+        <section class="min-w-0 border border-slate-700 bg-[#101a27] p-6">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="text-sm font-semibold uppercase tracking-[0.16em] text-brand-200">Operator Priorities</p>
+              <h2 class="mt-2 text-2xl font-semibold text-white">Next management pass</h2>
+            </div>
+            <span class="whitespace-nowrap font-mono text-xs uppercase tracking-[0.12em] text-slate-500">Top 3</span>
+          </div>
+          <div class="mt-5 grid gap-3 lg:grid-cols-3" data-dashboard-priorities>
+            {dashboardView.operatorPriorities.map((priority) => (
+              <a href={sitePath(priority.href)} class={`block min-w-0 border p-4 transition hover:border-brand-300/70 ${severityClasses[priority.severity]}`}>
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <p class="font-mono text-xs uppercase tracking-[0.12em] opacity-75">{priority.rank} · {priority.label}</p>
+                    <h3 class="mt-2 truncate font-semibold text-white">{priority.title}</h3>
+                  </div>
+                  <span class="whitespace-nowrap font-mono text-[10px] uppercase tracking-[0.1em] opacity-75">{priority.meta}</span>
+                </div>
+                <p class="mt-3 text-sm leading-relaxed opacity-90">{priority.summary}</p>
+              </a>
+            ))}
+          </div>
+        </section>
+
         <section class="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-3" data-dashboard-attention-counts>
           {dashboardView.attentionCounts.length ? (
             dashboardView.attentionCounts.map((item) => (
@@ -318,6 +342,7 @@ const dashboardAssistant = {
       sourceStatusClasses,
       sourceStatusLabels,
     } from '../lib/sourceStatus';
+    import { sitePath } from '../lib/paths';
     import {
       assistantReadoutHtml,
       bindAssistantPromptCopies,
@@ -388,6 +413,7 @@ const dashboardAssistant = {
         setSeverity(root, '[data-dashboard-top-severity]', view.topSeverity);
         setSeverity(root, '[data-dashboard-top-card]', view.topSeverity);
         setCommand(root, view.nextActionCommand);
+        setHtml(root, '[data-dashboard-priorities]', operatorPrioritiesHtml(view.operatorPriorities));
         setHtml(root, '[data-dashboard-attention-counts]', attentionCountsHtml(view.attentionCounts));
         setHtml(root, '[data-dashboard-capacity]', view.capacity.map(capacityHtml).join(''));
         setHtml(root, '[data-dashboard-health]', view.health.map(healthHtml).join(''));
@@ -464,6 +490,23 @@ const dashboardAssistant = {
       }
 
       return items.map(countHtml).join('');
+    }
+
+    function operatorPrioritiesHtml(priorities) {
+      return priorities.map(operatorPriorityHtml).join('');
+    }
+
+    function operatorPriorityHtml(priority) {
+      return `<a href="${escapeHtml(sitePath(priority.href))}" class="block min-w-0 border p-4 transition hover:border-brand-300/70 ${severityClasses[priority.severity]}">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="font-mono text-xs uppercase tracking-[0.12em] opacity-75">${escapeHtml(priority.rank)} · ${escapeHtml(priority.label)}</p>
+            <h3 class="mt-2 truncate font-semibold text-white">${escapeHtml(priority.title)}</h3>
+          </div>
+          <span class="whitespace-nowrap font-mono text-[10px] uppercase tracking-[0.1em] opacity-75">${escapeHtml(priority.meta)}</span>
+        </div>
+        <p class="mt-3 text-sm leading-relaxed opacity-90">${escapeHtml(priority.summary)}</p>
+      </a>`;
     }
 
     function capacityHtml(item) {
