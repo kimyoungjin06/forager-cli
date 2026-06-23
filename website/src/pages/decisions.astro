@@ -164,7 +164,11 @@ const selectedDecisionAssistant = selectedDecision ? decisionAssistantScope(deci
             <div class="mt-4 space-y-3">
               {selectedDecision.action_envelopes.length ? (
                 selectedDecision.action_envelopes.map((envelope) => (
-                  <article class="border border-slate-700 bg-slate-900/70 p-4">
+                  <article
+                    class="border border-slate-700 bg-slate-900/70 p-4"
+                    data-action-envelope-card
+                    data-action-id={envelope.action_id}
+                  >
                     <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                       <div>
                         <p class="font-mono text-xs uppercase tracking-[0.12em] text-slate-400">{envelope.schema}</p>
@@ -208,6 +212,19 @@ const selectedDecisionAssistant = selectedDecision ? decisionAssistantScope(deci
                       <summary class="cursor-pointer text-sm font-semibold text-white">Envelope boundary</summary>
                       <code class="mt-3 block whitespace-pre-wrap break-all border border-slate-700 bg-[#050a12] px-4 py-3 font-mono text-xs text-slate-200">{envelope.allowed_command}</code>
                     </details>
+                    <div class="mt-4 flex flex-col gap-2 border-t border-white/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                      <button
+                        type="button"
+                        class="inline-flex w-full justify-center border border-brand-300/60 px-3 py-2 text-xs font-semibold text-white transition hover:border-white disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                        data-action-envelope-validate
+                        data-action-id={envelope.action_id}
+                      >
+                        Validate envelope
+                      </button>
+                      <p class="text-xs leading-relaxed text-slate-400" data-action-envelope-status>
+                        Requires local action bridge.
+                      </p>
+                    </div>
                   </article>
                 ))
               ) : (
@@ -268,8 +285,10 @@ const selectedDecisionAssistant = selectedDecision ? decisionAssistantScope(deci
       assistantReadoutHtml,
       bindAssistantPromptCopies,
     } from '../lib/assistantReadout';
+    import { sitePath } from '../lib/paths';
 
     const WORKSTATION_REFRESH_COMMAND = 'npm run export:workstation-surface';
+    const ACTION_ENVELOPE_API = sitePath('/api/ondesk/action-envelope');
 
     const app = document.getElementById('decision-app');
     const fallbackElement = document.getElementById('decision-fallback-data');
@@ -330,6 +349,7 @@ const selectedDecisionAssistant = selectedDecision ? decisionAssistantScope(deci
       setHtml(root, '[data-decision-detail]', detailHtml(selected, inbox, view));
       bindDecisionQueue(root, view);
       bindDecisionAssistantPrompts(root);
+      bindActionEnvelopeControls(root, view);
     }
 
     function resolveSelectedQueueItem(view, preferred) {
@@ -569,7 +589,11 @@ const selectedDecisionAssistant = selectedDecision ? decisionAssistantScope(deci
         return visible.map((action) => `<span class="inline-flex border border-white/20 bg-slate-950/35 px-3 py-2 text-xs font-semibold">${escapeHtml(action)}</span>`).join(' ');
       }
 
-      return decision.action_envelopes.map((envelope) => `<article class="border border-white/15 bg-slate-950/35 p-4">
+      return decision.action_envelopes.map((envelope) => `<article
+        class="border border-white/15 bg-slate-950/35 p-4"
+        data-action-envelope-card
+        data-action-id="${escapeHtml(envelope.action_id)}"
+      >
         <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <p class="font-mono text-xs uppercase tracking-[0.12em] opacity-75">${escapeHtml(envelope.schema)}</p>
@@ -604,7 +628,122 @@ const selectedDecisionAssistant = selectedDecision ? decisionAssistantScope(deci
           <p class="mt-3 text-xs leading-relaxed opacity-85">${escapeHtml(envelope.stale_rejection_reason)}</p>
           <p class="mt-2 text-xs leading-relaxed opacity-85">Forbidden: ${escapeHtml(envelope.forbidden_effects.join(' / '))}</p>
         </details>
+        <div class="mt-4 flex flex-col gap-2 border-t border-white/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <button
+            type="button"
+            class="inline-flex w-full justify-center border border-brand-300/60 px-3 py-2 text-xs font-semibold text-white transition hover:border-white disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+            data-action-envelope-validate
+            data-action-id="${escapeHtml(envelope.action_id)}"
+          >
+            Validate envelope
+          </button>
+          <p class="text-xs leading-relaxed text-slate-400" data-action-envelope-status>Requires local action bridge.</p>
+        </div>
       </article>`).join('');
+    }
+
+    function bindActionEnvelopeControls(root, view) {
+      root.querySelectorAll('[data-action-envelope-validate]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          const actionId = button.dataset.actionId;
+          const envelope = findActionEnvelope(view, actionId);
+          const card = button.closest('[data-action-envelope-card]');
+          if (!envelope || !card) {
+            setEnvelopeStatus(card, 'Action envelope is no longer visible.', 'error');
+            return;
+          }
+
+          button.setAttribute('disabled', 'true');
+          setEnvelopeStatus(card, 'Validating envelope with local bridge...', 'pending');
+          try {
+            const response = await fetch(ACTION_ENVELOPE_API, {
+              method: 'POST',
+              headers: {
+                'content-type': 'application/json',
+              },
+              body: JSON.stringify({
+                envelope: actionEnvelopePayload(envelope),
+              }),
+            });
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok || !result.ok) {
+              throw new Error(result.message || result.error || `bridge returned ${response.status}`);
+            }
+
+            const receipt = result.receipt;
+            const status = receipt?.result_status ? formatLabel(receipt.result_status) : 'validated';
+            const stale = receipt?.stale ? ' stale' : '';
+            const refreshed = result.surface_refreshed ? 'Surface refreshed.' : 'Refresh surface manually.';
+            setEnvelopeStatus(
+              card,
+              `Envelope ${status}${stale}. ${refreshed}`,
+              receipt?.stale ? 'warning' : 'success',
+            );
+          } catch (error) {
+            setEnvelopeStatus(
+              card,
+              `Local bridge unavailable: ${error.message}. Run npm run serve:actions --prefix website.`,
+              'error',
+            );
+          } finally {
+            button.removeAttribute('disabled');
+          }
+        });
+      });
+    }
+
+    function findActionEnvelope(view, actionId) {
+      if (!actionId) {
+        return null;
+      }
+
+      for (const decision of view.decisionInbox.items) {
+        const envelope = decision.action_envelopes.find((item) => item.action_id === actionId);
+        if (envelope) {
+          return envelope;
+        }
+      }
+      return null;
+    }
+
+    function actionEnvelopePayload(envelope) {
+      return {
+        schema: envelope.schema,
+        action_id: envelope.action_id,
+        action_kind: envelope.action_kind,
+        profile: envelope.profile,
+        project_key: envelope.project_key,
+        target_ref: envelope.target_ref,
+        observed_hash: envelope.observed_hash,
+        nonce: envelope.nonce,
+        ttl: envelope.ttl,
+        issued_at: envelope.issued_at,
+        expires_at: envelope.expires_at,
+        idempotency_key: envelope.idempotency_key,
+        preview: envelope.preview,
+        allowed_command: envelope.allowed_command,
+        forbidden_effects: envelope.forbidden_effects,
+        expected_receipt_schema: envelope.expected_receipt_schema,
+        requires_confirmation: envelope.requires_confirmation,
+        confirmation_phrase: envelope.confirmation_phrase,
+        stale_rejection_reason: envelope.stale_rejection_reason,
+      };
+    }
+
+    function setEnvelopeStatus(card, message, tone) {
+      const status = card?.querySelector('[data-action-envelope-status]');
+      if (!status) {
+        return;
+      }
+
+      const toneClasses = {
+        pending: 'text-brand-200',
+        success: 'text-emerald-200',
+        warning: 'text-amber-200',
+        error: 'text-red-200',
+      };
+      status.className = `text-xs leading-relaxed ${toneClasses[tone] ?? 'text-slate-400'}`;
+      status.textContent = message;
     }
 
     function receiptHtml(envelope) {

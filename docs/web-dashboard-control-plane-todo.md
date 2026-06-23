@@ -760,6 +760,14 @@ Current status:
   `accepted_truth_recovery_action_receipt.v1` records. The dashboard still
   does not resolve follow-ups, retire closeouts, move files, promote wiki
   state, or record accepted truth.
+- Done: added the first local Web interaction bridge. `npm run serve:actions`
+  serves the built static Web UI from `127.0.0.1` and exposes only
+  `POST /api/ondesk/action-envelope`; `/decisions/` can validate a visible
+  `action_envelope.v1` through existing `forager ondesk action-envelope`
+  logic and record an `action_envelope_receipt.v1`. This bridge refreshes the
+  exported workstation surface after validation, but it still does not run
+  action preflight, apply decisions, close out records, queue runtime work,
+  launch processes, or record accepted truth.
 
 Scope:
 

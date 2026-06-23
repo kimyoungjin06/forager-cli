@@ -5,6 +5,7 @@
     "dev": "astro dev",
     "build": "node scripts/build-with-lock.mjs -- astro build",
     "preview": "astro preview",
+    "serve:actions": "node scripts/serve-local-actions.mjs",
     "export:review-surface": "node scripts/export-review-surface.mjs",
     "export:workstation-surface": "node scripts/export-workstation-surface.mjs",
     "test:visual": "node scripts/run-visual-tests.mjs"

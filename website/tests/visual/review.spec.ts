@@ -571,6 +571,29 @@ test('dashboard route hydrates exported workstation_surface.v1 when available', 
 });
 
 test('decisions route renders read-only action center from workstation surface', async ({ page }, testInfo) => {
+  await page.route('**/api/ondesk/action-envelope', async (route) => {
+    const request = route.request();
+    expect(request.method()).toBe('POST');
+    const body = request.postDataJSON();
+    expect(body.envelope.schema).toBe('action_envelope.v1');
+    expect(body.envelope.target_ref.decision_id).toBe('decision-closeout-followup');
+    expect(body.envelope.expected_receipt_schema).toBe('action_envelope_receipt.v1');
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        receipt_appended: true,
+        surface_refreshed: true,
+        receipt: {
+          schema: 'action_envelope_receipt.v1',
+          receipt_id: 'receipt-closeout-followup',
+          result_status: 'validated',
+          stale: false,
+        },
+      }),
+    });
+  });
+
   await page.route('**/forager-cli/workstation-surface.json', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
@@ -593,6 +616,9 @@ test('decisions route renders read-only action center from workstation surface',
   await expect(page.getByText('action_envelope.v1')).toBeVisible();
   await expect(page.getByText('action_envelope_receipt.v1')).toBeVisible();
   await expect(page.getByText('Authorization boundary')).toBeVisible();
+  const closeoutEnvelope = page.locator('[data-action-envelope-card]').filter({ hasText: 'Resolve follow-up' });
+  await closeoutEnvelope.getByRole('button', { name: 'Validate envelope' }).click();
+  await expect(closeoutEnvelope.locator('[data-action-envelope-status]')).toContainText('Envelope validated. Surface refreshed.');
   await page.getByText('Envelope boundary').click();
   await expect(page.getByText('forager offdesk decision show --json decision-closeout-followup')).toBeVisible();
   await page.getByText('CLI fallback').click();
