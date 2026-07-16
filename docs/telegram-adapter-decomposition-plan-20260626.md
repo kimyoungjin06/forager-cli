@@ -308,9 +308,25 @@ Status:
   `scripts/telegram_operator/plan_messages.py`. They are pure card builders.
   `manual_project_candidate` moved to `project_candidates.py` (its natural
   home) so both the renderers and the state machine can share it without a
-  circular import. The monolith dropped to ~5,920 lines. The remaining large
-  block is the plan-session state machine (`handle_remote_plan_session_input`,
-  stage transitions) and stage receipt/packet creation.
+  circular import. The monolith dropped to ~5,920 lines.
+
+### Schema Constants and Receipt Builders
+
+Status:
+
+- Plan-session and stage schema identifiers moved to
+  `scripts/telegram_operator/schemas.py` (one shared home so the receipt
+  builders and the state machine reference identical names without a cycle).
+- The 15 stage receipt/packet builders plus their 13 supporting helpers
+  (closeout followups/templates, secret-scan, CLI-option, summary, and
+  sha256 helpers) moved to `scripts/telegram_operator/receipts.py`. They
+  import constants from `schemas`, candidate helpers from
+  `project_candidates`, and readiness helpers from `health`. The main script
+  imports the 16 builders its state machine calls.
+- The monolith dropped to ~4,060 lines (from 7,367 at the start of this
+  cycle). The remaining block is the plan-session state machine itself
+  (`handle_remote_plan_session_input`, stage transition routing, project
+  selection/path resolution predicates) plus the CLI entrypoint and run loop.
 
 ### Agent Calls
 
