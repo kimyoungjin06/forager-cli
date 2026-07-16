@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 const siteRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = path.resolve(siteRoot, '..');
 const distRoot = path.join(siteRoot, 'dist');
+const publicRoot = path.join(siteRoot, 'public');
 const options = parseArgs(process.argv.slice(2));
 const host = options.host ?? '127.0.0.1';
 const port = Number(options.port ?? process.env.FORAGER_ACTION_BRIDGE_PORT ?? 4387);
@@ -131,16 +132,25 @@ async function handleActionEnvelope(request, response) {
     return;
   }
 
-  const output = parseJsonOutput(result.stdout, 'forager action-envelope output');
+  // The CLI already appended the receipt when it exited 0; a stdout parse
+  // failure must not surface as internal_error for a mutation that succeeded.
+  let output = {};
+  let receiptParseError = null;
+  try {
+    output = parseJsonOutput(result.stdout, 'forager action-envelope output');
+  } catch (error) {
+    receiptParseError = error.message;
+  }
   const surfaceResult = exportWorkstationSurface();
   json(response, 200, {
     ok: true,
     schema: 'local_action_bridge_response.v1',
     action_id: envelope.action_id,
     decision_id: envelope.target_ref?.decision_id ?? actionRequest.request.decision_id,
-    receipt: output.receipt,
-    receipt_appended: output.receipt_appended,
-    dry_run: output.dry_run,
+    receipt: output.receipt ?? null,
+    receipt_appended: output.receipt_appended ?? null,
+    receipt_parse_error: receiptParseError,
+    dry_run: output.dry_run ?? null,
     surface_refreshed: surfaceResult.ok,
     surface_error: surfaceResult.ok ? null : surfaceResult.message,
   });
@@ -347,6 +357,21 @@ async function serveStatic(pathname, response, headOnly) {
     response.writeHead(403);
     response.end('Forbidden');
     return;
+  }
+
+  // exportWorkstationSurface() writes into public/, which is only copied to
+  // dist/ at build time. Prefer the public/ copy so a surface refresh is
+  // visible to the browser without rebuilding the site.
+  const publicPath = safeJoin(publicRoot, relative);
+  if (publicPath) {
+    try {
+      const publicInfo = await stat(publicPath);
+      if (publicInfo.isFile()) {
+        filePath = publicPath;
+      }
+    } catch {
+      // fall through to dist
+    }
   }
 
   try {

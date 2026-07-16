@@ -761,27 +761,35 @@ Current status:
   does not resolve follow-ups, retire closeouts, move files, promote wiki
   state, or record accepted truth.
 - Done: added the first local Web interaction bridge. `npm run serve:actions`
-  serves the built static Web UI from `127.0.0.1` and exposes only
-  `POST /api/ondesk/action-envelope`; `/decisions/` can validate a visible
-  `action_envelope.v1` through existing `forager ondesk action-envelope`
-  logic and record an `action_envelope_receipt.v1`. This bridge refreshes the
-  exported workstation surface after validation, but it still does not run
-  action preflight, apply decisions, close out records, queue runtime work,
-  launch processes, or record accepted truth.
+  serves the built static Web UI from `127.0.0.1` and exposes
+  `GET /api/ondesk/bridge-status` plus `POST /api/ondesk/action-envelope`;
+  `/decisions/` can validate a visible `action_envelope.v1` through existing
+  `forager ondesk action-envelope` logic and record an
+  `action_envelope_receipt.v1`. This bridge refreshes the exported workstation
+  surface after validation, but it still does not run action preflight, apply
+  decisions, close out records, queue runtime work, launch processes, or
+  record accepted truth.
+- Done: the bridge accepts only a compact action request (`action_id`,
+  `decision_id`, `observed_hash`) and reconstructs the executable envelope
+  from a freshly exported operator-safe `workstation_surface.v1`; full
+  envelope payloads from the browser are rejected.
+- Done: same-origin and Host-header allowlist checks guard the bridge
+  (including against DNS rebinding), and refreshed surface exports in
+  `website/public/` are served with precedence over the stale `dist/` copy so
+  a page reload recovers from `409 observed_hash_changed`. `/decisions/` now
+  distinguishes bridge refusals (including 409 stale guidance) from an
+  unavailable bridge.
 
 Immediate hardening backlog before broader Web execution:
 
-- P0: Make the local bridge accept only a compact action request
-  (`action_id`, `decision_id`, `observed_hash`) and reconstruct the executable
-  envelope from a freshly exported `workstation_surface.v1`; the browser should
-  not submit the whole envelope JSON as authority.
-- P0: Add same-origin request checks and a bridge readiness endpoint so the UI
-  can distinguish static read-only browsing from local receipt recording.
+- P0: Use `GET /api/ondesk/bridge-status` from `/decisions/` so the UI can
+  distinguish static read-only browsing from local receipt recording before
+  the first click.
 - P0: Rehydrate `/decisions/` after a successful bridge action so the latest
   receipt block is visible immediately instead of relying on a manual reload.
-- P0: Add route coverage for the compact request contract and bridge readiness
-  state; add a real temp-profile bridge smoke before exposing additional
-  mutation-adjacent endpoints.
+- P0: Add route coverage for the bridge readiness state; add a real
+  temp-profile bridge smoke before exposing additional mutation-adjacent
+  endpoints.
 - P1: Rename UI copy from raw `read_only_preview` and generic "Validate
   envelope" language to operator-facing wording that separates assistant
   read-only advice from local receipt recording.

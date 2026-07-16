@@ -668,7 +668,18 @@ const selectedDecisionAssistant = selectedDecision ? decisionAssistantScope(deci
             });
             const result = await response.json().catch(() => ({}));
             if (!response.ok || !result.ok) {
-              throw new Error(result.message || result.error || `bridge returned ${response.status}`);
+              // The bridge answered; this is a refusal, not an unavailable bridge.
+              const detail = result.message || result.error || `bridge returned ${response.status}`;
+              if (response.status === 409) {
+                setEnvelopeStatus(
+                  card,
+                  `Decision changed since this page loaded: ${detail} Reload the page to pick up the refreshed surface.`,
+                  'warning',
+                );
+              } else {
+                setEnvelopeStatus(card, `Bridge refused the action: ${detail}`, 'error');
+              }
+              return;
             }
 
             const receipt = result.receipt;
