@@ -8,7 +8,7 @@ import re
 import subprocess
 from typing import Any
 
-from .common import csv_values, sha256_short
+from .common import csv_values, sha256_short, unique_nonempty
 from .rendering import sanitize_text
 
 
@@ -25,18 +25,6 @@ PROJECT_MARKER_FILES = (
     "package.json",
     "uv.lock",
 )
-
-
-def unique_nonempty(values: list[Any]) -> list[str]:
-    seen: set[str] = set()
-    result: list[str] = []
-    for value in values:
-        text = str(value or "").strip()
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        result.append(text)
-    return result
 
 
 def truncate_label(value: Any, *, max_chars: int = 34) -> str:

@@ -42,7 +42,10 @@ from telegram_operator.common import (
 )
 from telegram_operator.config import resolve_telegram_config
 from telegram_operator.persistence import (
+    append_chat_history,
+    chat_history_for_chat_hash,
     last_context_for_chat_hash,
+    parse_utc_timestamp,
     load_state,
     remember_context_for_chat_hash,
     save_state,
@@ -67,6 +70,7 @@ from telegram_operator.rendering import (
     MOBILE_CARD_MAX_LINES,
     REMOTE_PLAN_INIT_CONTEXT_KIND,
     REMOTE_PLAN_SESSION_CONTEXT_KIND,
+    agent_assistant_reply,
     choice_keyboard,
     choice_surface_contract,
     display_action,
@@ -588,15 +592,6 @@ def validate_projection(projection: dict[str, Any], *, expected_command: Any = N
         raise RemoteOperatorTelegramError(
             f"projection command mismatch: expected {expected}, got {actual or 'missing'}"
         )
-
-
-def short_hash(value: Any) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return "sha256:unknown"
-    if text.startswith("sha256:") and len(text) > 22:
-        return text[:22]
-    return text
 
 
 def public_remote_plan_session(session: dict[str, Any]) -> dict[str, Any]:
@@ -2181,23 +2176,6 @@ def manual_project_candidate(text: str) -> dict[str, Any]:
         "next_step": "init_review",
         "manual_input": True,
     }
-
-
-def render_project_selection_error_message(*, profile: Any, session: dict[str, Any]) -> str:
-    candidates = [
-        candidate
-        for candidate in session.get("candidates", [])
-        if isinstance(candidate, dict)
-    ]
-    labels = " · ".join(str(candidate.get("rank")) for candidate in candidates[:3])
-    return "\n".join(
-        [
-            title_with_profile("선택 확인 필요", profile),
-            "입력한 후보를 찾지 못했습니다.",
-            f"가능한 번호: {html.escape(labels or '없음')}",
-            "버튼 또는 번호/이름 직접 입력",
-        ]
-    )
 
 
 def render_project_selection_deferred_message(*, profile: Any) -> str:
@@ -6204,6 +6182,7 @@ def render_command_result(
     *,
     mode: str,
     feedback_context: dict[str, Any] | None = None,
+    chat_history: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     result = result_base(args, config, mode)
     result["command_text"] = sanitize_text(command_text, max_chars=400)
@@ -6240,6 +6219,7 @@ def render_command_result(
             args,
             str(parsed.get("chat_text") or command_text),
             feedback_context=feedback_context,
+            chat_history=chat_history,
         )
         if isinstance(agent_intent, dict):
             parsed["agent_intent"] = agent_intent
@@ -6513,6 +6493,11 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                 text,
                 mode="live_once",
                 feedback_context=feedback_context,
+                chat_history=chat_history_for_chat_hash(
+                    state,
+                    chat_hash,
+                    max_age_sec=args.context_max_age_sec,
+                ),
             )
         rendered["updates_seen"] = len(updates)
         if isinstance(update_id, int):
@@ -6613,6 +6598,21 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
             rendered["send_error"] = sanitize_text(str(error), max_chars=240)
         rendered["sent_message_id"] = message_id
         remember_context_for_chat_hash(state, chat_hash, rendered)
+        rendered_parsed = (
+            rendered.get("parsed_command")
+            if isinstance(rendered.get("parsed_command"), dict)
+            else {}
+        )
+        if rendered_parsed.get("command") == "chat":
+            append_chat_history(
+                state,
+                chat_hash,
+                role="operator",
+                text=str(rendered_parsed.get("chat_text") or text),
+            )
+            assistant_reply = agent_assistant_reply(rendered_parsed.get("agent_intent"))
+            if assistant_reply:
+                append_chat_history(state, chat_hash, role="assistant", text=assistant_reply)
         result = rendered
         break
     if max_update_id >= int(state.get("offset") or 0):
@@ -6732,21 +6732,6 @@ def run_loop(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
     return summary
 
 
-def parse_timestamp(value: Any) -> dt.datetime | None:
-    text = str(value or "").strip()
-    if not text:
-        return None
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    try:
-        parsed = dt.datetime.fromisoformat(text)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=dt.timezone.utc)
-    return parsed.astimezone(dt.timezone.utc)
-
-
 def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]:
     status_path = args.loop_status_file
     issues: list[str] = []
@@ -6766,7 +6751,7 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
     else:
         transport_issues.append("loop_status_missing")
     last_result = loop_status.get("last_result") if isinstance(loop_status.get("last_result"), dict) else {}
-    last_poll_at = parse_timestamp(last_result.get("generated_at") or loop_status.get("generated_at"))
+    last_poll_at = parse_utc_timestamp(last_result.get("generated_at") or loop_status.get("generated_at"))
     last_poll_age_sec = None
     if last_poll_at:
         last_poll_age_sec = max(

@@ -20,7 +20,7 @@ from offdesk_llm_endpoint import (
 )
 
 from .common import RemoteOperatorTelegramError, csv_values, unique_nonempty
-from .rendering import sanitize_text
+from .rendering import ASSISTANT_REPLY_MAX_CHARS, sanitize_text
 
 
 DEFAULT_AGENT_CONFIG_FILE = pathlib.Path(
@@ -173,16 +173,27 @@ def build_agent_chat_prompt(
     *,
     chat_text: str,
     feedback_context: dict[str, Any] | None,
+    chat_history: list[dict[str, Any]] | None = None,
 ) -> str:
     context = feedback_context if isinstance(feedback_context, dict) else {}
+    history = [
+        {
+            "role": str(entry.get("role") or ""),
+            "text": sanitize_text(str(entry.get("text") or ""), max_chars=400),
+        }
+        for entry in (chat_history or [])
+        if isinstance(entry, dict) and str(entry.get("text") or "").strip()
+    ]
     payload = {
         "telegram_text": sanitize_text(chat_text, max_chars=1200),
         "last_interaction_context": context,
+        "recent_chat_history": history,
     }
     return "\n".join(
         [
             "You are the Telegram chat assistant for a generic Offdesk remote operator harness.",
             "Answer the operator's plain Telegram message directly. Keep the answer short, useful, and in the same language as telegram_text.",
+            "recent_chat_history lists earlier turns in this Telegram chat, oldest first. Use it to resolve follow-up questions and pronouns; telegram_text is the message to answer now.",
             "You are read-only. You are not allowed to approve, launch, dispatch, run shell commands, mutate files, resolve approvals, or retarget providers.",
             "When the operator asks to perform an operation, explain the safe slash command to use instead of treating the chat as authorization.",
             "Return exactly one JSON object. Do not include markdown.",
@@ -334,7 +345,9 @@ def normalize_agent_chat(parsed: dict[str, Any], *, runtime: dict[str, Any]) -> 
         "confidence": clamp_float(parsed.get("confidence")),
         "requires_clarification": bool(parsed.get("requires_clarification")),
         "clarifying_question": short_optional_text(parsed.get("clarifying_question"), max_chars=240),
-        "assistant_reply": short_optional_text(parsed.get("assistant_reply"), max_chars=360),
+        "assistant_reply": short_optional_text(
+            parsed.get("assistant_reply"), max_chars=ASSISTANT_REPLY_MAX_CHARS
+        ),
         "reason": short_optional_text(parsed.get("reason"), max_chars=240),
         "non_authorized": non_authorized,
         "config_sources": list(runtime.get("config_sources") or []),
@@ -346,6 +359,7 @@ def chat_with_agent(
     chat_text: str,
     *,
     feedback_context: dict[str, Any] | None = None,
+    chat_history: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     agent_config = resolve_agent_config(args)
     if agent_config.get("mode") == "off":
@@ -353,7 +367,11 @@ def chat_with_agent(
     runtime = select_agent_runtime(agent_config)
     if not runtime:
         return fallback_agent_chat(reason="local_agent_unavailable", agent_config=agent_config)
-    prompt = build_agent_chat_prompt(chat_text=chat_text, feedback_context=feedback_context)
+    prompt = build_agent_chat_prompt(
+        chat_text=chat_text,
+        feedback_context=feedback_context,
+        chat_history=chat_history,
+    )
     try:
         parsed = call_ollama_intent_agent(runtime, prompt)
     except (OSError, TimeoutError, urllib.error.URLError, json.JSONDecodeError, ValueError) as error:

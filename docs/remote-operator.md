@@ -688,6 +688,11 @@ note that no autonomous work has started. `/remember <text>` records an
 adaptive wiki candidate under the active profile; it is not promoted knowledge
 and cannot affect runtime behavior until local wiki review promotes it.
 
+Chat keeps a small rolling history of recent turns per chat in local listener
+state so follow-up questions can be answered in context. The history is
+bounded, expires with `--context-max-age-sec`, never leaves the local state
+file, and grants no additional authority: chat stays read-only.
+
 Planning requests open a short project-selection session. The operator can tap
 a candidate button or type a project number/name directly. If the typed project
 is not in the candidate list, the listener stores it as a manual project hint

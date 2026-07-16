@@ -14,18 +14,6 @@ BUTTON_COMMAND_ALIASES = {
     "도움말": "/help",
 }
 CORE_BUTTON_LABELS = ("상태", "승인 대기", "계획", "도움말")
-ALLOWED_COMMANDS = (
-    "status",
-    "pending",
-    "plans",
-    "show",
-    "help",
-    "chat",
-    "feedback",
-    "note",
-    "plan",
-    "remember",
-)
 CORE_OR_SLASH_COMMANDS = {
     "start",
     "help",

@@ -1332,6 +1332,107 @@ fn remote_operator_telegram_replay_plain_text_chat_does_not_record_feedback() ->
 
 #[test]
 #[serial]
+fn remote_operator_telegram_replay_chat_records_history_without_context_refresh() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+
+    let status_update = temp.path().join("status_update.json");
+    write_text_update(&status_update, 630, 790, "/status")?;
+    let status_out = temp.path().join("status_result.json");
+    let status_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&status_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--out")
+        .arg(&status_out)
+        .output()?;
+    assert!(
+        status_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&status_output.stdout),
+        String::from_utf8_lossy(&status_output.stderr)
+    );
+    let status_result: Value = serde_json::from_slice(&fs::read(&status_out)?)?;
+    let chat_hash = status_result["target_chat_id_hash"]
+        .as_str()
+        .expect("chat hash")
+        .to_string();
+    let state_before: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    let remembered_before = state_before["last_interaction_context_by_chat"][&chat_hash]
+        ["remembered_at"]
+        .as_str()
+        .expect("remembered_at after status")
+        .to_string();
+
+    let chat_update = temp.path().join("chat_update.json");
+    write_text_update(&chat_update, 631, 791, "지금 상태 요약해줘")?;
+    let chat_out = temp.path().join("chat_result.json");
+    let chat_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&chat_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--out")
+        .arg(&chat_out)
+        .output()?;
+    assert!(
+        chat_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&chat_output.stdout),
+        String::from_utf8_lossy(&chat_output.stderr)
+    );
+    let chat_result: Value = serde_json::from_slice(&fs::read(&chat_out)?)?;
+    assert_eq!(chat_result["parsed_command"]["command"], "chat");
+
+    let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    assert_eq!(state["offset"], 632);
+    let history = state["chat_history_by_chat"][&chat_hash]
+        .as_array()
+        .expect("chat history entries");
+    assert!(history.iter().any(|entry| {
+        entry["role"] == "operator"
+            && entry["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("지금 상태 요약해줘"))
+    }));
+    // Chat must not refresh the last card context timestamp; otherwise the
+    // context-max-age expiry never fires for chatty operators.
+    assert_eq!(
+        state["last_interaction_context_by_chat"][&chat_hash]["remembered_at"]
+            .as_str()
+            .expect("remembered_at after chat"),
+        remembered_before
+    );
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn remote_operator_telegram_replay_remember_records_adaptive_wiki_candidate() -> Result<()> {
     let temp = tempdir()?;
     let env_path = temp.path().join("telegram.env");

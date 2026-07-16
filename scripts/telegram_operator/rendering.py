@@ -15,6 +15,10 @@ REMOTE_PLAN_SESSION_CONTEXT_KIND = "remote_plan_project_selection"
 REMOTE_PLAN_INIT_CONTEXT_KIND = "remote_plan_init_review"
 MOBILE_CARD_MAX_LINES = 5
 MOBILE_CARD_MAX_CHARS = 360
+# Reply budget inside the 360-char mobile card once the title and
+# next-action lines are accounted for. Normalization and rendering must
+# agree on this so replies are truncated exactly once.
+ASSISTANT_REPLY_MAX_CHARS = 260
 MOBILE_CARD_FORBIDDEN_TERMS = (
     "Forager Remote Status",
     "Read-only",
@@ -575,7 +579,11 @@ def render_chat_message(
     if assistant_reply:
         lines.append(html.escape(assistant_reply))
     else:
-        lines.append("채팅 에이전트 응답을 만들 수 없습니다.")
+        fallback_reason = agent_fallback_reason_line(agent_intent)
+        if fallback_reason:
+            lines.append(html.escape(fallback_reason))
+        else:
+            lines.append("채팅 에이전트 응답을 만들 수 없습니다.")
     lines.append("다음 조치: /status · /feedback · /plan")
     context_label = interaction_context_label(feedback_context)
     if context_label:
@@ -667,8 +675,31 @@ def agent_assistant_reply(agent_intent: dict[str, Any] | None) -> str | None:
         return None
     if str(agent_intent.get("status") or "") != "classified":
         return None
-    reply = sanitize_text(str(agent_intent.get("assistant_reply") or "").strip(), max_chars=260)
+    reply = sanitize_text(
+        str(agent_intent.get("assistant_reply") or "").strip(),
+        max_chars=ASSISTANT_REPLY_MAX_CHARS,
+    )
     return reply or None
+
+
+AGENT_FALLBACK_REASON_LINES = {
+    "local_agent_disabled": "로컬 에이전트가 꺼져 있습니다.",
+    "local_agent_unavailable": "로컬 에이전트에 연결할 수 없습니다.",
+}
+
+
+def agent_fallback_reason_line(agent_intent: dict[str, Any] | None) -> str | None:
+    if not isinstance(agent_intent, dict):
+        return None
+    if str(agent_intent.get("status") or "") != "fallback":
+        return None
+    reason = str(agent_intent.get("reason") or "").strip()
+    if reason in AGENT_FALLBACK_REASON_LINES:
+        return AGENT_FALLBACK_REASON_LINES[reason]
+    if reason.startswith("local_agent_failed:"):
+        detail = reason.split(":", 1)[1]
+        return f"로컬 에이전트 호출 실패: {detail}"
+    return "로컬 에이전트를 사용할 수 없습니다."
 
 
 def agent_clarifying_question(agent_intent: dict[str, Any] | None) -> str | None:

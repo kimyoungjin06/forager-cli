@@ -11,6 +11,8 @@ from .common import load_json, utc_now, write_json
 
 
 STATE_SCHEMA = "remote_operator_telegram_state.v1"
+CHAT_HISTORY_MAX_ENTRIES = 12
+CHAT_HISTORY_ENTRY_MAX_CHARS = 400
 
 
 def load_state(path: pathlib.Path) -> dict[str, Any]:
@@ -70,6 +72,59 @@ def last_context_for_chat_hash(
     return context
 
 
+def chat_history_for_chat_hash(
+    state: dict[str, Any],
+    chat_hash: Any,
+    *,
+    max_age_sec: int | None = None,
+) -> list[dict[str, Any]]:
+    histories = state.get("chat_history_by_chat")
+    if not isinstance(histories, dict):
+        return []
+    entries = histories.get(str(chat_hash or ""))
+    if not isinstance(entries, list):
+        return []
+    now = dt.datetime.now(dt.timezone.utc)
+    result: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if max_age_sec is not None and max_age_sec >= 0:
+            at = parse_utc_timestamp(entry.get("at"))
+            if at is None or (now - at).total_seconds() > max_age_sec:
+                continue
+        result.append(entry)
+    return result[-CHAT_HISTORY_MAX_ENTRIES:]
+
+
+def append_chat_history(
+    state: dict[str, Any],
+    chat_hash: Any,
+    *,
+    role: str,
+    text: Any,
+) -> None:
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return
+    histories = state.setdefault("chat_history_by_chat", {})
+    if not isinstance(histories, dict):
+        histories = {}
+        state["chat_history_by_chat"] = histories
+    key = str(chat_hash or "")
+    entries = histories.get(key)
+    if not isinstance(entries, list):
+        entries = []
+    entries.append(
+        {
+            "at": utc_now(),
+            "role": str(role),
+            "text": cleaned[:CHAT_HISTORY_ENTRY_MAX_CHARS],
+        }
+    )
+    histories[key] = entries[-CHAT_HISTORY_MAX_ENTRIES:]
+
+
 def remember_context_for_chat_hash(
     state: dict[str, Any],
     chat_hash: Any,
@@ -77,7 +132,9 @@ def remember_context_for_chat_hash(
 ) -> None:
     context = rendered.get("interaction_context")
     parsed = rendered.get("parsed_command") if isinstance(rendered.get("parsed_command"), dict) else {}
-    if not isinstance(context, dict) or parsed.get("command") in {"feedback", "remember"}:
+    # Chat results carry the previous card's context; re-storing it would
+    # refresh remembered_at and defeat context expiry for chatty operators.
+    if not isinstance(context, dict) or parsed.get("command") in {"feedback", "remember", "chat"}:
         return
     contexts = state.setdefault("last_interaction_context_by_chat", {})
     if not isinstance(contexts, dict):
