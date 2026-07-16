@@ -165,7 +165,7 @@ out of product-facing docs. The product direction is defined in
 
 1. Split the Telegram Remote Operator adapter into transport, input routing,
    rendering, persistence, and remote-plan workflow modules while preserving
-   the current 38-test behavioral contract.
+   the current 39-test behavioral contract.
 2. Split the large Offdesk CLI into command handling and typed workflow
    transition modules before adding more mutation-capable remote actions.
 3. Add the next guarded executor stage for accepted-truth recovery only after
