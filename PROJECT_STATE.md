@@ -184,7 +184,7 @@ out of product-facing docs. The product direction is defined in
 
 1. Split the Telegram Remote Operator adapter's remaining plan-session engine,
    health, and receipt logic into modules while preserving the current
-   44-test behavioral contract.
+   47-test behavioral contract.
 2. Split the large Offdesk CLI into command handling and typed workflow
    transition modules.
 3. Optionally add a curated allowlist mode for `/dispatch` (named command

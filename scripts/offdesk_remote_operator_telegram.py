@@ -6455,7 +6455,12 @@ def resolve_dispatch_confirmation(
         confirmation = rendered.get("pending_dispatch_confirmation")
         if isinstance(confirmation, dict):
             confirmation["chat_id_hash"] = chat_hash
-            store_confirmation(state, chat_hash, confirmation)
+            previous = store_confirmation(state, chat_hash, confirmation)
+            if previous is not None:
+                # A new request invalidates the old token. The card stays within
+                # its line budget; the old /confirm already fails clearly, and
+                # this field records the supersede for logs and tests.
+                rendered["superseded_pending_confirmation"] = True
         return
     if command == "cancel":
         cleared = clear_confirmation(state, chat_hash)

@@ -2118,6 +2118,256 @@ fn remote_operator_telegram_dispatch_rejects_stale_confirmation() -> Result<()> 
 
 #[test]
 #[serial]
+fn remote_operator_telegram_dispatch_rejects_expired_confirmation() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let profile = profile_dir(temp.path());
+    seed_pending_decision(&profile)?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+
+    let replay = |update: &Path, out: &Path| -> Result<Value> {
+        let output = remote_operator_command(temp.path())
+            .arg("--dry-run")
+            .arg("--once")
+            .arg("--replay-update-file")
+            .arg(update)
+            .arg("--forager-bin")
+            .arg(env!("CARGO_BIN_EXE_forager"))
+            .arg("--env-file")
+            .arg(&env_path)
+            .arg("--state-file")
+            .arg(&state_path)
+            .arg("--feedback-file")
+            .arg(&feedback_file)
+            .arg("--feedback-ingest-dir")
+            .arg(&ingest_dir)
+            .arg("--out")
+            .arg(out)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(serde_json::from_slice(&fs::read(out)?)?)
+    };
+
+    let decision_update = temp.path().join("decision_update.json");
+    write_text_update(
+        &decision_update,
+        770,
+        970,
+        "/decision decision-user revise 수정",
+    )?;
+    let decision_out = temp.path().join("decision_out.json");
+    let decision_result = replay(&decision_update, &decision_out)?;
+    let chat_hash = decision_result["target_chat_id_hash"]
+        .as_str()
+        .expect("chat hash")
+        .to_string();
+
+    // Age the confirmation past its TTL by rewriting created_at into the past.
+    let mut state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    let token = state["pending_dispatch_confirmations_by_chat"][&chat_hash]["token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+    state["pending_dispatch_confirmations_by_chat"][&chat_hash]["created_at"] =
+        json!("2020-01-01T00:00:00+00:00");
+    fs::write(&state_path, serde_json::to_string_pretty(&state)?)?;
+
+    let confirm_update = temp.path().join("confirm_update.json");
+    write_text_update(&confirm_update, 771, 971, &format!("/confirm {token}"))?;
+    let confirm_out = temp.path().join("confirm_out.json");
+    let confirm_result = replay(&confirm_update, &confirm_out)?;
+    assert!(confirm_result["dispatch_result"].is_null());
+    assert!(confirm_result["message_preview"]
+        .as_str()
+        .expect("preview")
+        .contains("만료"));
+    assert_mobile_contract(&confirm_result);
+    assert!(!profile.join("decision_action_executions.jsonl").exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_dispatch_cancel_clears_pending_confirmation() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let profile = profile_dir(temp.path());
+    seed_pending_decision(&profile)?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+
+    let replay = |update: &Path, out: &Path| -> Result<Value> {
+        let output = remote_operator_command(temp.path())
+            .arg("--dry-run")
+            .arg("--once")
+            .arg("--replay-update-file")
+            .arg(update)
+            .arg("--forager-bin")
+            .arg(env!("CARGO_BIN_EXE_forager"))
+            .arg("--env-file")
+            .arg(&env_path)
+            .arg("--state-file")
+            .arg(&state_path)
+            .arg("--feedback-file")
+            .arg(&feedback_file)
+            .arg("--feedback-ingest-dir")
+            .arg(&ingest_dir)
+            .arg("--out")
+            .arg(out)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(serde_json::from_slice(&fs::read(out)?)?)
+    };
+
+    let decision_update = temp.path().join("decision_update.json");
+    write_text_update(
+        &decision_update,
+        780,
+        980,
+        "/decision decision-user revise 수정",
+    )?;
+    let decision_out = temp.path().join("decision_out.json");
+    let decision_result = replay(&decision_update, &decision_out)?;
+    let chat_hash = decision_result["target_chat_id_hash"]
+        .as_str()
+        .expect("chat hash")
+        .to_string();
+    let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    let token = state["pending_dispatch_confirmations_by_chat"][&chat_hash]["token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+
+    let cancel_update = temp.path().join("cancel_update.json");
+    write_text_update(&cancel_update, 781, 981, "/cancel")?;
+    let cancel_out = temp.path().join("cancel_out.json");
+    let cancel_result = replay(&cancel_update, &cancel_out)?;
+    assert_eq!(cancel_result["parsed_command"]["command"], "cancel");
+    assert!(cancel_result["message_preview"]
+        .as_str()
+        .expect("preview")
+        .contains("취소"));
+    assert_mobile_contract(&cancel_result);
+    let cleared_state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    assert!(cleared_state["pending_dispatch_confirmations_by_chat"][&chat_hash].is_null());
+
+    // The cancelled token must no longer confirm anything.
+    let confirm_update = temp.path().join("confirm_update.json");
+    write_text_update(&confirm_update, 782, 982, &format!("/confirm {token}"))?;
+    let confirm_out = temp.path().join("confirm_out.json");
+    let confirm_result = replay(&confirm_update, &confirm_out)?;
+    assert!(confirm_result["dispatch_result"].is_null());
+    assert!(confirm_result["message_preview"]
+        .as_str()
+        .expect("preview")
+        .contains("찾을 수 없습니다"));
+    assert!(!profile.join("decision_action_executions.jsonl").exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_dispatch_new_confirmation_supersedes_old() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let profile = profile_dir(temp.path());
+    seed_pending_decision(&profile)?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+
+    let replay = |update: &Path, out: &Path| -> Result<Value> {
+        let output = remote_operator_command(temp.path())
+            .arg("--dry-run")
+            .arg("--once")
+            .arg("--replay-update-file")
+            .arg(update)
+            .arg("--forager-bin")
+            .arg(env!("CARGO_BIN_EXE_forager"))
+            .arg("--env-file")
+            .arg(&env_path)
+            .arg("--state-file")
+            .arg(&state_path)
+            .arg("--feedback-file")
+            .arg(&feedback_file)
+            .arg("--feedback-ingest-dir")
+            .arg(&ingest_dir)
+            .arg("--out")
+            .arg(out)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(serde_json::from_slice(&fs::read(out)?)?)
+    };
+
+    let first_update = temp.path().join("first_decision.json");
+    write_text_update(
+        &first_update,
+        790,
+        990,
+        "/decision decision-user revise 수정",
+    )?;
+    let first_out = temp.path().join("first_out.json");
+    let first_result = replay(&first_update, &first_out)?;
+    let chat_hash = first_result["target_chat_id_hash"]
+        .as_str()
+        .expect("chat hash")
+        .to_string();
+    assert!(first_result["superseded_pending_confirmation"].is_null());
+    let first_state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    let first_token = first_state["pending_dispatch_confirmations_by_chat"][&chat_hash]["token"]
+        .as_str()
+        .expect("first token")
+        .to_string();
+
+    // A second /decision replaces the pending confirmation.
+    let second_update = temp.path().join("second_decision.json");
+    write_text_update(
+        &second_update,
+        791,
+        991,
+        "/decision decision-user block 보류",
+    )?;
+    let second_out = temp.path().join("second_out.json");
+    let second_result = replay(&second_update, &second_out)?;
+    assert_eq!(second_result["superseded_pending_confirmation"], true);
+
+    // The first token is now dead.
+    let confirm_first = temp.path().join("confirm_first.json");
+    write_text_update(&confirm_first, 792, 992, &format!("/confirm {first_token}"))?;
+    let confirm_first_out = temp.path().join("confirm_first_out.json");
+    let confirm_first_result = replay(&confirm_first, &confirm_first_out)?;
+    assert!(confirm_first_result["dispatch_result"].is_null());
+    assert!(confirm_first_result["message_preview"]
+        .as_str()
+        .expect("preview")
+        .contains("찾을 수 없습니다"));
+    assert!(!profile.join("decision_action_executions.jsonl").exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn remote_operator_telegram_replay_plan_request_creates_project_selection_session() -> Result<()> {
     let temp = tempdir()?;
     let env_path = temp.path().join("telegram.env");

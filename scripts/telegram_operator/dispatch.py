@@ -262,13 +262,24 @@ def build_confirmation(
     }
 
 
-def store_confirmation(state: dict[str, Any], chat_hash: str | None, confirmation: dict[str, Any]) -> None:
+def store_confirmation(
+    state: dict[str, Any], chat_hash: str | None, confirmation: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Store a pending confirmation, returning any it superseded.
+
+    Only one pending confirmation per chat: a new request supersedes the old,
+    so the previous token stops matching on /confirm. The returned previous
+    confirmation lets callers tell the operator a pending action was replaced.
+    """
+
     pending = state.setdefault("pending_dispatch_confirmations_by_chat", {})
     if not isinstance(pending, dict):
         pending = {}
         state["pending_dispatch_confirmations_by_chat"] = pending
-    # Only one pending confirmation per chat: a new request supersedes the old.
-    pending[str(chat_hash or "")] = confirmation
+    key = str(chat_hash or "")
+    previous = pending.get(key)
+    pending[key] = confirmation
+    return previous if isinstance(previous, dict) else None
 
 
 def confirmation_is_fresh(confirmation: dict[str, Any]) -> bool:
