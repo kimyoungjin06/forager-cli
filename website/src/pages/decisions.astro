@@ -289,6 +289,7 @@ const selectedDecisionAssistant = selectedDecision ? decisionAssistantScope(deci
 
     const WORKSTATION_REFRESH_COMMAND = 'npm run export:workstation-surface';
     const ACTION_ENVELOPE_API = sitePath('/api/ondesk/action-envelope');
+    const ACTION_REQUEST_SCHEMA = 'local_action_bridge_request.v1';
 
     const app = document.getElementById('decision-app');
     const fallbackElement = document.getElementById('decision-fallback-data');
@@ -662,7 +663,7 @@ const selectedDecisionAssistant = selectedDecision ? decisionAssistantScope(deci
                 'content-type': 'application/json',
               },
               body: JSON.stringify({
-                envelope: actionEnvelopePayload(envelope),
+                action_request: actionEnvelopeRequestPayload(envelope),
               }),
             });
             const result = await response.json().catch(() => ({}));
@@ -706,27 +707,12 @@ const selectedDecisionAssistant = selectedDecision ? decisionAssistantScope(deci
       return null;
     }
 
-    function actionEnvelopePayload(envelope) {
+    function actionEnvelopeRequestPayload(envelope) {
       return {
-        schema: envelope.schema,
+        schema: ACTION_REQUEST_SCHEMA,
         action_id: envelope.action_id,
-        action_kind: envelope.action_kind,
-        profile: envelope.profile,
-        project_key: envelope.project_key,
-        target_ref: envelope.target_ref,
+        decision_id: envelope.target_ref?.decision_id ?? '',
         observed_hash: envelope.observed_hash,
-        nonce: envelope.nonce,
-        ttl: envelope.ttl,
-        issued_at: envelope.issued_at,
-        expires_at: envelope.expires_at,
-        idempotency_key: envelope.idempotency_key,
-        preview: envelope.preview,
-        allowed_command: envelope.allowed_command,
-        forbidden_effects: envelope.forbidden_effects,
-        expected_receipt_schema: envelope.expected_receipt_schema,
-        requires_confirmation: envelope.requires_confirmation,
-        confirmation_phrase: envelope.confirmation_phrase,
-        stale_rejection_reason: envelope.stale_rejection_reason,
       };
     }
 

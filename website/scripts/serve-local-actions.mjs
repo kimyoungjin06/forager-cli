@@ -15,6 +15,8 @@ const host = options.host ?? '127.0.0.1';
 const port = Number(options.port ?? process.env.FORAGER_ACTION_BRIDGE_PORT ?? 4387);
 const profile = options.profile ?? process.env.FORAGER_PROFILE ?? 'default';
 const basePath = normalizeBasePath(options.basePath ?? '/forager-cli');
+const ACTION_REQUEST_SCHEMA = 'local_action_bridge_request.v1';
+const BRIDGE_STATUS_SCHEMA = 'local_action_bridge_status.v1';
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   fail(`invalid port: ${options.port}`);
@@ -40,13 +42,25 @@ const server = http.createServer((request, response) => {
 
 server.listen(port, host, () => {
   process.stdout.write(`Forager local action bridge listening on http://${host}:${port}${basePath}/\n`);
-  process.stdout.write('Allowed API: POST /api/ondesk/action-envelope\n');
+  process.stdout.write('Allowed APIs: GET /api/ondesk/bridge-status, POST /api/ondesk/action-envelope\n');
 });
 
 async function handleRequest(request, response) {
+  const hostCheck = validateHostHeader(request);
+  if (!hostCheck.ok) {
+    json(response, 403, hostCheck);
+    return;
+  }
+
   const url = new URL(request.url ?? '/', `http://${host}:${port}`);
   const pathname = normalizePathname(url.pathname);
   const actionEnvelopeApi = `${basePath}/api/ondesk/action-envelope`;
+  const bridgeStatusApi = `${basePath}/api/ondesk/bridge-status`;
+
+  if (request.method === 'GET' && (pathname === bridgeStatusApi || pathname === '/api/ondesk/bridge-status')) {
+    json(response, 200, bridgeStatusPayload(request));
+    return;
+  }
 
   if (request.method === 'POST' && (pathname === actionEnvelopeApi || pathname === '/api/ondesk/action-envelope')) {
     await handleActionEnvelope(request, response);
@@ -65,31 +79,51 @@ async function handleRequest(request, response) {
 }
 
 async function handleActionEnvelope(request, response) {
-  const body = await readJsonBody(request);
-  const envelope = body?.envelope;
-  if (!isPlainObject(envelope)) {
+  const boundary = validateRequestBoundary(request);
+  if (!boundary.ok) {
+    json(response, 403, boundary);
+    return;
+  }
+
+  let body;
+  try {
+    body = await readJsonBody(request);
+  } catch (error) {
     json(response, 400, {
       ok: false,
-      error: 'missing_envelope',
-      message: 'Expected JSON body with an envelope object.',
+      error: 'invalid_json_body',
+      message: error.message,
     });
     return;
   }
 
-  const schema = String(envelope.schema ?? '');
-  if (schema !== 'action_envelope.v1') {
-    json(response, 400, {
+  const actionRequest = actionRequestFromBody(body);
+  if (!actionRequest.ok) {
+    json(response, 400, actionRequest);
+    return;
+  }
+
+  const currentSurface = exportWorkstationSurface();
+  if (!currentSurface.ok) {
+    json(response, 503, {
       ok: false,
-      error: 'unsupported_schema',
-      message: `Expected action_envelope.v1, got ${schema || 'missing'}.`,
+      error: 'surface_unavailable',
+      message: currentSurface.message,
     });
     return;
   }
 
+  const envelopeLookup = findCurrentActionEnvelope(currentSurface.surface, actionRequest.request);
+  if (!envelopeLookup.ok) {
+    json(response, envelopeLookup.status, envelopeLookup);
+    return;
+  }
+
+  const envelope = envelopeLookup.envelope;
   const envelopePath = writeEnvelope(envelope);
   const result = runForager(['--profile', profile, 'ondesk', 'action-envelope', '--envelope', envelopePath, '--json']);
   if (result.status !== 0) {
-    json(response, 422, {
+    json(response, 400, {
       ok: false,
       error: 'action_envelope_failed',
       message: result.stderr || result.stdout || 'forager ondesk action-envelope failed',
@@ -101,13 +135,205 @@ async function handleActionEnvelope(request, response) {
   const surfaceResult = exportWorkstationSurface();
   json(response, 200, {
     ok: true,
+    schema: 'local_action_bridge_response.v1',
+    action_id: envelope.action_id,
+    decision_id: envelope.target_ref?.decision_id ?? actionRequest.request.decision_id,
     receipt: output.receipt,
     receipt_appended: output.receipt_appended,
-    receipt_path: output.receipt_path,
     dry_run: output.dry_run,
     surface_refreshed: surfaceResult.ok,
     surface_error: surfaceResult.ok ? null : surfaceResult.message,
   });
+}
+
+function bridgeStatusPayload(request) {
+  return {
+    ok: true,
+    schema: BRIDGE_STATUS_SCHEMA,
+    profile,
+    base_path: basePath,
+    local_only: isLocalHost(host) && !options.allowRemote,
+    allow_remote: Boolean(options.allowRemote),
+    origin: request.headers.origin ?? null,
+    endpoints: {
+      action_envelope: `${basePath}/api/ondesk/action-envelope`,
+      bridge_status: `${basePath}/api/ondesk/bridge-status`,
+    },
+    contract: {
+      action_envelope_request_schema: ACTION_REQUEST_SCHEMA,
+      accepted_fields: ['action_id', 'decision_id', 'observed_hash'],
+    },
+  };
+}
+
+function hostHeaderName(rawHost) {
+  const value = String(rawHost ?? '').trim().toLowerCase();
+  if (!value) {
+    return '';
+  }
+  if (value.startsWith('[')) {
+    const closing = value.indexOf(']');
+    return closing === -1 ? value : value.slice(1, closing);
+  }
+  const colon = value.lastIndexOf(':');
+  return colon === -1 ? value : value.slice(0, colon);
+}
+
+function validateHostHeader(request) {
+  // The Host header must name this bridge, not an attacker-controlled DNS
+  // name rebound to 127.0.0.1. Without this, the Origin check below can be
+  // satisfied by a rebinding page whose Origin and Host headers match.
+  const hostname = hostHeaderName(request.headers.host);
+  const allowed = new Set(['127.0.0.1', 'localhost', '::1', host.toLowerCase()]);
+  if (allowed.has(hostname)) {
+    return { ok: true };
+  }
+  return {
+    ok: false,
+    error: 'host_not_allowed',
+    message: `Refusing request for host ${hostname || '(missing)'}; open the bridge via http://${host}:${port}${basePath}/.`,
+  };
+}
+
+function validateRequestBoundary(request) {
+  const secFetchSite = String(request.headers['sec-fetch-site'] ?? '');
+  if (secFetchSite && !['same-origin', 'none'].includes(secFetchSite)) {
+    return {
+      ok: false,
+      error: 'cross_origin_request',
+      message: `Refusing ${secFetchSite} browser request; open the Web UI from the local bridge origin.`,
+    };
+  }
+
+  const origin = request.headers.origin;
+  if (!origin) {
+    return { ok: true };
+  }
+
+  const hostHeader = request.headers.host ?? `${host}:${port}`;
+  const expectedOrigin = `http://${hostHeader}`;
+  if (origin !== expectedOrigin) {
+    return {
+      ok: false,
+      error: 'origin_mismatch',
+      message: `Refusing request from ${origin}; expected ${expectedOrigin}.`,
+    };
+  }
+
+  return { ok: true };
+}
+
+function actionRequestFromBody(body) {
+  if (!isPlainObject(body)) {
+    return {
+      ok: false,
+      error: 'invalid_request',
+      message: 'Expected a JSON object.',
+    };
+  }
+
+  if (isPlainObject(body.envelope)) {
+    return {
+      ok: false,
+      error: 'full_envelope_payload_unsupported',
+      message: 'Send action_id, decision_id, and observed_hash; the bridge rebuilds the envelope from the current workstation surface.',
+    };
+  }
+
+  const request = isPlainObject(body.action_request) ? body.action_request : body;
+  const schema = String(request.schema ?? '');
+  if (schema !== ACTION_REQUEST_SCHEMA) {
+    return {
+      ok: false,
+      error: 'unsupported_schema',
+      message: `Expected ${ACTION_REQUEST_SCHEMA}, got ${schema || 'missing'}.`,
+    };
+  }
+
+  const actionId = String(request.action_id ?? '').trim();
+  const decisionId = String(request.decision_id ?? '').trim();
+  const observedHash = String(request.observed_hash ?? '').trim();
+  const missing = [
+    ['action_id', actionId],
+    ['decision_id', decisionId],
+    ['observed_hash', observedHash],
+  ]
+    .filter(([, value]) => !value)
+    .map(([field]) => field);
+
+  if (missing.length) {
+    return {
+      ok: false,
+      error: 'missing_action_request_fields',
+      message: `Missing required field(s): ${missing.join(', ')}.`,
+    };
+  }
+
+  return {
+    ok: true,
+    request: {
+      schema,
+      action_id: actionId,
+      decision_id: decisionId,
+      observed_hash: observedHash,
+    },
+  };
+}
+
+function findCurrentActionEnvelope(surface, request) {
+  const decisions = surface?.decision_inbox?.items;
+  if (!Array.isArray(decisions)) {
+    return {
+      ok: false,
+      status: 503,
+      error: 'decision_inbox_unavailable',
+      message: 'Current workstation surface does not include decision inbox items.',
+    };
+  }
+
+  const decision = decisions.find((item) => item?.decision_id === request.decision_id);
+  if (!decision) {
+    return {
+      ok: false,
+      status: 409,
+      error: 'decision_not_current',
+      message: `Decision ${request.decision_id} is not visible in the current workstation surface.`,
+    };
+  }
+
+  const envelopes = Array.isArray(decision.action_envelopes) ? decision.action_envelopes : [];
+  const envelope = envelopes.find((item) => item?.action_id === request.action_id);
+  if (!envelope) {
+    return {
+      ok: false,
+      status: 409,
+      error: 'action_not_current',
+      message: `Action ${request.action_id} is not visible for decision ${request.decision_id}.`,
+    };
+  }
+
+  if (envelope.schema !== 'action_envelope.v1') {
+    return {
+      ok: false,
+      status: 400,
+      error: 'unsupported_envelope_schema',
+      message: `Expected action_envelope.v1, got ${envelope.schema ?? 'missing'}.`,
+    };
+  }
+
+  if (envelope.observed_hash !== request.observed_hash) {
+    return {
+      ok: false,
+      status: 409,
+      error: 'observed_hash_changed',
+      message: 'The decision changed since this action was rendered. Refresh the workstation surface before recording a receipt.',
+    };
+  }
+
+  return {
+    ok: true,
+    envelope,
+  };
 }
 
 async function serveStatic(pathname, response, headOnly) {

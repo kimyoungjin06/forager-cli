@@ -769,6 +769,29 @@ Current status:
   action preflight, apply decisions, close out records, queue runtime work,
   launch processes, or record accepted truth.
 
+Immediate hardening backlog before broader Web execution:
+
+- P0: Make the local bridge accept only a compact action request
+  (`action_id`, `decision_id`, `observed_hash`) and reconstruct the executable
+  envelope from a freshly exported `workstation_surface.v1`; the browser should
+  not submit the whole envelope JSON as authority.
+- P0: Add same-origin request checks and a bridge readiness endpoint so the UI
+  can distinguish static read-only browsing from local receipt recording.
+- P0: Rehydrate `/decisions/` after a successful bridge action so the latest
+  receipt block is visible immediately instead of relying on a manual reload.
+- P0: Add route coverage for the compact request contract and bridge readiness
+  state; add a real temp-profile bridge smoke before exposing additional
+  mutation-adjacent endpoints.
+- P1: Rename UI copy from raw `read_only_preview` and generic "Validate
+  envelope" language to operator-facing wording that separates assistant
+  read-only advice from local receipt recording.
+- P1: Keep mobile action density low: show the single safest contextual action
+  first, with evidence, boundary, and CLI fallback behind progressive
+  disclosure.
+- P2: Add Web bridge endpoints for accepted-truth recovery envelope validation,
+  then action preflight, before considering any decision application or runtime
+  dispatch controls.
+
 Scope:
 
 - Add a CLI export command or script that writes

@@ -575,9 +575,12 @@ test('decisions route renders read-only action center from workstation surface',
     const request = route.request();
     expect(request.method()).toBe('POST');
     const body = request.postDataJSON();
-    expect(body.envelope.schema).toBe('action_envelope.v1');
-    expect(body.envelope.target_ref.decision_id).toBe('decision-closeout-followup');
-    expect(body.envelope.expected_receipt_schema).toBe('action_envelope_receipt.v1');
+    expect(body.action_request).toEqual({
+      schema: 'local_action_bridge_request.v1',
+      action_id: 'action_decision_closeout_followup_resolve_follow_up_f1c2d3e4a5b6c7d8',
+      decision_id: 'decision-closeout-followup',
+      observed_hash: 'sha256:f1c2d3e4a5b6c7d80000000000000000000000000000000000000000000000000000',
+    });
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
