@@ -517,7 +517,13 @@ function json(response, status, payload) {
 }
 
 function safeJoin(root, relativePath) {
-  const decoded = decodeURIComponent(relativePath);
+  let decoded;
+  try {
+    decoded = decodeURIComponent(relativePath);
+  } catch {
+    // Malformed percent-encoding: treat as not found rather than a 500.
+    return null;
+  }
   const resolved = path.resolve(root, `.${decoded}`);
   return resolved.startsWith(root + path.sep) || resolved === root ? resolved : null;
 }

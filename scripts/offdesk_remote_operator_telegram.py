@@ -11,9 +11,7 @@ accepts runtime output as truth, or mutates project files directly.
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 import hashlib
-import html
 import json
 import os
 import pathlib
@@ -26,7 +24,6 @@ from typing import Any
 
 from telegram_operator.agent import (
     DEFAULT_AGENT_CONFIG_FILE,
-    agent_runtime_status as resolve_agent_runtime_status,
     chat_with_agent,
     classify_feedback_kind,
     classify_feedback_with_agent,
@@ -37,15 +34,10 @@ from telegram_operator.common import (
     load_json,
     sha256_short,
     utc_now,
-    unique_nonempty,
     write_json,
 )
 from telegram_operator.config import resolve_telegram_config
-from telegram_operator.health import (
-    action_readiness,
-    listener_health,
-    readiness_from_agent_intent,
-)
+from telegram_operator.health import listener_health
 from telegram_operator.redaction import public_remote_plan_session
 from telegram_operator.receipts import (
     bind_prepared_workload_to_execution_brief,
@@ -66,25 +58,10 @@ from telegram_operator.receipts import (
     sha256_id,
 )
 from telegram_operator.schemas import (
-    REMOTE_PLAN_SESSION_SCHEMA,
-    PROJECT_INIT_PREVIEW_SCHEMA,
-    PROJECT_INIT_RUN_SCHEMA,
-    PLAN_DRAFT_SCHEMA,
     PLAN_REGISTRATION_SCHEMA,
     PLAN_REVIEW_SCHEMA,
-    PLAN_LAUNCH_PREP_SCHEMA,
     PLAN_GATE_REQUEST_SCHEMA,
     PLAN_GATE_RESOLUTION_SCHEMA,
-    PLAN_EXECUTION_BRIEF_SCHEMA,
-    PLAN_ENQUEUE_HANDOFF_SCHEMA,
-    PLAN_WORKLOAD_BINDING_SCHEMA,
-    PLAN_ENQUEUE_RUN_SCHEMA,
-    PLAN_RUNTIME_START_SCHEMA,
-    PLAN_RUNTIME_MONITOR_SCHEMA,
-    PLAN_CLOSEOUT_PACKET_SCHEMA,
-    PLAN_CLOSEOUT_REVIEW_HANDOFF_SCHEMA,
-    PLAN_CLOSEOUT_VERDICT_SCHEMA,
-    PLAN_DRAFT_AUTHORITY_DENIALS,
 )
 from telegram_operator.plan_messages import (
     render_plan_closeout_packet_failed_message,
@@ -164,30 +141,21 @@ from telegram_operator.persistence import (
     append_chat_history,
     chat_history_for_chat_hash,
     last_context_for_chat_hash,
-    parse_utc_timestamp,
     load_state,
     remember_context_for_chat_hash,
     save_state,
 )
 from telegram_operator.project_candidates import (
-    PROJECT_CANDIDATE_SCHEMA,
     build_project_candidate,
     manual_project_candidate,
     discover_project_paths,
-    display_project_readiness,
-    display_project_risk,
-    is_git_repo,
-    project_marker_names,
-    public_project_candidate,
     ranked_project_candidates,
     request_tokens,
     scan_project_candidates,
-    slugify_project_key,
     truncate_label,
     workspace_roots,
 )
 from telegram_operator.rendering import (
-    MOBILE_CARD_MAX_LINES,
     REMOTE_PLAN_INIT_CONTEXT_KIND,
     REMOTE_PLAN_SESSION_CONTEXT_KIND,
     agent_assistant_reply,
@@ -218,7 +186,6 @@ from telegram_operator.rendering import (
     render_projection_message,
     sanitize_text,
     status_summary,
-    title_with_profile,
 )
 from telegram_operator.routing import (
     parse_remote_command,
@@ -228,7 +195,6 @@ from telegram_operator.transport import get_updates, send_message
 from telegram_operator.wiki import record_remember_candidate
 
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEFAULT_TELEGRAM_ENV_FILE = pathlib.Path(
     os.environ.get(
         "OFFDESK_TELEGRAM_ENV",
@@ -3304,7 +3270,7 @@ def resolve_dispatch_confirmation(
                     generated_at=generated_at,
                     result=dispatch_result,
                 )
-            except (OSError, RemoteOperatorTelegramError) as error:
+            except Exception as error:  # noqa: BLE001 - poll loop must never crash here
                 message_preview = render_dispatch_error_message(
                     profile=args.profile,
                     generated_at=generated_at,
@@ -3364,7 +3330,7 @@ def resolve_dispatch_confirmation(
                     generated_at=generated_at,
                     result=dispatch_result,
                 )
-        except (OSError, RemoteOperatorTelegramError) as error:
+        except Exception as error:  # noqa: BLE001 - poll loop must never crash here
             message_preview = render_dispatch_error_message(
                 profile=args.profile,
                 generated_at=generated_at,

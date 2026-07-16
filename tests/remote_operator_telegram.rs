@@ -2118,6 +2118,85 @@ fn remote_operator_telegram_dispatch_rejects_stale_confirmation() -> Result<()> 
 
 #[test]
 #[serial]
+fn remote_operator_telegram_dispatch_confirm_with_control_char_note_does_not_wedge() -> Result<()> {
+    // An operator note containing a NUL byte makes the CLI subprocess raise
+    // ValueError; the confirm path must convert that into an error card and
+    // still advance the poll offset instead of re-delivering the update.
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let profile = profile_dir(temp.path());
+    seed_pending_decision(&profile)?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+
+    let replay = |update: &Path, out: &Path| -> Result<Value> {
+        let output = remote_operator_command(temp.path())
+            .arg("--dry-run")
+            .arg("--once")
+            .arg("--replay-update-file")
+            .arg(update)
+            .arg("--forager-bin")
+            .arg(env!("CARGO_BIN_EXE_forager"))
+            .arg("--env-file")
+            .arg(&env_path)
+            .arg("--state-file")
+            .arg(&state_path)
+            .arg("--feedback-file")
+            .arg(&feedback_file)
+            .arg("--feedback-ingest-dir")
+            .arg(&ingest_dir)
+            .arg("--out")
+            .arg(out)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "adapter must exit cleanly (no crash)\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(serde_json::from_slice(&fs::read(out)?)?)
+    };
+
+    let decision_update = temp.path().join("decision_update.json");
+    let note_with_nul = format!("revise{}tail", '\u{0}');
+    write_text_update(
+        &decision_update,
+        740,
+        940,
+        &format!("/decision decision-user revise {note_with_nul}"),
+    )?;
+    let decision_out = temp.path().join("decision_out.json");
+    let decision_result = replay(&decision_update, &decision_out)?;
+    let chat_hash = decision_result["target_chat_id_hash"]
+        .as_str()
+        .expect("chat hash")
+        .to_string();
+    let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    let token = state["pending_dispatch_confirmations_by_chat"][&chat_hash]["token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+
+    let confirm_update = temp.path().join("confirm_update.json");
+    write_text_update(&confirm_update, 741, 941, &format!("/confirm {token}"))?;
+    let confirm_out = temp.path().join("confirm_out.json");
+    let confirm_result = replay(&confirm_update, &confirm_out)?;
+    // No execution recorded, an error card rendered, and the offset advanced.
+    assert!(confirm_result["dispatch_result"].is_null());
+    assert!(confirm_result["message_preview"]
+        .as_str()
+        .expect("preview")
+        .contains("실패"));
+    let state_after: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    assert_eq!(state_after["offset"], 742);
+    assert!(!profile.join("decision_action_executions.jsonl").exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn remote_operator_telegram_dispatch_rejects_expired_confirmation() -> Result<()> {
     let temp = tempdir()?;
     let env_path = temp.path().join("telegram.env");

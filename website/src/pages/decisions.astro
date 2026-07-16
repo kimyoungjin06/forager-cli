@@ -686,11 +686,20 @@ const selectedDecisionAssistant = selectedDecision ? decisionAssistantScope(deci
             const status = receipt?.result_status ? formatLabel(receipt.result_status) : 'validated';
             const stale = receipt?.stale ? ' stale' : '';
             const refreshed = result.surface_refreshed ? 'Surface refreshed.' : 'Refresh surface manually.';
-            setEnvelopeStatus(
-              card,
-              `Envelope ${status}${stale}. ${refreshed}`,
-              receipt?.stale ? 'warning' : 'success',
-            );
+            if (result.receipt_parse_error) {
+              // The mutation succeeded but its receipt could not be read back.
+              setEnvelopeStatus(
+                card,
+                `Action recorded but receipt was unreadable: ${result.receipt_parse_error}. ${refreshed}`,
+                'warning',
+              );
+            } else {
+              setEnvelopeStatus(
+                card,
+                `Envelope ${status}${stale}. ${refreshed}`,
+                receipt?.stale ? 'warning' : 'success',
+              );
+            }
           } catch (error) {
             setEnvelopeStatus(
               card,

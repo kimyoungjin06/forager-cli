@@ -21,10 +21,18 @@ def utc_now() -> str:
 def write_json(path: pathlib.Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     # Write through a same-directory temp file and rename so a crash mid-write
-    # cannot leave a truncated JSON file behind.
+    # cannot leave a truncated JSON file behind. Clean up the temp file if the
+    # write or rename fails so failures do not accumulate orphans.
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    tmp.replace(path)
+    try:
+        tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        tmp.replace(path)
+    except BaseException:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
 
 
 def append_jsonl(path: pathlib.Path, value: Any) -> None:

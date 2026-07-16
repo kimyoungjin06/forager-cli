@@ -56,7 +56,10 @@ def run_forager_json(
             stderr=subprocess.PIPE,
             text=True,
         )
-    except OSError as error:
+    except (OSError, ValueError) as error:
+        # ValueError covers operator text with an embedded NUL byte, which
+        # subprocess rejects; convert it to a handled adapter error so it
+        # cannot escape into the poll loop.
         raise RemoteOperatorTelegramError(f"{label} could not start: {error}") from error
     if process.returncode != 0:
         detail = sanitize_text(process.stderr.strip() or process.stdout.strip(), max_chars=240)
