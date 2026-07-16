@@ -30,12 +30,15 @@ CORE_OR_SLASH_COMMANDS = {
     "plan_request",
     "decisions",
     "decision",
+    "recovery",
+    "recover",
     "confirm",
     "cancel",
 }
 SESSION_INPUT_COMMANDS = {"select", "choose", "path", "workload", "session_input", "plan_input"}
 DISPATCH_BUTTON_ALIASES = {
     "결정 목록": "/decisions",
+    "복구 목록": "/recovery",
     "취소": "/cancel",
 }
 
@@ -166,6 +169,18 @@ def parse_remote_command(command_text: str) -> dict[str, Any]:
         }
     if command == "decision":
         return parse_decision_command(original_text, args)
+    if command == "recovery":
+        if args:
+            return unsupported_command(original_text, "recovery_accepts_no_arguments")
+        return {
+            "supported": True,
+            "command": "recovery",
+            "argv": [],
+            "reason": "explicit_recovery_command",
+            "command_text": original_text,
+        }
+    if command == "recover":
+        return parse_recover_command(original_text, args)
     if command == "confirm":
         token = args[0].strip() if args else ""
         if not token:
@@ -206,6 +221,26 @@ def parse_decision_command(command_text: str, args: list[str]) -> dict[str, Any]
         "decision_id": decision_id,
         "decision_action_kind": action_kind,
         "decision_note": note,
+    }
+
+
+def parse_recover_command(command_text: str, args: list[str]) -> dict[str, Any]:
+    if len(args) < 2:
+        return unsupported_command(command_text, "recover_requires_id_and_action")
+    closeout_id = args[0].strip()
+    action_kind = args[1].strip().lower()
+    note = " ".join(args[2:]).strip()
+    if not closeout_id or not action_kind:
+        return unsupported_command(command_text, "recover_requires_id_and_action")
+    return {
+        "supported": True,
+        "command": "recover",
+        "argv": [],
+        "reason": "explicit_recover_command",
+        "command_text": command_text,
+        "closeout_id": closeout_id,
+        "recovery_action_kind": action_kind,
+        "recovery_note": note,
     }
 
 

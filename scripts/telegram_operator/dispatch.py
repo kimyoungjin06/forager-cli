@@ -160,9 +160,85 @@ def available_action_kinds(surface: dict[str, Any], decision_id: str) -> list[st
     return []
 
 
+def recovery_surface_items(surface: dict[str, Any]) -> list[dict[str, Any]]:
+    recovery = surface.get("accepted_truth_recovery")
+    if not isinstance(recovery, dict):
+        return []
+    items = recovery.get("items")
+    if not isinstance(items, list):
+        return []
+    return [item for item in items if isinstance(item, dict)]
+
+
+def open_recovery_actions(surface: dict[str, Any]) -> list[dict[str, Any]]:
+    """Summarize accepted-truth recovery follow-ups and their action kinds."""
+
+    recoveries: list[dict[str, Any]] = []
+    for item in recovery_surface_items(surface):
+        envelopes = item.get("action_envelopes")
+        actions: list[dict[str, Any]] = []
+        if isinstance(envelopes, list):
+            for envelope in envelopes:
+                if not isinstance(envelope, dict):
+                    continue
+                action_kind = str(envelope.get("action_kind") or "").strip()
+                if not action_kind:
+                    continue
+                latest = envelope.get("latest_receipt")
+                stale = bool(latest.get("stale")) if isinstance(latest, dict) else False
+                actions.append(
+                    {
+                        "action_kind": action_kind,
+                        "observed_hash": str(envelope.get("observed_hash") or ""),
+                        "stale": stale,
+                    }
+                )
+        recoveries.append(
+            {
+                "closeout_id": str(item.get("closeout_id") or ""),
+                "stage": str(item.get("stage") or ""),
+                "acceptance_status": str(item.get("acceptance_status") or ""),
+                "next_safe_action": sanitize_text(
+                    str(item.get("next_safe_action") or ""), max_chars=120
+                ),
+                "actions": actions,
+            }
+        )
+    return recoveries
+
+
+def find_recovery_envelope(
+    surface: dict[str, Any],
+    closeout_id: str,
+    action_kind: str,
+) -> dict[str, Any] | None:
+    wanted_closeout = str(closeout_id or "").strip()
+    wanted_action = str(action_kind or "").strip().lower()
+    for item in recovery_surface_items(surface):
+        if str(item.get("closeout_id") or "").strip() != wanted_closeout:
+            continue
+        envelopes = item.get("action_envelopes")
+        if not isinstance(envelopes, list):
+            return None
+        for envelope in envelopes:
+            if not isinstance(envelope, dict):
+                continue
+            if str(envelope.get("action_kind") or "").strip().lower() == wanted_action:
+                return envelope
+    return None
+
+
+def available_recovery_action_kinds(surface: dict[str, Any], closeout_id: str) -> list[str]:
+    for recovery in open_recovery_actions(surface):
+        if recovery["closeout_id"] == str(closeout_id or "").strip():
+            return [action["action_kind"] for action in recovery["actions"]]
+    return []
+
+
 def build_confirmation(
     *,
-    decision_id: str,
+    kind: str,
+    target_id: str,
     action_kind: str,
     observed_hash: str,
     note: str,
@@ -175,7 +251,8 @@ def build_confirmation(
     return {
         "schema": CONFIRMATION_SCHEMA,
         "token": token,
-        "decision_id": str(decision_id or "").strip(),
+        "kind": str(kind or "decision").strip().lower(),
+        "target_id": str(target_id or "").strip(),
         "action_kind": str(action_kind or "").strip().lower(),
         "observed_hash": str(observed_hash or ""),
         "note": sanitize_text(note, max_chars=400),
@@ -337,6 +414,60 @@ def apply_decision_action(
                 str(execution_obj.get("reason") or f"execution {execution_status}"),
                 max_chars=240,
             )
+        return result
+    finally:
+        try:
+            envelope_path.unlink()
+        except OSError:
+            pass
+
+
+def apply_recovery_action(
+    forager_bin: str,
+    profile: str,
+    envelope: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate an accepted-truth recovery envelope and record its receipt.
+
+    This intentionally stops at validation: recording accepted truth or
+    running the fallback command remains a separate explicit local step that
+    this surface does not perform.
+    """
+
+    result: dict[str, Any] = {
+        "schema": DISPATCH_RESULT_SCHEMA,
+        "ok": False,
+        "stage": "recovery_envelope",
+        "kind": "recovery",
+        "closeout_id": str((envelope.get("target_ref") or {}).get("closeout_id") or ""),
+        "action_kind": str(envelope.get("action_kind") or ""),
+    }
+    envelope_path = _write_temp_envelope(envelope)
+    try:
+        validated = run_forager_json(
+            forager_bin,
+            profile,
+            [
+                "ondesk",
+                "accepted-truth-recovery-envelope",
+                "--envelope",
+                str(envelope_path),
+                "--json",
+            ],
+            label="recovery envelope validation",
+        )
+        receipt = validated.get("receipt") if isinstance(validated.get("receipt"), dict) else {}
+        receipt_status = str(receipt.get("result_status") or "")
+        result["receipt_id"] = receipt.get("receipt_id")
+        result["receipt_status"] = receipt_status
+        if receipt.get("stale") or receipt_status != "validated_preview":
+            result["stage"] = "recovery_envelope_rejected"
+            result["error"] = sanitize_text(
+                str(receipt.get("reason") or "recovery envelope rejected"), max_chars=240
+            )
+            return result
+        result["ok"] = True
+        result["stage"] = "recovery_validated"
         return result
     finally:
         try:

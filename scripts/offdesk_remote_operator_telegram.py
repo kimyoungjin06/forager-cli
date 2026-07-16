@@ -43,13 +43,17 @@ from telegram_operator.common import (
 from telegram_operator.config import resolve_telegram_config
 from telegram_operator.dispatch import (
     apply_decision_action,
+    apply_recovery_action,
     available_action_kinds,
+    available_recovery_action_kinds,
     build_confirmation,
     clear_confirmation,
     confirmation_is_fresh,
     export_workstation_surface,
     find_action_envelope,
+    find_recovery_envelope,
     open_decision_actions,
+    open_recovery_actions,
     pop_confirmation,
     store_confirmation,
 )
@@ -89,6 +93,9 @@ from telegram_operator.rendering import (
     render_dispatch_confirm_message,
     render_dispatch_error_message,
     render_dispatch_result_message,
+    render_recovery_confirm_message,
+    render_recovery_message,
+    render_recovery_result_message,
     choice_surface_contract,
     display_action,
     display_review_status,
@@ -6259,7 +6266,8 @@ def render_dispatch_command(
                 )
             else:
                 confirmation = build_confirmation(
-                    decision_id=decision_id,
+                    kind="decision",
+                    target_id=decision_id,
                     action_kind=action_kind,
                     observed_hash=str(envelope.get("observed_hash") or ""),
                     note=note,
@@ -6280,6 +6288,63 @@ def render_dispatch_command(
                 profile=args.profile,
                 generated_at=generated_at,
                 headline="실행 확인을 준비하지 못했습니다",
+                detail=str(error),
+            )
+        return finalize_dispatch_result(result, message_preview)
+    if command == "recovery":
+        try:
+            surface = export_workstation_surface(args.forager_bin, args.profile)
+            recoveries = open_recovery_actions(surface)
+            message_preview = render_recovery_message(
+                profile=args.profile, generated_at=generated_at, recoveries=recoveries
+            )
+        except RemoteOperatorTelegramError as error:
+            message_preview = render_dispatch_error_message(
+                profile=args.profile,
+                generated_at=generated_at,
+                headline="복구 목록을 불러오지 못했습니다",
+                detail=str(error),
+            )
+        return finalize_dispatch_result(result, message_preview)
+    if command == "recover":
+        closeout_id = str(parsed.get("closeout_id") or "")
+        action_kind = str(parsed.get("recovery_action_kind") or "")
+        note = str(parsed.get("recovery_note") or "")
+        try:
+            surface = export_workstation_surface(args.forager_bin, args.profile)
+            envelope = find_recovery_envelope(surface, closeout_id, action_kind)
+            if envelope is None:
+                kinds = available_recovery_action_kinds(surface, closeout_id)
+                message_preview = render_dispatch_error_message(
+                    profile=args.profile,
+                    generated_at=generated_at,
+                    headline=f"{closeout_id}에 {action_kind} 복구가 없습니다",
+                    detail=f"가능한 동작: {', '.join(kinds) or '없음'}",
+                )
+            else:
+                confirmation = build_confirmation(
+                    kind="recovery",
+                    target_id=closeout_id,
+                    action_kind=action_kind,
+                    observed_hash=str(envelope.get("observed_hash") or ""),
+                    note=note,
+                    chat_hash=None,
+                    ttl_sec=args.dispatch_confirm_ttl_sec,
+                )
+                result["pending_dispatch_confirmation"] = confirmation
+                message_preview = render_recovery_confirm_message(
+                    profile=args.profile,
+                    generated_at=generated_at,
+                    closeout_id=closeout_id,
+                    action_kind=action_kind,
+                    note=note,
+                    token=confirmation["token"],
+                )
+        except RemoteOperatorTelegramError as error:
+            message_preview = render_dispatch_error_message(
+                profile=args.profile,
+                generated_at=generated_at,
+                headline="복구 확인을 준비하지 못했습니다",
                 detail=str(error),
             )
         return finalize_dispatch_result(result, message_preview)
@@ -6305,7 +6370,7 @@ def resolve_dispatch_confirmation(
 
     command = parsed_command.get("command")
     generated_at = rendered["generated_at"]
-    if command == "decision":
+    if command in {"decision", "recover"}:
         confirmation = rendered.get("pending_dispatch_confirmation")
         if isinstance(confirmation, dict):
             confirmation["chat_id_hash"] = chat_hash
@@ -6340,24 +6405,44 @@ def resolve_dispatch_confirmation(
             detail="/decisions 로 다시 시작하세요.",
         )
     else:
+        kind = str(confirmation.get("kind") or "decision")
+        # Support decision confirmations issued before the kind field existed.
+        target_id = str(confirmation.get("target_id") or confirmation.get("decision_id") or "")
+        is_recovery = kind == "recovery"
+        list_hint = "/recovery" if is_recovery else "/decisions"
         try:
             surface = export_workstation_surface(args.forager_bin, args.profile)
-            envelope = find_action_envelope(
-                surface, confirmation["decision_id"], confirmation["action_kind"]
-            )
+            if is_recovery:
+                envelope = find_recovery_envelope(
+                    surface, target_id, confirmation["action_kind"]
+                )
+            else:
+                envelope = find_action_envelope(
+                    surface, target_id, confirmation["action_kind"]
+                )
             if envelope is None:
                 message_preview = render_dispatch_error_message(
                     profile=args.profile,
                     generated_at=generated_at,
-                    headline="결정 동작이 더 이상 없습니다",
-                    detail="/decisions 로 다시 확인하세요.",
+                    headline="동작이 더 이상 없습니다",
+                    detail=f"{list_hint} 로 다시 확인하세요.",
                 )
             elif str(envelope.get("observed_hash") or "") != confirmation.get("observed_hash"):
                 message_preview = render_dispatch_error_message(
                     profile=args.profile,
                     generated_at=generated_at,
-                    headline="결정이 변경되었습니다",
-                    detail="/decisions 로 최신 상태를 다시 확인하세요.",
+                    headline="대상이 변경되었습니다",
+                    detail=f"{list_hint} 로 최신 상태를 다시 확인하세요.",
+                )
+            elif is_recovery:
+                dispatch_result = apply_recovery_action(
+                    args.forager_bin, args.profile, envelope
+                )
+                rendered["dispatch_result"] = dispatch_result
+                message_preview = render_recovery_result_message(
+                    profile=args.profile,
+                    generated_at=generated_at,
+                    result=dispatch_result,
                 )
             else:
                 dispatch_result = apply_decision_action(
@@ -6526,7 +6611,14 @@ def render_command_result(
             }
         )
         return result
-    if parsed.get("command") in {"decisions", "decision", "confirm", "cancel"}:
+    if parsed.get("command") in {
+        "decisions",
+        "decision",
+        "recovery",
+        "recover",
+        "confirm",
+        "cancel",
+    }:
         return render_dispatch_command(args, config, parsed, result)
     result["parsed_command"] = parsed
     if args.projection_file:
@@ -6789,7 +6881,7 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                     )
                     attach_choice_surface(rendered, remote_plan_selection_context(session))
                     rendered["mobile_card_contract"] = mobile_card_contract(rendered["message_preview"])
-        if parsed_command.get("command") in {"decision", "confirm", "cancel"}:
+        if parsed_command.get("command") in {"decision", "recover", "confirm", "cancel"}:
             # Guarded remote execution. Every branch catches its own errors so
             # nothing raises before the offset save and re-delivers the update.
             resolve_dispatch_confirmation(args, state, chat_hash, rendered, parsed_command)

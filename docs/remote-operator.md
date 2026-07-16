@@ -701,6 +701,14 @@ and only orchestrates commands the CLI already exposes. It drives the same
 receipt-gated executors as the local Web decision action center, so the two
 surfaces share one safety model.
 
+`/recovery` and `/recover <closeout-id> <action> [note]` mirror this flow for
+accepted-truth recovery follow-ups (`resolve_followup`, `retire_closeout`),
+sharing the same confirmation token. `/confirm` on a recovery token runs
+`accepted-truth-recovery-envelope`, which validates the recovery envelope and
+records an `accepted_truth_recovery_action_receipt.v1`. This stops at
+validation: recording accepted truth or running the fallback command remains a
+separate explicit local step that this surface does not perform.
+
 Telegram messages should stay short enough for mobile scanning: a compact
 title, the current state, and the next local-safe action. Longer listener
 diagnostics belong in local health output, not in the chat message.

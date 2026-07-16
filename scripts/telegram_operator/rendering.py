@@ -552,7 +552,7 @@ def help_message(*, profile: Any, generated_at: Any) -> str:
             title_with_profile("Forager 원격 조작", profile),
             "평문은 에이전트 채팅으로 답합니다.",
             "기록은 /feedback · /remember · /plan",
-            "결정 처리는 /decisions",
+            "실행은 /decisions · /recovery",
             "다음 조치: /status · /pending · /plans",
         ]
     )
@@ -572,6 +572,58 @@ def render_decisions_message(*, profile: Any, generated_at: Any, decisions: list
             title = title[:57] + "..."
         lines.append(f"{html.escape(title)}: {html.escape(actions)}")
     lines.append("다음 조치: /decision <id> <action> [note]")
+    return "\n".join(lines)
+
+
+def render_recovery_message(*, profile: Any, generated_at: Any, recoveries: list[dict[str, Any]]) -> str:
+    lines = [title_with_profile("복구 목록", profile)]
+    open_recoveries = [recovery for recovery in recoveries if recovery.get("actions")]
+    if not open_recoveries:
+        lines.append("처리 대기 중인 복구 항목이 없습니다.")
+        lines.append("다음 조치: /status · /decisions")
+        return "\n".join(lines)
+    for recovery in open_recoveries[:3]:
+        actions = " · ".join(action["action_kind"] for action in recovery["actions"][:2])
+        closeout = str(recovery.get("closeout_id") or "")
+        if len(closeout) > 40:
+            closeout = closeout[:37] + "..."
+        lines.append(f"{html.escape(closeout)}: {html.escape(actions)}")
+    lines.append("다음 조치: /recover <closeout-id> <action> [note]")
+    return "\n".join(lines)
+
+
+def render_recovery_confirm_message(
+    *,
+    profile: Any,
+    generated_at: Any,
+    closeout_id: str,
+    action_kind: str,
+    note: str,
+    token: str,
+) -> str:
+    lines = [title_with_profile("복구 확인 필요", profile)]
+    lines.append(f"클로즈아웃 {html.escape(str(closeout_id))} → {html.escape(str(action_kind))}")
+    if note:
+        lines.append(f"메모: {html.escape(sanitize_text(note, max_chars=120))}")
+    lines.append("검증만 하며 수용 기록은 아닙니다.")
+    lines.append(f"다음 조치: /confirm {html.escape(str(token))} 또는 취소")
+    return "\n".join(lines)
+
+
+def render_recovery_result_message(*, profile: Any, generated_at: Any, result: dict[str, Any]) -> str:
+    lines = [title_with_profile("복구 결과", profile)]
+    closeout_id = str(result.get("closeout_id") or "")
+    action_kind = str(result.get("action_kind") or "")
+    if result.get("ok"):
+        lines.append(f"클로즈아웃 {html.escape(closeout_id)} → {html.escape(action_kind)} 검증됨.")
+        lines.append("아직 실제 복구/수용 기록은 아닙니다.")
+    else:
+        stage = str(result.get("stage") or "unknown")
+        lines.append(f"검증되지 않음 ({html.escape(stage)}).")
+        error = str(result.get("error") or "")
+        if error:
+            lines.append(html.escape(dispatch_safe_detail(error)))
+    lines.append("다음 조치: /recovery · /status")
     return "\n".join(lines)
 
 

@@ -161,26 +161,28 @@ out of product-facing docs. The product direction is defined in
   execution must reuse the existing receipt-gated CLI executors rather than
   add new mutation logic, and must land in the new `scripts/telegram_operator/`
   modules instead of the monolith.
-- Telegram now has a guarded remote decision execution surface in
+- Telegram now has a guarded remote execution surface in
   `scripts/telegram_operator/dispatch.py`: `/decisions` lists open decisions,
   `/decision <id> <action> [note]` returns a single-use confirmation token
-  bound to the decision's observed hash with a TTL, and `/confirm <token>`
+  bound to the target's observed hash with a TTL, and `/confirm <token>`
   runs the existing `action-envelope` -> `action-preflight` ->
   `action-decision` -> `action-closeout` chain after re-checking the hash.
-  `/cancel` clears a pending confirmation. It never runs arbitrary shell and
-  never records accepted truth. The plan-session engine, `health`, and
-  `receipts` modules still need decomposition.
+  `/recovery` and `/recover <closeout-id> <action> [note]` mirror this for
+  accepted-truth recovery follow-ups; `/confirm` on a recovery token runs
+  `accepted-truth-recovery-envelope`, which validates and records a receipt but
+  stops short of recording accepted truth. `/cancel` clears a pending
+  confirmation. It never runs arbitrary shell and never records accepted truth.
+  The plan-session engine, `health`, and `receipts` modules still need
+  decomposition.
 
 ## Next Work Candidates
 
-1. Extend the Telegram guarded execution surface to accepted-truth recovery
-   and closeout follow-ups (reusing `accepted-truth-recovery-envelope`), then
-   to post-closeout runtime dispatch (`runtime-preflight` ->
-   `runtime-dispatch` -> tick), following the `dispatch.py` confirm-token
-   pattern.
+1. Extend the Telegram guarded execution surface to post-closeout runtime
+   dispatch (`runtime-preflight` -> `runtime-dispatch` -> tick), following the
+   `dispatch.py` confirm-token pattern.
 2. Split the Telegram Remote Operator adapter's remaining plan-session engine,
    health, and receipt logic into modules while preserving the current
-   41-test behavioral contract.
+   42-test behavioral contract.
 3. Split the large Offdesk CLI into command handling and typed workflow
    transition modules.
 4. Any allowlisted shell/git remote action is a separate security decision:

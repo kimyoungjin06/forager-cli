@@ -1680,6 +1680,155 @@ fn remote_operator_telegram_dispatch_applies_decision_after_confirmation() -> Re
     Ok(())
 }
 
+fn seed_recovery_closeout(profile: &Path) -> Result<()> {
+    let closeout_dir = profile.join("offdesk_closeouts").join("completed-task");
+    fs::create_dir_all(&closeout_dir)?;
+    fs::write(
+        closeout_dir.join("closeout_plan.json"),
+        serde_json::to_string_pretty(&json!({
+            "schema": "closeout_plan.v1",
+            "closeout_id": "closeout-completed-task",
+            "generated_at": "2026-07-16T00:00:00Z",
+            "tasks": [{
+                "project_key": "project",
+                "request_id": "request-completed-task",
+                "task_id": "completed-task"
+            }]
+        }))?,
+    )?;
+    fs::write(
+        closeout_dir.join("closeout_review_20260618T000000Z.json"),
+        serde_json::to_string_pretty(&json!({
+            "schema": "closeout_review.v1",
+            "reviewed_at": "2026-07-16T00:01:00Z",
+            "review_id": "review-followup",
+            "closeout_id": "closeout-completed-task",
+            "verdict": "approved",
+            "applies_to_tasks": [{
+                "project_key": "project",
+                "request_id": "request-completed-task",
+                "task_id": "completed-task"
+            }],
+            "closeout_receipt": {
+                "schema": "closeout_receipt.v1",
+                "receipt_id": "receipt-followup",
+                "closeout_id": "closeout-completed-task",
+                "acceptance_status": "approved_with_followups",
+                "verification_status": "pending",
+                "evidence_status": "present",
+                "retention_review": "required",
+                "wiki_promotion_state": "not_required",
+                "stale_task_count": 0,
+                "next_safe_action": "Resolve archive review before accepting truth.",
+                "open_decisions": [{
+                    "kind": "archive_review",
+                    "summary": "Archive decision is still open."
+                }]
+            }
+        }))?,
+    )?;
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_dispatch_validates_recovery_after_confirmation() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let profile = profile_dir(temp.path());
+    fs::create_dir_all(&profile)?;
+    seed_recovery_closeout(&profile)?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+
+    let replay = |update: &Path, out: &Path| -> Result<Value> {
+        let output = remote_operator_command(temp.path())
+            .arg("--dry-run")
+            .arg("--once")
+            .arg("--replay-update-file")
+            .arg(update)
+            .arg("--forager-bin")
+            .arg(env!("CARGO_BIN_EXE_forager"))
+            .arg("--env-file")
+            .arg(&env_path)
+            .arg("--state-file")
+            .arg(&state_path)
+            .arg("--feedback-file")
+            .arg(&feedback_file)
+            .arg("--feedback-ingest-dir")
+            .arg(&ingest_dir)
+            .arg("--out")
+            .arg(out)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(serde_json::from_slice(&fs::read(out)?)?)
+    };
+
+    let list_update = temp.path().join("recovery_update.json");
+    write_text_update(&list_update, 740, 940, "/recovery")?;
+    let list_out = temp.path().join("recovery_result.json");
+    let list_result = replay(&list_update, &list_out)?;
+    assert_eq!(list_result["parsed_command"]["command"], "recovery");
+    assert!(list_result["message_preview"]
+        .as_str()
+        .expect("preview")
+        .contains("resolve_followup"));
+    assert_mobile_contract(&list_result);
+
+    let recover_update = temp.path().join("recover_update.json");
+    write_text_update(
+        &recover_update,
+        741,
+        941,
+        "/recover closeout-completed-task resolve_followup 아카이브 검토",
+    )?;
+    let recover_out = temp.path().join("recover_out.json");
+    let recover_result = replay(&recover_update, &recover_out)?;
+    assert_eq!(recover_result["parsed_command"]["command"], "recover");
+    assert_mobile_contract(&recover_result);
+
+    let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    let chat_hash = recover_result["target_chat_id_hash"]
+        .as_str()
+        .expect("chat hash");
+    let confirmation = &state["pending_dispatch_confirmations_by_chat"][chat_hash];
+    assert_eq!(confirmation["kind"], "recovery");
+    let token = confirmation["token"].as_str().expect("token").to_string();
+
+    let confirm_update = temp.path().join("recover_confirm_update.json");
+    write_text_update(&confirm_update, 742, 942, &format!("/confirm {token}"))?;
+    let confirm_out = temp.path().join("recover_confirm_out.json");
+    let confirm_result = replay(&confirm_update, &confirm_out)?;
+    assert_eq!(confirm_result["dispatch_result"]["ok"], true);
+    assert_eq!(
+        confirm_result["dispatch_result"]["stage"],
+        "recovery_validated"
+    );
+    assert_eq!(confirm_result["dispatch_result"]["kind"], "recovery");
+    assert!(confirm_result["message_preview"]
+        .as_str()
+        .expect("preview")
+        .contains("검증됨"));
+    assert_mobile_contract(&confirm_result);
+
+    // Recovery validation records a receipt but must not record accepted truth.
+    assert_eq!(
+        fs::read_to_string(profile.join("accepted_truth_recovery_action_receipts.jsonl"))?
+            .lines()
+            .count(),
+        1
+    );
+    assert!(!profile.join("accepted_truth.jsonl").exists());
+    Ok(())
+}
+
 #[test]
 #[serial]
 fn remote_operator_telegram_dispatch_rejects_stale_confirmation() -> Result<()> {
