@@ -312,3 +312,25 @@ def public_project_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
     if "workspace_path" in public:
         public["workspace_path_hash"] = sha256_short(public.pop("workspace_path"))
     return public
+
+
+def manual_project_candidate(text: str) -> dict[str, Any]:
+    label = truncate_label(text, max_chars=40) or "직접 입력"
+    return {
+        "schema": PROJECT_CANDIDATE_SCHEMA,
+        "rank": None,
+        "score": 0,
+        "project_key": slugify_project_key(label),
+        "display_name": label,
+        "workspace_path_hint": "manual_input",
+        "is_git_repo": False,
+        "branch": None,
+        "head": None,
+        "dirty": None,
+        "readiness": "not_git",
+        "risk": "high",
+        "autonomy_fit": "low",
+        "reasons": ["manual input", "path not resolved"],
+        "next_step": "init_review",
+        "manual_input": True,
+    }

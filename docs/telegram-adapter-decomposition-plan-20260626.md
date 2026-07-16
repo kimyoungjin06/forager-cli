@@ -299,6 +299,19 @@ Status:
   `public_remote_plan_session`, which composes the rest internally. The
   monolith dropped to 6,590 lines.
 
+### Plan-Session Message Renderers
+
+Status:
+
+- All 53 plan-session stage message renderers plus the
+  `runtime_monitor_next_action_label` helper have been extracted to
+  `scripts/telegram_operator/plan_messages.py`. They are pure card builders.
+  `manual_project_candidate` moved to `project_candidates.py` (its natural
+  home) so both the renderers and the state machine can share it without a
+  circular import. The monolith dropped to ~5,920 lines. The remaining large
+  block is the plan-session state machine (`handle_remote_plan_session_input`,
+  stage transitions) and stage receipt/packet creation.
+
 ### Agent Calls
 
 Status:
