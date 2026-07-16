@@ -171,22 +171,24 @@ out of product-facing docs. The product direction is defined in
   accepted-truth recovery follow-ups; `/confirm` on a recovery token runs
   `accepted-truth-recovery-envelope`, which validates and records a receipt but
   stops short of recording accepted truth. `/cancel` clears a pending
-  confirmation. It never runs arbitrary shell and never records accepted truth.
-  The plan-session engine, `health`, and `receipts` modules still need
-  decomposition.
+  confirmation. It never records accepted truth. The plan-session engine,
+  `health`, and `receipts` modules still need decomposition.
+- Runtime dispatch is available but opt-in: `/runtime` lists post-closeout
+  handoffs and `/dispatch <closeout-id> <runner> -- <command>` queues an
+  operator-supplied command, gated behind `--enable-runtime-dispatch`
+  (default off; this is remote command execution). On `/confirm`,
+  `runtime-preflight` re-verifies the closeout and `runtime-dispatch` queues a
+  durable task that runs only through `forager offdesk tick`.
 
 ## Next Work Candidates
 
-1. Extend the Telegram guarded execution surface to post-closeout runtime
-   dispatch (`runtime-preflight` -> `runtime-dispatch` -> tick), following the
-   `dispatch.py` confirm-token pattern.
-2. Split the Telegram Remote Operator adapter's remaining plan-session engine,
+1. Split the Telegram Remote Operator adapter's remaining plan-session engine,
    health, and receipt logic into modules while preserving the current
-   42-test behavioral contract.
-3. Split the large Offdesk CLI into command handling and typed workflow
+   44-test behavioral contract.
+2. Split the large Offdesk CLI into command handling and typed workflow
    transition modules.
-4. Any allowlisted shell/git remote action is a separate security decision:
-   off by default, fixed allowlist, never free-form.
+3. Optionally add a curated allowlist mode for `/dispatch` (named command
+   templates) as a safer alternative to free-form `--enable-runtime-dispatch`.
 
 ## Refresh Rule
 

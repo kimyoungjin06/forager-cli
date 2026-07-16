@@ -28,7 +28,6 @@ MOBILE_CARD_FORBIDDEN_TERMS = (
     "기준 ",
     "검증:",
     "sha256:",
-    "dispatch",
     "shell",
     "launch-prep",
     "runtime_handle_alive",
@@ -572,6 +571,69 @@ def render_decisions_message(*, profile: Any, generated_at: Any, decisions: list
             title = title[:57] + "..."
         lines.append(f"{html.escape(title)}: {html.escape(actions)}")
     lines.append("다음 조치: /decision <id> <action> [note]")
+    return "\n".join(lines)
+
+
+def render_runtime_message(*, profile: Any, generated_at: Any, rows: list[dict[str, Any]], enabled: bool) -> str:
+    lines = [title_with_profile("런타임 대기열", profile)]
+    if not rows:
+        lines.append("디스패치 대기 중인 항목이 없습니다.")
+        lines.append("다음 조치: /decisions · /status")
+        return "\n".join(lines)
+    for row in rows[:3]:
+        closeout = str(row.get("closeout_id") or "")
+        if len(closeout) > 44:
+            closeout = closeout[:41] + "..."
+        marker = " (대기열 등록됨)" if row.get("already_queued") else ""
+        lines.append(f"{html.escape(closeout)}{html.escape(marker)}")
+    if enabled:
+        lines.append("다음 조치: /dispatch <closeout-id> <runner> -- <명령>")
+    else:
+        lines.append("실행 비활성. --enable-runtime-dispatch 필요")
+    return "\n".join(lines)
+
+
+def render_runtime_disabled_message(*, profile: Any, generated_at: Any) -> str:
+    return "\n".join(
+        [
+            title_with_profile("런타임 실행 비활성", profile),
+            "원격 런타임 디스패치가 꺼져 있습니다.",
+            "로컬에서 --enable-runtime-dispatch 로 켜야 합니다.",
+            "다음 조치: /runtime · /status",
+        ]
+    )
+
+
+def render_runtime_confirm_message(
+    *,
+    profile: Any,
+    generated_at: Any,
+    closeout_id: str,
+    runner: str,
+    command: str,
+    token: str,
+) -> str:
+    lines = [title_with_profile("런타임 디스패치 확인", profile)]
+    lines.append(f"클로즈아웃 {html.escape(str(closeout_id))} / {html.escape(str(runner))}")
+    lines.append(f"명령: {html.escape(sanitize_text(command, max_chars=120))}")
+    lines.append("확인 시 tick에서 실행 대기열에 올립니다.")
+    lines.append(f"다음 조치: /confirm {html.escape(str(token))} 또는 취소")
+    return "\n".join(lines)
+
+
+def render_runtime_result_message(*, profile: Any, generated_at: Any, result: dict[str, Any]) -> str:
+    lines = [title_with_profile("런타임 디스패치 결과", profile)]
+    closeout_id = str(result.get("closeout_id") or "")
+    if result.get("ok"):
+        lines.append(f"클로즈아웃 {html.escape(closeout_id)} 대기열 등록됨.")
+        lines.append("tick 실행 전까지 프로세스는 시작되지 않습니다.")
+    else:
+        stage = str(result.get("stage") or "unknown")
+        lines.append(f"등록되지 않음 ({html.escape(stage)}).")
+        error = str(result.get("error") or "")
+        if error:
+            lines.append(html.escape(dispatch_safe_detail(error)))
+    lines.append("다음 조치: /runtime · /status")
     return "\n".join(lines)
 
 

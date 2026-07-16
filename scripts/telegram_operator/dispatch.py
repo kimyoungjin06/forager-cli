@@ -422,6 +422,121 @@ def apply_decision_action(
             pass
 
 
+def runtime_dispatch_items(surface: dict[str, Any]) -> list[dict[str, Any]]:
+    runtime = surface.get("runtime_dispatch")
+    if not isinstance(runtime, dict):
+        return []
+    items = runtime.get("items")
+    if not isinstance(items, list):
+        return []
+    return [item for item in items if isinstance(item, dict)]
+
+
+def open_runtime_dispatch(surface: dict[str, Any]) -> list[dict[str, Any]]:
+    """Summarize post-closeout handoffs ready for runtime dispatch."""
+
+    rows: list[dict[str, Any]] = []
+    for item in runtime_dispatch_items(surface):
+        latest = item.get("latest_receipt")
+        already_queued = (
+            str(latest.get("result_status") or "") == "queued"
+            if isinstance(latest, dict)
+            else False
+        )
+        rows.append(
+            {
+                "closeout_id": str(item.get("closeout_id") or ""),
+                "decision_id": str(item.get("decision_id") or ""),
+                "title": sanitize_text(str(item.get("title") or ""), max_chars=120),
+                "stage": str(item.get("stage") or ""),
+                "already_queued": already_queued,
+            }
+        )
+    return rows
+
+
+def runtime_dispatch_item(surface: dict[str, Any], closeout_id: str) -> dict[str, Any] | None:
+    wanted = str(closeout_id or "").strip()
+    for item in runtime_dispatch_items(surface):
+        if str(item.get("closeout_id") or "").strip() == wanted:
+            return item
+    return None
+
+
+def apply_runtime_dispatch(
+    forager_bin: str,
+    profile: str,
+    *,
+    closeout_id: str,
+    runner: str,
+    command: str,
+) -> dict[str, Any]:
+    """Preflight a receipted closeout and queue a runtime task.
+
+    runtime-preflight re-verifies the closeout against the latest canonical
+    decision receipt at dispatch time, so a changed decision is rejected here
+    rather than queued. The queued command runs later only through
+    `forager offdesk tick` and the scheduler gate; this call does not launch a
+    process.
+    """
+
+    result: dict[str, Any] = {
+        "schema": DISPATCH_RESULT_SCHEMA,
+        "ok": False,
+        "stage": "runtime_preflight",
+        "kind": "runtime",
+        "closeout_id": str(closeout_id or ""),
+        "runner": str(runner or ""),
+        "command_preview": sanitize_text(command, max_chars=120),
+    }
+    preflight = run_forager_json(
+        forager_bin,
+        profile,
+        ["ondesk", "runtime-preflight", "--closeout-id", str(closeout_id), "--json"],
+        label="runtime dispatch preflight",
+    )
+    pf = preflight.get("preflight") if isinstance(preflight.get("preflight"), dict) else {}
+    result["preflight_id"] = pf.get("preflight_id")
+    if str(pf.get("result_status") or "") != "ready_for_runtime_dispatch":
+        result["stage"] = "runtime_preflight_rejected"
+        result["error"] = sanitize_text(
+            str(pf.get("reason") or "runtime preflight not ready"), max_chars=240
+        )
+        return result
+
+    dispatch = run_forager_json(
+        forager_bin,
+        profile,
+        [
+            "ondesk",
+            "runtime-dispatch",
+            "--preflight-id",
+            str(pf["preflight_id"]),
+            "--runner",
+            str(runner),
+            "--cmd",
+            str(command),
+            "--json",
+        ],
+        label="runtime dispatch",
+    )
+    receipt = dispatch.get("receipt") if isinstance(dispatch.get("receipt"), dict) else {}
+    result["receipt_id"] = receipt.get("receipt_id")
+    result["task_id"] = receipt.get("task_id")
+    dispatch_status = str(receipt.get("result_status") or "")
+    result["dispatch_status"] = dispatch_status
+    result["task_enqueued"] = bool(dispatch.get("task_enqueued"))
+    if dispatch_status == "queued":
+        result["ok"] = True
+        result["stage"] = "queued"
+    else:
+        result["stage"] = "runtime_dispatch_not_queued"
+        result["error"] = sanitize_text(
+            str(receipt.get("reason") or f"runtime dispatch {dispatch_status}"), max_chars=240
+        )
+    return result
+
+
 def apply_recovery_action(
     forager_bin: str,
     profile: str,

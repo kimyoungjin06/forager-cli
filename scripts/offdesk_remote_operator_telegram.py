@@ -44,6 +44,7 @@ from telegram_operator.config import resolve_telegram_config
 from telegram_operator.dispatch import (
     apply_decision_action,
     apply_recovery_action,
+    apply_runtime_dispatch,
     available_action_kinds,
     available_recovery_action_kinds,
     build_confirmation,
@@ -54,7 +55,9 @@ from telegram_operator.dispatch import (
     find_recovery_envelope,
     open_decision_actions,
     open_recovery_actions,
+    open_runtime_dispatch,
     pop_confirmation,
+    runtime_dispatch_item,
     store_confirmation,
 )
 from telegram_operator.persistence import (
@@ -96,6 +99,10 @@ from telegram_operator.rendering import (
     render_recovery_confirm_message,
     render_recovery_message,
     render_recovery_result_message,
+    render_runtime_confirm_message,
+    render_runtime_disabled_message,
+    render_runtime_message,
+    render_runtime_result_message,
     choice_surface_contract,
     display_action,
     display_review_status,
@@ -240,6 +247,14 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_DISPATCH_CONFIRM_TTL_SEC", "300")),
         help="Lifetime of a pending Telegram execution confirmation token.",
+    )
+    parser.add_argument(
+        "--enable-runtime-dispatch",
+        action="store_true",
+        default=os.environ.get("OFFDESK_REMOTE_OPERATOR_ENABLE_RUNTIME_DISPATCH", "").strip().lower()
+        in {"1", "true", "yes", "on"},
+        help="Allow /dispatch to queue an operator-supplied runtime command. Off by default; "
+        "this is remote command execution and should only be enabled on trusted setups.",
     )
     parser.add_argument(
         "--agent-intent-mode",
@@ -6348,6 +6363,72 @@ def render_dispatch_command(
                 detail=str(error),
             )
         return finalize_dispatch_result(result, message_preview)
+    if command == "runtime":
+        try:
+            surface = export_workstation_surface(args.forager_bin, args.profile)
+            rows = open_runtime_dispatch(surface)
+            message_preview = render_runtime_message(
+                profile=args.profile,
+                generated_at=generated_at,
+                rows=rows,
+                enabled=bool(args.enable_runtime_dispatch),
+            )
+        except RemoteOperatorTelegramError as error:
+            message_preview = render_dispatch_error_message(
+                profile=args.profile,
+                generated_at=generated_at,
+                headline="런타임 대기열을 불러오지 못했습니다",
+                detail=str(error),
+            )
+        return finalize_dispatch_result(result, message_preview)
+    if command == "dispatch":
+        if not args.enable_runtime_dispatch:
+            message_preview = render_runtime_disabled_message(
+                profile=args.profile, generated_at=generated_at
+            )
+            return finalize_dispatch_result(result, message_preview)
+        closeout_id = str(parsed.get("closeout_id") or "")
+        runner = str(parsed.get("runner") or "")
+        command_text = str(parsed.get("dispatch_command_text") or "")
+        try:
+            surface = export_workstation_surface(args.forager_bin, args.profile)
+            item = runtime_dispatch_item(surface, closeout_id)
+            if item is None:
+                message_preview = render_dispatch_error_message(
+                    profile=args.profile,
+                    generated_at=generated_at,
+                    headline=f"{closeout_id} 런타임 항목이 없습니다",
+                    detail="/runtime 로 대기열을 확인하세요.",
+                )
+            else:
+                confirmation = build_confirmation(
+                    kind="runtime",
+                    target_id=closeout_id,
+                    action_kind="dispatch",
+                    observed_hash="",
+                    note=command_text,
+                    chat_hash=None,
+                    ttl_sec=args.dispatch_confirm_ttl_sec,
+                )
+                confirmation["runner"] = runner
+                confirmation["command"] = command_text
+                result["pending_dispatch_confirmation"] = confirmation
+                message_preview = render_runtime_confirm_message(
+                    profile=args.profile,
+                    generated_at=generated_at,
+                    closeout_id=closeout_id,
+                    runner=runner,
+                    command=command_text,
+                    token=confirmation["token"],
+                )
+        except RemoteOperatorTelegramError as error:
+            message_preview = render_dispatch_error_message(
+                profile=args.profile,
+                generated_at=generated_at,
+                headline="런타임 확인을 준비하지 못했습니다",
+                detail=str(error),
+            )
+        return finalize_dispatch_result(result, message_preview)
     # confirm and cancel are resolved against persisted state in run_once;
     # this placeholder is only visible on non-live probe paths.
     message_preview = render_dispatch_error_message(
@@ -6370,7 +6451,7 @@ def resolve_dispatch_confirmation(
 
     command = parsed_command.get("command")
     generated_at = rendered["generated_at"]
-    if command in {"decision", "recover"}:
+    if command in {"decision", "recover", "dispatch"}:
         confirmation = rendered.get("pending_dispatch_confirmation")
         if isinstance(confirmation, dict):
             confirmation["chat_id_hash"] = chat_hash
@@ -6404,6 +6485,35 @@ def resolve_dispatch_confirmation(
             headline="확인 시간이 만료되었습니다",
             detail="/decisions 로 다시 시작하세요.",
         )
+    elif str(confirmation.get("kind") or "") == "runtime":
+        # Runtime dispatch has no envelope hash; runtime-preflight re-verifies
+        # the closeout against the latest decision receipt at execution time.
+        if not args.enable_runtime_dispatch:
+            message_preview = render_runtime_disabled_message(
+                profile=args.profile, generated_at=generated_at
+            )
+        else:
+            try:
+                dispatch_result = apply_runtime_dispatch(
+                    args.forager_bin,
+                    args.profile,
+                    closeout_id=str(confirmation.get("target_id") or ""),
+                    runner=str(confirmation.get("runner") or ""),
+                    command=str(confirmation.get("command") or ""),
+                )
+                rendered["dispatch_result"] = dispatch_result
+                message_preview = render_runtime_result_message(
+                    profile=args.profile,
+                    generated_at=generated_at,
+                    result=dispatch_result,
+                )
+            except (OSError, RemoteOperatorTelegramError) as error:
+                message_preview = render_dispatch_error_message(
+                    profile=args.profile,
+                    generated_at=generated_at,
+                    headline="런타임 디스패치에 실패했습니다",
+                    detail=str(error),
+                )
     else:
         kind = str(confirmation.get("kind") or "decision")
         # Support decision confirmations issued before the kind field existed.
@@ -6616,6 +6726,8 @@ def render_command_result(
         "decision",
         "recovery",
         "recover",
+        "runtime",
+        "dispatch",
         "confirm",
         "cancel",
     }:
@@ -6881,7 +6993,13 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                     )
                     attach_choice_surface(rendered, remote_plan_selection_context(session))
                     rendered["mobile_card_contract"] = mobile_card_contract(rendered["message_preview"])
-        if parsed_command.get("command") in {"decision", "recover", "confirm", "cancel"}:
+        if parsed_command.get("command") in {
+            "decision",
+            "recover",
+            "dispatch",
+            "confirm",
+            "cancel",
+        }:
             # Guarded remote execution. Every branch catches its own errors so
             # nothing raises before the offset save and re-delivers the update.
             resolve_dispatch_confirmation(args, state, chat_hash, rendered, parsed_command)

@@ -32,6 +32,8 @@ CORE_OR_SLASH_COMMANDS = {
     "decision",
     "recovery",
     "recover",
+    "runtime",
+    "dispatch",
     "confirm",
     "cancel",
 }
@@ -39,6 +41,7 @@ SESSION_INPUT_COMMANDS = {"select", "choose", "path", "workload", "session_input
 DISPATCH_BUTTON_ALIASES = {
     "결정 목록": "/decisions",
     "복구 목록": "/recovery",
+    "런타임 목록": "/runtime",
     "취소": "/cancel",
 }
 
@@ -79,6 +82,10 @@ def parse_remote_command(command_text: str) -> dict[str, Any]:
             "command_text": original_text,
             "chat_text": original_text,
         }
+    # /dispatch carries an arbitrary shell command after " -- "; parse it from
+    # the raw text so quoting in the command survives shlex tokenization.
+    if normalize_command_name(text.split(None, 1)[0]) == "dispatch":
+        return parse_dispatch_command(original_text, text)
     try:
         tokens = shlex.split(text)
     except ValueError as error:
@@ -181,6 +188,16 @@ def parse_remote_command(command_text: str) -> dict[str, Any]:
         }
     if command == "recover":
         return parse_recover_command(original_text, args)
+    if command == "runtime":
+        if args:
+            return unsupported_command(original_text, "runtime_accepts_no_arguments")
+        return {
+            "supported": True,
+            "command": "runtime",
+            "argv": [],
+            "reason": "explicit_runtime_command",
+            "command_text": original_text,
+        }
     if command == "confirm":
         token = args[0].strip() if args else ""
         if not token:
@@ -221,6 +238,31 @@ def parse_decision_command(command_text: str, args: list[str]) -> dict[str, Any]
         "decision_id": decision_id,
         "decision_action_kind": action_kind,
         "decision_note": note,
+    }
+
+
+def parse_dispatch_command(original_text: str, text: str) -> dict[str, Any]:
+    remainder = text.split(None, 1)
+    tail = remainder[1] if len(remainder) > 1 else ""
+    if " -- " not in tail:
+        return unsupported_command(original_text, "dispatch_requires_command_after_dashes")
+    left, command = tail.split(" -- ", 1)
+    command = command.strip()
+    try:
+        left_tokens = shlex.split(left)
+    except ValueError as error:
+        return unsupported_command(original_text, f"parse_error:{error}")
+    if len(left_tokens) < 2 or not command:
+        return unsupported_command(original_text, "dispatch_requires_closeout_runner_and_command")
+    return {
+        "supported": True,
+        "command": "dispatch",
+        "argv": [],
+        "reason": "explicit_dispatch_command",
+        "command_text": original_text,
+        "closeout_id": left_tokens[0],
+        "runner": left_tokens[1],
+        "dispatch_command_text": command,
     }
 
 

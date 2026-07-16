@@ -709,6 +709,25 @@ records an `accepted_truth_recovery_action_receipt.v1`. This stops at
 validation: recording accepted truth or running the fallback command remains a
 separate explicit local step that this surface does not perform.
 
+### Runtime dispatch (opt-in)
+
+`/runtime` lists post-closeout handoffs that are ready for runtime dispatch.
+`/dispatch <closeout-id> <runner> -- <command>` queues an operator-supplied
+command for a receipted closeout. Unlike the decision and recovery surfaces,
+this runs a command the operator types, so it is **off by default**. It is only
+available when the listener is started with `--enable-runtime-dispatch` (or
+`OFFDESK_REMOTE_OPERATOR_ENABLE_RUNTIME_DISPATCH=1`); without that flag
+`/dispatch` is refused and no confirmation is stored.
+
+Treat `--enable-runtime-dispatch` as remote command execution: a compromised
+Telegram account can queue arbitrary commands. Enable it only on trusted
+setups with a locked-down chat allowlist. When enabled, `/dispatch` still
+requires a `/confirm <token>` step. On confirm, `runtime-preflight`
+re-verifies the closeout against the latest canonical decision receipt, then
+`runtime-dispatch` queues a durable `OffdeskTask`. It does not launch a
+process: the queued command runs later only through `forager offdesk tick` and
+the scheduler gate.
+
 Telegram messages should stay short enough for mobile scanning: a compact
 title, the current state, and the next local-safe action. Longer listener
 diagnostics belong in local health output, not in the chat message.

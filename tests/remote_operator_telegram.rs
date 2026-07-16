@@ -271,7 +271,6 @@ fn assert_mobile_contract(result: &Value) {
         "preview",
         "project init",
         "plan evidence",
-        "dispatch",
         "shell",
         "launch-prep",
         "runtime_handle_alive",
@@ -1826,6 +1825,206 @@ fn remote_operator_telegram_dispatch_validates_recovery_after_confirmation() -> 
         1
     );
     assert!(!profile.join("accepted_truth.jsonl").exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_dispatch_queues_runtime_task_after_confirmation() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let profile = profile_dir(temp.path());
+    seed_pending_decision(&profile)?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+
+    let replay = |update: &Path, out: &Path| -> Result<Value> {
+        let output = remote_operator_command(temp.path())
+            .arg("--dry-run")
+            .arg("--once")
+            .arg("--enable-runtime-dispatch")
+            .arg("--replay-update-file")
+            .arg(update)
+            .arg("--forager-bin")
+            .arg(env!("CARGO_BIN_EXE_forager"))
+            .arg("--env-file")
+            .arg(&env_path)
+            .arg("--state-file")
+            .arg(&state_path)
+            .arg("--feedback-file")
+            .arg(&feedback_file)
+            .arg("--feedback-ingest-dir")
+            .arg(&ingest_dir)
+            .arg("--out")
+            .arg(out)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(serde_json::from_slice(&fs::read(out)?)?)
+    };
+    let confirm_token = |chat_hash: &str| -> Result<String> {
+        let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+        Ok(
+            state["pending_dispatch_confirmations_by_chat"][chat_hash]["token"]
+                .as_str()
+                .expect("confirmation token")
+                .to_string(),
+        )
+    };
+
+    // Apply the decision so it reaches "receipted" and becomes a runtime handoff.
+    let decision_update = temp.path().join("decision_update.json");
+    write_text_update(
+        &decision_update,
+        750,
+        950,
+        "/decision decision-user revise 수정",
+    )?;
+    let decision_out = temp.path().join("decision_out.json");
+    let decision_result = replay(&decision_update, &decision_out)?;
+    let chat_hash = decision_result["target_chat_id_hash"]
+        .as_str()
+        .expect("chat hash")
+        .to_string();
+    let apply_update = temp.path().join("apply_update.json");
+    write_text_update(
+        &apply_update,
+        751,
+        951,
+        &format!("/confirm {}", confirm_token(&chat_hash)?),
+    )?;
+    let apply_out = temp.path().join("apply_out.json");
+    let apply_result = replay(&apply_update, &apply_out)?;
+    assert_eq!(apply_result["dispatch_result"]["stage"], "applied");
+
+    // The runtime dispatch surface should now expose the receipted closeout.
+    let surface_output = Command::new(env!("CARGO_BIN_EXE_forager"))
+        .arg("--profile")
+        .arg("default")
+        .args(["ondesk", "workstation-surface", "--json"])
+        .env("HOME", temp.path())
+        .env("XDG_CONFIG_HOME", temp.path().join(".config"))
+        .env_remove("FORAGER_PROFILE")
+        .output()?;
+    assert!(surface_output.status.success());
+    let surface: Value = serde_json::from_slice(&surface_output.stdout)?;
+    let closeout_id = surface["runtime_dispatch"]["items"][0]["closeout_id"]
+        .as_str()
+        .expect("runtime dispatch closeout id")
+        .to_string();
+
+    let dispatch_update = temp.path().join("dispatch_update.json");
+    write_text_update(
+        &dispatch_update,
+        752,
+        952,
+        &format!("/dispatch {closeout_id} local-background -- echo hello-from-telegram"),
+    )?;
+    let dispatch_out = temp.path().join("dispatch_out.json");
+    let dispatch_result = replay(&dispatch_update, &dispatch_out)?;
+    assert_eq!(dispatch_result["parsed_command"]["command"], "dispatch");
+    assert!(dispatch_result["message_preview"]
+        .as_str()
+        .expect("preview")
+        .contains("런타임 디스패치 확인"));
+    assert_mobile_contract(&dispatch_result);
+
+    let confirm_update = temp.path().join("dispatch_confirm_update.json");
+    write_text_update(
+        &confirm_update,
+        753,
+        953,
+        &format!("/confirm {}", confirm_token(&chat_hash)?),
+    )?;
+    let confirm_out = temp.path().join("dispatch_confirm_out.json");
+    let confirm_result = replay(&confirm_update, &confirm_out)?;
+    assert_eq!(confirm_result["dispatch_result"]["ok"], true);
+    assert_eq!(confirm_result["dispatch_result"]["stage"], "queued");
+    assert_eq!(confirm_result["dispatch_result"]["kind"], "runtime");
+    assert_eq!(confirm_result["dispatch_result"]["task_enqueued"], true);
+    assert!(confirm_result["dispatch_result"]["task_id"]
+        .as_str()
+        .is_some());
+    assert_mobile_contract(&confirm_result);
+
+    assert_eq!(
+        fs::read_to_string(profile.join("runtime_dispatch_receipts.jsonl"))?
+            .lines()
+            .count(),
+        1
+    );
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_dispatch_refuses_runtime_when_disabled() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let profile = profile_dir(temp.path());
+    fs::create_dir_all(&profile)?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+
+    // No --enable-runtime-dispatch flag: /dispatch must be refused outright.
+    let dispatch_update = temp.path().join("dispatch_update.json");
+    write_text_update(
+        &dispatch_update,
+        760,
+        960,
+        "/dispatch closeout-x local-background -- rm -rf /",
+    )?;
+    let out = temp.path().join("dispatch_out.json");
+    let output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&dispatch_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--out")
+        .arg(&out)
+        .output()?;
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["parsed_command"]["command"], "dispatch");
+    assert!(result["dispatch_result"].is_null());
+    assert!(result["message_preview"]
+        .as_str()
+        .expect("preview")
+        .contains("비활성"));
+    assert_mobile_contract(&result);
+    // No confirmation may be stored for a refused dispatch.
+    let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    assert!(
+        state["pending_dispatch_confirmations_by_chat"].is_null()
+            || state["pending_dispatch_confirmations_by_chat"]
+                .as_object()
+                .expect("map")
+                .is_empty()
+    );
+    assert!(!profile.join("runtime_dispatch_receipts.jsonl").exists());
     Ok(())
 }
 
