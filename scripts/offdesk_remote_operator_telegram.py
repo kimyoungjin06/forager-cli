@@ -7236,6 +7236,7 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
         ),
         "agent_runtime_status": agent_runtime_status,
         "action_readiness": readiness,
+        "runtime_dispatch_enabled": bool(args.enable_runtime_dispatch),
         "read_only": True,
         "mutation_authorized": False,
         "approval_authorized": False,
@@ -7327,6 +7328,16 @@ def main() -> int:
             emit_result(args, result)
             return 0 if result.get("status") != "unsupported" else 2
         config = resolve_telegram_config(args.env_file, required=True)
+        if args.enable_runtime_dispatch:
+            # Make this powerful mode visible in logs/systemd journal: it lets
+            # the allowlisted chat queue arbitrary commands for tick execution.
+            print(
+                "WARNING: --enable-runtime-dispatch is ON. Allowlisted Telegram chat can "
+                "queue arbitrary commands for `forager offdesk tick`. Treat this as remote "
+                "command execution and keep the chat allowlist locked down.",
+                file=sys.stderr,
+                flush=True,
+            )
         result = run_once(args, config) if args.once else run_loop(args, config)
         emit_result(args, result)
         return 0
