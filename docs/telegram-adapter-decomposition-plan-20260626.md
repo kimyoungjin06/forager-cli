@@ -288,6 +288,17 @@ Status:
   `loop_summary_base`, backoff) stays in the main script because it is coupled
   to the poller.
 
+### Public Redaction
+
+Status:
+
+- All 27 `public_*` redaction projections have been extracted to
+  `scripts/telegram_operator/redaction.py`. They are pure transforms with no
+  state or I/O; the group references only `sha256_short` and
+  `public_project_candidate`. The main script now imports only
+  `public_remote_plan_session`, which composes the rest internally. The
+  monolith dropped to 6,590 lines.
+
 ### Agent Calls
 
 Status:
