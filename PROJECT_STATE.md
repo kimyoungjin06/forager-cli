@@ -182,11 +182,15 @@ out of product-facing docs. The product direction is defined in
 
 ## Next Work Candidates
 
-1. Split the Telegram Remote Operator adapter's remaining plan-session engine
-   and receipt logic into modules while preserving the current 47-test
-   behavioral contract. Listener health has been extracted to
-   `scripts/telegram_operator/health.py`; the plan-session state machine and
-   stage receipt writers are the remaining large block in the monolith.
+1. Finish the Telegram adapter decomposition: the monolith is down from
+   7,367 to ~4,060 lines with health, redaction, plan-message renderers,
+   schema constants, and stage receipt builders now in
+   `scripts/telegram_operator/` modules. The remaining block is the
+   plan-session state machine hub (`handle_remote_plan_session_input` and its
+   stage transition executors, selection/context helpers, and the shared
+   `result_base`/`attach_choice_surface` plumbing). Extract it into
+   `plan_workflow.py` in its own careful pass, moving the shared result
+   plumbing to a base module first, and preserve the 47-test contract.
 2. Split the large Offdesk CLI into command handling and typed workflow
    transition modules.
 3. Optionally add a curated allowlist mode for `/dispatch` (named command
