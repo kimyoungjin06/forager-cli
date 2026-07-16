@@ -268,6 +268,26 @@ The first decomposition cycle is complete when:
 
 ## Additional Extracted Modules
 
+### Guarded Remote Execution
+
+Status:
+
+- Guarded remote decision, accepted-truth recovery, and opt-in runtime
+  dispatch surfaces have been added in
+  `scripts/telegram_operator/dispatch.py`. They reuse the existing
+  receipt-gated ondesk CLI executors and share one confirmation-token model.
+
+### Listener Health
+
+Status:
+
+- Listener health, action readiness, and agent-runtime issue reporting have
+  been extracted to `scripts/telegram_operator/health.py`. The main script now
+  imports `listener_health`, `action_readiness`, and
+  `readiness_from_agent_intent`. Run-loop result plumbing (`result_base`,
+  `loop_summary_base`, backoff) stays in the main script because it is coupled
+  to the poller.
+
 ### Agent Calls
 
 Status:
