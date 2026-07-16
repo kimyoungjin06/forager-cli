@@ -28,8 +28,16 @@ CORE_OR_SLASH_COMMANDS = {
     "remember",
     "plan",
     "plan_request",
+    "decisions",
+    "decision",
+    "confirm",
+    "cancel",
 }
 SESSION_INPUT_COMMANDS = {"select", "choose", "path", "workload", "session_input", "plan_input"}
+DISPATCH_BUTTON_ALIASES = {
+    "결정 목록": "/decisions",
+    "취소": "/cancel",
+}
 
 
 def normalize_command_name(raw: str) -> str:
@@ -56,7 +64,7 @@ def parse_remote_command(command_text: str) -> dict[str, Any]:
     if not text:
         return unsupported_command(text, "empty_command")
     original_text = text
-    alias = BUTTON_COMMAND_ALIASES.get(text)
+    alias = BUTTON_COMMAND_ALIASES.get(text) or DISPATCH_BUTTON_ALIASES.get(text)
     if alias:
         text = alias
     if not text.startswith("/"):
@@ -146,7 +154,59 @@ def parse_remote_command(command_text: str) -> dict[str, Any]:
         return parse_plans_command(original_text, args)
     if command == "show":
         return parse_show_command(original_text, args)
+    if command == "decisions":
+        if args:
+            return unsupported_command(original_text, "decisions_accepts_no_arguments")
+        return {
+            "supported": True,
+            "command": "decisions",
+            "argv": [],
+            "reason": "explicit_decisions_command",
+            "command_text": original_text,
+        }
+    if command == "decision":
+        return parse_decision_command(original_text, args)
+    if command == "confirm":
+        token = args[0].strip() if args else ""
+        if not token:
+            return unsupported_command(original_text, "confirm_requires_token")
+        return {
+            "supported": True,
+            "command": "confirm",
+            "argv": [],
+            "reason": "explicit_confirm_command",
+            "command_text": original_text,
+            "confirm_token": token,
+        }
+    if command == "cancel":
+        return {
+            "supported": True,
+            "command": "cancel",
+            "argv": [],
+            "reason": "explicit_cancel_command",
+            "command_text": original_text,
+        }
     return unsupported_command(original_text, "unsupported_remote_operator_command")
+
+
+def parse_decision_command(command_text: str, args: list[str]) -> dict[str, Any]:
+    if len(args) < 2:
+        return unsupported_command(command_text, "decision_requires_id_and_action")
+    decision_id = args[0].strip()
+    action_kind = args[1].strip().lower()
+    note = " ".join(args[2:]).strip()
+    if not decision_id or not action_kind:
+        return unsupported_command(command_text, "decision_requires_id_and_action")
+    return {
+        "supported": True,
+        "command": "decision",
+        "argv": [],
+        "reason": "explicit_decision_command",
+        "command_text": command_text,
+        "decision_id": decision_id,
+        "decision_action_kind": action_kind,
+        "decision_note": note,
+    }
 
 
 def parse_plans_command(command_text: str, args: list[str]) -> dict[str, Any]:

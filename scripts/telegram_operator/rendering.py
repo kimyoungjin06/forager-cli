@@ -552,7 +552,92 @@ def help_message(*, profile: Any, generated_at: Any) -> str:
             title_with_profile("Forager 원격 조작", profile),
             "평문은 에이전트 채팅으로 답합니다.",
             "기록은 /feedback · /remember · /plan",
+            "결정 처리는 /decisions",
             "다음 조치: /status · /pending · /plans",
+        ]
+    )
+
+
+def render_decisions_message(*, profile: Any, generated_at: Any, decisions: list[dict[str, Any]]) -> str:
+    lines = [title_with_profile("결정 목록", profile)]
+    open_decisions = [decision for decision in decisions if decision.get("actions")]
+    if not open_decisions:
+        lines.append("처리 대기 중인 결정이 없습니다.")
+        lines.append("다음 조치: /status · /pending")
+        return "\n".join(lines)
+    for decision in open_decisions[:3]:
+        actions = " · ".join(action["action_kind"] for action in decision["actions"][:3])
+        title = str(decision.get("title") or decision.get("decision_id") or "")
+        if len(title) > 60:
+            title = title[:57] + "..."
+        lines.append(f"{html.escape(title)}: {html.escape(actions)}")
+    lines.append("다음 조치: /decision <id> <action> [note]")
+    return "\n".join(lines)
+
+
+def render_dispatch_confirm_message(
+    *,
+    profile: Any,
+    generated_at: Any,
+    decision_id: str,
+    action_kind: str,
+    note: str,
+    token: str,
+) -> str:
+    lines = [title_with_profile("실행 확인 필요", profile)]
+    lines.append(f"결정 {html.escape(str(decision_id))} → {html.escape(str(action_kind))}")
+    if note:
+        lines.append(f"메모: {html.escape(sanitize_text(note, max_chars=120))}")
+    lines.append("아직 실행하지 않았습니다.")
+    lines.append(f"다음 조치: /confirm {html.escape(str(token))} 또는 취소")
+    return "\n".join(lines)
+
+
+def render_dispatch_result_message(*, profile: Any, generated_at: Any, result: dict[str, Any]) -> str:
+    lines = [title_with_profile("실행 결과", profile)]
+    decision_id = str(result.get("decision_id") or "")
+    action_kind = str(result.get("action_kind") or "")
+    if result.get("ok"):
+        lines.append(f"결정 {html.escape(decision_id)} → {html.escape(action_kind)} 적용됨.")
+        if result.get("closeout_appended"):
+            lines.append("결정 원장에 기록했습니다.")
+    else:
+        stage = str(result.get("stage") or "unknown")
+        lines.append(f"적용되지 않음 ({html.escape(stage)}).")
+        error = str(result.get("error") or "")
+        if error:
+            lines.append(html.escape(dispatch_safe_detail(error)))
+    lines.append("다음 조치: /decisions · /status")
+    return "\n".join(lines)
+
+
+def dispatch_safe_detail(text: str) -> str:
+    """Trim CLI-facing terms out of an operator card detail line."""
+
+    detail = sanitize_text(text, max_chars=160)
+    for term in ("receipt", "preview", "sha256:"):
+        detail = detail.replace(term, "").replace(term.capitalize(), "")
+    return " ".join(detail.split())
+
+
+def render_dispatch_cancel_message(*, profile: Any, generated_at: Any, cleared: bool) -> str:
+    return "\n".join(
+        [
+            title_with_profile("실행 취소", profile),
+            "대기 중이던 실행 확인을 취소했습니다." if cleared else "취소할 실행 확인이 없습니다.",
+            "아직 아무 작업도 실행하지 않았습니다.",
+            "다음 조치: /decisions · /status",
+        ]
+    )
+
+
+def render_dispatch_error_message(*, profile: Any, generated_at: Any, headline: str, detail: str) -> str:
+    return "\n".join(
+        [
+            title_with_profile("실행 불가", profile),
+            html.escape(sanitize_text(headline, max_chars=120)),
+            html.escape(dispatch_safe_detail(detail)),
+            "다음 조치: /decisions · /status",
         ]
     )
 

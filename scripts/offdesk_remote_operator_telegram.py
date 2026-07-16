@@ -41,6 +41,18 @@ from telegram_operator.common import (
     write_json,
 )
 from telegram_operator.config import resolve_telegram_config
+from telegram_operator.dispatch import (
+    apply_decision_action,
+    available_action_kinds,
+    build_confirmation,
+    clear_confirmation,
+    confirmation_is_fresh,
+    export_workstation_surface,
+    find_action_envelope,
+    open_decision_actions,
+    pop_confirmation,
+    store_confirmation,
+)
 from telegram_operator.persistence import (
     append_chat_history,
     chat_history_for_chat_hash,
@@ -72,6 +84,11 @@ from telegram_operator.rendering import (
     REMOTE_PLAN_SESSION_CONTEXT_KIND,
     agent_assistant_reply,
     choice_keyboard,
+    render_decisions_message,
+    render_dispatch_cancel_message,
+    render_dispatch_confirm_message,
+    render_dispatch_error_message,
+    render_dispatch_result_message,
     choice_surface_contract,
     display_action,
     display_review_status,
@@ -210,6 +227,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_CONTEXT_MAX_AGE_SEC", "86400")),
         help="Maximum age for remembered Telegram card context; negative disables expiry.",
+    )
+    parser.add_argument(
+        "--dispatch-confirm-ttl-sec",
+        type=int,
+        default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_DISPATCH_CONFIRM_TTL_SEC", "300")),
+        help="Lifetime of a pending Telegram execution confirmation token.",
     )
     parser.add_argument(
         "--agent-intent-mode",
@@ -6175,6 +6198,192 @@ def attach_choice_surface(result: dict[str, Any], context: dict[str, Any] | None
         result["interaction_context"] = context
 
 
+def finalize_dispatch_result(result: dict[str, Any], message_preview: str) -> dict[str, Any]:
+    attach_choice_surface(result, None)
+    result.update(
+        {
+            "status": "rendered",
+            "projection": None,
+            "message_preview": message_preview,
+            "mobile_card_contract": mobile_card_contract(message_preview),
+        }
+    )
+    return result
+
+
+def render_dispatch_command(
+    args: argparse.Namespace,
+    config: dict[str, Any],
+    parsed: dict[str, Any],
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    """Render the read-only part of a dispatch command.
+
+    State mutation (storing a confirmation, popping it, running the executor
+    chain) happens in run_once so it persists and stays out of the offset
+    save path. This function only reads a fresh surface and builds cards.
+    """
+
+    result["parsed_command"] = parsed
+    command = parsed.get("command")
+    generated_at = result["generated_at"]
+    if command == "decisions":
+        try:
+            surface = export_workstation_surface(args.forager_bin, args.profile)
+            decisions = open_decision_actions(surface)
+            message_preview = render_decisions_message(
+                profile=args.profile, generated_at=generated_at, decisions=decisions
+            )
+        except RemoteOperatorTelegramError as error:
+            message_preview = render_dispatch_error_message(
+                profile=args.profile,
+                generated_at=generated_at,
+                headline="결정 목록을 불러오지 못했습니다",
+                detail=str(error),
+            )
+        return finalize_dispatch_result(result, message_preview)
+    if command == "decision":
+        decision_id = str(parsed.get("decision_id") or "")
+        action_kind = str(parsed.get("decision_action_kind") or "")
+        note = str(parsed.get("decision_note") or "")
+        try:
+            surface = export_workstation_surface(args.forager_bin, args.profile)
+            envelope = find_action_envelope(surface, decision_id, action_kind)
+            if envelope is None:
+                kinds = available_action_kinds(surface, decision_id)
+                message_preview = render_dispatch_error_message(
+                    profile=args.profile,
+                    generated_at=generated_at,
+                    headline=f"{decision_id}에 {action_kind} 동작이 없습니다",
+                    detail=f"가능한 동작: {', '.join(kinds) or '없음'}",
+                )
+            else:
+                confirmation = build_confirmation(
+                    decision_id=decision_id,
+                    action_kind=action_kind,
+                    observed_hash=str(envelope.get("observed_hash") or ""),
+                    note=note,
+                    chat_hash=None,
+                    ttl_sec=args.dispatch_confirm_ttl_sec,
+                )
+                result["pending_dispatch_confirmation"] = confirmation
+                message_preview = render_dispatch_confirm_message(
+                    profile=args.profile,
+                    generated_at=generated_at,
+                    decision_id=decision_id,
+                    action_kind=action_kind,
+                    note=note,
+                    token=confirmation["token"],
+                )
+        except RemoteOperatorTelegramError as error:
+            message_preview = render_dispatch_error_message(
+                profile=args.profile,
+                generated_at=generated_at,
+                headline="실행 확인을 준비하지 못했습니다",
+                detail=str(error),
+            )
+        return finalize_dispatch_result(result, message_preview)
+    # confirm and cancel are resolved against persisted state in run_once;
+    # this placeholder is only visible on non-live probe paths.
+    message_preview = render_dispatch_error_message(
+        profile=args.profile,
+        generated_at=generated_at,
+        headline="라이브 처리 필요",
+        detail="이 명령은 라이브 폴링에서 처리됩니다.",
+    )
+    return finalize_dispatch_result(result, message_preview)
+
+
+def resolve_dispatch_confirmation(
+    args: argparse.Namespace,
+    state: dict[str, Any],
+    chat_hash: str,
+    rendered: dict[str, Any],
+    parsed_command: dict[str, Any],
+) -> None:
+    """Apply the state-touching part of a dispatch command inside run_once."""
+
+    command = parsed_command.get("command")
+    generated_at = rendered["generated_at"]
+    if command == "decision":
+        confirmation = rendered.get("pending_dispatch_confirmation")
+        if isinstance(confirmation, dict):
+            confirmation["chat_id_hash"] = chat_hash
+            store_confirmation(state, chat_hash, confirmation)
+        return
+    if command == "cancel":
+        cleared = clear_confirmation(state, chat_hash)
+        message_preview = render_dispatch_cancel_message(
+            profile=args.profile, generated_at=generated_at, cleared=cleared
+        )
+        rendered["message_preview"] = message_preview
+        rendered["mobile_card_contract"] = mobile_card_contract(message_preview)
+        return
+    if command != "confirm":
+        return
+
+    token = str(parsed_command.get("confirm_token") or "")
+    confirmation = pop_confirmation(state, chat_hash, token)
+    message_preview = None
+    if confirmation is None:
+        message_preview = render_dispatch_error_message(
+            profile=args.profile,
+            generated_at=generated_at,
+            headline="확인 요청을 찾을 수 없습니다",
+            detail="/decisions 로 다시 시작하세요.",
+        )
+    elif not confirmation_is_fresh(confirmation):
+        message_preview = render_dispatch_error_message(
+            profile=args.profile,
+            generated_at=generated_at,
+            headline="확인 시간이 만료되었습니다",
+            detail="/decisions 로 다시 시작하세요.",
+        )
+    else:
+        try:
+            surface = export_workstation_surface(args.forager_bin, args.profile)
+            envelope = find_action_envelope(
+                surface, confirmation["decision_id"], confirmation["action_kind"]
+            )
+            if envelope is None:
+                message_preview = render_dispatch_error_message(
+                    profile=args.profile,
+                    generated_at=generated_at,
+                    headline="결정 동작이 더 이상 없습니다",
+                    detail="/decisions 로 다시 확인하세요.",
+                )
+            elif str(envelope.get("observed_hash") or "") != confirmation.get("observed_hash"):
+                message_preview = render_dispatch_error_message(
+                    profile=args.profile,
+                    generated_at=generated_at,
+                    headline="결정이 변경되었습니다",
+                    detail="/decisions 로 최신 상태를 다시 확인하세요.",
+                )
+            else:
+                dispatch_result = apply_decision_action(
+                    args.forager_bin,
+                    args.profile,
+                    envelope,
+                    note=str(confirmation.get("note") or ""),
+                )
+                rendered["dispatch_result"] = dispatch_result
+                message_preview = render_dispatch_result_message(
+                    profile=args.profile,
+                    generated_at=generated_at,
+                    result=dispatch_result,
+                )
+        except (OSError, RemoteOperatorTelegramError) as error:
+            message_preview = render_dispatch_error_message(
+                profile=args.profile,
+                generated_at=generated_at,
+                headline="실행에 실패했습니다",
+                detail=str(error),
+            )
+    if message_preview is not None:
+        rendered["message_preview"] = message_preview
+        rendered["mobile_card_contract"] = mobile_card_contract(message_preview)
+
+
 def render_command_result(
     args: argparse.Namespace,
     config: dict[str, Any],
@@ -6317,6 +6526,8 @@ def render_command_result(
             }
         )
         return result
+    if parsed.get("command") in {"decisions", "decision", "confirm", "cancel"}:
+        return render_dispatch_command(args, config, parsed, result)
     result["parsed_command"] = parsed
     if args.projection_file:
         projection = load_projection_file(args.projection_file, parsed)
@@ -6578,6 +6789,10 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                     )
                     attach_choice_surface(rendered, remote_plan_selection_context(session))
                     rendered["mobile_card_contract"] = mobile_card_contract(rendered["message_preview"])
+        if parsed_command.get("command") in {"decision", "confirm", "cancel"}:
+            # Guarded remote execution. Every branch catches its own errors so
+            # nothing raises before the offset save and re-delivers the update.
+            resolve_dispatch_confirmation(args, state, chat_hash, rendered, parsed_command)
         try:
             message_id = send_message(
                 config,

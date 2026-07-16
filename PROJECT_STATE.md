@@ -156,22 +156,35 @@ out of product-facing docs. The product direction is defined in
 - Large Offdesk and Telegram adapter modules need staged decomposition before
   adding more mutation-capable remote actions.
 - The 2026-06-26 refactor baseline is captured in
-  `docs/refactor-baseline-20260626.md`. Until the first decomposition cycle is
-  complete, new mutation-capable remote actions are frozen. Bug fixes, routing
-  safety fixes, tests, documentation, and pure extraction refactors remain in
-  scope.
+  `docs/refactor-baseline-20260626.md`. The mutation-freeze has been lifted by
+  product decision to widen the Telegram operator surface, but new remote
+  execution must reuse the existing receipt-gated CLI executors rather than
+  add new mutation logic, and must land in the new `scripts/telegram_operator/`
+  modules instead of the monolith.
+- Telegram now has a guarded remote decision execution surface in
+  `scripts/telegram_operator/dispatch.py`: `/decisions` lists open decisions,
+  `/decision <id> <action> [note]` returns a single-use confirmation token
+  bound to the decision's observed hash with a TTL, and `/confirm <token>`
+  runs the existing `action-envelope` -> `action-preflight` ->
+  `action-decision` -> `action-closeout` chain after re-checking the hash.
+  `/cancel` clears a pending confirmation. It never runs arbitrary shell and
+  never records accepted truth. The plan-session engine, `health`, and
+  `receipts` modules still need decomposition.
 
 ## Next Work Candidates
 
-1. Split the Telegram Remote Operator adapter into transport, input routing,
-   rendering, persistence, and remote-plan workflow modules while preserving
-   the current 39-test behavioral contract.
-2. Split the large Offdesk CLI into command handling and typed workflow
-   transition modules before adding more mutation-capable remote actions.
-3. Add the next guarded executor stage for accepted-truth recovery only after
-   the decomposition freeze is lifted. It must start from a current
-   `accepted_truth_recovery_action_receipt.v1` and keep accepted-truth
-   recording as a separate explicit closeout receipt step.
+1. Extend the Telegram guarded execution surface to accepted-truth recovery
+   and closeout follow-ups (reusing `accepted-truth-recovery-envelope`), then
+   to post-closeout runtime dispatch (`runtime-preflight` ->
+   `runtime-dispatch` -> tick), following the `dispatch.py` confirm-token
+   pattern.
+2. Split the Telegram Remote Operator adapter's remaining plan-session engine,
+   health, and receipt logic into modules while preserving the current
+   41-test behavioral contract.
+3. Split the large Offdesk CLI into command handling and typed workflow
+   transition modules.
+4. Any allowlisted shell/git remote action is a separate security decision:
+   off by default, fixed allowlist, never free-form.
 
 ## Refresh Rule
 

@@ -669,13 +669,37 @@ scripts/offdesk_remote_operator_telegram.py \
 
 The adapter accepts plain Telegram text as read-only chat. Structured surfaces
 are explicit slash commands: `/status`, `/pending`, `/plans`, `/show <plan-id>`,
-`/feedback`, `/remember`, `/plan`, and `/help`, plus the bounded plan-session
-buttons described below. Unsupported commands such as `/approve`, `/launch`,
-`/exec`, or `/git push` return an unsupported result and do not call
-mutation-capable local surfaces. Without `--once`, live polling stays attached
-and keeps reading Telegram updates. `--once` is for one-shot probes, and
-`--max-polls` is available for bounded smoke tests. `--send-command-text` sends
-one read-only projection to the configured owner chat without consuming updates.
+`/feedback`, `/remember`, `/plan`, `/decisions`, `/decision`, `/confirm`,
+`/cancel`, and `/help`, plus the bounded plan-session buttons described below.
+Unsupported commands such as `/approve`, `/launch`, `/exec`, or `/git push`
+return an unsupported result and do not call mutation-capable local surfaces.
+Without `--once`, live polling stays attached and keeps reading Telegram
+updates. `--once` is for one-shot probes, and `--max-polls` is available for
+bounded smoke tests. `--send-command-text` sends one read-only projection to
+the configured owner chat without consuming updates.
+
+## Guarded remote decision execution
+
+`/decisions` lists open decision records and the bounded action kinds
+available for each (for example `revise` or `block`). `/decision <decision-id>
+<action> [note]` does not execute anything: it exports a fresh operator-safe
+`workstation_surface.v1`, rebuilds the executable action envelope from that
+surface, and returns a confirmation card carrying a single-use token bound to
+the decision id, action kind, and observed hash, with a TTL
+(`--dispatch-confirm-ttl-sec`, default 300s).
+
+`/confirm <token>` is the only step that applies a decision. It re-exports the
+surface, rejects the request if the decision's observed hash changed since the
+token was issued, then runs the existing receipt-gated executor chain
+(`action-envelope` -> `action-preflight` -> `action-decision` ->
+`action-closeout`). The CLI independently re-validates the observed hash,
+nonce, and expiry, so a stale envelope is rejected with a receipt rather than a
+mutation. `/cancel` clears a pending confirmation.
+
+This surface never executes arbitrary shell text, never records accepted truth,
+and only orchestrates commands the CLI already exposes. It drives the same
+receipt-gated executors as the local Web decision action center, so the two
+surfaces share one safety model.
 
 Telegram messages should stay short enough for mobile scanning: a compact
 title, the current state, and the next local-safe action. Longer listener
