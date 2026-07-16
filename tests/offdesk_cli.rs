@@ -10749,14 +10749,11 @@ fn generic_prepare_offdesk_workload_writes_reviewed_launch_packet() -> Result<()
         manifest["review_contract"]["schema"],
         "forager_workload_review_contract.v1"
     );
-    assert_eq!(
-        manifest["artifacts"]["review_artifact"]
-            .as_str()
-            .map(PathBuf::from)
-            .filter(|path| path.exists())
-            .is_some(),
-        true
-    );
+    assert!(manifest["artifacts"]["review_artifact"]
+        .as_str()
+        .map(PathBuf::from)
+        .filter(|path| path.exists())
+        .is_some());
     let launch = fs::read_to_string(&launch_path)?;
     let validation = fs::read_to_string(&validation_path)?;
     let manifest_text = fs::read_to_string(&manifest_path)?;
