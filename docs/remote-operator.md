@@ -667,28 +667,33 @@ scripts/offdesk_remote_operator_telegram.py \
   --forager-bin target/debug/forager
 ```
 
-The adapter accepts `/status`, `/pending`, `/plans`, `/show <plan-id>`,
-`/help`, freeform planning text, and the bounded plan-session buttons described
-below. Unsupported commands such as `/approve`, `/launch`, `/exec`, or
-`/git push` return an unsupported result and do not call mutation-capable local
-surfaces. Without `--once`, live polling stays attached and keeps reading
-Telegram updates. `--once` is for one-shot probes, and `--max-polls` is
-available for bounded smoke tests. `--send-command-text` sends one read-only
-projection to the configured owner chat without consuming updates.
+The adapter accepts plain Telegram text as read-only chat. Structured surfaces
+are explicit slash commands: `/status`, `/pending`, `/plans`, `/show <plan-id>`,
+`/feedback`, `/remember`, `/plan`, and `/help`, plus the bounded plan-session
+buttons described below. Unsupported commands such as `/approve`, `/launch`,
+`/exec`, or `/git push` return an unsupported result and do not call
+mutation-capable local surfaces. Without `--once`, live polling stays attached
+and keeps reading Telegram updates. `--once` is for one-shot probes, and
+`--max-polls` is available for bounded smoke tests. `--send-command-text` sends
+one read-only projection to the configured owner chat without consuming updates.
 
 Telegram messages should stay short enough for mobile scanning: a compact
 title, the current state, and the next local-safe action. Longer listener
 diagnostics belong in local health output, not in the chat message.
 
-Freeform Telegram text can be captured as either feedback or a planning
-request. Planning requests are intentionally not executed from Telegram. They
-are promoted into the decision inbox as `telegram_operator_plan_request` with
-an explicit note that no autonomous work has started, then the listener opens a
-short project-selection session. The operator can tap a candidate button or
-type a project number/name directly. If the typed project is not in the
-candidate list, the listener stores it as a manual project hint for later path
-confirmation. This only selects the Plan Mode target; launch, approval, shell,
-and git mutation remain unavailable from Telegram.
+Plain Telegram text is chat, not feedback capture and not a planning request.
+Use `/feedback <text>` to record an operator note in the decision inbox, and
+use `/plan <request>` to create a planning-request decision with an explicit
+note that no autonomous work has started. `/remember <text>` records an
+adaptive wiki candidate under the active profile; it is not promoted knowledge
+and cannot affect runtime behavior until local wiki review promotes it.
+
+Planning requests open a short project-selection session. The operator can tap
+a candidate button or type a project number/name directly. If the typed project
+is not in the candidate list, the listener stores it as a manual project hint
+for later path confirmation. This only selects the Plan Mode target; launch,
+approval, shell, wiki promotion, and git mutation remain unavailable from
+Telegram.
 
 After a project is selected, the listener keeps the session active and offers
 `초기화 검토`, `다시 선택`, and `보류`. `초기화 검토` writes a

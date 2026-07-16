@@ -155,14 +155,23 @@ out of product-facing docs. The product direction is defined in
   never executes the fallback or records accepted truth.
 - Large Offdesk and Telegram adapter modules need staged decomposition before
   adding more mutation-capable remote actions.
+- The 2026-06-26 refactor baseline is captured in
+  `docs/refactor-baseline-20260626.md`. Until the first decomposition cycle is
+  complete, new mutation-capable remote actions are frozen. Bug fixes, routing
+  safety fixes, tests, documentation, and pure extraction refactors remain in
+  scope.
 
 ## Next Work Candidates
 
-1. Add the next guarded executor stage for accepted-truth recovery only if it
-   starts from a current `accepted_truth_recovery_action_receipt.v1` and keeps
-   accepted-truth recording as a separate explicit closeout receipt step.
-2. Split the large Offdesk CLI and Telegram adapter into smaller modules before
-   adding more mutation-capable remote actions.
+1. Split the Telegram Remote Operator adapter into transport, input routing,
+   rendering, persistence, and remote-plan workflow modules while preserving
+   the current 38-test behavioral contract.
+2. Split the large Offdesk CLI into command handling and typed workflow
+   transition modules before adding more mutation-capable remote actions.
+3. Add the next guarded executor stage for accepted-truth recovery only after
+   the decomposition freeze is lifted. It must start from a current
+   `accepted_truth_recovery_action_receipt.v1` and keep accepted-truth
+   recording as a separate explicit closeout receipt step.
 
 ## Refresh Rule
 

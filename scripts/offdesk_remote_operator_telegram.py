@@ -14,7 +14,6 @@ import argparse
 import datetime as dt
 import hashlib
 import html
-import http.client
 import json
 import os
 import pathlib
@@ -23,19 +22,74 @@ import shlex
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from typing import Any
 
-from offdesk_llm_endpoint import (
-    DEFAULT_CODING_MODEL_CANDIDATES,
-    LlmProviderError,
-    call_ollama_json,
-    default_ollama_base_urls,
-    provider_status,
-    resolve_provider_config,
-    select_provider_runtime as select_llm_provider_runtime,
+from telegram_operator.agent import (
+    DEFAULT_AGENT_CONFIG_FILE,
+    agent_runtime_status as resolve_agent_runtime_status,
+    chat_with_agent,
+    classify_feedback_kind,
+    classify_feedback_with_agent,
 )
+from telegram_operator.common import (
+    RemoteOperatorTelegramError,
+    append_jsonl,
+    load_json,
+    sha256_short,
+    utc_now,
+    unique_nonempty,
+    write_json,
+)
+from telegram_operator.config import resolve_telegram_config
+from telegram_operator.persistence import (
+    last_context_for_chat_hash,
+    load_state,
+    remember_context_for_chat_hash,
+    save_state,
+)
+from telegram_operator.project_candidates import (
+    PROJECT_CANDIDATE_SCHEMA,
+    build_project_candidate,
+    discover_project_paths,
+    display_project_readiness,
+    display_project_risk,
+    is_git_repo,
+    project_marker_names,
+    public_project_candidate,
+    ranked_project_candidates,
+    request_tokens,
+    scan_project_candidates,
+    slugify_project_key,
+    truncate_label,
+    workspace_roots,
+)
+from telegram_operator.rendering import (
+    MOBILE_CARD_MAX_LINES,
+    REMOTE_PLAN_INIT_CONTEXT_KIND,
+    REMOTE_PLAN_SESSION_CONTEXT_KIND,
+    choice_keyboard,
+    choice_surface_contract,
+    display_action,
+    display_review_status,
+    help_message,
+    mobile_card_contract,
+    number,
+    profile_label_from_projection,
+    projection_payload,
+    render_chat_message,
+    render_feedback_message,
+    render_wiki_candidate_message,
+    render_projection_message,
+    sanitize_text,
+    status_summary,
+    title_with_profile,
+)
+from telegram_operator.routing import (
+    parse_remote_command,
+    remote_plan_session_command_payload,
+)
+from telegram_operator.transport import get_updates, send_message
+from telegram_operator.wiki import record_remember_candidate
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -75,22 +129,11 @@ DEFAULT_LOOP_STATUS_FILE = pathlib.Path(
         str(pathlib.Path.home() / ".cache" / "forager" / "remote_operator_telegram_loop.json"),
     )
 )
-DEFAULT_AGENT_CONFIG_FILE = pathlib.Path(
-    os.environ.get(
-        "OFFDESK_REMOTE_OPERATOR_AGENT_CONFIG",
-        str(pathlib.Path(os.environ.get("XDG_CONFIG_HOME", pathlib.Path.home() / ".config")) / "forager" / "config.toml"),
-    )
-)
-
 RESULT_SCHEMA = "remote_operator_telegram_adapter_result.v1"
-MOBILE_CARD_CONTRACT_SCHEMA = "telegram_mobile_card_contract.v1"
-CHOICE_SURFACE_CONTRACT_SCHEMA = "telegram_choice_surface_contract.v1"
 INTERACTION_CONTEXT_SCHEMA = "telegram_interaction_context.v1"
 HEALTH_SCHEMA = "remote_operator_telegram_health.v1"
 ACTION_READINESS_SCHEMA = "telegram_action_readiness.v1"
-AGENT_INTENT_SCHEMA = "telegram_agent_intent.v1"
 REMOTE_PLAN_SESSION_SCHEMA = "telegram_remote_plan_session.v1"
-PROJECT_CANDIDATE_SCHEMA = "telegram_remote_project_candidate.v1"
 PROJECT_INIT_PREVIEW_SCHEMA = "telegram_remote_project_init_preview.v1"
 PROJECT_INIT_RUN_SCHEMA = "telegram_remote_project_init_run.v1"
 PLAN_DRAFT_SCHEMA = "telegram_remote_plan_draft.v1"
@@ -108,9 +151,6 @@ PLAN_RUNTIME_MONITOR_SCHEMA = "telegram_remote_plan_runtime_monitor.v1"
 PLAN_CLOSEOUT_PACKET_SCHEMA = "telegram_remote_plan_closeout_packet.v1"
 PLAN_CLOSEOUT_REVIEW_HANDOFF_SCHEMA = "telegram_remote_plan_closeout_review_handoff.v1"
 PLAN_CLOSEOUT_VERDICT_SCHEMA = "telegram_remote_plan_closeout_verdict.v1"
-REMOTE_PLAN_SESSION_CONTEXT_KIND = "remote_plan_project_selection"
-REMOTE_PLAN_INIT_CONTEXT_KIND = "remote_plan_init_review"
-MOBILE_CARD_MAX_LINES = 5
 PLAN_DRAFT_AUTHORITY_DENIALS = [
     "enqueue",
     "launch",
@@ -121,34 +161,6 @@ PLAN_DRAFT_AUTHORITY_DENIALS = [
     "wiki promotion",
     "accepted truth",
 ]
-MOBILE_CARD_MAX_CHARS = 360
-DEFAULT_AGENT_BASE_URLS = (
-    *default_ollama_base_urls(),
-)
-DEFAULT_AGENT_MODEL_CANDIDATES = DEFAULT_CODING_MODEL_CANDIDATES
-MOBILE_CARD_FORBIDDEN_TERMS = (
-    "Forager Remote Status",
-    "Read-only",
-    "상태:",
-    "다음:",
-    "맥락:",
-    "기준 ",
-    "검증:",
-    "sha256:",
-    "dispatch",
-    "shell",
-    "launch-prep",
-    "runtime_handle_alive",
-)
-BUTTON_COMMAND_ALIASES = {
-    "상태": "/status",
-    "승인 대기": "/pending",
-    "전체 승인": "/pending --all",
-    "계획": "/plans --latest",
-    "도움말": "/help",
-}
-CORE_BUTTON_LABELS = ("상태", "승인 대기", "계획", "도움말")
-ALLOWED_COMMANDS = ("status", "pending", "plans", "show", "help", "feedback")
 FORBIDDEN_REMOTE_INTENTS = (
     "approve_plan",
     "approve_launch",
@@ -161,14 +173,6 @@ FORBIDDEN_REMOTE_INTENTS = (
     "delete",
     "provider_retarget",
 )
-
-
-class RemoteOperatorTelegramError(RuntimeError):
-    pass
-
-
-def utc_now() -> str:
-    return dt.datetime.now(dt.timezone.utc).isoformat()
 
 
 def parse_args() -> argparse.Namespace:
@@ -197,6 +201,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--once", action="store_true", help="Poll Telegram once and answer at most one update.")
     parser.add_argument("--health", action="store_true", help="Report local Telegram listener health and exit.")
     parser.add_argument("--health-max-age-sec", type=int, default=120)
+    parser.add_argument(
+        "--context-max-age-sec",
+        type=int,
+        default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_CONTEXT_MAX_AGE_SEC", "86400")),
+        help="Maximum age for remembered Telegram card context; negative disables expiry.",
+    )
     parser.add_argument(
         "--agent-intent-mode",
         choices=("auto", "off", "required"),
@@ -289,256 +299,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--poll-error-backoff-sec", type=int, default=5)
     parser.add_argument("--max-message-chars", type=int, default=3500)
     return parser.parse_args()
-
-
-def write_json(path: pathlib.Path, value: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-
-def append_jsonl(path: pathlib.Path, value: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n")
-
-
-def load_json(path: pathlib.Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def parse_env_file(path: pathlib.Path, *, required: bool) -> dict[str, str]:
-    if not path.exists():
-        if required:
-            raise RemoteOperatorTelegramError(f"telegram env file not found: {path}")
-        return {}
-    values: dict[str, str] = {}
-    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("export "):
-            line = line[len("export ") :].strip()
-        if "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key:
-            values[key] = value
-    return values
-
-
-def csv_values(raw: str) -> list[str]:
-    return [item.strip() for item in str(raw or "").split(",") if item.strip()]
-
-
-def unique_nonempty(values: list[Any]) -> list[str]:
-    seen: set[str] = set()
-    result: list[str] = []
-    for value in values:
-        text = str(value or "").strip()
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        result.append(text)
-    return result
-
-
-def arg_was_provided(flag: str) -> bool:
-    return any(raw == flag or raw.startswith(flag + "=") for raw in sys.argv[1:])
-
-
-def resolve_agent_config(args: argparse.Namespace) -> dict[str, Any]:
-    try:
-        return resolve_provider_config(
-            config_file=args.agent_config_file,
-            section_paths=(
-                ("offdesk", "remote_operator", "agent"),
-                ("remote_operator", "agent"),
-                ("remote_operator", "telegram", "agent"),
-                ("offdesk", "llm", "provider"),
-                ("llm", "provider"),
-            ),
-            mode=str(args.agent_intent_mode or "auto"),
-            mode_explicit=arg_was_provided("--agent-intent-mode"),
-            provider=args.agent_provider,
-            provider_explicit=arg_was_provided("--agent-provider"),
-            base_urls=args.agent_base_url,
-            models=args.agent_model,
-            model_candidates=csv_values(args.agent_model_candidates)
-            + list(DEFAULT_AGENT_MODEL_CANDIDATES),
-            timeout_sec=int(args.agent_timeout_sec),
-            timeout_explicit=arg_was_provided("--agent-timeout-sec"),
-            num_ctx=int(args.agent_num_ctx),
-            num_ctx_explicit=arg_was_provided("--agent-num-ctx"),
-            num_predict=int(args.agent_num_predict),
-            num_predict_explicit=arg_was_provided("--agent-num-predict"),
-            env_mode_key="OFFDESK_REMOTE_OPERATOR_AGENT_INTENT_MODE",
-            env_provider_key="OFFDESK_REMOTE_OPERATOR_AGENT_PROVIDER",
-            env_base_url_keys=(
-                "OFFDESK_REMOTE_OPERATOR_AGENT_BASE_URL",
-                "OFFDESK_LLM_BASE_URL",
-                "OLLAMA_BASE_URL",
-            ),
-            env_model_keys=(
-                "OFFDESK_REMOTE_OPERATOR_AGENT_MODELS",
-                "OFFDESK_LLM_MODELS",
-                "OFFDESK_OLLAMA_MODEL",
-                "OFFDESK_LLM_MODEL",
-            ),
-            env_timeout_key="OFFDESK_REMOTE_OPERATOR_AGENT_TIMEOUT_SEC",
-            env_num_ctx_key="OFFDESK_REMOTE_OPERATOR_AGENT_NUM_CTX",
-            env_num_predict_key="OFFDESK_REMOTE_OPERATOR_AGENT_NUM_PREDICT",
-            default_provider="ollama",
-            default_base_urls=list(DEFAULT_AGENT_BASE_URLS),
-            default_models=list(DEFAULT_AGENT_MODEL_CANDIDATES),
-        )
-    except LlmProviderError as error:
-        raise RemoteOperatorTelegramError(str(error)) from error
-
-
-def select_agent_runtime(agent_config: dict[str, Any]) -> dict[str, Any] | None:
-    try:
-        return select_llm_provider_runtime(agent_config)
-    except LlmProviderError as error:
-        raise RemoteOperatorTelegramError(str(error)) from error
-
-
-def build_agent_intent_prompt(
-    *,
-    feedback_text: str,
-    deterministic_feedback_kind: str,
-    feedback_context: dict[str, Any] | None,
-) -> str:
-    context = feedback_context if isinstance(feedback_context, dict) else {}
-    payload = {
-        "telegram_text": sanitize_text(feedback_text, max_chars=1200),
-        "deterministic_hint": deterministic_feedback_kind,
-        "last_interaction_context": context,
-    }
-    return "\n".join(
-        [
-            "You are the Telegram intent classifier for a generic Offdesk remote operator harness.",
-            "Classify the operator's freeform Telegram message. You are not allowed to approve, launch, dispatch, run shell commands, mutate files, resolve approvals, or retarget providers.",
-            "Return exactly one JSON object. Do not include markdown.",
-            "Allowed intent values: feedback, plan_request, execution_request, approval_attempt, unsafe_mutation, clarification, unknown.",
-            "Use feedback_kind=planning_request only when the text should become a Plan Mode candidate. Otherwise use feedback_kind=freeform_feedback.",
-            "If execution is requested, classify intent as execution_request but do not imply authorization.",
-            "When you set requires_clarification=true, write clarifying_question in the same language as telegram_text and keep it short enough for a mobile chat card.",
-            "JSON schema:",
-            json.dumps(
-                {
-                    "intent": "feedback",
-                    "feedback_kind": "freeform_feedback",
-                    "confidence": 0.0,
-                    "project_hint": None,
-                    "goal": None,
-                    "timebox": None,
-                    "requires_clarification": False,
-                    "clarifying_question": None,
-                    "reason": "short reason",
-                    "non_authorized": [
-                        "execution",
-                        "approval",
-                        "shell",
-                        "git mutation",
-                    ],
-                },
-                ensure_ascii=False,
-            ),
-            "Input:",
-            json.dumps(payload, ensure_ascii=False, sort_keys=True),
-        ]
-    )
-
-
-def call_ollama_intent_agent(runtime: dict[str, Any], prompt: str) -> dict[str, Any]:
-    return call_ollama_json(runtime, prompt, temperature=0.1)
-
-
-def clamp_float(value: Any, default: float = 0.0) -> float:
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        parsed = default
-    return max(0.0, min(1.0, parsed))
-
-
-def short_optional_text(value: Any, max_chars: int = 240) -> str | None:
-    text = sanitize_text(str(value or "").strip(), max_chars=max_chars)
-    return text or None
-
-
-def normalize_agent_intent(
-    parsed: dict[str, Any],
-    *,
-    runtime: dict[str, Any],
-    deterministic_feedback_kind: str,
-) -> dict[str, Any]:
-    allowed_intents = {
-        "feedback",
-        "plan_request",
-        "execution_request",
-        "approval_attempt",
-        "unsafe_mutation",
-        "clarification",
-        "unknown",
-    }
-    intent = str(parsed.get("intent") or "").strip().lower()
-    if intent not in allowed_intents:
-        intent = "unknown"
-    requested_kind = str(parsed.get("feedback_kind") or "").strip()
-    if requested_kind not in {"freeform_feedback", "planning_request"}:
-        requested_kind = (
-            "planning_request"
-            if intent in {"plan_request", "execution_request"}
-            else deterministic_feedback_kind
-        )
-    non_authorized = unique_nonempty(
-        list(parsed.get("non_authorized") if isinstance(parsed.get("non_authorized"), list) else [])
-        + ["execution", "approval", "shell", "git mutation"]
-    )
-    return {
-        "schema": AGENT_INTENT_SCHEMA,
-        "status": "classified",
-        "source": "ollama",
-        "provider": runtime.get("provider"),
-        "base_url": runtime.get("base_url"),
-        "model": runtime.get("model"),
-        "intent": intent,
-        "feedback_kind": requested_kind,
-        "confidence": clamp_float(parsed.get("confidence")),
-        "project_hint": short_optional_text(parsed.get("project_hint"), max_chars=120),
-        "goal": short_optional_text(parsed.get("goal"), max_chars=240),
-        "timebox": short_optional_text(parsed.get("timebox"), max_chars=120),
-        "requires_clarification": bool(parsed.get("requires_clarification")),
-        "clarifying_question": short_optional_text(parsed.get("clarifying_question"), max_chars=240),
-        "reason": short_optional_text(parsed.get("reason"), max_chars=240),
-        "non_authorized": non_authorized,
-        "config_sources": list(runtime.get("config_sources") or []),
-    }
-
-
-def fallback_agent_intent(
-    *,
-    reason: str,
-    deterministic_feedback_kind: str,
-    agent_config: dict[str, Any],
-) -> dict[str, Any]:
-    return {
-        "schema": AGENT_INTENT_SCHEMA,
-        "status": "fallback",
-        "source": "deterministic",
-        "reason": sanitize_text(reason, max_chars=240),
-        "intent": "plan_request"
-        if deterministic_feedback_kind == "planning_request"
-        else "feedback",
-        "feedback_kind": deterministic_feedback_kind,
-        "confidence": 0.25,
-        "provider": agent_config.get("provider"),
-        "configured_models": list(agent_config.get("models") or [])[:4],
-        "non_authorized": ["execution", "approval", "shell", "git mutation"],
-    }
 
 
 def action_readiness(
@@ -666,50 +426,6 @@ def health_action_readiness(
     return [status_readiness, project_scan_readiness, build_plan, start_offdesk]
 
 
-def classify_feedback_with_agent(
-    args: argparse.Namespace,
-    feedback_text: str,
-    *,
-    feedback_context: dict[str, Any] | None = None,
-) -> dict[str, Any] | None:
-    deterministic_feedback_kind = classify_feedback_kind(feedback_text)
-    agent_config = resolve_agent_config(args)
-    if agent_config.get("mode") == "off":
-        return None
-    runtime = select_agent_runtime(agent_config)
-    if not runtime:
-        return fallback_agent_intent(
-            reason="local_agent_unavailable",
-            deterministic_feedback_kind=deterministic_feedback_kind,
-            agent_config=agent_config,
-        )
-    prompt = build_agent_intent_prompt(
-        feedback_text=feedback_text,
-        deterministic_feedback_kind=deterministic_feedback_kind,
-        feedback_context=feedback_context,
-    )
-    try:
-        parsed = call_ollama_intent_agent(runtime, prompt)
-    except (OSError, TimeoutError, urllib.error.URLError, json.JSONDecodeError, ValueError) as error:
-        if agent_config.get("mode") == "required":
-            raise RemoteOperatorTelegramError(f"local agent intent classification failed: {error}") from error
-        return fallback_agent_intent(
-            reason=f"local_agent_failed:{type(error).__name__}",
-            deterministic_feedback_kind=deterministic_feedback_kind,
-            agent_config=agent_config,
-        )
-    return normalize_agent_intent(
-        parsed,
-        runtime=runtime,
-        deterministic_feedback_kind=deterministic_feedback_kind,
-    )
-
-
-def sha256_short(value: str) -> str:
-    digest = hashlib.sha256(str(value).encode("utf-8")).hexdigest()
-    return f"sha256:{digest[:16]}"
-
-
 def sha256_hex(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
@@ -735,158 +451,6 @@ def ensure_cli_option(argv: list[str], flag: str, value: str) -> list[str]:
     else:
         output.extend([flag, value])
     return output
-
-
-def resolve_telegram_config(env_file: pathlib.Path, *, required: bool) -> dict[str, Any]:
-    env = parse_env_file(env_file, required=required)
-    token = env.get("TELEGRAM_BOT_TOKEN", "").strip()
-    owner_chat_id = env.get("TELEGRAM_OWNER_CHAT_ID", "").strip()
-    allowed_chat_ids = set(csv_values(env.get("TELEGRAM_ALLOW_CHAT_IDS", "")))
-    allowed_chat_ids.update(csv_values(env.get("TELEGRAM_ALLOWED_CHAT_IDS", "")))
-    if owner_chat_id:
-        allowed_chat_ids.add(owner_chat_id)
-    owner_user_id = env.get("TELEGRAM_OWNER_USER_ID", "").strip()
-    allowed_user_ids = set(csv_values(env.get("TELEGRAM_ALLOW_USER_IDS", "")))
-    allowed_user_ids.update(csv_values(env.get("TELEGRAM_ALLOWED_USER_IDS", "")))
-    if owner_user_id:
-        allowed_user_ids.add(owner_user_id)
-    target_chat_id = owner_chat_id or next(iter(sorted(allowed_chat_ids)), "")
-    if required and not token:
-        raise RemoteOperatorTelegramError("TELEGRAM_BOT_TOKEN is missing")
-    if required and not allowed_chat_ids:
-        raise RemoteOperatorTelegramError(
-            "TELEGRAM_OWNER_CHAT_ID or TELEGRAM_ALLOW_CHAT_IDS is required"
-        )
-    return {
-        "token": token,
-        "target_chat_id": target_chat_id,
-        "target_chat_id_hash": sha256_short(target_chat_id) if target_chat_id else None,
-        "allowed_chat_ids": allowed_chat_ids,
-        "allowed_user_ids": allowed_user_ids,
-        "chat_allowlist_configured": bool(allowed_chat_ids),
-        "user_allowlist_configured": bool(allowed_user_ids),
-        "env_file": str(env_file),
-    }
-
-
-def normalize_command_name(raw: str) -> str:
-    text = raw.strip()
-    if text.startswith("/"):
-        text = text[1:]
-    if "@" in text:
-        text = text.split("@", 1)[0]
-    return text.strip().lower().replace("-", "_")
-
-
-def parse_remote_command(command_text: str) -> dict[str, Any]:
-    text = str(command_text or "").strip()
-    if not text:
-        return unsupported_command(text, "empty_command")
-    original_text = text
-    alias = BUTTON_COMMAND_ALIASES.get(text)
-    if alias:
-        text = alias
-    if not text.startswith("/"):
-        feedback_kind = classify_feedback_kind(original_text)
-        return {
-            "supported": True,
-            "command": "feedback",
-            "argv": [],
-            "reason": feedback_kind,
-            "command_text": original_text,
-            "feedback_text": original_text,
-            "feedback_kind": feedback_kind,
-        }
-    try:
-        tokens = shlex.split(text)
-    except ValueError as error:
-        return unsupported_command(original_text, f"parse_error:{error}")
-    if not tokens:
-        return unsupported_command(original_text, "empty_command")
-
-    command = normalize_command_name(tokens[0])
-    args = tokens[1:]
-    if command in {"start", "help"}:
-        return {"supported": True, "command": "help", "argv": [], "reason": "help"}
-    if command == "status":
-        if args:
-            return unsupported_command(original_text, "status_accepts_no_arguments")
-        return {"supported": True, "command": "status", "argv": ["status"]}
-    if command == "pending":
-        argv = ["pending"]
-        for arg in args:
-            if arg == "--all":
-                argv.append("--all")
-            else:
-                return unsupported_command(original_text, f"unsupported_pending_argument:{arg}")
-        return {"supported": True, "command": "pending", "argv": argv}
-    if command == "plans":
-        return parse_plans_command(original_text, args)
-    if command == "show":
-        return parse_show_command(original_text, args)
-    return unsupported_command(original_text, "unsupported_remote_operator_command")
-
-
-def parse_plans_command(command_text: str, args: list[str]) -> dict[str, Any]:
-    argv = ["plans"]
-    index = 0
-    value_flags = {"--project-key", "--task-id", "--profile-key", "--artifact-kind"}
-    while index < len(args):
-        arg = args[index]
-        if arg == "--latest":
-            argv.append(arg)
-            index += 1
-            continue
-        if arg in value_flags:
-            if index + 1 >= len(args):
-                return unsupported_command(command_text, f"missing_value:{arg}")
-            value = args[index + 1].strip()
-            if not value:
-                return unsupported_command(command_text, f"empty_value:{arg}")
-            argv.extend([arg, value])
-            index += 2
-            continue
-        return unsupported_command(command_text, f"unsupported_plans_argument:{arg}")
-    return {"supported": True, "command": "plans", "argv": argv}
-
-
-def parse_show_command(command_text: str, args: list[str]) -> dict[str, Any]:
-    if len(args) != 1 or not args[0].strip():
-        return unsupported_command(command_text, "show_requires_one_plan_ref")
-    return {"supported": True, "command": "show", "argv": ["show", args[0].strip()]}
-
-
-def classify_feedback_kind(text: str) -> str:
-    normalized = str(text or "").strip().lower()
-    planning_markers = (
-        "자율주행",
-        "야간주행",
-        "야간 주행",
-        "밤샘",
-        "overnight",
-        "night run",
-        "계획",
-        "plan",
-        "offdesk",
-        "진행",
-        "처리",
-        "검토해볼까",
-        "시작",
-        "맡기",
-    )
-    if any(marker in normalized for marker in planning_markers):
-        return "planning_request"
-    return "freeform_feedback"
-
-
-def unsupported_command(command_text: str, reason: str) -> dict[str, Any]:
-    return {
-        "supported": False,
-        "command": None,
-        "argv": [],
-        "reason": reason,
-        "command_text": command_text,
-    }
 
 
 def projection_command(forager_bin: str, profile: str, parsed: dict[str, Any]) -> list[str]:
@@ -1026,318 +590,6 @@ def validate_projection(projection: dict[str, Any], *, expected_command: Any = N
         )
 
 
-def sanitize_text(text: str, *, max_chars: int = 1200) -> str:
-    safe = str(text or "")
-    safe = re.sub(r"bot[0-9]+:[A-Za-z0-9_-]+", "bot<redacted>", safe)
-    safe = re.sub(r"(?i)(telegram_bot_token|bot_token|token)=\S+", r"\1=<redacted>", safe)
-    safe = re.sub(r"sk-[A-Za-z0-9_-]{12,}", "sk-<redacted>", safe)
-    if len(safe) > max_chars:
-        safe = safe[:max_chars] + "...<truncated>"
-    return safe
-
-
-def profile_label_from_projection(projection: dict[str, Any]) -> str:
-    payload = projection_payload(projection)
-    value = payload.get("profile") or projection.get("forager_profile") or "default"
-    return sanitize_text(str(value), max_chars=80)
-
-
-def title_with_profile(title: str, profile: Any) -> str:
-    safe_profile = str(profile or "default").strip()
-    if safe_profile and safe_profile != "default":
-        return f"<b>{html.escape(str(title))}</b> · <code>{html.escape(safe_profile)}</code>"
-    return f"<b>{html.escape(str(title))}</b>"
-
-
-def render_projection_message(
-    projection: dict[str, Any],
-    *,
-    max_chars: int,
-    adapter_health: dict[str, Any] | None = None,
-) -> str:
-    command = str(projection.get("command") or "").strip()
-    if command == "status":
-        message = render_status_message(projection, adapter_health=adapter_health)
-    elif command == "pending":
-        message = render_pending_message(projection)
-    elif command == "plans":
-        message = render_plans_message(projection)
-    elif command == "show":
-        message = render_show_message(projection)
-    else:
-        message = render_generic_projection_message(projection)
-    if len(message) > max_chars:
-        return message[: max(0, max_chars - 20)] + "\n...<truncated>"
-    return message
-
-
-def render_status_message(
-    projection: dict[str, Any],
-    *,
-    adapter_health: dict[str, Any] | None = None,
-) -> str:
-    payload = projection_payload(projection)
-    profile = profile_label_from_projection(projection)
-    lines = [
-        title_with_profile("Forager 점검", profile),
-        status_headline(payload),
-    ]
-    summary = status_summary(payload, primary_status_kind(payload))
-    if summary:
-        lines.append(summary)
-    adapter_line = adapter_status_line(adapter_health)
-    if adapter_line:
-        lines.append(adapter_line)
-    lines.append(status_next_action(payload))
-    return "\n".join(lines)
-
-
-def readiness_for_action(adapter_health: dict[str, Any] | None, action: str) -> dict[str, Any] | None:
-    if not isinstance(adapter_health, dict):
-        return None
-    readiness = adapter_health.get("action_readiness")
-    if not isinstance(readiness, list):
-        return None
-    for item in readiness:
-        if isinstance(item, dict) and str(item.get("action") or "") == action:
-            return item
-    return None
-
-
-def adapter_status_line(adapter_health: dict[str, Any] | None) -> str:
-    if not isinstance(adapter_health, dict):
-        return ""
-    health_status = str(adapter_health.get("health_status") or "").strip()
-    build_plan = readiness_for_action(adapter_health, "build_plan") or {}
-    build_plan_status = str(build_plan.get("status") or "").strip()
-    if health_status == "healthy" and build_plan_status == "healthy":
-        return "원격 정상 · 계획 준비 가능"
-    if health_status == "degraded" or build_plan_status == "blocked":
-        return "부분 장애: 새 계획/야간주행 막힘"
-    if health_status == "unhealthy":
-        return "원격 수신 장애: 로컬 CLI 확인"
-    return ""
-
-
-def render_pending_message(projection: dict[str, Any]) -> str:
-    payload = projection_payload(projection)
-    profile = profile_label_from_projection(projection)
-    approvals = payload.get("approvals") if isinstance(payload.get("approvals"), list) else []
-    lines = [
-        title_with_profile("승인 대기", profile),
-    ]
-    if approvals:
-        expired_count = sum(1 for item in approvals if isinstance(item, dict) and item.get("expired"))
-        expired_suffix = f" 만료 {expired_count}개 포함." if expired_count else ""
-        lines.append(
-            f"승인 요청 {number(payload, 'approval_count')}개가 기다립니다.{expired_suffix}"
-        )
-    else:
-        lines.append("승인할 항목이 없습니다.")
-    action_labels: list[str] = []
-    for approval in approvals[:2]:
-        if not isinstance(approval, dict):
-            continue
-        expired = " 만료" if approval.get("expired") else ""
-        action_labels.append(html.escape(display_action(approval.get("action"))) + expired)
-    if action_labels:
-        lines.append(" · ".join(action_labels))
-    if len(approvals) > 2:
-        lines.append(f"외 {len(approvals) - 2}개 더 있음")
-    next_line = (
-        "승인은 로컬에서 판단하세요."
-        if approvals
-        else "새 승인 요청이 오면 다시 확인하세요."
-    )
-    lines.append(next_line)
-    return "\n".join(lines)
-
-
-def render_plans_message(projection: dict[str, Any]) -> str:
-    payload = projection_payload(projection)
-    profile = profile_label_from_projection(projection)
-    plans = payload.get("plans") if isinstance(payload.get("plans"), list) else []
-    lines = [
-        title_with_profile("자율주행 계획", profile),
-    ]
-    if plans:
-        lines.append(f"계획 {number(payload, 'plan_count')}개가 있습니다.")
-    else:
-        lines.append("등록된 계획이 없습니다.")
-    for plan in plans[:2]:
-        if not isinstance(plan, dict):
-            continue
-        lines.append(
-            html.escape(str(plan.get("plan_id") or "plan"))
-            + " · "
-            + html.escape(display_review_status(plan.get("review_status")))
-        )
-    if len(plans) > 2:
-        lines.append(f"외 {len(plans) - 2}개 더 있음")
-    next_line = (
-        "아래 버튼으로 계획 상세 보기"
-        if plans
-        else "계획을 등록한 뒤 다시 확인하세요."
-    )
-    lines.append(next_line)
-    return "\n".join(lines)
-
-
-def render_show_message(projection: dict[str, Any]) -> str:
-    payload = projection_payload(projection)
-    profile = profile_label_from_projection(projection)
-    plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else {}
-    reviews = payload.get("reviews") if isinstance(payload.get("reviews"), list) else []
-    launch_preps = payload.get("launch_preps") if isinstance(payload.get("launch_preps"), list) else []
-    lines = [
-        title_with_profile("계획 상세", profile),
-        f"계획: {html.escape(str(plan.get('plan_id') or 'unknown'))}",
-        f"리뷰: {html.escape(display_review_status(plan.get('review_status')))} / 실행 준비 {len(launch_preps)}개",
-        f"다음 조치: {html.escape(display_next_action(plan.get('next_safe_action')))}",
-    ]
-    if reviews:
-        latest = reviews[-1] if isinstance(reviews[-1], dict) else {}
-        lines.append(
-            "최근 리뷰: "
-            + html.escape(str(latest.get("decision") or "unknown"))
-            + " by "
-            + html.escape(str(latest.get("reviewer") or "operator"))
-        )
-    return "\n".join(lines)
-
-
-def render_generic_projection_message(projection: dict[str, Any]) -> str:
-    card = projection.get("card") if isinstance(projection.get("card"), dict) else {}
-    title = html.escape(str(card.get("title") or "Forager"))
-    summary_lines = safe_string_list(card.get("summary_lines"))
-    lines = [
-        f"<b>{title}</b>",
-        html.escape(summary_lines[0] if summary_lines else "내용 확인"),
-    ]
-    for item in summary_lines[1:3]:
-        lines.append(html.escape(item))
-    lines.append("세부 내용은 로컬에서 확인하세요.")
-    return "\n".join(lines)
-
-
-def projection_payload(projection: dict[str, Any]) -> dict[str, Any]:
-    payload = projection.get("payload")
-    return payload if isinstance(payload, dict) else {}
-
-
-def projection_card(projection: dict[str, Any]) -> dict[str, Any]:
-    card = projection.get("card")
-    return card if isinstance(card, dict) else {}
-
-
-def number(value: dict[str, Any], key: str) -> int:
-    raw = value.get(key)
-    return int(raw) if isinstance(raw, int) else 0
-
-
-def status_headline(payload: dict[str, Any]) -> str:
-    pending = number(payload, "pending_approvals")
-    failed = number(payload, "failed_offdesk_tasks")
-    closeout = number(payload, "closeout_required_offdesk_tasks")
-    active = number(payload, "active_offdesk_tasks")
-    queued = number(payload, "queued_offdesk_tasks")
-    if pending:
-        return f"승인 요청 {pending}개가 먼저입니다."
-    if failed:
-        return f"실패한 자율주행 {failed}개를 확인해야 합니다."
-    if closeout:
-        return f"마무리 확인 {closeout}개가 남았습니다."
-    if active:
-        return f"자율주행 {active}개가 진행 중입니다."
-    if queued:
-        return f"자율주행 {queued}개가 대기 중입니다."
-    return "처리할 항목이 없습니다."
-
-
-def primary_status_kind(payload: dict[str, Any]) -> str:
-    if number(payload, "pending_approvals"):
-        return "pending"
-    if number(payload, "failed_offdesk_tasks"):
-        return "failed"
-    if number(payload, "closeout_required_offdesk_tasks"):
-        return "closeout"
-    if number(payload, "active_offdesk_tasks"):
-        return "active"
-    if number(payload, "queued_offdesk_tasks"):
-        return "queued"
-    return "none"
-
-
-def status_summary(payload: dict[str, Any], primary: str = "none") -> str:
-    pending = number(payload, "pending_approvals")
-    failed = number(payload, "failed_offdesk_tasks")
-    closeout = number(payload, "closeout_required_offdesk_tasks")
-    active = number(payload, "active_offdesk_tasks")
-    queued = number(payload, "queued_offdesk_tasks")
-    parts: list[str] = []
-    if pending and primary != "pending":
-        parts.append(f"승인 {pending}")
-    if failed and primary != "failed":
-        parts.append(f"실패 {failed}")
-    if closeout and primary != "closeout":
-        parts.append(f"마무리 {closeout}")
-    if (active or queued) and primary not in {"active", "queued"}:
-        parts.append(f"진행 {active} / 대기 {queued}")
-    return "그 밖에 " + " · ".join(parts) if parts else ""
-
-
-def status_next_action(payload: dict[str, Any]) -> str:
-    pending = number(payload, "pending_approvals")
-    failed = number(payload, "failed_offdesk_tasks")
-    closeout = number(payload, "closeout_required_offdesk_tasks")
-    if pending:
-        return "아래 버튼으로 승인 내용 보기"
-    if failed or closeout:
-        return "로컬에서 실패/마무리 항목을 점검하세요."
-    return "새 알림이 오면 다시 확인하세요."
-
-
-def display_action(value: Any) -> str:
-    text = str(value or "").strip()
-    labels = {
-        "approve_plan": "계획 승인",
-        "approve_launch": "실행 승인",
-        "deny_launch": "실행 거절",
-        "provider_fallback": "모델 대체",
-        "provider_retarget": "모델 변경",
-    }
-    return labels.get(text, text.replace("_", " ") or "확인 필요")
-
-
-def display_review_status(value: Any) -> str:
-    text = str(value or "").strip()
-    labels = {
-        "accepted": "승인됨",
-        "approved": "승인됨",
-        "pending": "검토 대기",
-        "missing": "검토 없음",
-        "not_reviewed": "검토 없음",
-        "revision_required": "수정 필요",
-        "rejected": "거절됨",
-        "review_unknown": "검토 상태 불명",
-        "unknown": "상태 불명",
-    }
-    return labels.get(text, text.replace("_", " ") or "상태 불명")
-
-
-def display_next_action(value: Any) -> str:
-    text = str(value or "").strip()
-    labels = {
-        "inspect": "내용 확인",
-        "review": "리뷰 필요",
-        "approve": "승인 검토",
-        "launch_prep": "실행 준비 확인",
-        "launch": "실행 검토",
-        "closeout": "마무리 확인",
-    }
-    return labels.get(text, text.replace("_", " ") or "내용 확인")
-
-
 def short_hash(value: Any) -> str:
     text = str(value or "").strip()
     if not text:
@@ -1345,312 +597,6 @@ def short_hash(value: Any) -> str:
     if text.startswith("sha256:") and len(text) > 22:
         return text[:22]
     return text
-
-
-def safe_string_list(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [sanitize_text(str(item), max_chars=400) for item in value if str(item).strip()]
-
-
-def truncate_label(value: Any, *, max_chars: int = 34) -> str:
-    text = sanitize_text(str(value or "").strip(), max_chars=max_chars + 20)
-    if len(text) <= max_chars:
-        return text
-    return text[: max(1, max_chars - 1)] + "…"
-
-
-def slugify_project_key(value: Any) -> str:
-    text = str(value or "").strip().lower()
-    text = re.sub(r"[^a-z0-9가-힣]+", "-", text)
-    return text.strip("-") or "project"
-
-
-def workspace_root_inputs(args: argparse.Namespace) -> list[pathlib.Path]:
-    roots: list[pathlib.Path] = []
-    for raw in args.workspace_root or []:
-        roots.append(pathlib.Path(raw))
-    for raw in csv_values(os.environ.get("OFFDESK_REMOTE_OPERATOR_WORKSPACE_ROOTS", "")):
-        roots.append(pathlib.Path(raw))
-    if roots:
-        return roots
-    for parent in REPO_ROOT.parents:
-        if parent.name == "Workspace" and parent.exists():
-            return [parent]
-    return [REPO_ROOT.parent]
-
-
-def workspace_roots(args: argparse.Namespace) -> list[pathlib.Path]:
-    roots: list[pathlib.Path] = []
-    seen: set[str] = set()
-    for raw in workspace_root_inputs(args):
-        try:
-            path = pathlib.Path(raw).expanduser().resolve()
-        except OSError:
-            path = pathlib.Path(raw).expanduser()
-        key = str(path)
-        if key in seen or not path.exists() or not path.is_dir():
-            continue
-        seen.add(key)
-        roots.append(path)
-    return roots
-
-
-PROJECT_MARKER_FILES = (
-    ".git",
-    ".forager",
-    "AGENTS.md",
-    "README.md",
-    "README_KO.md",
-    "Cargo.toml",
-    "pyproject.toml",
-    "package.json",
-    "uv.lock",
-)
-
-
-def project_marker_names(path: pathlib.Path) -> list[str]:
-    markers: list[str] = []
-    for name in PROJECT_MARKER_FILES:
-        if (path / name).exists():
-            markers.append(name)
-    return markers
-
-
-def looks_like_project_dir(path: pathlib.Path) -> bool:
-    if project_marker_names(path):
-        return True
-    try:
-        child_names = {child.name for child in path.iterdir() if child.is_dir()}
-    except OSError:
-        return False
-    return bool(child_names.intersection({"src", "scripts", "tests", "forager-cli"}))
-
-
-def discover_project_paths(roots: list[pathlib.Path], *, max_paths: int = 80) -> list[pathlib.Path]:
-    found: list[pathlib.Path] = []
-    seen: set[str] = set()
-
-    def add(path: pathlib.Path) -> None:
-        if len(found) >= max_paths:
-            return
-        try:
-            resolved = path.resolve()
-        except OSError:
-            resolved = path
-        key = str(resolved)
-        if key in seen or not path.exists() or not path.is_dir():
-            return
-        if not looks_like_project_dir(path):
-            return
-        seen.add(key)
-        found.append(path)
-
-    for root in roots:
-        add(root)
-        try:
-            children = sorted(
-                [child for child in root.iterdir() if child.is_dir() and not child.name.startswith(".")],
-                key=lambda item: item.name.lower(),
-            )
-        except OSError:
-            continue
-        for child in children:
-            add(child)
-        for child in children[:40]:
-            try:
-                nested = sorted(
-                    [
-                        grandchild
-                        for grandchild in child.iterdir()
-                        if grandchild.is_dir() and not grandchild.name.startswith(".")
-                    ],
-                    key=lambda item: item.name.lower(),
-                )
-            except OSError:
-                continue
-            for grandchild in nested:
-                if (grandchild / ".git").exists() or project_marker_names(grandchild):
-                    add(grandchild)
-    return found
-
-
-def git_output(path: pathlib.Path, args: list[str], *, timeout_sec: float = 1.5) -> str | None:
-    try:
-        process = subprocess.run(
-            ["git", "-C", str(path), *args],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=timeout_sec,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if process.returncode != 0:
-        return None
-    return process.stdout.strip()
-
-
-def is_git_repo(path: pathlib.Path) -> bool:
-    marker = path / ".git"
-    if marker.exists():
-        return True
-    return git_output(path, ["rev-parse", "--is-inside-work-tree"]) == "true"
-
-
-def request_tokens(*values: Any) -> set[str]:
-    text = " ".join(str(value or "") for value in values)
-    tokens = re.findall(r"[A-Za-z0-9가-힣]{2,}", text.lower())
-    return set(tokens)
-
-
-def relative_path_hint(path: pathlib.Path, roots: list[pathlib.Path]) -> str:
-    for root in roots:
-        try:
-            return str(path.resolve().relative_to(root.resolve()))
-        except (OSError, ValueError):
-            continue
-    return path.name
-
-
-def project_readiness(markers: list[str], git_repo: bool, dirty: bool | None) -> str:
-    if git_repo and dirty is False:
-        return "ready"
-    if git_repo:
-        return "needs_review"
-    if markers:
-        return "needs_review"
-    return "not_git"
-
-
-def project_risk(readiness: str, dirty: bool | None) -> str:
-    if readiness == "ready":
-        return "low"
-    if dirty is True:
-        return "medium"
-    return "medium" if readiness == "needs_review" else "high"
-
-
-def display_project_readiness(value: Any) -> str:
-    labels = {
-        "ready": "준비됨",
-        "needs_review": "검토 필요",
-        "not_git": "경로 확인 필요",
-    }
-    return labels.get(str(value or ""), "검토 필요")
-
-
-def display_project_risk(value: Any) -> str:
-    labels = {"low": "낮음", "medium": "중간", "high": "높음"}
-    return labels.get(str(value or ""), "중간")
-
-
-def build_project_candidate(
-    path: pathlib.Path,
-    *,
-    roots: list[pathlib.Path],
-    tokens: set[str],
-    rank: int,
-) -> dict[str, Any]:
-    markers = project_marker_names(path)
-    git_repo = is_git_repo(path)
-    branch = git_output(path, ["branch", "--show-current"]) if git_repo else None
-    head = git_output(path, ["rev-parse", "--short", "HEAD"]) if git_repo else None
-    status = git_output(path, ["status", "--porcelain"]) if git_repo else None
-    dirty = bool(status) if status is not None else (None if git_repo else False)
-    hint = relative_path_hint(path, roots)
-    display_name = path.name if path.name else hint
-    if "/" in hint and path.name not in hint.split("/", 1)[0]:
-        display_name = hint
-    readiness = project_readiness(markers, git_repo, dirty)
-    risk = project_risk(readiness, dirty)
-    reasons: list[str] = []
-    if git_repo:
-        reasons.append("git repository")
-    if dirty is False and git_repo:
-        reasons.append("clean worktree")
-    if dirty is True:
-        reasons.append("dirty worktree")
-    for marker in markers[:3]:
-        if marker != ".git":
-            reasons.append(marker)
-    name_blob = f"{display_name} {hint}".lower()
-    token_hits = sum(1 for token in tokens if token and token in name_blob)
-    score = token_hits * 20
-    score += 10 if git_repo else 0
-    score += 5 if dirty is False and git_repo else 0
-    score += min(5, len(markers))
-    score -= 3 if dirty is True else 0
-    return {
-        "schema": PROJECT_CANDIDATE_SCHEMA,
-        "rank": rank,
-        "score": score,
-        "project_key": slugify_project_key(display_name),
-        "display_name": truncate_label(display_name, max_chars=40),
-        "workspace_path": str(path),
-        "workspace_path_hint": sanitize_text(hint, max_chars=160),
-        "is_git_repo": git_repo,
-        "branch": branch,
-        "head": head,
-        "dirty": dirty,
-        "readiness": readiness,
-        "risk": risk,
-        "autonomy_fit": "high" if readiness == "ready" else "medium" if readiness == "needs_review" else "low",
-        "reasons": unique_nonempty(reasons)[:4],
-        "next_step": "init_review",
-    }
-
-
-def ranked_project_candidates(
-    args: argparse.Namespace,
-    *,
-    request_text: str,
-    agent_intent: dict[str, Any] | None = None,
-) -> list[dict[str, Any]]:
-    roots = workspace_roots(args)
-    token_set = request_tokens(
-        request_text,
-        agent_intent.get("project_hint") if isinstance(agent_intent, dict) else None,
-        agent_intent.get("goal") if isinstance(agent_intent, dict) else None,
-    )
-    candidates = [
-        build_project_candidate(path, roots=roots, tokens=token_set, rank=index + 1)
-        for index, path in enumerate(discover_project_paths(roots))
-    ]
-    candidates.sort(
-        key=lambda item: (
-            -int(item.get("score") or 0),
-            str(item.get("workspace_path_hint") or "").lower(),
-        )
-    )
-    for index, candidate in enumerate(candidates, start=1):
-        candidate["rank"] = index
-    return candidates
-
-
-def scan_project_candidates(
-    args: argparse.Namespace,
-    *,
-    request_text: str,
-    agent_intent: dict[str, Any] | None = None,
-) -> list[dict[str, Any]]:
-    candidates = ranked_project_candidates(
-        args,
-        request_text=request_text,
-        agent_intent=agent_intent,
-    )
-    limited = candidates[: max(1, int(args.max_project_candidates))]
-    for index, candidate in enumerate(limited, start=1):
-        candidate["rank"] = index
-    return limited
-
-
-def public_project_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
-    public = dict(candidate)
-    if "workspace_path" in public:
-        public["workspace_path_hash"] = sha256_short(public.pop("workspace_path"))
-    return public
 
 
 def public_remote_plan_session(session: dict[str, Any]) -> dict[str, Any]:
@@ -2431,7 +1377,7 @@ def render_project_selection_message(*, profile: Any, session: dict[str, Any]) -
     lines = [title_with_profile("계획 대상 선택", profile)]
     if not candidates:
         lines.append("후보 프로젝트를 찾지 못했습니다.")
-        lines.append("프로젝트명을 직접 입력하세요.")
+        lines.append("다음 조치: /select 프로젝트명")
         lines.append("아직 실행은 시작하지 않았습니다.")
         return "\n".join(lines)
     if build_plan_blocked:
@@ -2439,16 +1385,15 @@ def render_project_selection_message(*, profile: Any, session: dict[str, Any]) -
         lines.append("막힘: 새 계획/야간주행 시작")
         shown_candidates = candidates[:1]
     else:
-        lines.append(f"후보 {len(candidates)}개를 찾았습니다.")
-        shown_candidates = candidates[:2]
+        lines.append("다음 조치: 번호/이름 또는 /select")
+        shown_candidates = candidates[:3]
     for candidate in shown_candidates:
         name = truncate_label(candidate.get("display_name"), max_chars=22)
         lines.append(
             f"{candidate.get('rank')}. {html.escape(name)} · {display_project_readiness(candidate.get('readiness'))}"
         )
-    if len(candidates) > len(shown_candidates):
-        lines[-1] = lines[-1] + f" 외 {len(candidates) - len(shown_candidates)}"
-    lines.append("버튼 또는 번호/이름 직접 입력")
+    if len(candidates) > len(shown_candidates) and len(lines) < MOBILE_CARD_MAX_LINES:
+        lines.append(f"외 {len(candidates) - len(shown_candidates)}개는 다시 스캔")
     return "\n".join(lines[:MOBILE_CARD_MAX_LINES])
 
 
@@ -2457,6 +1402,16 @@ def render_project_selected_message(*, profile: Any, session: dict[str, Any]) ->
     name = truncate_label(candidate.get("display_name") or "프로젝트", max_chars=24)
     readiness = display_project_readiness(candidate.get("readiness"))
     risk = display_project_risk(candidate.get("risk"))
+    if candidate.get("manual_input") and not candidate.get("workspace_path"):
+        return "\n".join(
+            [
+                title_with_profile("계획 대상 확인 필요", profile),
+                f"{html.escape(name)} · 경로 미확인",
+                "다음 조치: 실제 폴더명/경로 입력",
+                "아직 실행은 시작하지 않았습니다.",
+                "다시 선택 또는 보류 가능",
+            ]
+        )
     return "\n".join(
         [
             title_with_profile("계획 대상 선택됨", profile),
@@ -6120,19 +5075,6 @@ def store_remote_plan_session(state: dict[str, Any], chat_hash: str, session: di
     remote_plan_sessions_by_chat(state)[str(chat_hash or "")] = session
 
 
-def is_core_or_slash_command_text(text: str) -> bool:
-    stripped = str(text or "").strip()
-    if stripped in BUTTON_COMMAND_ALIASES:
-        return True
-    if not stripped.startswith("/"):
-        return False
-    try:
-        first = shlex.split(stripped)[0]
-    except (ValueError, IndexError):
-        first = stripped.split(maxsplit=1)[0]
-    return normalize_command_name(first) in {"start", "help", "status", "pending", "plans", "show"}
-
-
 def remote_plan_defer_text(text: str) -> bool:
     return str(text or "").strip().lower() in {"보류", "취소", "나중에", "hold", "cancel"}
 
@@ -6159,6 +5101,100 @@ def remote_plan_init_review_text(text: str) -> bool:
         "project init",
         "project init preview",
     }
+
+
+def remote_plan_action_text(text: str) -> bool:
+    return any(
+        predicate(text)
+        for predicate in (
+            remote_plan_defer_text,
+            remote_plan_rescan_text,
+            remote_plan_reselect_text,
+            remote_plan_init_review_text,
+            project_init_create_text,
+            plan_draft_create_text,
+            plan_registration_create_text,
+            plan_review_approve_text,
+            plan_launch_prep_create_text,
+            plan_gate_request_text,
+            gate_approval_approve_text,
+            gate_approval_deny_text,
+            execution_brief_create_text,
+            enqueue_handoff_create_text,
+            workload_binding_request_text,
+            enqueue_run_create_text,
+            runtime_start_create_text,
+            runtime_monitor_text,
+            closeout_packet_create_text,
+            closeout_review_handoff_create_text,
+        )
+    ) or closeout_verdict_request(text)[0] is not None
+
+
+def candidate_directly_selected(candidate: dict[str, Any], text: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    if not normalized:
+        return False
+    rank = str(candidate.get("rank") or "").strip()
+    if rank and re.match(rf"^\s*{re.escape(rank)}\s*(번)?(\s|$)", normalized):
+        return True
+    values = (
+        candidate.get("display_name"),
+        candidate.get("project_key"),
+        candidate.get("workspace_path_hint"),
+    )
+    for value in values:
+        option = str(value or "").strip().lower()
+        if option and normalized in {option, f"{rank} {option}".strip(), f"{rank}번 {option}".strip()}:
+            return True
+    return False
+
+
+def remote_plan_project_selection_text(
+    args: argparse.Namespace,
+    session: dict[str, Any],
+    text: str,
+) -> bool:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return False
+    if resolve_manual_project_path(args, normalized):
+        return True
+    candidates = [
+        candidate
+        for candidate in session.get("candidates", [])
+        if isinstance(candidate, dict)
+    ]
+    if any(candidate_directly_selected(candidate, normalized) for candidate in candidates):
+        return True
+    # Allow exact workspace names that are not currently visible in the limited candidate list.
+    roots = workspace_roots(args)
+    lowered = normalized.lower()
+    if len(normalized) <= 80 and not any(marker in lowered for marker in ("?", "？", "뭐", "왜", "설명", "알려")):
+        for path in discover_project_paths(roots):
+            if lowered == path.name.lower():
+                return True
+    return False
+
+
+def remote_plan_session_should_handle_text(
+    args: argparse.Namespace,
+    session: dict[str, Any],
+    text: str,
+) -> bool:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return False
+    stage = str(session.get("stage") or "")
+    if remote_plan_action_text(normalized):
+        return True
+    if stage == "project_selection":
+        return remote_plan_project_selection_text(args, session, normalized)
+    if stage == "project_path_required":
+        return bool(resolve_manual_project_path(args, normalized)) or remote_plan_search_request_text(normalized)
+    if stage in {"plan_enqueue_handoff_created", "plan_workload_path_required", "plan_workload_binding_failed"}:
+        return bool(resolve_prepared_task_path(normalized))
+    return False
 
 
 def append_remote_plan_note(session: dict[str, Any], text: str) -> None:
@@ -7137,276 +6173,6 @@ def interaction_context_from_projection(projection: dict[str, Any]) -> dict[str,
     return context
 
 
-def interaction_context_label(context: dict[str, Any] | None) -> str:
-    if not isinstance(context, dict):
-        return ""
-    focus_kind = str(context.get("focus_kind") or "").strip()
-    focus_ref = str(context.get("focus_ref") or "").strip()
-    focus_label = str(context.get("focus_label") or "").strip()
-    if focus_kind == "plan" and focus_ref:
-        suffix = f" · {focus_label}" if focus_label else ""
-        return f"계획 {focus_ref}{suffix}"
-    if focus_kind == "approval" and focus_ref:
-        suffix = f" · {focus_label}" if focus_label else ""
-        return f"승인 {focus_ref}{suffix}"
-    if focus_label:
-        return focus_label
-    command = str(context.get("command") or "").strip()
-    return command
-
-
-def mobile_card_contract(message: str) -> dict[str, Any]:
-    lines = str(message or "").splitlines()
-    content_lines = [line.strip() for line in lines if line.strip()]
-    warnings: list[str] = []
-    if len(lines) > MOBILE_CARD_MAX_LINES:
-        warnings.append("too_many_lines")
-    if len(str(message or "")) > MOBILE_CARD_MAX_CHARS:
-        warnings.append("too_many_chars")
-    has_title = bool(content_lines and content_lines[0].startswith("<b>"))
-    body_lines = content_lines[1:] if has_title else content_lines
-    action_markers = (
-        "아래 버튼",
-        "로컬에서",
-        "다시 확인",
-        "직접 의견",
-        "직접 입력",
-        "세부 내용",
-        "다음 조치:",
-    )
-
-    def is_action_line(line: str) -> bool:
-        return any(marker in line for marker in action_markers)
-
-    has_status_headline = any(
-        not line.startswith("기준 ") and not is_action_line(line)
-        for line in body_lines
-    )
-    has_next_action = any(is_action_line(line) for line in body_lines)
-    if not has_title:
-        warnings.append("missing_title")
-    if not has_status_headline:
-        warnings.append("missing_status_headline")
-    if not has_next_action:
-        warnings.append("missing_next_action")
-    leaked_terms = [term for term in MOBILE_CARD_FORBIDDEN_TERMS if term in message]
-    if leaked_terms:
-        warnings.append("forbidden_terms:" + ",".join(leaked_terms))
-    return {
-        "schema": MOBILE_CARD_CONTRACT_SCHEMA,
-        "line_count": len(lines),
-        "char_count": len(str(message or "")),
-        "max_lines": MOBILE_CARD_MAX_LINES,
-        "max_chars": MOBILE_CARD_MAX_CHARS,
-        "has_title": has_title,
-        "has_status_headline": has_status_headline,
-        "has_next_action": has_next_action,
-        "warnings": warnings,
-    }
-
-
-def choice_keyboard(context: dict[str, Any] | None = None) -> dict[str, Any]:
-    rows: list[list[str]] = []
-    seen: set[str] = set()
-
-    def add_row(*labels: str) -> None:
-        row: list[str] = []
-        for label in labels:
-            text = str(label or "").strip()
-            if not text or text in seen:
-                continue
-            seen.add(text)
-            row.append(text)
-        if row:
-            rows.append(row)
-
-    context_kind = str(context.get("context_kind") or "") if isinstance(context, dict) else ""
-    next_command = str(context.get("next_command") or "").strip() if isinstance(context, dict) else ""
-    if context_kind == REMOTE_PLAN_SESSION_CONTEXT_KIND:
-        choice_labels = (
-            context.get("choice_labels") if isinstance(context, dict) else []
-        )
-        labels = [str(label or "").strip() for label in choice_labels if str(label or "").strip()] if isinstance(choice_labels, list) else []
-        for index in range(0, len(labels), 2):
-            add_row(*labels[index : index + 2])
-        add_row("다시 스캔", "보류")
-        add_row("상태", "계획")
-        add_row("승인 대기", "도움말")
-        for label in CORE_BUTTON_LABELS:
-            if label not in seen:
-                add_row(label)
-        return {
-            "keyboard": rows,
-            "resize_keyboard": True,
-            "one_time_keyboard": False,
-            "input_field_placeholder": "번호/프로젝트명 또는 의견을 직접 입력",
-        }
-    if context_kind == REMOTE_PLAN_INIT_CONTEXT_KIND:
-        choice_labels = context.get("choice_labels") if isinstance(context, dict) else []
-        labels = [str(label or "").strip() for label in choice_labels if str(label or "").strip()] if isinstance(choice_labels, list) else []
-        if labels:
-            add_row(*labels[:2])
-            add_row(*labels[2:4])
-        else:
-            add_row("초기화 검토", "다시 선택")
-            add_row("보류")
-        add_row("상태", "계획")
-        add_row("승인 대기", "도움말")
-        for label in CORE_BUTTON_LABELS:
-            if label not in seen:
-                add_row(label)
-        return {
-            "keyboard": rows,
-            "resize_keyboard": True,
-            "one_time_keyboard": False,
-            "input_field_placeholder": "의견이나 프로젝트 경로를 직접 입력",
-        }
-    if next_command and next_command not in {"/status", "/pending", "/plans --latest", "/help"}:
-        add_row(next_command)
-    if context_kind == "status_attention":
-        add_row("승인 대기", "계획")
-        add_row("상태", "도움말")
-    elif context_kind == "approval_attention":
-        add_row("전체 승인", "상태")
-        add_row("승인 대기", "계획")
-        add_row("도움말")
-    elif context_kind == "plan_attention":
-        add_row("계획", "상태")
-        add_row("승인 대기", "도움말")
-    elif context_kind == "plan_detail":
-        add_row("계획", "상태")
-        add_row("승인 대기", "도움말")
-    else:
-        add_row("상태", "승인 대기")
-        add_row("계획", "도움말")
-    for label in CORE_BUTTON_LABELS:
-        if label not in seen:
-            add_row(label)
-    return {
-        "keyboard": rows,
-        "resize_keyboard": True,
-        "one_time_keyboard": False,
-        "input_field_placeholder": "의견을 직접 입력할 수 있습니다",
-    }
-
-
-def button_resolves_to(button_text: str, command_text: str) -> bool:
-    button = str(button_text or "").strip()
-    command = str(command_text or "").strip()
-    return bool(command) and (button == command or BUTTON_COMMAND_ALIASES.get(button) == command)
-
-
-def choice_surface_contract(
-    reply_markup: dict[str, Any] | None,
-    context: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    warnings: list[str] = []
-    keyboard = reply_markup.get("keyboard") if isinstance(reply_markup, dict) else None
-    button_texts: list[str] = []
-    if isinstance(keyboard, list):
-        for row in keyboard:
-            if not isinstance(row, list):
-                continue
-            for button in row:
-                if isinstance(button, str):
-                    button_texts.append(button)
-                elif isinstance(button, dict):
-                    button_texts.append(str(button.get("text") or ""))
-    else:
-        warnings.append("missing_keyboard")
-    for label in CORE_BUTTON_LABELS:
-        if label not in button_texts:
-            warnings.append(f"missing_button:{label}")
-    placeholder = ""
-    if isinstance(reply_markup, dict):
-        placeholder = str(reply_markup.get("input_field_placeholder") or "")
-    if "의견" not in placeholder:
-        warnings.append("missing_freeform_placeholder")
-    next_command = str(context.get("next_command") or "").strip() if isinstance(context, dict) else ""
-    has_contextual_choice = False
-    choice_labels = context.get("choice_labels") if isinstance(context, dict) else None
-    if isinstance(choice_labels, list) and choice_labels:
-        expected = [str(label or "").strip() for label in choice_labels if str(label or "").strip()]
-        has_contextual_choice = any(label in button_texts for label in expected)
-        if not has_contextual_choice:
-            warnings.append("missing_contextual_choice:choice_labels")
-    if next_command:
-        has_contextual_choice = any(button_resolves_to(button, next_command) for button in button_texts)
-        if not has_contextual_choice:
-            warnings.append(f"missing_contextual_choice:{next_command}")
-    return {
-        "schema": CHOICE_SURFACE_CONTRACT_SCHEMA,
-        "button_texts": button_texts,
-        "has_freeform_placeholder": "의견" in placeholder,
-        "context_kind": context.get("context_kind") if isinstance(context, dict) else None,
-        "context_command": next_command or None,
-        "has_contextual_choice": has_contextual_choice,
-        "warnings": warnings,
-    }
-
-
-def help_message(*, profile: Any, generated_at: Any) -> str:
-    return "\n".join(
-        [
-            title_with_profile("Forager 원격 조작", profile),
-            "상태, 승인 요청, 계획을 빠르게 확인합니다.",
-            "버튼으로 조회하거나 직접 의견을 쓰세요.",
-            "직접 입력: /status · /pending · /plans",
-        ]
-    )
-
-
-def render_feedback_message(
-    *,
-    profile: Any,
-    generated_at: Any,
-    feedback_text: str,
-    feedback_kind: str = "freeform_feedback",
-    feedback_context: dict[str, Any] | None = None,
-    inbox_status: str | None = None,
-    agent_intent: dict[str, Any] | None = None,
-) -> str:
-    is_planning_request = feedback_kind == "planning_request"
-    clarifying_question = agent_clarifying_question(agent_intent)
-    if clarifying_question:
-        return "\n".join(
-            [
-                title_with_profile("확인 필요", profile),
-                "모델이 범위 확인을 요청했습니다.",
-                html.escape(clarifying_question),
-                "직접 입력으로 범위만 알려주세요.",
-            ]
-        )
-    if inbox_status in {"recorded", "existing"}:
-        status_line = "검토 목록에 넣었습니다." if is_planning_request else "의견을 검토 목록에 넣었습니다."
-    elif inbox_status == "error":
-        status_line = "요청은 저장했지만 검토 등록은 실패했습니다." if is_planning_request else "의견은 저장했지만 검토 목록 등록은 실패했습니다."
-    else:
-        status_line = "계획 요청을 저장했습니다." if is_planning_request else "의견을 저장했습니다."
-    lines = [
-        title_with_profile("계획 요청 접수" if is_planning_request else "의견 접수", profile),
-        status_line,
-    ]
-    context_label = interaction_context_label(feedback_context)
-    if context_label and not is_planning_request:
-        lines.append(f"관련: {html.escape(context_label)}")
-    if is_planning_request:
-        lines.append("아직 실행은 시작하지 않았습니다.")
-        lines.append("로컬에서 계획으로 바꾸세요.")
-    else:
-        lines.append("로컬에서 검토합니다.")
-    return "\n".join(lines)
-
-
-def agent_clarifying_question(agent_intent: dict[str, Any] | None) -> str | None:
-    if not isinstance(agent_intent, dict):
-        return None
-    if not bool(agent_intent.get("requires_clarification")):
-        return None
-    question = sanitize_text(str(agent_intent.get("clarifying_question") or "").strip(), max_chars=180)
-    return question or None
-
-
 def result_base(args: argparse.Namespace, config: dict[str, Any], mode: str) -> dict[str, Any]:
     return {
         "schema": RESULT_SCHEMA,
@@ -7469,7 +6235,78 @@ def render_command_result(
             }
         )
         return result
+    if parsed.get("command") == "chat":
+        agent_intent = chat_with_agent(
+            args,
+            str(parsed.get("chat_text") or command_text),
+            feedback_context=feedback_context,
+        )
+        if isinstance(agent_intent, dict):
+            parsed["agent_intent"] = agent_intent
+            parsed["agent_chat_reason"] = str(
+                agent_intent.get("reason") or agent_intent.get("status") or "unknown"
+            )
+        result["parsed_command"] = parsed
+        message_preview = render_chat_message(
+            profile=args.profile,
+            generated_at=result["generated_at"],
+            chat_text=str(parsed.get("chat_text") or command_text),
+            feedback_context=feedback_context,
+            agent_intent=agent_intent if isinstance(agent_intent, dict) else None,
+        )
+        attach_choice_surface(result, feedback_context)
+        if isinstance(feedback_context, dict):
+            result["feedback_context"] = feedback_context
+        result.update(
+            {
+                "status": "rendered",
+                "projection": None,
+                "message_preview": message_preview,
+                "mobile_card_contract": mobile_card_contract(message_preview),
+            }
+        )
+        return result
     if parsed.get("command") == "feedback":
+        result["parsed_command"] = parsed
+        message_preview = render_feedback_message(
+            profile=args.profile,
+            generated_at=result["generated_at"],
+            feedback_text=str(parsed.get("feedback_text") or command_text),
+            feedback_kind=str(parsed.get("feedback_kind") or "freeform_feedback"),
+            feedback_context=feedback_context,
+        )
+        attach_choice_surface(result, feedback_context)
+        if isinstance(feedback_context, dict):
+            result["feedback_context"] = feedback_context
+        result.update(
+            {
+                "status": "rendered",
+                "projection": None,
+                "message_preview": message_preview,
+                "mobile_card_contract": mobile_card_contract(message_preview),
+            }
+        )
+        return result
+    if parsed.get("command") == "remember":
+        result["parsed_command"] = parsed
+        message_preview = render_wiki_candidate_message(
+            profile=args.profile,
+            generated_at=result["generated_at"],
+            remember_text=str(parsed.get("remember_text") or command_text),
+        )
+        attach_choice_surface(result, feedback_context)
+        if isinstance(feedback_context, dict):
+            result["feedback_context"] = feedback_context
+        result.update(
+            {
+                "status": "rendered",
+                "projection": None,
+                "message_preview": message_preview,
+                "mobile_card_contract": mobile_card_contract(message_preview),
+            }
+        )
+        return result
+    if parsed.get("command") == "plan_request":
         agent_intent = classify_feedback_with_agent(
             args,
             str(parsed.get("feedback_text") or command_text),
@@ -7477,16 +6314,14 @@ def render_command_result(
         )
         if isinstance(agent_intent, dict):
             parsed["agent_intent"] = agent_intent
-            parsed["feedback_kind"] = str(
-                agent_intent.get("feedback_kind") or parsed.get("feedback_kind") or "freeform_feedback"
-            )
+            parsed["feedback_kind"] = "planning_request"
             parsed["reason"] = f"agent_intent:{agent_intent.get('intent') or 'unknown'}"
         result["parsed_command"] = parsed
         message_preview = render_feedback_message(
             profile=args.profile,
             generated_at=result["generated_at"],
             feedback_text=str(parsed.get("feedback_text") or command_text),
-            feedback_kind=str(parsed.get("feedback_kind") or "freeform_feedback"),
+            feedback_kind="planning_request",
             feedback_context=feedback_context,
             agent_intent=agent_intent if isinstance(agent_intent, dict) else None,
         )
@@ -7528,149 +6363,6 @@ def render_command_result(
         }
     )
     return result
-
-
-def telegram_api(token: str, method: str, payload: dict[str, Any], timeout_sec: int) -> dict[str, Any]:
-    url = f"https://api.telegram.org/bot{token}/{method}"
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout_sec) as response:
-            data = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as error:
-        detail = error.read().decode("utf-8", errors="replace") if hasattr(error, "read") else str(error)
-        raise RemoteOperatorTelegramError(f"Telegram API HTTP error ({method}): {detail}") from error
-    except (TimeoutError, http.client.RemoteDisconnected, ConnectionError) as error:
-        raise RemoteOperatorTelegramError(
-            f"Telegram API transport error ({method}): {type(error).__name__}: {error}"
-        ) from error
-    except urllib.error.URLError as error:
-        raise RemoteOperatorTelegramError(f"Telegram API URL error ({method}): {error}") from error
-    except json.JSONDecodeError as error:
-        raise RemoteOperatorTelegramError(f"Telegram API invalid JSON ({method})") from error
-    if not data.get("ok"):
-        raise RemoteOperatorTelegramError(f"Telegram API error ({method}): {data}")
-    return data
-
-
-def load_state(path: pathlib.Path) -> dict[str, Any]:
-    if not path.exists():
-        return {"schema": "remote_operator_telegram_state.v1", "offset": 0}
-    try:
-        state = load_json(path)
-    except (OSError, json.JSONDecodeError):
-        return {"schema": "remote_operator_telegram_state.v1", "offset": 0}
-    if not isinstance(state, dict):
-        return {"schema": "remote_operator_telegram_state.v1", "offset": 0}
-    state.setdefault("schema", "remote_operator_telegram_state.v1")
-    state.setdefault("offset", 0)
-    return state
-
-
-def save_state(path: pathlib.Path, state: dict[str, Any]) -> None:
-    state["updated_at"] = utc_now()
-    write_json(path, state)
-
-
-def last_context_for_chat_hash(state: dict[str, Any], chat_hash: Any) -> dict[str, Any] | None:
-    contexts = state.get("last_interaction_context_by_chat")
-    if not isinstance(contexts, dict):
-        return None
-    context = contexts.get(str(chat_hash or ""))
-    return context if isinstance(context, dict) else None
-
-
-def remember_context_for_chat_hash(
-    state: dict[str, Any],
-    chat_hash: Any,
-    rendered: dict[str, Any],
-) -> None:
-    context = rendered.get("interaction_context")
-    parsed = rendered.get("parsed_command") if isinstance(rendered.get("parsed_command"), dict) else {}
-    if not isinstance(context, dict) or parsed.get("command") == "feedback":
-        return
-    contexts = state.setdefault("last_interaction_context_by_chat", {})
-    if not isinstance(contexts, dict):
-        contexts = {}
-        state["last_interaction_context_by_chat"] = contexts
-    remembered = dict(context)
-    remembered["remembered_at"] = utc_now()
-    if isinstance(rendered.get("sent_message_id"), int):
-        remembered["source_message_id"] = rendered["sent_message_id"]
-    contexts[str(chat_hash or "")] = remembered
-
-
-def remember_context_for_message(
-    state: dict[str, Any],
-    message: dict[str, Any],
-    rendered: dict[str, Any],
-) -> None:
-    remember_context_for_chat_hash(state, sha256_short(chat_id_for(message)), rendered)
-
-
-def get_updates(config: dict[str, Any], offset: int, args: argparse.Namespace) -> list[dict[str, Any]]:
-    if args.replay_update_file:
-        value = load_json(args.replay_update_file)
-        if isinstance(value, dict) and isinstance(value.get("result"), list):
-            raw_updates = value["result"]
-        elif isinstance(value, list):
-            raw_updates = value
-        elif isinstance(value, dict):
-            raw_updates = [value]
-        else:
-            raw_updates = []
-        updates = [item for item in raw_updates if isinstance(item, dict)]
-        return [
-            item
-            for item in updates
-            if not isinstance(item.get("update_id"), int) or item["update_id"] >= int(offset)
-        ]
-    data = telegram_api(
-        config["token"],
-        "getUpdates",
-        {
-            "offset": int(offset),
-            "timeout": max(0, int(args.poll_timeout_sec)),
-            "allowed_updates": ["message"],
-        },
-        timeout_sec=max(int(args.api_timeout_sec), int(args.poll_timeout_sec) + 10),
-    )
-    updates = data.get("result", [])
-    return [item for item in updates if isinstance(item, dict)] if isinstance(updates, list) else []
-
-
-def send_message(
-    config: dict[str, Any],
-    chat_id: str,
-    message: str,
-    args: argparse.Namespace,
-    *,
-    reply_markup: dict[str, Any] | None = None,
-) -> int | None:
-    payload = {
-        "chat_id": chat_id,
-        "text": message,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True,
-    }
-    if reply_markup:
-        payload["reply_markup"] = reply_markup
-    if args.dry_run:
-        return None
-    data = telegram_api(
-        config["token"],
-        "sendMessage",
-        payload,
-        timeout_sec=max(1, int(args.api_timeout_sec)),
-    )
-    result = data.get("result")
-    if isinstance(result, dict) and isinstance(result.get("message_id"), int):
-        return int(result["message_id"])
-    return None
 
 
 def message_from_update(update: dict[str, Any]) -> dict[str, Any] | None:
@@ -7788,7 +6480,18 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
             continue
         chat_hash = sha256_short(chat_id_for(message))
         active_session = active_remote_plan_session(state, chat_hash)
-        if active_session and not is_core_or_slash_command_text(text):
+        session_payload = remote_plan_session_command_payload(text) if active_session else None
+        if active_session and session_payload:
+            rendered = handle_remote_plan_session_input(
+                args,
+                config,
+                state,
+                chat_hash=chat_hash,
+                session=active_session,
+                text=session_payload,
+                mode="live_once",
+            )
+        elif active_session and remote_plan_session_should_handle_text(args, active_session, text):
             rendered = handle_remote_plan_session_input(
                 args,
                 config,
@@ -7799,7 +6502,11 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                 mode="live_once",
             )
         else:
-            feedback_context = last_context_for_chat_hash(state, chat_hash)
+            feedback_context = last_context_for_chat_hash(
+                state,
+                chat_hash,
+                max_age_sec=args.context_max_age_sec,
+            )
             rendered = render_command_result(
                 args,
                 config,
@@ -7811,13 +6518,44 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
         if isinstance(update_id, int):
             rendered["processed_update_id"] = update_id
         parsed_command = rendered.get("parsed_command") if isinstance(rendered.get("parsed_command"), dict) else {}
-        if parsed_command.get("command") == "feedback":
-            feedback_context = last_context_for_chat_hash(state, chat_hash)
+        if parsed_command.get("command") == "remember":
+            remember_text = str(parsed_command.get("remember_text") or text)
+            # A persistence failure must not raise before the offset save:
+            # that would re-deliver the same update on every poll.
+            try:
+                record_result = record_remember_candidate(
+                    profile=args.profile,
+                    text=remember_text,
+                    chat_hash=chat_hash,
+                    user_hash=sha256_short(user_id_for(message)),
+                    message_id=message_id_for(message),
+                )
+            except (OSError, RemoteOperatorTelegramError) as error:
+                record_result = {
+                    "wiki_candidate_recorded": False,
+                    "wiki_candidate_status": "failed",
+                    "wiki_candidate_error": sanitize_text(str(error), max_chars=240),
+                }
+            rendered.update(record_result)
+            rendered["message_preview"] = render_wiki_candidate_message(
+                profile=args.profile,
+                generated_at=rendered["generated_at"],
+                remember_text=remember_text,
+                record_result=record_result,
+            )
+            rendered["mobile_card_contract"] = mobile_card_contract(rendered["message_preview"])
+        if parsed_command.get("command") in {"feedback", "plan_request"}:
+            feedback_context = last_context_for_chat_hash(
+                state,
+                chat_hash,
+                max_age_sec=args.context_max_age_sec,
+            )
+            feedback_text = str(parsed_command.get("feedback_text") or parsed_command.get("plan_text") or text)
             feedback_result = record_feedback(
                 args,
                 config,
                 message,
-                text,
+                feedback_text,
                 feedback_context=feedback_context,
                 parsed_command=parsed_command,
             )
@@ -7829,7 +6567,7 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                 rendered["message_preview"] = render_feedback_message(
                     profile=args.profile,
                     generated_at=rendered["generated_at"],
-                    feedback_text=str(parsed_command.get("feedback_text") or text),
+                    feedback_text=feedback_text,
                     feedback_kind=str(parsed_command.get("feedback_kind") or "freeform_feedback"),
                     feedback_context=feedback_context,
                     inbox_status=str(ingest_result.get("decision_feedback_ingest_status") or ""),
@@ -7838,11 +6576,11 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                     else None,
                 )
                 rendered["mobile_card_contract"] = mobile_card_contract(rendered["message_preview"])
-                if str(parsed_command.get("feedback_kind") or "") == "planning_request":
+                if parsed_command.get("command") == "plan_request":
                     session = create_remote_plan_session(
                         args,
                         chat_hash=chat_hash,
-                        request_text=str(parsed_command.get("feedback_text") or text),
+                        request_text=feedback_text,
                         parsed_command=parsed_command,
                         feedback_context=feedback_context,
                         decision_id=ingest_result.get("decision_feedback_decision_id"),
@@ -7874,7 +6612,7 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
             rendered["send_status"] = "failed"
             rendered["send_error"] = sanitize_text(str(error), max_chars=240)
         rendered["sent_message_id"] = message_id
-        remember_context_for_message(state, message, rendered)
+        remember_context_for_chat_hash(state, chat_hash, rendered)
         result = rendered
         break
     if max_update_id >= int(state.get("offset") or 0):
@@ -8047,14 +6785,7 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
         transport_issues.append("last_send_transport_error")
     if str(last_result.get("status") or "") == "loop_error":
         transport_issues.append("last_loop_internal_error")
-    try:
-        agent_runtime_status = provider_status(resolve_agent_config(args))
-    except RemoteOperatorTelegramError as error:
-        agent_runtime_status = {
-            "schema": "offdesk_llm_provider_resolution.v1",
-            "status": "error",
-            "error": sanitize_text(str(error), max_chars=240),
-        }
+    agent_runtime_status = resolve_agent_runtime_status(args)
     issues.extend(transport_issues)
     agent_issue = agent_runtime_issue(agent_runtime_status)
     if agent_issue:
@@ -8106,7 +6837,11 @@ def send_command_text(args: argparse.Namespace, config: dict[str, Any]) -> dict[
     if not target_chat_id:
         raise RemoteOperatorTelegramError("target chat id is missing")
     state = load_state(args.state_file)
-    feedback_context = last_context_for_chat_hash(state, sha256_short(target_chat_id))
+    feedback_context = last_context_for_chat_hash(
+        state,
+        sha256_short(target_chat_id),
+        max_age_sec=args.context_max_age_sec,
+    )
     rendered = render_command_result(
         args,
         config,
@@ -8165,6 +6900,7 @@ def main() -> int:
             feedback_context = last_context_for_chat_hash(
                 state,
                 config.get("target_chat_id_hash"),
+                max_age_sec=args.context_max_age_sec,
             )
             result = render_command_result(
                 args,

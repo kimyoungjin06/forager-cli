@@ -238,7 +238,16 @@ fn assert_mobile_contract(result: &Value) {
         .as_array()
         .expect("choice surface warnings")
         .is_empty());
-    for label in ["상태", "승인 대기", "계획", "도움말"] {
+    let context_kind = choice_contract["context_kind"].as_str().unwrap_or("");
+    let required_buttons: Vec<&str> = if matches!(
+        context_kind,
+        "remote_plan_project_selection" | "remote_plan_init_review"
+    ) {
+        vec!["상태", "계획"]
+    } else {
+        vec!["상태", "승인 대기", "계획", "도움말"]
+    };
+    for label in required_buttons {
         assert!(choice_contract["button_texts"]
             .as_array()
             .expect("button texts")
@@ -359,6 +368,45 @@ fn remote_operator_telegram_dry_run_status_renders_read_only_projection() -> Res
     let serialized = serde_json::to_string(&result)?;
     assert!(!serialized.contains("fake-token-for-test"));
     assert!(!serialized.contains("999999:"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_korean_status_question_routes_to_chat() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let out = temp.path().join("korean_status_question.json");
+
+    let output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--command-text")
+        .arg("지금은 정상상태!?")
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--out")
+        .arg(&out)
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["status"], "rendered");
+    assert_eq!(result["parsed_command"]["command"], "chat");
+    assert_eq!(result["parsed_command"]["reason"], "plain_text_chat");
+    assert_eq!(result["projection"], Value::Null);
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>Forager 응답</b>"));
+    assert!(preview.contains("/status"));
+    assert!(!preview.contains("<b>의견 접수</b>"));
+    assert_mobile_contract(&result);
     Ok(())
 }
 
@@ -506,11 +554,11 @@ fn remote_operator_telegram_korean_buttons_map_to_safe_commands() -> Result<()> 
 
 #[test]
 #[serial]
-fn remote_operator_telegram_freeform_feedback_gets_mobile_receipt() -> Result<()> {
+fn remote_operator_telegram_plain_text_defaults_to_chat() -> Result<()> {
     let temp = tempdir()?;
     let env_path = temp.path().join("telegram.env");
     write_env_file(&env_path)?;
-    let out = temp.path().join("remote_feedback.json");
+    let out = temp.path().join("remote_chat.json");
 
     let output = remote_operator_command(temp.path())
         .arg("--dry-run")
@@ -530,28 +578,28 @@ fn remote_operator_telegram_freeform_feedback_gets_mobile_receipt() -> Result<()
     );
     let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
     assert_eq!(result["status"], "rendered");
-    assert_eq!(result["parsed_command"]["command"], "feedback");
+    assert_eq!(result["parsed_command"]["command"], "chat");
     assert_eq!(result["projection"], Value::Null);
     let preview = result["message_preview"].as_str().expect("message preview");
-    assert!(preview.contains("<b>의견 접수</b>"));
-    assert!(preview.contains("의견을 저장했습니다."));
-    assert!(!preview.contains("승인 전 실패 조건을 더 명확히 적어줘"));
+    assert!(preview.contains("<b>Forager 응답</b>"));
+    assert!(preview.contains("/feedback"));
+    assert!(!preview.contains("<b>의견 접수</b>"));
     assert_mobile_contract(&result);
     Ok(())
 }
 
 #[test]
 #[serial]
-fn remote_operator_telegram_planning_request_makes_non_execution_receipt_explicit() -> Result<()> {
+fn remote_operator_telegram_feedback_command_gets_mobile_receipt() -> Result<()> {
     let temp = tempdir()?;
     let env_path = temp.path().join("telegram.env");
     write_env_file(&env_path)?;
-    let out = temp.path().join("remote_plan_request.json");
+    let out = temp.path().join("remote_feedback.json");
 
     let output = remote_operator_command(temp.path())
         .arg("--dry-run")
         .arg("--command-text")
-        .arg("nanoclustering Fractal tree 개발쪽을 자율주행으로 처리할 수 있을지 검토해볼까")
+        .arg("/feedback 승인 전 실패 조건을 더 명확히 적어줘")
         .arg("--env-file")
         .arg(&env_path)
         .arg("--out")
@@ -569,29 +617,29 @@ fn remote_operator_telegram_planning_request_makes_non_execution_receipt_explici
     assert_eq!(result["parsed_command"]["command"], "feedback");
     assert_eq!(
         result["parsed_command"]["feedback_kind"],
-        "planning_request"
+        "freeform_feedback"
     );
+    assert_eq!(result["projection"], Value::Null);
     let preview = result["message_preview"].as_str().expect("message preview");
-    assert!(preview.contains("<b>계획 요청 접수</b>"));
-    assert!(preview.contains("아직 실행은 시작하지 않았습니다."));
-    assert!(preview.contains("로컬에서 계획으로 바꾸세요."));
-    assert!(!preview.contains("Fractal tree"));
+    assert!(preview.contains("<b>의견 접수</b>"));
+    assert!(preview.contains("의견을 저장했습니다."));
+    assert!(!preview.contains("승인 전 실패 조건을 더 명확히 적어줘"));
     assert_mobile_contract(&result);
     Ok(())
 }
 
 #[test]
 #[serial]
-fn remote_operator_telegram_classifies_korean_night_run_as_planning_request() -> Result<()> {
+fn remote_operator_telegram_remember_command_gets_wiki_candidate_preview() -> Result<()> {
     let temp = tempdir()?;
     let env_path = temp.path().join("telegram.env");
     write_env_file(&env_path)?;
-    let out = temp.path().join("night_run_request.json");
+    let out = temp.path().join("remote_remember.json");
 
     let output = remote_operator_command(temp.path())
         .arg("--dry-run")
         .arg("--command-text")
-        .arg("TwinPaper쪽에서 야간주행을 하고 싶어")
+        .arg("/remember 평문 텔레그램 메시지는 기본 채팅으로 답한다")
         .arg("--env-file")
         .arg(&env_path)
         .arg("--out")
@@ -605,7 +653,87 @@ fn remote_operator_telegram_classifies_korean_night_run_as_planning_request() ->
         String::from_utf8_lossy(&output.stderr)
     );
     let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
-    assert_eq!(result["parsed_command"]["command"], "feedback");
+    assert_eq!(result["status"], "rendered");
+    assert_eq!(result["parsed_command"]["command"], "remember");
+    assert_eq!(result["projection"], Value::Null);
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>위키 후보</b>"));
+    assert!(preview.contains("위키 후보 저장 미리보기입니다."));
+    assert!(preview.contains("아직 런타임 지식은 아닙니다."));
+    assert!(!profile_dir(temp.path())
+        .join("adaptive_wiki_candidates.json")
+        .exists());
+    assert_mobile_contract(&result);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_plan_command_makes_non_execution_receipt_explicit() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let out = temp.path().join("remote_plan_request.json");
+
+    let output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--command-text")
+        .arg("/plan nanoclustering Fractal tree 개발쪽을 자율주행으로 처리할 수 있을지 검토해볼까")
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--out")
+        .arg(&out)
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["status"], "rendered");
+    assert_eq!(result["parsed_command"]["command"], "plan_request");
+    assert_eq!(
+        result["parsed_command"]["feedback_kind"],
+        "planning_request"
+    );
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>계획 요청 접수</b>"));
+    assert!(preview.contains("아직 실행은 시작하지 않았습니다."));
+    assert!(preview.contains("로컬에서 계획으로 바꾸세요."));
+    assert!(!preview.contains("Fractal tree"));
+    assert_mobile_contract(&result);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_plan_command_classifies_korean_night_run_as_planning_request(
+) -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let out = temp.path().join("night_run_request.json");
+
+    let output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--command-text")
+        .arg("/plan TwinPaper쪽에서 야간주행을 하고 싶어")
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--out")
+        .arg(&out)
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["parsed_command"]["command"], "plan_request");
     assert_eq!(
         result["parsed_command"]["feedback_kind"],
         "planning_request"
@@ -619,7 +747,7 @@ fn remote_operator_telegram_classifies_korean_night_run_as_planning_request() ->
 
 #[test]
 #[serial]
-fn remote_operator_telegram_agent_classifies_freeform_plan_request() -> Result<()> {
+fn remote_operator_telegram_agent_classifies_plan_command_request() -> Result<()> {
     let temp = tempdir()?;
     let env_path = temp.path().join("telegram.env");
     write_env_file(&env_path)?;
@@ -627,11 +755,12 @@ fn remote_operator_telegram_agent_classifies_freeform_plan_request() -> Result<(
     let agent_request_path = temp.path().join("ollama_generate_request.json");
     let (base_url, server) = spawn_fake_ollama(agent_request_path.clone())?;
     let telegram_text = "Please assess NanoClustering Fractal tree work for tomorrow night";
+    let command_text = format!("/plan {telegram_text}");
 
     let output = remote_operator_command(temp.path())
         .arg("--dry-run")
         .arg("--command-text")
-        .arg(telegram_text)
+        .arg(&command_text)
         .arg("--env-file")
         .arg(&env_path)
         .arg("--out")
@@ -653,7 +782,7 @@ fn remote_operator_telegram_agent_classifies_freeform_plan_request() -> Result<(
     );
     let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
     assert_eq!(result["status"], "rendered");
-    assert_eq!(result["parsed_command"]["command"], "feedback");
+    assert_eq!(result["parsed_command"]["command"], "plan_request");
     assert_eq!(
         result["parsed_command"]["feedback_kind"],
         "planning_request"
@@ -682,6 +811,80 @@ fn remote_operator_telegram_agent_classifies_freeform_plan_request() -> Result<(
     assert_eq!(agent_request["stream"], false);
     assert_eq!(agent_request["think"], false);
     assert_eq!(agent_request["format"], "json");
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_agent_freeform_reply_is_conversational() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let out = temp.path().join("remote_agent_conversation.json");
+    let agent_request_path = temp.path().join("ollama_conversation_request.json");
+    let (base_url, server) = spawn_fake_ollama_with_classification(
+        agent_request_path.clone(),
+        json!({
+            "intent": "feedback",
+            "feedback_kind": "freeform_feedback",
+            "confidence": 0.93,
+            "project_hint": null,
+            "goal": null,
+            "timebox": null,
+            "requires_clarification": false,
+            "clarifying_question": null,
+            "assistant_reply": "지금 listener는 살아 있고, 최근 poll도 정상입니다. 다만 실행 권한은 로컬 검토 뒤에만 열립니다.",
+            "reason": "The operator is asking for a conversational status explanation.",
+            "non_authorized": ["execution", "approval", "shell"]
+        }),
+    )?;
+
+    let output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--command-text")
+        .arg("방금 봇 상태를 사람이 읽기 좋게 설명해줘")
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--out")
+        .arg(&out)
+        .arg("--agent-intent-mode")
+        .arg("required")
+        .arg("--agent-base-url")
+        .arg(&base_url)
+        .arg("--agent-model")
+        .arg("qwen3-coder-next:latest")
+        .output()?;
+
+    server.join().expect("fake ollama server panicked")?;
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["status"], "rendered");
+    assert_eq!(result["parsed_command"]["command"], "chat");
+    assert_eq!(result["parsed_command"]["feedback_kind"], Value::Null);
+    assert_eq!(
+        result["parsed_command"]["agent_intent"]["feedback_kind"],
+        "chat"
+    );
+    assert_eq!(
+        result["parsed_command"]["agent_intent"]["assistant_reply"],
+        "지금 listener는 살아 있고, 최근 poll도 정상입니다. 다만 실행 권한은 로컬 검토 뒤에만 열립니다."
+    );
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>Forager 응답</b>"));
+    assert!(preview.contains("최근 poll도 정상"));
+    assert!(!preview.contains("<b>의견 접수</b>"));
+    assert_mobile_contract(&result);
+
+    let agent_request: Value = serde_json::from_slice(&fs::read(&agent_request_path)?)?;
+    assert!(agent_request["prompt"]
+        .as_str()
+        .expect("agent prompt")
+        .contains("assistant_reply"));
     Ok(())
 }
 
@@ -733,10 +936,8 @@ fn remote_operator_telegram_agent_clarification_is_visible_in_mobile_receipt() -
         String::from_utf8_lossy(&output.stderr)
     );
     let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
-    assert_eq!(
-        result["parsed_command"]["agent_intent"]["intent"],
-        "clarification"
-    );
+    assert_eq!(result["parsed_command"]["command"], "chat");
+    assert_eq!(result["parsed_command"]["agent_intent"]["intent"], "chat");
     assert_eq!(
         result["parsed_command"]["agent_intent"]["requires_clarification"],
         true
@@ -744,7 +945,7 @@ fn remote_operator_telegram_agent_clarification_is_visible_in_mobile_receipt() -
     let preview = result["message_preview"].as_str().expect("message preview");
     assert!(preview.contains("<b>확인 필요</b>"));
     assert!(preview.contains("NIMS 안의 EPIMS 파일"));
-    assert!(preview.contains("직접 입력으로 범위만 알려주세요."));
+    assert!(preview.contains("/plan"));
     assert!(!preview.contains("<b>의견 접수</b>"));
     assert_mobile_contract(&result);
 
@@ -786,7 +987,7 @@ num_predict = 512
     let output = remote_operator_command(temp.path())
         .arg("--dry-run")
         .arg("--command-text")
-        .arg("Please assess generic product telemetry cleanup for tonight")
+        .arg("/plan Please assess generic product telemetry cleanup for tonight")
         .arg("--env-file")
         .arg(&env_path)
         .arg("--out")
@@ -809,6 +1010,7 @@ num_predict = 512
         result["parsed_command"]["agent_intent"]["base_url"],
         base_url
     );
+    assert_eq!(result["parsed_command"]["command"], "plan_request");
     assert_eq!(
         result["parsed_command"]["agent_intent"]["config_sources"],
         json!(["llm.provider"])
@@ -868,8 +1070,10 @@ fn remote_operator_telegram_feedback_uses_last_card_context() -> Result<()> {
     let chat_hash = first["target_chat_id_hash"]
         .as_str()
         .expect("target chat hash");
+    let mut remembered_context = first["interaction_context"].clone();
+    remembered_context["remembered_at"] = json!("2999-01-01T00:00:00+00:00");
     let mut contexts = Map::new();
-    contexts.insert(chat_hash.to_string(), first["interaction_context"].clone());
+    contexts.insert(chat_hash.to_string(), remembered_context);
     let state = json!({
         "schema": "remote_operator_telegram_state.v1",
         "offset": 0,
@@ -881,7 +1085,7 @@ fn remote_operator_telegram_feedback_uses_last_card_context() -> Result<()> {
     let feedback_output = remote_operator_command(temp.path())
         .arg("--dry-run")
         .arg("--command-text")
-        .arg("실패 조건 보강 필요")
+        .arg("/feedback 실패 조건 보강 필요")
         .arg("--env-file")
         .arg(&env_path)
         .arg("--state-file")
@@ -917,6 +1121,64 @@ fn remote_operator_telegram_feedback_uses_last_card_context() -> Result<()> {
 
 #[test]
 #[serial]
+fn remote_operator_telegram_ignores_stale_last_card_context() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let state_path = temp.path().join("telegram_state.json");
+    let out = temp.path().join("feedback_result.json");
+    let chat_hash = "sha256:9dd7fefaf214ceca";
+    let mut contexts = Map::new();
+    contexts.insert(
+        chat_hash.to_string(),
+        json!({
+            "schema": "telegram_interaction_context.v1",
+            "context_kind": "plan_attention",
+            "focus_ref": "stale_plan",
+            "focus_label": "수정 필요",
+            "next_command": "/show stale_plan",
+            "remembered_at": "2000-01-01T00:00:00+00:00"
+        }),
+    );
+    let state = json!({
+        "schema": "remote_operator_telegram_state.v1",
+        "offset": 0,
+        "last_interaction_context_by_chat": Value::Object(contexts)
+    });
+    fs::write(&state_path, serde_json::to_string_pretty(&state)?)?;
+
+    let output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--command-text")
+        .arg("/feedback 오래된 카드 맥락을 붙이지 마")
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--out")
+        .arg(&out)
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(!preview.contains("stale_plan"));
+    assert_eq!(result["feedback_context"], Value::Null);
+    assert_eq!(
+        result["choice_surface_contract"]["has_contextual_choice"],
+        false
+    );
+    assert_mobile_contract(&result);
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn remote_operator_telegram_replay_feedback_records_decision_inbox_item() -> Result<()> {
     let temp = tempdir()?;
     let env_path = temp.path().join("telegram.env");
@@ -931,7 +1193,7 @@ fn remote_operator_telegram_replay_feedback_records_decision_inbox_item() -> Res
                 "date": 1780000000,
                 "chat": {"id": 123456789, "type": "private"},
                 "from": {"id": 987654321, "is_bot": false, "first_name": "Operator"},
-                "text": "모바일 메시지에서 핵심만 남겨줘"
+                "text": "/feedback 모바일 메시지에서 핵심만 남겨줘"
             }
         }))?,
     )?;
@@ -1015,6 +1277,144 @@ fn remote_operator_telegram_replay_feedback_records_decision_inbox_item() -> Res
 
 #[test]
 #[serial]
+fn remote_operator_telegram_replay_plain_text_chat_does_not_record_feedback() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let update_path = temp.path().join("chat_update.json");
+    write_text_update(&update_path, 600, 778, "챗봇이랑 대화하고 싶어")?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+    let out = temp.path().join("chat_replay_result.json");
+
+    let output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&update_path)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--out")
+        .arg(&out)
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["status"], "rendered");
+    assert_eq!(result["parsed_command"]["command"], "chat");
+    assert_eq!(result["feedback_recorded"], Value::Null);
+    assert_eq!(result["decision_feedback_ingest_status"], Value::Null);
+    assert!(!feedback_file.exists());
+    assert!(!ingest_dir.exists());
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>Forager 응답</b>"));
+    assert!(!preview.contains("<b>의견 접수</b>"));
+    assert_mobile_contract(&result);
+
+    let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    assert_eq!(state["offset"], 601);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_replay_remember_records_adaptive_wiki_candidate() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let update_path = temp.path().join("remember_update.json");
+    write_text_update(
+        &update_path,
+        610,
+        779,
+        "/remember 평문 텔레그램 메시지는 기본 채팅으로 답한다",
+    )?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+    let out = temp.path().join("remember_replay_result.json");
+
+    let output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&update_path)
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--out")
+        .arg(&out)
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["status"], "rendered");
+    assert_eq!(result["parsed_command"]["command"], "remember");
+    assert_eq!(result["wiki_candidate_recorded"], true);
+    assert_eq!(result["wiki_candidate_status"], "recorded");
+    assert_eq!(result["feedback_recorded"], Value::Null);
+    assert_eq!(result["decision_feedback_ingest_status"], Value::Null);
+    assert!(!feedback_file.exists());
+    assert!(!ingest_dir.exists());
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("위키 후보로 저장했습니다."));
+    assert!(preview.contains("아직 런타임 지식은 아닙니다."));
+    assert_mobile_contract(&result);
+
+    let candidates_path = profile_dir(temp.path()).join("adaptive_wiki_candidates.json");
+    let candidates_state: Value = serde_json::from_slice(&fs::read(&candidates_path)?)?;
+    let candidates = candidates_state["candidates"]
+        .as_array()
+        .expect("candidate list");
+    assert_eq!(candidates.len(), 1);
+    let candidate = &candidates[0];
+    assert_eq!(candidate["kind"], "preference");
+    assert_eq!(candidate["scope"], "user_global");
+    assert_eq!(
+        candidate["claim"],
+        "평문 텔레그램 메시지는 기본 채팅으로 답한다"
+    );
+    assert_eq!(candidate["signal_kind"], "explicit_preference");
+    assert_eq!(candidate["origin"], "operator_explicit");
+    assert_eq!(candidate["occurrence_count"], 1);
+    assert!(candidate["evidence_refs"]
+        .as_array()
+        .expect("evidence refs")
+        .iter()
+        .any(|item| item == "telegram:message:779"));
+
+    let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    assert_eq!(state["offset"], 611);
+    assert!(state["last_interaction_context_by_chat"].is_null());
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn remote_operator_telegram_replay_plan_request_creates_project_selection_session() -> Result<()> {
     let temp = tempdir()?;
     let env_path = temp.path().join("telegram.env");
@@ -1043,7 +1443,7 @@ fn remote_operator_telegram_replay_plan_request_creates_project_selection_sessio
         &update_path,
         700,
         880,
-        "Alpha 프로젝트를 오늘 밤 자율주행 계획으로 잡아줘",
+        "/plan Alpha 프로젝트를 오늘 밤 자율주행 계획으로 잡아줘",
     )?;
     let state_path = temp.path().join("telegram_state.json");
     let feedback_file = temp.path().join("feedback.jsonl");
@@ -1079,7 +1479,7 @@ fn remote_operator_telegram_replay_plan_request_creates_project_selection_sessio
     );
     let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
     assert_eq!(result["status"], "rendered");
-    assert_eq!(result["parsed_command"]["command"], "feedback");
+    assert_eq!(result["parsed_command"]["command"], "plan_request");
     assert_eq!(
         result["parsed_command"]["feedback_kind"],
         "planning_request"
@@ -1100,7 +1500,7 @@ fn remote_operator_telegram_replay_plan_request_creates_project_selection_sessio
     );
     let preview = result["message_preview"].as_str().expect("message preview");
     assert!(preview.contains("<b>계획 대상 선택</b>"));
-    assert!(preview.contains("직접 입력"));
+    assert!(preview.contains("/select"));
     assert!(!preview.contains(workspace_root.to_str().expect("workspace path")));
     assert!(button_texts(&result).contains(&"1 Alpha".to_string()));
     assert!(button_texts(&result).contains(&"다시 스캔".to_string()));
@@ -1109,6 +1509,202 @@ fn remote_operator_telegram_replay_plan_request_creates_project_selection_sessio
 
     let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
     assert_eq!(state["offset"], 701);
+    assert_eq!(
+        state["remote_plan_sessions_by_chat"][result["target_chat_id_hash"].as_str().unwrap()]
+            ["stage"],
+        "project_selection"
+    );
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_replay_plan_session_plain_text_stays_chat() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let workspace_root = temp.path().join("workspace");
+    fs::create_dir_all(workspace_root.join("Alpha"))?;
+    fs::write(
+        workspace_root.join("Alpha").join("README.md"),
+        "Alpha project\n",
+    )?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+    let first_update = temp.path().join("plan_update.json");
+    write_text_update(
+        &first_update,
+        705,
+        885,
+        "/plan Alpha 프로젝트를 오늘 밤 자율주행 계획으로 잡아줘",
+    )?;
+    let first_out = temp.path().join("plan_result.json");
+    let first_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&first_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&first_out)
+        .output()?;
+    assert!(
+        first_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&first_output.stdout),
+        String::from_utf8_lossy(&first_output.stderr)
+    );
+
+    let second_update = temp.path().join("plain_chat_update.json");
+    write_text_update(&second_update, 706, 886, "이 계획 상태를 설명해줘")?;
+    let second_out = temp.path().join("plain_chat_result.json");
+    let second_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&second_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&second_out)
+        .output()?;
+    assert!(
+        second_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&second_output.stdout),
+        String::from_utf8_lossy(&second_output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&second_out)?)?;
+    assert_eq!(result["status"], "rendered");
+    assert_eq!(result["parsed_command"]["command"], "chat");
+    assert_eq!(result["feedback_recorded"], Value::Null);
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("<b>Forager 응답</b>"));
+    assert!(!preview.contains("<b>계획 대상 선택됨</b>"));
+    assert_mobile_contract(&result);
+
+    let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    assert_eq!(state["offset"], 707);
+    assert_eq!(
+        state["remote_plan_sessions_by_chat"][result["target_chat_id_hash"].as_str().unwrap()]
+            ["stage"],
+        "project_selection"
+    );
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_replay_plan_session_unmatched_short_text_stays_chat() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let workspace_root = temp.path().join("workspace");
+    fs::create_dir_all(workspace_root.join("Alpha"))?;
+    fs::write(
+        workspace_root.join("Alpha").join("README.md"),
+        "Alpha project\n",
+    )?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+    let first_update = temp.path().join("plan_update.json");
+    write_text_update(
+        &first_update,
+        721,
+        901,
+        "/plan Alpha 프로젝트를 오늘 밤 자율주행 계획으로 잡아줘",
+    )?;
+    let first_out = temp.path().join("plan_result.json");
+    let first_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&first_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&first_out)
+        .output()?;
+    assert!(
+        first_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&first_output.stdout),
+        String::from_utf8_lossy(&first_output.stderr)
+    );
+
+    // Short text with no question marker that matches no candidate, no existing
+    // directory, and no workspace project name. This previously crashed session
+    // routing with a NameError and poisoned the update offset.
+    let second_update = temp.path().join("unmatched_short_text_update.json");
+    write_text_update(&second_update, 722, 902, "Zeta")?;
+    let second_out = temp.path().join("unmatched_short_text_result.json");
+    let second_output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&second_update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--workspace-root")
+        .arg(&workspace_root)
+        .arg("--out")
+        .arg(&second_out)
+        .output()?;
+    assert!(
+        second_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&second_output.stdout),
+        String::from_utf8_lossy(&second_output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&second_out)?)?;
+    assert_eq!(result["status"], "rendered");
+    assert_eq!(result["parsed_command"]["command"], "chat");
+    assert_eq!(result["feedback_recorded"], Value::Null);
+    assert_mobile_contract(&result);
+
+    let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    assert_eq!(state["offset"], 723);
     assert_eq!(
         state["remote_plan_sessions_by_chat"][result["target_chat_id_hash"].as_str().unwrap()]
             ["stage"],
@@ -1146,7 +1742,7 @@ fn remote_operator_telegram_replay_plan_session_accepts_direct_project_input() -
         &first_update,
         710,
         890,
-        "Alpha 프로젝트를 오늘 밤 자율주행 계획으로 잡아줘",
+        "/plan Alpha 프로젝트를 오늘 밤 자율주행 계획으로 잡아줘",
     )?;
     let first_out = temp.path().join("plan_replay_result.json");
 
@@ -1259,7 +1855,7 @@ fn remote_operator_telegram_replay_plan_session_searches_workspace_before_manual
         &first_update,
         713,
         892,
-        "Alpha 프로젝트를 오늘 밤 자율주행 계획으로 잡아줘",
+        "/plan Alpha 프로젝트를 오늘 밤 자율주행 계획으로 잡아줘",
     )?;
     let first_out = temp.path().join("plan_replay_result.json");
     let first_output = remote_operator_command(temp.path())
@@ -1372,7 +1968,7 @@ fn remote_operator_telegram_replay_plan_session_builds_init_preview_receipt() ->
         &first_update,
         730,
         910,
-        "Alpha 프로젝트를 오늘 밤 자율주행 계획으로 잡아줘",
+        "/plan Alpha 프로젝트를 오늘 밤 자율주행 계획으로 잡아줘",
     )?;
     let first_out = temp.path().join("plan_replay_result.json");
     let first_output = remote_operator_command(temp.path())
@@ -3707,7 +4303,7 @@ fn remote_operator_telegram_replay_plan_session_accepts_manual_project_input() -
         &first_update,
         720,
         900,
-        "Alpha 프로젝트를 오늘 밤 자율주행 계획으로 잡아줘",
+        "/plan Alpha 프로젝트를 오늘 밤 자율주행 계획으로 잡아줘",
     )?;
     let first_out = temp.path().join("plan_replay_result.json");
     let first_output = remote_operator_command(temp.path())
@@ -3738,7 +4334,7 @@ fn remote_operator_telegram_replay_plan_session_accepts_manual_project_input() -
     );
 
     let second_update = temp.path().join("manual_selection_update.json");
-    write_text_update(&second_update, 721, 901, "Gamma 프로젝트")?;
+    write_text_update(&second_update, 721, 901, "/select Gamma 프로젝트")?;
     let second_out = temp.path().join("manual_selection_result.json");
     let second_output = remote_operator_command(temp.path())
         .arg("--dry-run")
@@ -3782,8 +4378,10 @@ fn remote_operator_telegram_replay_plan_session_accepts_manual_project_input() -
         "Gamma 프로젝트"
     );
     let preview = result["message_preview"].as_str().expect("message preview");
-    assert!(preview.contains("<b>계획 대상 선택됨</b>"));
+    assert!(preview.contains("<b>계획 대상 확인 필요</b>"));
     assert!(preview.contains("Gamma 프로젝트"));
+    assert!(preview.contains("경로 미확인"));
+    assert!(preview.contains("실제 폴더명/경로 입력"));
     assert!(preview.contains("아직 실행은 시작하지 않았습니다."));
     assert_mobile_contract(&result);
 

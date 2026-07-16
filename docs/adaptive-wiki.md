@@ -42,6 +42,11 @@ Operators or the Council then decide whether to promote, merge, rescope, or
 reject candidates. Candidate ingestion is a memory capture step, not an
 authority grant.
 
+Telegram `/remember <text>` uses the same candidate boundary. It records an
+operator-explicit `preference` candidate in the active profile, but it does not
+promote the entry and does not change runtime projection. Plain Telegram chat
+does not become a wiki candidate automatically.
+
 ## Provisional Overnight Trials
 
 Council can also recommend a temporary `trial_promote` decision during an
