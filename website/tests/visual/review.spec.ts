@@ -608,6 +608,8 @@ test('decisions route renders read-only action center from workstation surface',
 
   await expect(page.getByRole('heading', { name: 'Decision action center' })).toBeVisible();
   await expect(page.getByText('Queue', { exact: true })).toBeVisible();
+  // Mode chip shows an operator-facing label, not the raw contract value.
+  await expect(page.locator('[data-decision-mode]')).toHaveText('Read-only preview');
   await expect(page.locator('[data-decision-detail]').getByRole('heading', { name: 'Resolve closeout follow-up' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Resolve closeout follow-up/ })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByRole('heading', { name: 'Decision readout' })).toBeVisible();
@@ -620,7 +622,7 @@ test('decisions route renders read-only action center from workstation surface',
   await expect(page.getByText('action_envelope_receipt.v1')).toBeVisible();
   await expect(page.getByText('Authorization boundary')).toBeVisible();
   const closeoutEnvelope = page.locator('[data-action-envelope-card]').filter({ hasText: 'Resolve follow-up' });
-  await closeoutEnvelope.getByRole('button', { name: 'Validate envelope' }).click();
+  await closeoutEnvelope.getByRole('button', { name: 'Validate & record receipt' }).click();
   await expect(closeoutEnvelope.locator('[data-action-envelope-status]')).toContainText('Envelope validated. Latest receipt updated below.');
   await page.getByText('Envelope boundary').click();
   await expect(page.getByText('forager offdesk decision show --json decision-closeout-followup')).toBeVisible();
@@ -733,7 +735,7 @@ test('decisions route rehydrates the receipt block after a successful action', a
 
   const card = page.locator('[data-action-envelope-card]').filter({ hasText: 'Resolve follow-up' });
   await expect(card).not.toContainText('validated preview');
-  await card.getByRole('button', { name: 'Validate envelope' }).click();
+  await card.getByRole('button', { name: 'Validate & record receipt' }).click();
   await expect(card.locator('[data-action-envelope-status]')).toContainText('Latest receipt updated below');
   await expect(card).toContainText('validated preview');
 });

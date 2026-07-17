@@ -510,6 +510,17 @@ export function formatLabel(label: string): string {
   return label.replaceAll('_', ' ');
 }
 
+const ACTION_MODE_LABELS: Record<string, string> = {
+  read_only_preview: 'Read-only preview',
+};
+
+// Operator-facing label for a decision-inbox action mode. Keeps the raw
+// contract value (e.g. read_only_preview) out of the UI while preserving it in
+// the surface data.
+export function actionModeLabel(mode: string): string {
+  return ACTION_MODE_LABELS[mode] ?? formatLabel(mode);
+}
+
 export function statusClasses(status: HealthStatus): string {
   switch (status) {
     case 'ok':
