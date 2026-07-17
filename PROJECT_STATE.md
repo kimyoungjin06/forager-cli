@@ -171,8 +171,13 @@ out of product-facing docs. The product direction is defined in
   accepted-truth recovery follow-ups; `/confirm` on a recovery token runs
   `accepted-truth-recovery-envelope`, which validates and records a receipt but
   stops short of recording accepted truth. `/cancel` clears a pending
-  confirmation. It never records accepted truth. The plan-session engine,
-  `health`, and `receipts` modules still need decomposition.
+  confirmation. It never records accepted truth.
+- The Telegram adapter decomposition is complete: the monolith dropped from
+  ~7,367 to ~1,885 lines (CLI entrypoint, run loop, projection commands,
+  dispatch wiring, feedback ingest). Health, redaction, plan-message
+  renderers, schemas, stage receipt builders, shared result plumbing
+  (`base.py`), and the plan-session state machine (`plan_workflow.py`) are now
+  separate, acyclic modules under `scripts/telegram_operator/`.
 - Runtime dispatch is available but opt-in: `/runtime` lists post-closeout
   handoffs and `/dispatch <closeout-id> <runner> -- <command>` queues an
   operator-supplied command, gated behind `--enable-runtime-dispatch`
@@ -182,19 +187,13 @@ out of product-facing docs. The product direction is defined in
 
 ## Next Work Candidates
 
-1. Finish the Telegram adapter decomposition: the monolith is down from
-   7,367 to ~4,060 lines with health, redaction, plan-message renderers,
-   schema constants, and stage receipt builders now in
-   `scripts/telegram_operator/` modules. The remaining block is the
-   plan-session state machine hub (`handle_remote_plan_session_input` and its
-   stage transition executors, selection/context helpers, and the shared
-   `result_base`/`attach_choice_surface` plumbing). Extract it into
-   `plan_workflow.py` in its own careful pass, moving the shared result
-   plumbing to a base module first, and preserve the 47-test contract.
-2. Split the large Offdesk CLI into command handling and typed workflow
-   transition modules.
-3. Optionally add a curated allowlist mode for `/dispatch` (named command
+1. Split the large Offdesk CLI (`src/cli/offdesk.rs`, ~18k lines) into command
+   handling and typed workflow transition modules, applying the same
+   extraction pattern proven on the Telegram adapter.
+2. Optionally add a curated allowlist mode for `/dispatch` (named command
    templates) as a safer alternative to free-form `--enable-runtime-dispatch`.
+3. Optionally split `scripts/telegram_operator/receipts.py` (~1,960 lines) by
+   stage family if it keeps growing; it is cohesive today.
 
 ## Refresh Rule
 

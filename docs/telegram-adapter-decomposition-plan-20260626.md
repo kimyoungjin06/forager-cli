@@ -266,6 +266,29 @@ The first decomposition cycle is complete when:
 - `docs/refactor-baseline-20260626.md` is updated or superseded with reduced
   size metrics.
 
+### Cycle complete (2026-07)
+
+All criteria met. `scripts/offdesk_remote_operator_telegram.py` dropped from
+8,588 (baseline) / 7,367 (cycle start) to ~1,885 lines and 31 functions, now
+holding the CLI entrypoint, argument parsing, run loop, projection commands,
+dispatch orchestration wiring, and feedback ingest. The extracted package
+`scripts/telegram_operator/` layers cleanly (verified acyclic):
+
+- leaves: `common`, `schemas`, `routing`
+- `rendering` -> `routing`; `base`/`agent`/`wiki`/`project_candidates`/
+  `persistence`/`config`/`transport` over `common`/`rendering`
+- `health`, `redaction`, `plan_messages`, `receipts` on top
+- `plan_workflow` (the plan-session state machine) at the top, importing
+  `base`, `common`, `plan_messages`, `project_candidates`, `receipts`,
+  `redaction`, `rendering`, `schemas`
+- `dispatch` (guarded remote execution) alongside, over the same lower layers
+
+The 48-function plan-session state machine (`handle_remote_plan_session_input`
+and its stage transitions, selection/path resolution, and session-state
+helpers) now lives in `plan_workflow.py`; the main script imports the five
+entry points its run loop calls. The behavioral contract held throughout:
+48 Telegram integration tests pass.
+
 ## Additional Extracted Modules
 
 ### Guarded Remote Execution
