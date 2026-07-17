@@ -41,6 +41,7 @@ const selectedDecisionAssistant = selectedDecision ? decisionAssistantScope(deci
           <p class="text-xs font-semibold uppercase tracking-[0.16em] text-brand-300">Forager Decisions</p>
           <h1 class="mt-2 text-3xl font-semibold tracking-tight text-white md:text-4xl">Decision action center</h1>
           <p class="mt-2 max-w-3xl text-sm leading-relaxed text-slate-400" data-decision-summary>{decisionView.decisionInbox.summary}</p>
+          <p class="mt-2 text-xs font-medium text-slate-500" data-bridge-status data-state="unknown">Checking local action bridge…</p>
         </div>
         <div class="grid gap-3 text-sm sm:grid-cols-3">
           <div class="border border-slate-700 bg-slate-950/55 px-4 py-3">
@@ -289,15 +290,40 @@ const selectedDecisionAssistant = selectedDecision ? decisionAssistantScope(deci
 
     const WORKSTATION_REFRESH_COMMAND = 'npm run export:workstation-surface';
     const ACTION_ENVELOPE_API = sitePath('/api/ondesk/action-envelope');
+    const BRIDGE_STATUS_API = sitePath('/api/ondesk/bridge-status');
+    const SERVE_ACTIONS_COMMAND = 'npm run serve:actions --prefix website';
     const ACTION_REQUEST_SCHEMA = 'local_action_bridge_request.v1';
 
     const app = document.getElementById('decision-app');
     const fallbackElement = document.getElementById('decision-fallback-data');
     const fallbackView = fallbackElement?.textContent ? JSON.parse(fallbackElement.textContent) : null;
     let selectedQueueItem = null;
+    let bridgeAvailable = false;
 
     if (app && fallbackView) {
       fetchDecisionSurface(app, fallbackView);
+      checkBridgeStatus(app);
+    }
+
+    async function checkBridgeStatus(root) {
+      const indicator = root.querySelector('[data-bridge-status]');
+      try {
+        const response = await fetch(BRIDGE_STATUS_API, { cache: 'no-store' });
+        const body = await response.json().catch(() => ({}));
+        bridgeAvailable = Boolean(response.ok && body.ok);
+      } catch {
+        bridgeAvailable = false;
+      }
+      if (!indicator) {
+        return;
+      }
+      if (bridgeAvailable) {
+        indicator.dataset.state = 'ready';
+        indicator.textContent = 'Local action bridge ready — actions record receipts locally.';
+      } else {
+        indicator.dataset.state = 'offline';
+        indicator.textContent = `Local action bridge offline — read-only. Run ${SERVE_ACTIONS_COMMAND} to record actions.`;
+      }
     }
 
     async function fetchDecisionSurface(root, fallback) {
@@ -685,21 +711,21 @@ const selectedDecisionAssistant = selectedDecision ? decisionAssistantScope(deci
             const receipt = result.receipt;
             const status = receipt?.result_status ? formatLabel(receipt.result_status) : 'validated';
             const stale = receipt?.stale ? ' stale' : '';
-            const refreshed = result.surface_refreshed ? 'Surface refreshed.' : 'Refresh surface manually.';
+            let message;
+            let tone;
             if (result.receipt_parse_error) {
               // The mutation succeeded but its receipt could not be read back.
-              setEnvelopeStatus(
-                card,
-                `Action recorded but receipt was unreadable: ${result.receipt_parse_error}. ${refreshed}`,
-                'warning',
-              );
+              message = `Action recorded but receipt was unreadable: ${result.receipt_parse_error}.`;
+              tone = 'warning';
             } else {
-              setEnvelopeStatus(
-                card,
-                `Envelope ${status}${stale}. ${refreshed}`,
-                receipt?.stale ? 'warning' : 'success',
-              );
+              message = `Envelope ${status}${stale}. Latest receipt updated below.`;
+              tone = receipt?.stale ? 'warning' : 'success';
             }
+            // Rehydrate from the bridge-refreshed surface so the latest receipt
+            // block appears without a manual page reload, then re-apply the
+            // status to the freshly rendered card.
+            await rehydrateAfterAction(root, actionId, message, tone);
+            return;
           } catch (error) {
             setEnvelopeStatus(
               card,
@@ -711,6 +737,19 @@ const selectedDecisionAssistant = selectedDecision ? decisionAssistantScope(deci
           }
         });
       });
+    }
+
+    async function rehydrateAfterAction(root, actionId, message, tone) {
+      // Re-fetch the bridge-refreshed surface and re-render so the newly
+      // recorded receipt is visible, then restore the action status on the
+      // freshly rendered card (the previous card node is now detached).
+      await fetchDecisionSurface(root, fallbackView);
+      const card = Array.from(root.querySelectorAll('[data-action-envelope-card]')).find(
+        (element) => element.dataset.actionId === actionId,
+      );
+      if (card) {
+        setEnvelopeStatus(card, message, tone);
+      }
     }
 
     function findActionEnvelope(view, actionId) {

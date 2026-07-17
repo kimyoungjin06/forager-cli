@@ -621,7 +621,7 @@ test('decisions route renders read-only action center from workstation surface',
   await expect(page.getByText('Authorization boundary')).toBeVisible();
   const closeoutEnvelope = page.locator('[data-action-envelope-card]').filter({ hasText: 'Resolve follow-up' });
   await closeoutEnvelope.getByRole('button', { name: 'Validate envelope' }).click();
-  await expect(closeoutEnvelope.locator('[data-action-envelope-status]')).toContainText('Envelope validated. Surface refreshed.');
+  await expect(closeoutEnvelope.locator('[data-action-envelope-status]')).toContainText('Envelope validated. Latest receipt updated below.');
   await page.getByText('Envelope boundary').click();
   await expect(page.getByText('forager offdesk decision show --json decision-closeout-followup')).toBeVisible();
   await page.getByText('CLI fallback').click();
@@ -649,6 +649,93 @@ test('decisions route renders read-only action center from workstation surface',
     path: screenshotPath,
     contentType: 'image/png',
   });
+});
+
+test('decisions route reflects an available action bridge', async ({ page }) => {
+  await page.route('**/api/ondesk/bridge-status', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, schema: 'local_action_bridge_status.v1' }),
+    });
+  });
+  await page.route('**/forager-cli/workstation-surface.json', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(workstationSurface) });
+  });
+
+  await page.goto(DECISIONS_ROUTE);
+
+  await expect(page.locator('[data-bridge-status]')).toContainText('Local action bridge ready');
+  await expect(page.locator('[data-bridge-status]')).toHaveAttribute('data-state', 'ready');
+});
+
+test('decisions route flags an offline action bridge', async ({ page }) => {
+  await page.route('**/api/ondesk/bridge-status', async (route) => {
+    await route.fulfill({ status: 503, contentType: 'application/json', body: '{"ok":false}' });
+  });
+  await page.route('**/forager-cli/workstation-surface.json', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(workstationSurface) });
+  });
+
+  await page.goto(DECISIONS_ROUTE);
+
+  await expect(page.locator('[data-bridge-status]')).toContainText('Local action bridge offline');
+  await expect(page.locator('[data-bridge-status]')).toContainText('npm run serve:actions');
+  await expect(page.locator('[data-bridge-status]')).toHaveAttribute('data-state', 'offline');
+});
+
+test('decisions route rehydrates the receipt block after a successful action', async ({ page }) => {
+  const afterSurface = JSON.parse(JSON.stringify(workstationSurface));
+  const rehydratedDecision = afterSurface.decisions.find(
+    (decision) => decision.decision_id === 'decision-closeout-followup',
+  );
+  rehydratedDecision.action_envelopes[0].latest_receipt = {
+    schema: 'action_envelope_receipt.v1',
+    receipt_id: 'action-receipt-rehydrated',
+    processed_at: '2026-06-18T03:20:00Z',
+    result_status: 'validated_preview',
+    stale: false,
+    reason: 'Envelope matches current decision ledger; processor remains read-only.',
+    current_hash: 'sha256:fresh',
+    failed_checks: [],
+  };
+
+  let currentSurface = workstationSurface;
+  await page.route('**/api/ondesk/bridge-status', async (route) => {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, schema: 'local_action_bridge_status.v1' }),
+    });
+  });
+  await page.route('**/forager-cli/workstation-surface.json', async (route) => {
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(currentSurface) });
+  });
+  await page.route('**/api/ondesk/action-envelope', async (route) => {
+    // The bridge refreshes the surface after a successful action; serve the
+    // updated surface on the rehydration re-fetch.
+    currentSurface = afterSurface;
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        receipt_appended: true,
+        surface_refreshed: true,
+        receipt: {
+          schema: 'action_envelope_receipt.v1',
+          receipt_id: 'action-receipt-rehydrated',
+          result_status: 'validated',
+          stale: false,
+        },
+      }),
+    });
+  });
+
+  await page.goto(DECISIONS_ROUTE);
+
+  const card = page.locator('[data-action-envelope-card]').filter({ hasText: 'Resolve follow-up' });
+  await expect(card).not.toContainText('validated preview');
+  await card.getByRole('button', { name: 'Validate envelope' }).click();
+  await expect(card.locator('[data-action-envelope-status]')).toContainText('Latest receipt updated below');
+  await expect(card).toContainText('validated preview');
 });
 
 test('decisions route can inspect runtime handoffs while decisions remain open', async ({ page }) => {

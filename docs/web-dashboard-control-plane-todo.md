@@ -779,17 +779,20 @@ Current status:
   a page reload recovers from `409 observed_hash_changed`. `/decisions/` now
   distinguishes bridge refusals (including 409 stale guidance) from an
   unavailable bridge.
+- Done: `/decisions/` probes `GET /api/ondesk/bridge-status` on load and shows a
+  readiness indicator (`data-bridge-status`), so the operator knows whether
+  actions will record receipts before the first click.
+- Done: `/decisions/` rehydrates from the bridge-refreshed surface after a
+  successful action, so the latest receipt block updates without a manual
+  reload; the action status is restored on the freshly rendered card.
+- Done: Playwright coverage for bridge readiness (ready and offline states) and
+  post-action rehydration in `website/tests/visual/review.spec.ts`.
 
 Immediate hardening backlog before broader Web execution:
 
-- P0: Use `GET /api/ondesk/bridge-status` from `/decisions/` so the UI can
-  distinguish static read-only browsing from local receipt recording before
-  the first click.
-- P0: Rehydrate `/decisions/` after a successful bridge action so the latest
-  receipt block is visible immediately instead of relying on a manual reload.
-- P0: Add route coverage for the bridge readiness state; add a real
-  temp-profile bridge smoke before exposing additional mutation-adjacent
-  endpoints.
+- P0: Add a real temp-profile bridge smoke (drive `serve-local-actions.mjs`
+  against a seeded profile) before exposing additional mutation-adjacent
+  endpoints; current coverage mocks the bridge responses.
 - P1: Rename UI copy from raw `read_only_preview` and generic "Validate
   envelope" language to operator-facing wording that separates assistant
   read-only advice from local receipt recording.
