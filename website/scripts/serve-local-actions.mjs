@@ -438,7 +438,9 @@ function exportWorkstationSurface() {
   const outputPath = path.join(siteRoot, 'public', 'workstation-surface.json');
   mkdirSync(path.dirname(outputPath), { recursive: true });
   writeFileSync(outputPath, `${JSON.stringify(surface, null, 2)}\n`);
-  return { ok: true, message: 'surface refreshed' };
+  // Return the parsed surface so the caller can rebuild the executable envelope
+  // from it; without this, findCurrentActionEnvelope receives undefined.
+  return { ok: true, message: 'surface refreshed', surface };
 }
 
 function writeEnvelope(envelope) {
