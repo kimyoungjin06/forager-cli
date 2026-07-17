@@ -39,6 +39,7 @@ from telegram_operator.common import (
 from telegram_operator.config import resolve_telegram_config
 from telegram_operator.health import listener_health
 from telegram_operator.redaction import public_remote_plan_session
+from telegram_operator.base import attach_choice_surface, result_base
 from telegram_operator.receipts import (
     bind_prepared_workload_to_execution_brief,
     create_closeout_packet_from_runtime_monitor,
@@ -58,10 +59,13 @@ from telegram_operator.receipts import (
     sha256_id,
 )
 from telegram_operator.schemas import (
-    PLAN_REGISTRATION_SCHEMA,
-    PLAN_REVIEW_SCHEMA,
+    FORBIDDEN_REMOTE_INTENTS,
+    INTERACTION_CONTEXT_SCHEMA,
     PLAN_GATE_REQUEST_SCHEMA,
     PLAN_GATE_RESOLUTION_SCHEMA,
+    PLAN_REGISTRATION_SCHEMA,
+    PLAN_REVIEW_SCHEMA,
+    RESULT_SCHEMA,
 )
 from telegram_operator.plan_messages import (
     render_plan_closeout_packet_failed_message,
@@ -230,20 +234,6 @@ DEFAULT_LOOP_STATUS_FILE = pathlib.Path(
         "OFFDESK_REMOTE_OPERATOR_TELEGRAM_LOOP_STATUS",
         str(pathlib.Path.home() / ".cache" / "forager" / "remote_operator_telegram_loop.json"),
     )
-)
-RESULT_SCHEMA = "remote_operator_telegram_adapter_result.v1"
-INTERACTION_CONTEXT_SCHEMA = "telegram_interaction_context.v1"
-FORBIDDEN_REMOTE_INTENTS = (
-    "approve_plan",
-    "approve_launch",
-    "deny_launch",
-    "enqueue",
-    "launch",
-    "dispatch",
-    "shell",
-    "git_push",
-    "delete",
-    "provider_retarget",
 )
 
 
@@ -2954,28 +2944,8 @@ def interaction_context_from_projection(projection: dict[str, Any]) -> dict[str,
     return context
 
 
-def result_base(args: argparse.Namespace, config: dict[str, Any], mode: str) -> dict[str, Any]:
-    return {
-        "schema": RESULT_SCHEMA,
-        "generated_at": utc_now(),
-        "mode": mode,
-        "profile": args.profile,
-        "target_chat_id_hash": config.get("target_chat_id_hash"),
-        "chat_allowlist_configured": bool(config.get("chat_allowlist_configured")),
-        "user_allowlist_configured": bool(config.get("user_allowlist_configured")),
-        "read_only": True,
-        "mutation_authorized": False,
-        "approval_authorized": False,
-        "forbidden_remote_intents": list(FORBIDDEN_REMOTE_INTENTS),
-    }
 
 
-def attach_choice_surface(result: dict[str, Any], context: dict[str, Any] | None) -> None:
-    reply_markup = choice_keyboard(context)
-    result["reply_markup_preview"] = reply_markup
-    result["choice_surface_contract"] = choice_surface_contract(reply_markup, context)
-    if isinstance(context, dict):
-        result["interaction_context"] = context
 
 
 def finalize_dispatch_result(result: dict[str, Any], message_preview: str) -> dict[str, Any]:

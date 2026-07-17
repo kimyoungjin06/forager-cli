@@ -36,3 +36,19 @@ PLAN_DRAFT_AUTHORITY_DENIALS = [
     "wiki promotion",
     "accepted truth",
 ]
+
+
+RESULT_SCHEMA = "remote_operator_telegram_adapter_result.v1"
+INTERACTION_CONTEXT_SCHEMA = "telegram_interaction_context.v1"
+FORBIDDEN_REMOTE_INTENTS = (
+    "approve_plan",
+    "approve_launch",
+    "deny_launch",
+    "enqueue",
+    "launch",
+    "dispatch",
+    "shell",
+    "git_push",
+    "delete",
+    "provider_retarget",
+)
