@@ -790,18 +790,26 @@ Current status:
 
 Immediate hardening backlog before broader Web execution:
 
-- P0: Add a real temp-profile bridge smoke (drive `serve-local-actions.mjs`
-  against a seeded profile) before exposing additional mutation-adjacent
-  endpoints; current coverage mocks the bridge responses.
-- P1: Rename UI copy from raw `read_only_preview` and generic "Validate
-  envelope" language to operator-facing wording that separates assistant
-  read-only advice from local receipt recording.
-- P1: Keep mobile action density low: show the single safest contextual action
-  first, with evidence, boundary, and CLI fallback behind progressive
-  disclosure.
-- P2: Add Web bridge endpoints for accepted-truth recovery envelope validation,
-  then action preflight, before considering any decision application or runtime
-  dispatch controls.
+- Done: a real temp-profile bridge smoke drives `serve-local-actions.mjs`
+  against a seeded profile and the built forager binary
+  (`website/tests/bridge/`, `npm run test:bridge`). It caught a latent bug:
+  `exportWorkstationSurface` did not return the parsed surface, so every real
+  action POST failed; now fixed.
+- Done: operator-facing decision action copy ("Validate & record receipt", a
+  "Read-only preview" mode label via `actionModeLabel`) with the verbose
+  observed-hash and idempotency fields behind progressive disclosure to keep
+  mobile density low.
+- Done: the bridge exposes `POST /api/ondesk/accepted-truth-recovery-envelope`
+  (compact `action_id`, `closeout_id`, `observed_hash` request), rebuilding the
+  recovery envelope from a fresh surface and running
+  `forager ondesk accepted-truth-recovery-envelope`. It validates and records a
+  recovery receipt but never records accepted truth; covered by the bridge
+  smoke.
+- P2: Wire the dashboard truth-recovery cards to the new recovery endpoint
+  (a clickable "Validate & record recovery receipt" mirroring the decisions
+  action controls, with bridge-status probe and rehydration), then action
+  preflight, before considering any decision application or runtime dispatch
+  controls.
 
 Scope:
 

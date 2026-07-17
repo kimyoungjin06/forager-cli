@@ -134,6 +134,48 @@ before(async () => {
   mkdirSync(profileDir, { recursive: true });
   writeFileSync(path.join(profileDir, 'offdesk_decisions.jsonl'), `${DECISION}\n`);
 
+  // Seed a completed closeout with an open follow-up so the workstation
+  // surface exposes an accepted-truth recovery envelope.
+  const closeoutDir = path.join(profileDir, 'offdesk_closeouts', 'completed-task');
+  mkdirSync(closeoutDir, { recursive: true });
+  writeFileSync(
+    path.join(closeoutDir, 'closeout_plan.json'),
+    JSON.stringify({
+      schema: 'closeout_plan.v1',
+      closeout_id: 'closeout-completed-task',
+      generated_at: '2026-07-16T00:00:00Z',
+      tasks: [
+        { project_key: 'project', request_id: 'request-completed-task', task_id: 'completed-task' },
+      ],
+    }),
+  );
+  writeFileSync(
+    path.join(closeoutDir, 'closeout_review_20260618T000000Z.json'),
+    JSON.stringify({
+      schema: 'closeout_review.v1',
+      reviewed_at: '2026-07-16T00:01:00Z',
+      review_id: 'review-followup',
+      closeout_id: 'closeout-completed-task',
+      verdict: 'approved',
+      applies_to_tasks: [
+        { project_key: 'project', request_id: 'request-completed-task', task_id: 'completed-task' },
+      ],
+      closeout_receipt: {
+        schema: 'closeout_receipt.v1',
+        receipt_id: 'receipt-followup',
+        closeout_id: 'closeout-completed-task',
+        acceptance_status: 'approved_with_followups',
+        verification_status: 'pending',
+        evidence_status: 'present',
+        retention_review: 'required',
+        wiki_promotion_state: 'not_required',
+        stale_task_count: 0,
+        next_safe_action: 'Resolve archive review before accepting truth.',
+        open_decisions: [{ kind: 'archive_review', summary: 'Archive decision is still open.' }],
+      },
+    }),
+  );
+
   // The bridge rewrites public/workstation-surface.json (a gitignored build
   // artifact); preserve any local copy so a dev workspace is untouched.
   if (existsSync(publicSurface)) {
@@ -227,6 +269,63 @@ test('a compact action request records a receipt from the seeded profile', async
   assert.ok(existsSync(receiptsFile), 'receipt ledger was written');
   const receiptLines = readFileSync(receiptsFile, 'utf8').trim().split('\n').filter(Boolean);
   assert.equal(receiptLines.length, 1);
+});
+
+test('a compact recovery request records a recovery receipt', async (t) => {
+  if (!prereqsReady) {
+    t.skip('forager binary or website/dist build is missing');
+    return;
+  }
+  const surfaceRun = spawnSync(
+    foragerBin,
+    ['--profile', 'default', 'ondesk', 'workstation-surface', '--json'],
+    { env, cwd: repoRoot, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 },
+  );
+  assert.equal(surfaceRun.status, 0, surfaceRun.stderr);
+  const surface = JSON.parse(surfaceRun.stdout);
+  const item = surface.accepted_truth_recovery?.items?.find(
+    (candidate) => candidate.closeout_id === 'closeout-completed-task',
+  );
+  assert.ok(item, 'seeded closeout is present in the recovery surface');
+  const envelope = item.action_envelopes[0];
+  assert.ok(envelope, 'recovery item exposes an action envelope');
+
+  const response = await fetch(`${origin}${BASE}/api/ondesk/accepted-truth-recovery-envelope`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      recovery_request: {
+        schema: 'local_action_bridge_recovery_request.v1',
+        action_id: envelope.action_id,
+        closeout_id: item.closeout_id,
+        observed_hash: envelope.observed_hash,
+      },
+    }),
+  });
+  const body = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(body));
+  assert.equal(body.ok, true);
+  assert.equal(body.receipt.result_status, 'validated_preview');
+
+  // The recovery receipt is recorded, but accepted truth is NOT.
+  const recoveryReceipts = path.join(
+    home,
+    '.config',
+    'forager',
+    'profiles',
+    'default',
+    'accepted_truth_recovery_action_receipts.jsonl',
+  );
+  assert.ok(existsSync(recoveryReceipts), 'recovery receipt ledger was written');
+  const acceptedTruth = path.join(
+    home,
+    '.config',
+    'forager',
+    'profiles',
+    'default',
+    'accepted_truth.jsonl',
+  );
+  assert.equal(existsSync(acceptedTruth), false, 'accepted truth must not be recorded');
 });
 
 test('a full-envelope payload is rejected', async (t) => {
