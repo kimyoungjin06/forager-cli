@@ -184,6 +184,14 @@ out of product-facing docs. The product direction is defined in
   (default off; this is remote command execution). On `/confirm`,
   `runtime-preflight` re-verifies the closeout and `runtime-dispatch` queues a
   durable task that runs only through `forager offdesk tick`.
+- The Telegram poller can proactively notify: with `--attention-notify` (the
+  systemd installer enables it by default) each poll scans the workstation
+  surface and pushes the owner chat a deduplicated card for newly waiting
+  decisions and recovery follow-ups, naming the exact command to run. The scan
+  is read-only and never crashes the loop. This closes the biggest gap for
+  urgent handling: the operator is told when to act instead of having to poll
+  `/decisions` manually. Logic lives in
+  `scripts/telegram_operator/notifier.py`.
 
 ## Next Work Candidates
 

@@ -678,6 +678,22 @@ updates. `--once` is for one-shot probes, and `--max-polls` is available for
 bounded smoke tests. `--send-command-text` sends one read-only projection to
 the configured owner chat without consuming updates.
 
+## Proactive attention notifications
+
+The live poller can also push, unprompted, when something is waiting so an
+urgent item can be handled without checking first. With `--attention-notify`
+(the systemd installer enables it by default; set `OFFDESK_REMOTE_OPERATOR_
+ATTENTION_NOTIFY=1` or pass the flag manually), each poll scans the current
+operator-safe `workstation_surface.v1` for open decisions and accepted-truth
+recovery follow-ups and sends the owner chat a short card naming the top item
+and the exact command to run (for example `/decision <id> revise`).
+
+It is deduplicated: an item is pushed once, and a still-waiting item is only
+re-notified when `--attention-reminder-sec` is set above 0. A resolved item is
+pruned so it notifies afresh if it reopens. The scan is read-only, never
+mutates state, and never crashes the poll loop: a surface-export or send
+failure is recorded and the loop continues.
+
 ## Guarded remote decision execution
 
 `/decisions` lists open decision records and the bounded action kinds

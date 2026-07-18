@@ -72,6 +72,10 @@ from telegram_operator.dispatch import (
     runtime_dispatch_item,
     store_confirmation,
 )
+from telegram_operator.notifier import (
+    build_attention_notification,
+    render_attention_message,
+)
 from telegram_operator.persistence import (
     append_chat_history,
     chat_history_for_chat_hash,
@@ -199,6 +203,20 @@ def parse_args() -> argparse.Namespace:
         in {"1", "true", "yes", "on"},
         help="Allow /dispatch to queue an operator-supplied runtime command. Off by default; "
         "this is remote command execution and should only be enabled on trusted setups.",
+    )
+    parser.add_argument(
+        "--attention-notify",
+        action="store_true",
+        default=os.environ.get("OFFDESK_REMOTE_OPERATOR_ATTENTION_NOTIFY", "").strip().lower()
+        in {"1", "true", "yes", "on"},
+        help="On each poll, proactively send the owner chat a card for newly waiting decisions "
+        "and recovery follow-ups, so urgent items can be handled without polling first.",
+    )
+    parser.add_argument(
+        "--attention-reminder-sec",
+        type=int,
+        default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_ATTENTION_REMINDER_SEC", "0")),
+        help="Re-notify a still-waiting attention item after this many seconds. 0 notifies once.",
     )
     parser.add_argument(
         "--agent-intent-mode",
@@ -1454,6 +1472,52 @@ def update_is_allowed(config: dict[str, Any], message: dict[str, Any]) -> tuple[
     return True, "allowed"
 
 
+def scan_and_notify_attention(
+    args: argparse.Namespace,
+    config: dict[str, Any],
+    state: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Push a card for newly waiting attention items. Never raises into the loop."""
+
+    if not args.attention_notify:
+        return None
+    target_chat_id = str(config.get("target_chat_id") or "").strip()
+    if not target_chat_id:
+        return {"status": "no_target_chat"}
+    try:
+        surface = export_workstation_surface(args.forager_bin, args.profile)
+        notification = build_attention_notification(
+            surface, state, reminder_sec=int(args.attention_reminder_sec)
+        )
+    except (OSError, RemoteOperatorTelegramError) as error:
+        return {"status": "scan_failed", "error": sanitize_text(str(error), max_chars=240)}
+    fresh = notification.get("fresh_items") or []
+    if not fresh:
+        return {"status": "no_new_attention", "pending_count": notification.get("pending_count")}
+    message = render_attention_message(
+        profile=args.profile, generated_at=utc_now(), items=fresh
+    )
+    send_status = "sent"
+    message_id = None
+    try:
+        message_id = send_message(config, target_chat_id, message, args, reply_markup=None)
+        send_status = "dry_run" if args.dry_run else "sent"
+    except RemoteOperatorTelegramError as error:
+        if "Telegram API" not in str(error):
+            return {"status": "scan_failed", "error": sanitize_text(str(error), max_chars=240)}
+        send_status = "failed"
+    return {
+        "status": "notified",
+        "pending_count": notification.get("pending_count"),
+        "notified_count": len(fresh),
+        "items": fresh,
+        "message_preview": message,
+        "mobile_card_contract": mobile_card_contract(message),
+        "send_status": send_status,
+        "sent_message_id": message_id,
+    }
+
+
 def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]:
     state = load_state(args.state_file)
     updates = get_updates(config, int(state.get("offset") or 0), args)
@@ -1649,8 +1713,19 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                 append_chat_history(state, chat_hash, role="assistant", text=assistant_reply)
         result = rendered
         break
-    if max_update_id >= int(state.get("offset") or 0):
+    attention = scan_and_notify_attention(args, config, state)
+    if attention is not None:
+        result["attention_notification"] = attention
+    offset_advanced = max_update_id >= int(state.get("offset") or 0)
+    if offset_advanced:
         state["offset"] = max_update_id + 1
+    # A successful attention scan prunes/marks the notified registry, so persist
+    # state even when no update advanced the offset; otherwise the same item
+    # would re-notify on the next poll.
+    attention_touched_state = bool(
+        attention and attention.get("status") in {"notified", "no_new_attention"}
+    )
+    if offset_advanced or attention_touched_state:
         save_state(args.state_file, state)
     return result
 

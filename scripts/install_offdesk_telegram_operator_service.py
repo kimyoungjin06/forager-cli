@@ -45,6 +45,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--poll-timeout-sec", type=int, default=30)
     parser.add_argument("--api-timeout-sec", type=int, default=45)
     parser.add_argument("--poll-error-backoff-sec", type=int, default=5)
+    parser.add_argument(
+        "--attention-notify",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Proactively push newly waiting decisions/recovery items to the owner chat "
+        "(recommended for urgent handling). Use --no-attention-notify to disable.",
+    )
+    parser.add_argument("--attention-reminder-sec", type=int, default=0)
     parser.add_argument("--install", action="store_true", help="Write the unit into ~/.config/systemd/user.")
     parser.add_argument("--enable", action="store_true", help="Enable the service after installing it.")
     parser.add_argument("--start", action="store_true", help="Start the service after installing it.")
@@ -94,6 +102,10 @@ def render_unit(args: argparse.Namespace) -> str:
         "--poll-error-backoff-sec",
         args.poll_error_backoff_sec,
     ]
+    if args.attention_notify:
+        command.append("--attention-notify")
+        if int(args.attention_reminder_sec) > 0:
+            command.extend(["--attention-reminder-sec", args.attention_reminder_sec])
     exec_start = " ".join(systemd_arg(item) for item in command)
     return "\n".join(
         [

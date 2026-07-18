@@ -2118,6 +2118,122 @@ fn remote_operator_telegram_dispatch_rejects_stale_confirmation() -> Result<()> 
 
 #[test]
 #[serial]
+fn remote_operator_telegram_attention_notify_pushes_then_dedupes() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let profile = profile_dir(temp.path());
+    seed_pending_decision(&profile)?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+
+    let replay = |update: &Path, out: &Path| -> Result<Value> {
+        let output = remote_operator_command(temp.path())
+            .arg("--dry-run")
+            .arg("--once")
+            .arg("--attention-notify")
+            .arg("--replay-update-file")
+            .arg(update)
+            .arg("--forager-bin")
+            .arg(env!("CARGO_BIN_EXE_forager"))
+            .arg("--env-file")
+            .arg(&env_path)
+            .arg("--state-file")
+            .arg(&state_path)
+            .arg("--feedback-file")
+            .arg(&feedback_file)
+            .arg("--feedback-ingest-dir")
+            .arg(&ingest_dir)
+            .arg("--out")
+            .arg(out)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(serde_json::from_slice(&fs::read(out)?)?)
+    };
+
+    // First poll: the waiting decision is proactively pushed to the owner chat.
+    let first_update = temp.path().join("poll1.json");
+    write_text_update(&first_update, 900, 1, "/status")?;
+    let first_out = temp.path().join("poll1_out.json");
+    let first = replay(&first_update, &first_out)?;
+    let notification = &first["attention_notification"];
+    assert_eq!(notification["status"], "notified");
+    assert_eq!(notification["notified_count"], 1);
+    let preview = notification["message_preview"].as_str().expect("preview");
+    assert!(preview.contains("조치 필요"));
+    assert!(preview.contains("/decision decision-user"));
+    // The attention card is a separate send to the owner chat, mobile-scannable.
+    let contract = &notification["mobile_card_contract"];
+    assert!(contract["warnings"]
+        .as_array()
+        .expect("warnings")
+        .is_empty());
+
+    // The notified item is recorded so it is not pushed again.
+    let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    assert!(state["attention_notified_by_key"]["decision:decision-user"].is_object());
+
+    // Second poll: the same decision is still open but must not re-notify.
+    let second_update = temp.path().join("poll2.json");
+    write_text_update(&second_update, 901, 2, "/status")?;
+    let second_out = temp.path().join("poll2_out.json");
+    let second = replay(&second_update, &second_out)?;
+    assert_eq!(
+        second["attention_notification"]["status"],
+        "no_new_attention"
+    );
+    assert_eq!(second["attention_notification"]["pending_count"], 1);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_attention_notify_off_by_default() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let profile = profile_dir(temp.path());
+    seed_pending_decision(&profile)?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+    let update = temp.path().join("poll.json");
+    write_text_update(&update, 910, 1, "/status")?;
+    let out = temp.path().join("poll_out.json");
+
+    // Without --attention-notify no proactive scan runs.
+    let output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--out")
+        .arg(&out)
+        .output()?;
+    assert!(output.status.success());
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert!(result["attention_notification"].is_null());
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn remote_operator_telegram_dispatch_confirm_with_control_char_note_does_not_wedge() -> Result<()> {
     // An operator note containing a NUL byte makes the CLI subprocess raise
     // ValueError; the confirm path must convert that into an error card and
@@ -5993,6 +6109,8 @@ fn telegram_operator_systemd_installer_dry_run_renders_unit() -> Result<()> {
     assert!(unit.contains("offdesk_remote_operator_telegram.py"));
     assert!(unit.contains("--poll-timeout-sec 30"));
     assert!(unit.contains("--poll-error-backoff-sec 5"));
+    // Proactive attention notification is enabled by default for deployments.
+    assert!(unit.contains("--attention-notify"));
     assert!(unit.contains("StartLimitIntervalSec=0"));
     assert!(unit.contains("Restart=always"));
     assert!(!unit.contains("fake-token-for-test"));
