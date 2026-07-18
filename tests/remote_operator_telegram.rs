@@ -1561,6 +1561,99 @@ fn seed_pending_decision(profile: &Path) -> Result<()> {
     Ok(())
 }
 
+#[test]
+#[serial]
+fn remote_operator_telegram_pause_is_immediate_and_resume_is_confirmed() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let profile = profile_dir(temp.path());
+    fs::create_dir_all(&profile)?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+
+    let replay = |update: &Path, out: &Path| -> Result<Value> {
+        let output = remote_operator_command(temp.path())
+            .arg("--dry-run")
+            .arg("--once")
+            .arg("--replay-update-file")
+            .arg(update)
+            .arg("--forager-bin")
+            .arg(env!("CARGO_BIN_EXE_forager"))
+            .arg("--env-file")
+            .arg(&env_path)
+            .arg("--state-file")
+            .arg(&state_path)
+            .arg("--feedback-file")
+            .arg(&feedback_file)
+            .arg("--feedback-ingest-dir")
+            .arg(&ingest_dir)
+            .arg("--out")
+            .arg(out)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(serde_json::from_slice(&fs::read(out)?)?)
+    };
+
+    // /pause is immediate: one message halts all new dispatch, no confirm step.
+    let pause_update = temp.path().join("pause_update.json");
+    write_text_update(&pause_update, 900, 1, "/pause 에이전트 오작동")?;
+    let pause_out = temp.path().join("pause_out.json");
+    let pause_result = replay(&pause_update, &pause_out)?;
+    assert_eq!(pause_result["parsed_command"]["command"], "pause");
+    assert_eq!(pause_result["dispatch_result"]["ok"], true);
+    assert_eq!(pause_result["dispatch_result"]["paused"], true);
+    assert!(pause_result["message_preview"]
+        .as_str()
+        .expect("preview")
+        .contains("전면 정지"));
+    assert_mobile_contract(&pause_result);
+    // The pause state is persisted so the tick will hold new dispatch.
+    let pause_state: Value =
+        serde_json::from_slice(&fs::read(profile.join("offdesk_operator_pause.json"))?)?;
+    assert_eq!(pause_state["paused"], true);
+
+    // /resume is confirm-gated: it returns a confirmation card first.
+    let resume_update = temp.path().join("resume_update.json");
+    write_text_update(&resume_update, 901, 2, "/resume")?;
+    let resume_out = temp.path().join("resume_out.json");
+    let resume_result = replay(&resume_update, &resume_out)?;
+    assert_eq!(resume_result["parsed_command"]["command"], "resume");
+    assert!(resume_result["message_preview"]
+        .as_str()
+        .expect("preview")
+        .contains("정지 해제 확인"));
+    assert_mobile_contract(&resume_result);
+    let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    let chat_hash = resume_result["target_chat_id_hash"]
+        .as_str()
+        .expect("chat hash");
+    let token = state["pending_dispatch_confirmations_by_chat"][chat_hash]["token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+
+    // /confirm clears the pause.
+    let confirm_update = temp.path().join("confirm_update.json");
+    write_text_update(&confirm_update, 902, 3, &format!("/confirm {token}"))?;
+    let confirm_out = temp.path().join("confirm_out.json");
+    let confirm_result = replay(&confirm_update, &confirm_out)?;
+    assert_eq!(confirm_result["dispatch_result"]["ok"], true);
+    assert_eq!(confirm_result["dispatch_result"]["kind"], "resume");
+    assert_eq!(confirm_result["dispatch_result"]["paused"], false);
+    assert_mobile_contract(&confirm_result);
+    let resumed_state: Value =
+        serde_json::from_slice(&fs::read(profile.join("offdesk_operator_pause.json"))?)?;
+    assert_eq!(resumed_state["paused"], false);
+    Ok(())
+}
+
 fn seed_running_task(profile: &Path) -> Result<()> {
     fs::create_dir_all(profile)?;
     let tasks = json!([{

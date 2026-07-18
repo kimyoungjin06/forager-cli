@@ -75,6 +75,14 @@ pub struct OffdeskTickReport {
     pub provider_retargeted: usize,
     pub skipped: usize,
     pub stale_lock_replaced: bool,
+    /// True when a global operator pause held back new dispatch this tick.
+    #[serde(default)]
+    pub dispatch_paused: bool,
+    /// Number of dispatch-ready tasks held back by the operator pause.
+    #[serde(default)]
+    pub held: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pause_reason: Option<String>,
     pub updated_task_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub next_safe_actions: Vec<OffdeskNextSafeAction>,
@@ -134,10 +142,15 @@ pub fn run_offdesk_tick(
         .map(|outcome| (outcome.probe.ticket_id.clone(), outcome))
         .collect::<HashMap<_, _>>();
 
+    let operator_pause =
+        crate::offdesk::operator_pause::OperatorPauseStore::new(profile_dir).load()?;
+
     let mut report = OffdeskTickReport {
         expired_approvals: expired.len(),
         polled_background: background_outcomes.len(),
         stale_lock_replaced: tick_lock.stale_metadata_replaced(),
+        dispatch_paused: operator_pause.paused,
+        pause_reason: operator_pause.reason.clone(),
         ..OffdeskTickReport::default()
     };
 
@@ -166,6 +179,15 @@ pub fn run_offdesk_tick(
     let mut dispatched = 0usize;
     for task in tasks.iter_mut() {
         if !task_matches_tick_filter(task, &options) {
+            continue;
+        }
+        // A global operator pause halts all new dispatch: dispatch-ready tasks
+        // stay queued and are reported as held. Background polling above still
+        // runs, so existing work keeps being monitored.
+        if operator_pause.paused {
+            if task.can_dispatch_at(options.now) {
+                report.held += 1;
+            }
             continue;
         }
         if dispatched >= options.limit {
@@ -1250,6 +1272,35 @@ mod tests {
         assert_eq!(fallback.current_model.as_deref(), Some("gpt-4.1"));
         assert_eq!(ApprovalLedger::new(temp.path()).load()?.len(), 0);
         assert!(BackgroundRunStore::new(temp.path()).load()?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn tick_operator_pause_holds_new_dispatch_then_resumes() -> Result<()> {
+        let temp = tempdir()?;
+        let now = Utc::now();
+        let store = OffdeskTaskStore::new(temp.path());
+        store.enqueue(OffdeskTask::new(task_input(now, "true"), now))?;
+
+        // A global operator pause holds new dispatch: the task stays queued.
+        let pause = crate::offdesk::operator_pause::OperatorPauseStore::new(temp.path());
+        pause.pause(Some("emergency"), Some("test"), now)?;
+        let report = run_offdesk_tick(temp.path(), OffdeskTickOptions::new(now))?;
+        assert!(report.dispatch_paused);
+        assert_eq!(report.held, 1);
+        assert_eq!(report.launched, 0);
+        assert_eq!(report.pause_reason.as_deref(), Some("emergency"));
+        assert_eq!(store.load()?.remove(0).status, OffdeskTaskStatus::Queued);
+        assert!(BackgroundRunStore::new(temp.path()).load()?.is_empty());
+
+        // Resuming releases dispatch; the task launches on the next tick.
+        pause.resume(Some("test"), now)?;
+        let report = run_offdesk_tick(temp.path(), OffdeskTickOptions::new(now))?;
+        assert!(!report.dispatch_paused);
+        assert_eq!(report.held, 0);
+        assert_eq!(report.launched, 1);
+        assert_eq!(store.load()?.remove(0).status, OffdeskTaskStatus::Launched);
         Ok(())
     }
 

@@ -52,12 +52,12 @@ use crate::offdesk::{
     MutationRestorePlan, MutationSnapshot, MutationSnapshotStore, MutationSnapshotVerification,
     OffdeskModeAssessment, OffdeskModeLifecycle, OffdeskNextSafeAction, OffdeskPendingApprovalView,
     OffdeskTask, OffdeskTaskInput, OffdeskTaskLifecycleReport, OffdeskTaskStatus, OffdeskTaskStore,
-    OffdeskTaskView, OffdeskTickOptions, PendingActionApproval, ProviderCapacityState,
-    ProviderCapacityStore, ProviderFallbackRecommendation, ResumeStatus, RiskLevel, SchedulerGate,
-    SchedulerGateRequest, SchedulerGateStatus, TaskResumeState, TaskResumeStore,
-    WorkSliceExecutionReceipt, WorkSliceExecutionStatus, WorkSliceReceiptProducerRole,
-    WorkSliceVerificationStatus, DECISION_RECORD_SCHEMA, JUDGMENT_ROUTE_SCHEMA,
-    WORK_SLICE_EXECUTION_RECEIPTS_FILE,
+    OffdeskTaskView, OffdeskTickOptions, OperatorPauseState, OperatorPauseStore,
+    PendingActionApproval, ProviderCapacityState, ProviderCapacityStore,
+    ProviderFallbackRecommendation, ResumeStatus, RiskLevel, SchedulerGate, SchedulerGateRequest,
+    SchedulerGateStatus, TaskResumeState, TaskResumeStore, WorkSliceExecutionReceipt,
+    WorkSliceExecutionStatus, WorkSliceReceiptProducerRole, WorkSliceVerificationStatus,
+    DECISION_RECORD_SCHEMA, JUDGMENT_ROUTE_SCHEMA, WORK_SLICE_EXECUTION_RECEIPTS_FILE,
 };
 use crate::session::{get_profile_dir, resolved_app_dir_path, DEFAULT_PROFILE};
 
@@ -122,6 +122,16 @@ pub enum OffdeskCommands {
 
     /// Mark a durable task cancelled without stopping its background runner
     CancelTask(CancelTaskArgs),
+
+    /// Halt all new offdesk dispatch until resumed (existing runs keep polling)
+    Pause(PauseArgs),
+
+    /// Clear the global operator pause so new dispatch can proceed again
+    Unpause(UnpauseArgs),
+
+    /// Show the current global operator pause state
+    #[command(name = "pause-status")]
+    PauseStatus(JsonArgs),
 
     /// Requeue a failed, resume-pending, or cancelled durable task
     RetryTask(RetryTaskArgs),
@@ -1918,6 +1928,32 @@ pub struct CancelTaskArgs {
 }
 
 #[derive(Args)]
+pub struct PauseArgs {
+    /// Reason to record for the pause
+    #[arg(long)]
+    reason: Option<String>,
+
+    /// Actor engaging the pause
+    #[arg(long, default_value = "cli")]
+    by: String,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct UnpauseArgs {
+    /// Actor clearing the pause
+    #[arg(long, default_value = "cli")]
+    by: String,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
 pub struct TaskLifecycleArgs {
     /// Offdesk task ID to update
     task_id: String,
@@ -3658,6 +3694,9 @@ pub async fn run(profile: &str, command: OffdeskCommands) -> Result<()> {
         OffdeskCommands::ProviderCapacity(args) => provider_capacity(profile, args).await,
         OffdeskCommands::ProviderFallback(args) => provider_fallback(profile, args).await,
         OffdeskCommands::CancelTask(args) => cancel_task(profile, args).await,
+        OffdeskCommands::Pause(args) => pause_dispatch(profile, args).await,
+        OffdeskCommands::Unpause(args) => unpause_dispatch(profile, args).await,
+        OffdeskCommands::PauseStatus(args) => pause_status(profile, args).await,
         OffdeskCommands::RetryTask(args) => retry_task(profile, args).await,
         OffdeskCommands::ResumeTask(args) => resume_task(profile, args).await,
         OffdeskCommands::AbandonTask(args) => abandon_task(profile, args).await,
@@ -7634,6 +7673,42 @@ async fn cancel_task(profile: &str, args: CancelTaskArgs) -> Result<()> {
     let report =
         task_store(profile)?.cancel_task(&args.task_id, args.reason.as_deref(), Utc::now())?;
     print_lifecycle_report(&report, args.json)
+}
+
+async fn pause_dispatch(profile: &str, args: PauseArgs) -> Result<()> {
+    let state = OperatorPauseStore::new(get_profile_dir(profile)?).pause(
+        args.reason.as_deref(),
+        Some(&args.by),
+        Utc::now(),
+    )?;
+    print_operator_pause_state(&state, args.json)
+}
+
+async fn unpause_dispatch(profile: &str, args: UnpauseArgs) -> Result<()> {
+    let state =
+        OperatorPauseStore::new(get_profile_dir(profile)?).resume(Some(&args.by), Utc::now())?;
+    print_operator_pause_state(&state, args.json)
+}
+
+async fn pause_status(profile: &str, args: JsonArgs) -> Result<()> {
+    let state = OperatorPauseStore::new(get_profile_dir(profile)?).load()?;
+    print_operator_pause_state(&state, args.json)
+}
+
+fn print_operator_pause_state(state: &OperatorPauseState, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(state)?);
+        return Ok(());
+    }
+    if state.paused {
+        println!("Offdesk dispatch is PAUSED; new work is held until resume.");
+        if let Some(reason) = state.reason.as_deref() {
+            println!("  reason: {reason}");
+        }
+    } else {
+        println!("Offdesk dispatch is active.");
+    }
+    Ok(())
 }
 
 async fn retry_task(profile: &str, args: RetryTaskArgs) -> Result<()> {

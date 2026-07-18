@@ -10764,3 +10764,59 @@ fn generic_prepare_offdesk_workload_writes_reviewed_launch_packet() -> Result<()
     assert!(!manifest_text.contains("TwinPaper"));
     Ok(())
 }
+
+#[test]
+#[serial]
+fn offdesk_pause_unpause_round_trips_and_tick_holds_dispatch() -> Result<()> {
+    let temp = tempdir()?;
+    let profile = profile_dir(temp.path());
+    fs::create_dir_all(&profile)?;
+
+    // Not paused by default.
+    let status = forager_command(temp.path())
+        .args(["offdesk", "pause-status", "--json"])
+        .output()?;
+    assert!(status.status.success());
+    let status: serde_json::Value = serde_json::from_slice(&status.stdout)?;
+    assert_eq!(status["paused"], false);
+
+    // Pause records the reason and flips the state.
+    let pause = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "pause",
+            "--reason",
+            "emergency stop",
+            "--by",
+            "test",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        pause.status.success(),
+        "{}",
+        String::from_utf8_lossy(&pause.stderr)
+    );
+    let pause: serde_json::Value = serde_json::from_slice(&pause.stdout)?;
+    assert_eq!(pause["paused"], true);
+    assert_eq!(pause["reason"], "emergency stop");
+    assert!(profile.join("offdesk_operator_pause.json").exists());
+
+    // A tick while paused holds new dispatch instead of launching.
+    let tick = forager_command(temp.path())
+        .args(["offdesk", "tick", "--limit", "5", "--json"])
+        .output()?;
+    assert!(tick.status.success());
+    let tick: serde_json::Value = serde_json::from_slice(&tick.stdout)?;
+    assert_eq!(tick["dispatch_paused"], true);
+    assert_eq!(tick["launched"], 0);
+
+    // Unpause clears it.
+    let unpause = forager_command(temp.path())
+        .args(["offdesk", "unpause", "--by", "test", "--json"])
+        .output()?;
+    assert!(unpause.status.success());
+    let unpause: serde_json::Value = serde_json::from_slice(&unpause.stdout)?;
+    assert_eq!(unpause["paused"], false);
+    Ok(())
+}

@@ -710,6 +710,17 @@ plainly ("the background runner may still be running"). An unknown or
 already-finished task fails cleanly with a clear card and never wedges the poll
 loop.
 
+`/pause [reason]` is the global emergency stop. It is immediate (no
+confirmation step, because stopping is fail-safe and speed matters): one message
+engages a persistent operator pause, and `forager offdesk tick` then holds all
+new dispatch (dispatch-ready tasks stay queued and are reported as held) while
+still polling and reconciling existing background runs. `/resume` re-enables
+autonomy and is confirm-gated, since restarting dispatch is a deliberate act:
+`/resume` returns a confirmation card and `/confirm <token>` clears the pause.
+The pause state persists in `offdesk_operator_pause.json`, so it survives across
+ticks and processes until explicitly resumed. Locally the same switch is
+`forager offdesk pause` / `offdesk unpause` / `offdesk pause-status`.
+
 ## Guarded remote decision execution
 
 `/decisions` lists open decision records and the bounded action kinds

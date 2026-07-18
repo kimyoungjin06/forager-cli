@@ -36,6 +36,8 @@ CORE_OR_SLASH_COMMANDS = {
     "dispatch",
     "tasks",
     "cancel_task",
+    "pause",
+    "resume",
     "confirm",
     "cancel",
 }
@@ -208,6 +210,26 @@ def parse_remote_command(command_text: str) -> dict[str, Any]:
             "command": "tasks",
             "argv": [],
             "reason": "explicit_tasks_command",
+            "command_text": original_text,
+        }
+    if command == "pause":
+        reason = " ".join(args).strip()
+        return {
+            "supported": True,
+            "command": "pause",
+            "argv": [],
+            "reason": "explicit_pause_command",
+            "command_text": original_text,
+            "pause_reason": reason,
+        }
+    if command == "resume":
+        if args:
+            return unsupported_command(original_text, "resume_accepts_no_arguments")
+        return {
+            "supported": True,
+            "command": "resume",
+            "argv": [],
+            "reason": "explicit_resume_command",
             "command_text": original_text,
         }
     if command == "cancel_task":

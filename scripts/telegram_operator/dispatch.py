@@ -514,6 +514,50 @@ def apply_cancel_task(
     return result
 
 
+def apply_operator_pause(
+    forager_bin: str,
+    profile: str,
+    *,
+    reason: str,
+) -> dict[str, Any]:
+    """Engage the global operator pause: halt all new offdesk dispatch."""
+
+    result: dict[str, Any] = {"schema": DISPATCH_RESULT_SCHEMA, "ok": False, "kind": "pause"}
+    argv = ["offdesk", "pause", "--by", "telegram"]
+    cleaned = sanitize_text(reason, max_chars=200)
+    if cleaned:
+        argv.extend(["--reason", cleaned])
+    argv.append("--json")
+    try:
+        state = run_forager_json(forager_bin, profile, argv, label="operator pause")
+    except RemoteOperatorTelegramError as error:
+        result["error"] = sanitize_text(str(error), max_chars=240)
+        return result
+    result["ok"] = True
+    result["paused"] = bool(state.get("paused"))
+    result["reason"] = sanitize_text(str(state.get("reason") or ""), max_chars=160)
+    return result
+
+
+def apply_operator_resume(forager_bin: str, profile: str) -> dict[str, Any]:
+    """Clear the global operator pause so new dispatch can proceed again."""
+
+    result: dict[str, Any] = {"schema": DISPATCH_RESULT_SCHEMA, "ok": False, "kind": "resume"}
+    try:
+        state = run_forager_json(
+            forager_bin,
+            profile,
+            ["offdesk", "unpause", "--by", "telegram", "--json"],
+            label="operator resume",
+        )
+    except RemoteOperatorTelegramError as error:
+        result["error"] = sanitize_text(str(error), max_chars=240)
+        return result
+    result["ok"] = True
+    result["paused"] = bool(state.get("paused"))
+    return result
+
+
 def runtime_dispatch_items(surface: dict[str, Any]) -> list[dict[str, Any]]:
     runtime = surface.get("runtime_dispatch")
     if not isinstance(runtime, dict):

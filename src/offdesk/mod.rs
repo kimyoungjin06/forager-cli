@@ -13,6 +13,7 @@ pub mod decision;
 pub mod implementation_packet;
 pub mod mode_contract;
 pub mod mutation;
+pub mod operator_pause;
 pub mod provider;
 pub mod redaction;
 pub mod resume;
@@ -104,6 +105,9 @@ pub use mode_contract::{
 pub use mutation::{
     MutationRestoreOperation, MutationRestorePlan, MutationSnapshot, MutationSnapshotRequest,
     MutationSnapshotStore, MutationSnapshotVerification, SnapshotPolicy,
+};
+pub use operator_pause::{
+    OperatorPauseState, OperatorPauseStore, OPERATOR_PAUSE_FILE, OPERATOR_PAUSE_SCHEMA,
 };
 pub use provider::{
     classify_provider_error, classify_provider_error_with_context, default_provider_profile,

@@ -637,6 +637,48 @@ def render_runtime_result_message(*, profile: Any, generated_at: Any, result: di
     return "\n".join(lines)
 
 
+def render_pause_result_message(*, profile: Any, generated_at: Any, result: dict[str, Any]) -> str:
+    lines = [title_with_profile("전면 정지", profile)]
+    if result.get("ok") and result.get("paused"):
+        lines.append("신규 작업 시작을 전면 중단했습니다.")
+        reason = str(result.get("reason") or "")
+        if reason:
+            lines.append(f"사유: {html.escape(sanitize_text(reason, max_chars=120))}")
+        lines.append("실행 중 작업은 계속될 수 있습니다.")
+    else:
+        lines.append("정지에 실패했습니다.")
+        error = str(result.get("error") or "")
+        if error:
+            lines.append(html.escape(dispatch_safe_detail(error)))
+    lines.append("다음 조치: /resume · /status")
+    return "\n".join(lines)
+
+
+def render_resume_confirm_message(*, profile: Any, generated_at: Any, token: str) -> str:
+    return "\n".join(
+        [
+            title_with_profile("정지 해제 확인", profile),
+            "자율 실행을 다시 시작합니다.",
+            "신규 작업이 다시 dispatch됩니다.",
+            f"다음 조치: /confirm {html.escape(str(token))} 또는 취소",
+        ]
+    )
+
+
+def render_resume_result_message(*, profile: Any, generated_at: Any, result: dict[str, Any]) -> str:
+    lines = [title_with_profile("정지 해제 결과", profile)]
+    if result.get("ok") and not result.get("paused"):
+        lines.append("전면 정지를 해제했습니다.")
+        lines.append("신규 작업 dispatch가 다시 진행됩니다.")
+    else:
+        lines.append("해제에 실패했습니다.")
+        error = str(result.get("error") or "")
+        if error:
+            lines.append(html.escape(dispatch_safe_detail(error)))
+    lines.append("다음 조치: /tasks · /status")
+    return "\n".join(lines)
+
+
 def render_tasks_message(*, profile: Any, generated_at: Any, tasks: list[dict[str, Any]]) -> str:
     lines = [title_with_profile("실행 작업", profile)]
     if not tasks:

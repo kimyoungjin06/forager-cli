@@ -56,6 +56,8 @@ from telegram_operator.plan_messages import render_project_selection_message
 from telegram_operator.dispatch import (
     apply_cancel_task,
     apply_decision_action,
+    apply_operator_pause,
+    apply_operator_resume,
     apply_recovery_action,
     apply_runtime_dispatch,
     available_action_kinds,
@@ -95,6 +97,7 @@ from telegram_operator.rendering import (
     render_dispatch_result_message,
     render_cancel_task_confirm_message,
     render_cancel_task_result_message,
+    render_pause_result_message,
     render_recovery_confirm_message,
     render_recovery_message,
     render_recovery_result_message,
@@ -102,6 +105,8 @@ from telegram_operator.rendering import (
     render_runtime_disabled_message,
     render_runtime_message,
     render_runtime_result_message,
+    render_resume_confirm_message,
+    render_resume_result_message,
     render_tasks_message,
     display_action,
     display_review_status,
@@ -1092,7 +1097,25 @@ def render_dispatch_command(
             token=confirmation["token"],
         )
         return finalize_dispatch_result(result, message_preview)
-    # confirm and cancel are resolved against persisted state in run_once;
+    if command == "resume":
+        # Re-enabling autonomy is deliberate, so it is confirm-gated.
+        confirmation = build_confirmation(
+            kind="resume",
+            target_id="operator_pause",
+            action_kind="resume",
+            observed_hash="",
+            note="",
+            chat_hash=None,
+            ttl_sec=args.dispatch_confirm_ttl_sec,
+        )
+        result["pending_dispatch_confirmation"] = confirmation
+        message_preview = render_resume_confirm_message(
+            profile=args.profile, generated_at=generated_at, token=confirmation["token"]
+        )
+        return finalize_dispatch_result(result, message_preview)
+    # pause is an immediate emergency stop resolved in run_once; confirm, cancel,
+    # and resume are resolved against persisted state there too. This placeholder
+    # is only visible on non-live probe paths.
     # this placeholder is only visible on non-live probe paths.
     message_preview = render_dispatch_error_message(
         profile=args.profile,
@@ -1114,7 +1137,24 @@ def resolve_dispatch_confirmation(
 
     command = parsed_command.get("command")
     generated_at = rendered["generated_at"]
-    if command in {"decision", "recover", "dispatch", "cancel_task"}:
+    if command == "pause":
+        # Emergency stop is immediate (fail-safe): no confirmation step.
+        try:
+            pause_result = apply_operator_pause(
+                args.forager_bin,
+                args.profile,
+                reason=str(parsed_command.get("pause_reason") or ""),
+            )
+        except Exception as error:  # noqa: BLE001 - poll loop must never crash here
+            pause_result = {"ok": False, "kind": "pause", "error": sanitize_text(str(error), max_chars=240)}
+        rendered["dispatch_result"] = pause_result
+        message_preview = render_pause_result_message(
+            profile=args.profile, generated_at=generated_at, result=pause_result
+        )
+        rendered["message_preview"] = message_preview
+        rendered["mobile_card_contract"] = mobile_card_contract(message_preview)
+        return
+    if command in {"decision", "recover", "dispatch", "cancel_task", "resume"}:
         confirmation = rendered.get("pending_dispatch_confirmation")
         if isinstance(confirmation, dict):
             confirmation["chat_id_hash"] = chat_hash
@@ -1202,6 +1242,22 @@ def resolve_dispatch_confirmation(
                 profile=args.profile,
                 generated_at=generated_at,
                 headline="작업 취소에 실패했습니다",
+                detail=str(error),
+            )
+    elif str(confirmation.get("kind") or "") == "resume":
+        try:
+            dispatch_result = apply_operator_resume(args.forager_bin, args.profile)
+            rendered["dispatch_result"] = dispatch_result
+            message_preview = render_resume_result_message(
+                profile=args.profile,
+                generated_at=generated_at,
+                result=dispatch_result,
+            )
+        except Exception as error:  # noqa: BLE001 - poll loop must never crash here
+            message_preview = render_dispatch_error_message(
+                profile=args.profile,
+                generated_at=generated_at,
+                headline="정지 해제에 실패했습니다",
                 detail=str(error),
             )
     else:
@@ -1420,6 +1476,8 @@ def render_command_result(
         "dispatch",
         "tasks",
         "cancel_task",
+        "pause",
+        "resume",
         "confirm",
         "cancel",
     }:
@@ -1736,6 +1794,8 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
             "recover",
             "dispatch",
             "cancel_task",
+            "pause",
+            "resume",
             "confirm",
             "cancel",
         }:

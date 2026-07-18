@@ -196,9 +196,15 @@ out of product-facing docs. The product direction is defined in
   `/cancel-task <task-id> [reason]` -> `/confirm` marks a durable task
   cancelled (fail-safe; available without the runtime-dispatch opt-in). It does
   not kill an already-running background process, which the result card states
-  plainly. This is the first slice of the urgent-handling roadmap; a persistent
-  global operator pause (halt all new dispatch until resumed) is the planned
-  next slice.
+  plainly.
+- Telegram has a global emergency pause: `/pause [reason]` is immediate and
+  engages a persistent operator pause (`offdesk_operator_pause.json`) so
+  `forager offdesk tick` holds all new dispatch (queued tasks stay queued,
+  reported as `held`) while still polling existing runs. `/resume` is
+  confirm-gated and clears the pause. Backed by `src/offdesk/operator_pause.rs`
+  and the `forager offdesk pause`/`unpause`/`pause-status` CLI. This completes
+  the emergency-stop slice of the urgent-handling roadmap (notify -> triage ->
+  act -> stop).
 
 ## Next Work Candidates
 
