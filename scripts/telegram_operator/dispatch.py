@@ -436,6 +436,84 @@ def apply_decision_action(
             pass
 
 
+CANCELLABLE_TASK_STATUSES_EXCLUDED = {"completed", "cancelled"}
+
+
+def cancellable_tasks_from_surface(surface: dict[str, Any]) -> list[dict[str, Any]]:
+    """List tasks that can still be cancelled, drawn from project task rows."""
+
+    tasks: list[dict[str, Any]] = []
+    projects = surface.get("projects")
+    if not isinstance(projects, list):
+        return tasks
+    for project in projects:
+        if not isinstance(project, dict):
+            continue
+        items = project.get("task_items")
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            status = str(item.get("status") or "").strip().lower()
+            if status in CANCELLABLE_TASK_STATUSES_EXCLUDED:
+                continue
+            task_id = str(item.get("task_id") or "").strip()
+            if not task_id:
+                continue
+            tasks.append(
+                {
+                    "task_id": task_id,
+                    "status": status,
+                    "title": sanitize_text(str(item.get("title") or task_id), max_chars=80),
+                    "project_key": str(
+                        item.get("project_key") or project.get("project_key") or ""
+                    ),
+                }
+            )
+    return tasks
+
+
+def apply_cancel_task(
+    forager_bin: str,
+    profile: str,
+    task_id: str,
+    *,
+    reason: str,
+) -> dict[str, Any]:
+    """Mark a durable offdesk task cancelled.
+
+    This is the fail-safe direction (it stops the harness from continuing or
+    resuming the task) but it does not kill an already-running background
+    process; the caller surfaces that nuance to the operator.
+    """
+
+    result: dict[str, Any] = {
+        "schema": DISPATCH_RESULT_SCHEMA,
+        "ok": False,
+        "kind": "cancel_task",
+        "task_id": str(task_id or ""),
+    }
+    argv = ["offdesk", "cancel-task", str(task_id)]
+    cleaned = sanitize_text(reason, max_chars=200)
+    if cleaned:
+        argv.extend(["--reason", cleaned])
+    argv.append("--json")
+    try:
+        report = run_forager_json(forager_bin, profile, argv, label="cancel task")
+    except RemoteOperatorTelegramError as error:
+        result["stage"] = "cancel_failed"
+        result["error"] = sanitize_text(str(error), max_chars=240)
+        return result
+    result["ok"] = True
+    result["stage"] = "cancelled" if report.get("changed") else "unchanged"
+    result["changed"] = bool(report.get("changed"))
+    result["previous_status"] = report.get("previous_status")
+    result["status"] = report.get("status")
+    result["message"] = sanitize_text(str(report.get("message") or ""), max_chars=160)
+    return result
+
+
 def runtime_dispatch_items(surface: dict[str, Any]) -> list[dict[str, Any]]:
     runtime = surface.get("runtime_dispatch")
     if not isinstance(runtime, dict):

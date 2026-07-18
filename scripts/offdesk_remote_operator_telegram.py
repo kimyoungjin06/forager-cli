@@ -54,12 +54,14 @@ from telegram_operator.schemas import (
 )
 from telegram_operator.plan_messages import render_project_selection_message
 from telegram_operator.dispatch import (
+    apply_cancel_task,
     apply_decision_action,
     apply_recovery_action,
     apply_runtime_dispatch,
     available_action_kinds,
     available_recovery_action_kinds,
     build_confirmation,
+    cancellable_tasks_from_surface,
     clear_confirmation,
     confirmation_is_fresh,
     export_workstation_surface,
@@ -91,6 +93,8 @@ from telegram_operator.rendering import (
     render_dispatch_confirm_message,
     render_dispatch_error_message,
     render_dispatch_result_message,
+    render_cancel_task_confirm_message,
+    render_cancel_task_result_message,
     render_recovery_confirm_message,
     render_recovery_message,
     render_recovery_result_message,
@@ -98,6 +102,7 @@ from telegram_operator.rendering import (
     render_runtime_disabled_message,
     render_runtime_message,
     render_runtime_result_message,
+    render_tasks_message,
     display_action,
     display_review_status,
     help_message,
@@ -1051,6 +1056,42 @@ def render_dispatch_command(
                 detail=str(error),
             )
         return finalize_dispatch_result(result, message_preview)
+    if command == "tasks":
+        try:
+            surface = export_workstation_surface(args.forager_bin, args.profile)
+            tasks = cancellable_tasks_from_surface(surface)
+            message_preview = render_tasks_message(
+                profile=args.profile, generated_at=generated_at, tasks=tasks
+            )
+        except RemoteOperatorTelegramError as error:
+            message_preview = render_dispatch_error_message(
+                profile=args.profile,
+                generated_at=generated_at,
+                headline="작업 목록을 불러오지 못했습니다",
+                detail=str(error),
+            )
+        return finalize_dispatch_result(result, message_preview)
+    if command == "cancel_task":
+        task_id = str(parsed.get("cancel_task_id") or "")
+        reason = str(parsed.get("cancel_reason") or "")
+        confirmation = build_confirmation(
+            kind="cancel_task",
+            target_id=task_id,
+            action_kind="cancel",
+            observed_hash="",
+            note=reason,
+            chat_hash=None,
+            ttl_sec=args.dispatch_confirm_ttl_sec,
+        )
+        result["pending_dispatch_confirmation"] = confirmation
+        message_preview = render_cancel_task_confirm_message(
+            profile=args.profile,
+            generated_at=generated_at,
+            task_id=task_id,
+            reason=reason,
+            token=confirmation["token"],
+        )
+        return finalize_dispatch_result(result, message_preview)
     # confirm and cancel are resolved against persisted state in run_once;
     # this placeholder is only visible on non-live probe paths.
     message_preview = render_dispatch_error_message(
@@ -1073,7 +1114,7 @@ def resolve_dispatch_confirmation(
 
     command = parsed_command.get("command")
     generated_at = rendered["generated_at"]
-    if command in {"decision", "recover", "dispatch"}:
+    if command in {"decision", "recover", "dispatch", "cancel_task"}:
         confirmation = rendered.get("pending_dispatch_confirmation")
         if isinstance(confirmation, dict):
             confirmation["chat_id_hash"] = chat_hash
@@ -1141,6 +1182,28 @@ def resolve_dispatch_confirmation(
                     headline="런타임 디스패치에 실패했습니다",
                     detail=str(error),
                 )
+    elif str(confirmation.get("kind") or "") == "cancel_task":
+        # Cancel is the fail-safe direction; it has no envelope hash to re-check.
+        try:
+            dispatch_result = apply_cancel_task(
+                args.forager_bin,
+                args.profile,
+                str(confirmation.get("target_id") or ""),
+                reason=str(confirmation.get("note") or ""),
+            )
+            rendered["dispatch_result"] = dispatch_result
+            message_preview = render_cancel_task_result_message(
+                profile=args.profile,
+                generated_at=generated_at,
+                result=dispatch_result,
+            )
+        except Exception as error:  # noqa: BLE001 - poll loop must never crash here
+            message_preview = render_dispatch_error_message(
+                profile=args.profile,
+                generated_at=generated_at,
+                headline="작업 취소에 실패했습니다",
+                detail=str(error),
+            )
     else:
         kind = str(confirmation.get("kind") or "decision")
         # Support decision confirmations issued before the kind field existed.
@@ -1355,6 +1418,8 @@ def render_command_result(
         "recover",
         "runtime",
         "dispatch",
+        "tasks",
+        "cancel_task",
         "confirm",
         "cancel",
     }:
@@ -1670,6 +1735,7 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
             "decision",
             "recover",
             "dispatch",
+            "cancel_task",
             "confirm",
             "cancel",
         }:

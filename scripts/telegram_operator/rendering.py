@@ -550,8 +550,8 @@ def help_message(*, profile: Any, generated_at: Any) -> str:
         [
             title_with_profile("Forager 원격 조작", profile),
             "평문은 에이전트 채팅으로 답합니다.",
-            "기록은 /feedback · /remember · /plan",
-            "실행은 /decisions · /recovery",
+            "기록: /feedback · /remember · /plan",
+            "실행/정지: /decisions · /recovery · /tasks",
             "다음 조치: /status · /pending · /plans",
         ]
     )
@@ -634,6 +634,60 @@ def render_runtime_result_message(*, profile: Any, generated_at: Any, result: di
         if error:
             lines.append(html.escape(dispatch_safe_detail(error)))
     lines.append("다음 조치: /runtime · /status")
+    return "\n".join(lines)
+
+
+def render_tasks_message(*, profile: Any, generated_at: Any, tasks: list[dict[str, Any]]) -> str:
+    lines = [title_with_profile("실행 작업", profile)]
+    if not tasks:
+        lines.append("취소 가능한 작업이 없습니다.")
+        lines.append("다음 조치: /status · /pending")
+        return "\n".join(lines)
+    for task in tasks[:3]:
+        task_id = str(task.get("task_id") or "")
+        if len(task_id) > 40:
+            task_id = task_id[:37] + "..."
+        status = str(task.get("status") or "")
+        lines.append(f"{html.escape(task_id)} · {html.escape(status)}")
+    lines.append("다음 조치: /cancel-task <task-id> [사유]")
+    return "\n".join(lines)
+
+
+def render_cancel_task_confirm_message(
+    *,
+    profile: Any,
+    generated_at: Any,
+    task_id: str,
+    reason: str,
+    token: str,
+) -> str:
+    lines = [title_with_profile("작업 취소 확인", profile)]
+    lines.append(f"작업 {html.escape(str(task_id))}")
+    if reason:
+        lines.append(f"사유: {html.escape(sanitize_text(reason, max_chars=120))}")
+    lines.append("확인 시 취소 표시(러너는 별도).")
+    lines.append(f"다음 조치: /confirm {html.escape(str(token))} 또는 취소")
+    return "\n".join(lines)
+
+
+def render_cancel_task_result_message(*, profile: Any, generated_at: Any, result: dict[str, Any]) -> str:
+    lines = [title_with_profile("작업 취소 결과", profile)]
+    task_id = str(result.get("task_id") or "")
+    if result.get("ok"):
+        if result.get("changed"):
+            lines.append(f"작업 {html.escape(task_id)} 취소 표시됨.")
+            lines.append("백그라운드 러너는 계속 실행 중일 수 있습니다.")
+        else:
+            lines.append(f"작업 {html.escape(task_id)}: 변경 없음.")
+            detail = str(result.get("message") or "")
+            if detail:
+                lines.append(html.escape(dispatch_safe_detail(detail)))
+    else:
+        lines.append(f"취소 실패: {html.escape(task_id)}")
+        error = str(result.get("error") or "")
+        if error:
+            lines.append(html.escape(dispatch_safe_detail(error)))
+    lines.append("다음 조치: /tasks · /status")
     return "\n".join(lines)
 
 

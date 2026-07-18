@@ -694,6 +694,22 @@ pruned so it notifies afresh if it reopens. The scan is read-only, never
 mutates state, and never crashes the poll loop: a surface-export or send
 failure is recorded and the loop continues.
 
+## Emergency stop
+
+`/tasks` lists tasks that can still be cancelled (drawn from the operator-safe
+workstation surface: anything not already completed or cancelled), with each
+task id and status. `/cancel-task <task-id> [reason]` returns a single-use
+confirmation card; `/confirm <token>` runs `forager offdesk cancel-task`, which
+marks the durable task cancelled so the harness stops continuing or resuming
+it.
+
+This is the fail-safe direction (it stops work, it does not start anything), so
+it is available without the `--enable-runtime-dispatch` opt-in. It does not,
+however, kill an already-running background process: the result card says so
+plainly ("the background runner may still be running"). An unknown or
+already-finished task fails cleanly with a clear card and never wedges the poll
+loop.
+
 ## Guarded remote decision execution
 
 `/decisions` lists open decision records and the bounded action kinds

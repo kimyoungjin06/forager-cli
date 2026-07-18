@@ -192,6 +192,13 @@ out of product-facing docs. The product direction is defined in
   urgent handling: the operator is told when to act instead of having to poll
   `/decisions` manually. Logic lives in
   `scripts/telegram_operator/notifier.py`.
+- Telegram has an emergency stop: `/tasks` lists cancellable tasks and
+  `/cancel-task <task-id> [reason]` -> `/confirm` marks a durable task
+  cancelled (fail-safe; available without the runtime-dispatch opt-in). It does
+  not kill an already-running background process, which the result card states
+  plainly. This is the first slice of the urgent-handling roadmap; a persistent
+  global operator pause (halt all new dispatch until resumed) is the planned
+  next slice.
 
 ## Next Work Candidates
 

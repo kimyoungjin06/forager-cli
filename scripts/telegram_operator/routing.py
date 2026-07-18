@@ -34,6 +34,8 @@ CORE_OR_SLASH_COMMANDS = {
     "recover",
     "runtime",
     "dispatch",
+    "tasks",
+    "cancel_task",
     "confirm",
     "cancel",
 }
@@ -197,6 +199,32 @@ def parse_remote_command(command_text: str) -> dict[str, Any]:
             "argv": [],
             "reason": "explicit_runtime_command",
             "command_text": original_text,
+        }
+    if command == "tasks":
+        if args:
+            return unsupported_command(original_text, "tasks_accepts_no_arguments")
+        return {
+            "supported": True,
+            "command": "tasks",
+            "argv": [],
+            "reason": "explicit_tasks_command",
+            "command_text": original_text,
+        }
+    if command == "cancel_task":
+        if not args:
+            return unsupported_command(original_text, "cancel_task_requires_task_id")
+        task_id = args[0].strip()
+        reason = " ".join(args[1:]).strip()
+        if not task_id:
+            return unsupported_command(original_text, "cancel_task_requires_task_id")
+        return {
+            "supported": True,
+            "command": "cancel_task",
+            "argv": [],
+            "reason": "explicit_cancel_task_command",
+            "command_text": original_text,
+            "cancel_task_id": task_id,
+            "cancel_reason": reason,
         }
     if command == "confirm":
         token = args[0].strip() if args else ""

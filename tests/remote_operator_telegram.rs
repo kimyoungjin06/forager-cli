@@ -1561,6 +1561,184 @@ fn seed_pending_decision(profile: &Path) -> Result<()> {
     Ok(())
 }
 
+fn seed_running_task(profile: &Path) -> Result<()> {
+    fs::create_dir_all(profile)?;
+    let tasks = json!([{
+        "task_id": "task-run-1",
+        "request_id": "req-1",
+        "project_key": "Harness",
+        "status": "running",
+        "capability_id": "web.visual_review",
+        "runner_kind": "local_background",
+        "command": "forager offdesk tick",
+        "workdir": "/tmp",
+        "attempt_count": 1,
+        "created_at": "2026-07-17T00:00:00Z",
+        "updated_at": "2026-07-17T00:00:00Z"
+    }]);
+    fs::write(
+        profile.join("offdesk_tasks.json"),
+        serde_json::to_string(&tasks)?,
+    )?;
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_cancel_task_after_confirmation() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let profile = profile_dir(temp.path());
+    seed_running_task(&profile)?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+
+    let replay = |update: &Path, out: &Path| -> Result<Value> {
+        let output = remote_operator_command(temp.path())
+            .arg("--dry-run")
+            .arg("--once")
+            .arg("--replay-update-file")
+            .arg(update)
+            .arg("--forager-bin")
+            .arg(env!("CARGO_BIN_EXE_forager"))
+            .arg("--env-file")
+            .arg(&env_path)
+            .arg("--state-file")
+            .arg(&state_path)
+            .arg("--feedback-file")
+            .arg(&feedback_file)
+            .arg("--feedback-ingest-dir")
+            .arg(&ingest_dir)
+            .arg("--out")
+            .arg(out)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(serde_json::from_slice(&fs::read(out)?)?)
+    };
+
+    // /tasks lists the running, cancellable task.
+    let tasks_update = temp.path().join("tasks_update.json");
+    write_text_update(&tasks_update, 800, 1, "/tasks")?;
+    let tasks_out = temp.path().join("tasks_out.json");
+    let tasks_result = replay(&tasks_update, &tasks_out)?;
+    assert_eq!(tasks_result["parsed_command"]["command"], "tasks");
+    assert!(tasks_result["message_preview"]
+        .as_str()
+        .expect("preview")
+        .contains("task-run-1"));
+    assert_mobile_contract(&tasks_result);
+
+    // /cancel-task returns a confirmation card.
+    let cancel_update = temp.path().join("cancel_update.json");
+    write_text_update(
+        &cancel_update,
+        801,
+        2,
+        "/cancel-task task-run-1 잘못된 실행",
+    )?;
+    let cancel_out = temp.path().join("cancel_out.json");
+    let cancel_result = replay(&cancel_update, &cancel_out)?;
+    assert_eq!(cancel_result["parsed_command"]["command"], "cancel_task");
+    assert!(cancel_result["message_preview"]
+        .as_str()
+        .expect("preview")
+        .contains("작업 취소 확인"));
+    assert_mobile_contract(&cancel_result);
+    let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    let chat_hash = cancel_result["target_chat_id_hash"]
+        .as_str()
+        .expect("chat hash");
+    let token = state["pending_dispatch_confirmations_by_chat"][chat_hash]["token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+
+    // /confirm cancels the task.
+    let confirm_update = temp.path().join("confirm_update.json");
+    write_text_update(&confirm_update, 802, 3, &format!("/confirm {token}"))?;
+    let confirm_out = temp.path().join("confirm_out.json");
+    let confirm_result = replay(&confirm_update, &confirm_out)?;
+    assert_eq!(confirm_result["dispatch_result"]["ok"], true);
+    assert_eq!(confirm_result["dispatch_result"]["kind"], "cancel_task");
+    assert_eq!(confirm_result["dispatch_result"]["changed"], true);
+    assert_eq!(confirm_result["dispatch_result"]["status"], "cancelled");
+    assert_mobile_contract(&confirm_result);
+
+    // The task store reflects the cancellation.
+    let stored: Value = serde_json::from_slice(&fs::read(profile.join("offdesk_tasks.json"))?)?;
+    assert_eq!(stored[0]["status"], "cancelled");
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_cancel_task_reports_unknown_task() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let profile = profile_dir(temp.path());
+    fs::create_dir_all(&profile)?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+
+    let replay = |update: &Path, out: &Path| -> Result<Value> {
+        let output = remote_operator_command(temp.path())
+            .arg("--dry-run")
+            .arg("--once")
+            .arg("--replay-update-file")
+            .arg(update)
+            .arg("--forager-bin")
+            .arg(env!("CARGO_BIN_EXE_forager"))
+            .arg("--env-file")
+            .arg(&env_path)
+            .arg("--state-file")
+            .arg(&state_path)
+            .arg("--feedback-file")
+            .arg(&feedback_file)
+            .arg("--feedback-ingest-dir")
+            .arg(&ingest_dir)
+            .arg("--out")
+            .arg(out)
+            .output()?;
+        assert!(output.status.success());
+        Ok(serde_json::from_slice(&fs::read(out)?)?)
+    };
+
+    let cancel_update = temp.path().join("cancel_update.json");
+    write_text_update(&cancel_update, 810, 1, "/cancel-task task-missing")?;
+    let cancel_out = temp.path().join("cancel_out.json");
+    let cancel_result = replay(&cancel_update, &cancel_out)?;
+    let chat_hash = cancel_result["target_chat_id_hash"]
+        .as_str()
+        .expect("chat hash");
+    let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    let token = state["pending_dispatch_confirmations_by_chat"][chat_hash]["token"]
+        .as_str()
+        .expect("token")
+        .to_string();
+
+    let confirm_update = temp.path().join("confirm_update.json");
+    write_text_update(&confirm_update, 811, 2, &format!("/confirm {token}"))?;
+    let confirm_out = temp.path().join("confirm_out.json");
+    let confirm_result = replay(&confirm_update, &confirm_out)?;
+    // An unknown task fails cleanly (no crash, error surfaced), not a wedge.
+    assert_eq!(confirm_result["dispatch_result"]["ok"], false);
+    assert!(confirm_result["message_preview"]
+        .as_str()
+        .expect("preview")
+        .contains("취소 실패"));
+    assert_mobile_contract(&confirm_result);
+    Ok(())
+}
+
 #[test]
 #[serial]
 fn remote_operator_telegram_dispatch_applies_decision_after_confirmation() -> Result<()> {
