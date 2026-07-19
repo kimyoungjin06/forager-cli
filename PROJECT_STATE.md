@@ -192,7 +192,9 @@ out of product-facing docs. The product direction is defined in
 - Telegram confirmation cards carry one-tap `확인`/`취소` buttons: `확인` sends a
   bare `/confirm` that confirms the single pending confirmation for the chat, so
   the operator never types the token. `/attention` also offers the top action as
-  a one-tap button. This completes the urgent-handling roadmap
+  a one-tap button. The `/decisions` card renders the top open decision's action
+  kinds as full `/decision <id> <action>` buttons, so a decision is handled in
+  two taps (action, then `확인`). This completes the urgent-handling roadmap
   (notify -> triage -> act -> stop), now fully tap-driven.
 - The Telegram poller can proactively notify: with `--attention-notify` (the
   systemd installer enables it by default) each poll scans the workstation

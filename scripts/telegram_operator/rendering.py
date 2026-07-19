@@ -460,6 +460,14 @@ def choice_keyboard(context: dict[str, Any] | None = None) -> dict[str, Any]:
         # Confirm cards get one-tap 확인/취소 buttons so the operator does not
         # have to type /confirm <token>.
         add_row("확인", "취소")
+    choice_commands = context.get("choice_commands") if isinstance(context, dict) else None
+    if isinstance(choice_commands, list):
+        # Each command is a complete slash command (e.g. "/decision <id> revise").
+        # Tapping the button sends that text, so the operator dispatches the
+        # decision action in one tap instead of typing the id and action.
+        commands = [str(command or "").strip() for command in choice_commands if str(command or "").strip()]
+        for index in range(0, len(commands), 2):
+            add_row(*commands[index : index + 2])
     if next_command and next_command not in {"/status", "/pending", "/plans --latest", "/help"}:
         add_row(next_command)
     if context_kind == "status_attention":
@@ -475,6 +483,9 @@ def choice_keyboard(context: dict[str, Any] | None = None) -> dict[str, Any]:
     elif context_kind == "plan_detail":
         add_row("계획", "상태")
         add_row("승인 대기", "도움말")
+    elif context_kind == "decisions_actions":
+        add_row("승인 대기", "상태")
+        add_row("계획", "도움말")
     else:
         add_row("상태", "승인 대기")
         add_row("계획", "도움말")
@@ -534,6 +545,12 @@ def choice_surface_contract(
         has_contextual_choice = any(label in button_texts for label in expected)
         if not has_contextual_choice:
             warnings.append("missing_contextual_choice:choice_labels")
+    choice_commands = context.get("choice_commands") if isinstance(context, dict) else None
+    if isinstance(choice_commands, list) and choice_commands:
+        expected_commands = [str(command or "").strip() for command in choice_commands if str(command or "").strip()]
+        has_contextual_choice = any(command in button_texts for command in expected_commands)
+        if not has_contextual_choice:
+            warnings.append("missing_contextual_choice:choice_commands")
     if next_command:
         has_contextual_choice = any(button_resolves_to(button, next_command) for button in button_texts)
         if not has_contextual_choice:

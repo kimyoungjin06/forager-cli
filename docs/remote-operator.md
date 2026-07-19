@@ -749,6 +749,14 @@ cards additionally offer the single most urgent action as a one-tap button
 (e.g. `/decision <id> revise`), so an urgent item can be handled by tapping the
 action and then `확인`.
 
+The `/decisions` card goes one step further: it renders the most urgent open
+decision's action kinds (e.g. `승인`/`보류`/`차단`) as full `/decision <id>
+<action>` buttons. Tapping one dispatches that action straight into the confirm
+step, so a decision is handled in two taps (action button, then `확인`) with no
+typing. Only the top open decision is buttoned to keep the mobile card tight;
+the remaining decisions stay reachable via the `/decision <id> <action> [note]`
+text hint or by re-running `/decisions`.
+
 `/confirm <token>` is the only step that applies a decision. It re-exports the
 surface, rejects the request if the decision's observed hash changed since the
 token was issued, then runs the existing receipt-gated executor chain

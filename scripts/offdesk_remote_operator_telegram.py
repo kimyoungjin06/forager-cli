@@ -854,6 +854,30 @@ def interaction_context_from_projection(projection: dict[str, Any]) -> dict[str,
 
 
 
+def decision_action_choice_context(decisions: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """One-tap action buttons for the most urgent open decision.
+
+    Each button is a complete `/decision <id> <action>` command, so tapping it
+    dispatches that action (through the usual confirm step) without typing the
+    id or action. Scoped to the top open decision and its first few actions to
+    keep the mobile card tight; other decisions stay reachable via the text hint.
+    """
+
+    for decision in decisions:
+        actions = decision.get("actions")
+        decision_id = str(decision.get("decision_id") or "").strip()
+        if not decision_id or not isinstance(actions, list) or not actions:
+            continue
+        commands: list[str] = []
+        for action in actions[:3]:
+            action_kind = str(action.get("action_kind") or "").strip()
+            if action_kind:
+                commands.append(f"/decision {decision_id} {action_kind}")
+        if commands:
+            return {"context_kind": "decisions_actions", "choice_commands": commands}
+    return None
+
+
 def finalize_dispatch_result(
     result: dict[str, Any],
     message_preview: str,
@@ -892,12 +916,14 @@ def render_dispatch_command(
     command = parsed.get("command")
     generated_at = result["generated_at"]
     if command == "decisions":
+        context: dict[str, Any] | None = None
         try:
             surface = export_workstation_surface(args.forager_bin, args.profile)
             decisions = open_decision_actions(surface)
             message_preview = render_decisions_message(
                 profile=args.profile, generated_at=generated_at, decisions=decisions
             )
+            context = decision_action_choice_context(decisions)
         except RemoteOperatorTelegramError as error:
             message_preview = render_dispatch_error_message(
                 profile=args.profile,
@@ -905,7 +931,7 @@ def render_dispatch_command(
                 headline="결정 목록을 불러오지 못했습니다",
                 detail=str(error),
             )
-        return finalize_dispatch_result(result, message_preview)
+        return finalize_dispatch_result(result, message_preview, context=context)
     if command == "decision":
         decision_id = str(parsed.get("decision_id") or "")
         action_kind = str(parsed.get("decision_action_kind") or "")

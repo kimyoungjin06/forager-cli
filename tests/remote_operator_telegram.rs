@@ -2043,6 +2043,25 @@ fn remote_operator_telegram_dispatch_applies_decision_after_confirmation() -> Re
     assert!(list_preview.contains("revise"));
     assert_mobile_contract(&list_result);
 
+    // The decisions card must offer the open decision's action as a one-tap
+    // button, so the operator dispatches it without typing the id and action.
+    let list_keyboard = list_result["reply_markup_preview"]["keyboard"]
+        .as_array()
+        .expect("keyboard");
+    let has_action_button = list_keyboard.iter().any(|row| {
+        row.as_array()
+            .map(|buttons| {
+                buttons
+                    .iter()
+                    .any(|button| button.as_str() == Some("/decision decision-user revise"))
+            })
+            .unwrap_or(false)
+    });
+    assert!(
+        has_action_button,
+        "decisions card missing one-tap action button; keyboard: {list_keyboard:?}"
+    );
+
     let decision_update = temp.path().join("decision_update.json");
     write_text_update(
         &decision_update,
