@@ -35,6 +35,11 @@ from telegram_operator.common import (
     utc_now,
     write_json,
 )
+from telegram_operator.allowlist import (
+    dispatch_templates,
+    find_dispatch_template,
+    load_dispatch_allowlist,
+)
 from telegram_operator.config import resolve_telegram_config
 from telegram_operator.health import listener_health
 from telegram_operator.redaction import public_remote_plan_session
@@ -107,6 +112,9 @@ from telegram_operator.rendering import (
     render_runtime_disabled_message,
     render_runtime_message,
     render_runtime_result_message,
+    render_run_confirm_message,
+    render_run_disabled_message,
+    render_run_list_message,
     render_resume_confirm_message,
     render_resume_result_message,
     render_tasks_message,
@@ -168,6 +176,11 @@ DEFAULT_LOOP_STATUS_FILE = pathlib.Path(
         str(pathlib.Path.home() / ".cache" / "forager" / "remote_operator_telegram_loop.json"),
     )
 )
+# Off by default: curated /run is opt-in, the operator must point this at a file
+# of vetted command templates. Kept distinct from --enable-runtime-dispatch so a
+# setup can allow named commands without allowing free-form ones.
+_DISPATCH_ALLOWLIST_ENV = os.environ.get("OFFDESK_REMOTE_OPERATOR_DISPATCH_ALLOWLIST", "").strip()
+DEFAULT_DISPATCH_ALLOWLIST_FILE = pathlib.Path(_DISPATCH_ALLOWLIST_ENV) if _DISPATCH_ALLOWLIST_ENV else None
 
 
 def parse_args() -> argparse.Namespace:
@@ -215,6 +228,16 @@ def parse_args() -> argparse.Namespace:
         in {"1", "true", "yes", "on"},
         help="Allow /dispatch to queue an operator-supplied runtime command. Off by default; "
         "this is remote command execution and should only be enabled on trusted setups.",
+    )
+    parser.add_argument(
+        "--dispatch-allowlist-file",
+        type=pathlib.Path,
+        default=DEFAULT_DISPATCH_ALLOWLIST_FILE,
+        help="Path to a JSON file of curated /run command templates ({\"templates\": "
+        "[{\"name\", \"runner\", \"command\"}]}). When set, /run lets the operator dispatch "
+        "a named, pre-vetted command without --enable-runtime-dispatch; the operator names a "
+        "template and never supplies the command. The command is re-resolved from this file at "
+        "confirm time, so removing a template revokes it even for an outstanding confirmation.",
     )
     parser.add_argument(
         "--attention-notify",
@@ -1097,6 +1120,77 @@ def render_dispatch_command(
                 detail=str(error),
             )
         return finalize_dispatch_result(result, message_preview)
+    if command == "run_list":
+        allowlist = load_dispatch_allowlist(args.dispatch_allowlist_file)
+        message_preview = render_run_list_message(
+            profile=args.profile,
+            generated_at=generated_at,
+            templates=dispatch_templates(allowlist),
+            configured=bool(args.dispatch_allowlist_file),
+        )
+        return finalize_dispatch_result(result, message_preview)
+    if command == "run":
+        if not args.dispatch_allowlist_file:
+            message_preview = render_run_disabled_message(
+                profile=args.profile, generated_at=generated_at
+            )
+            return finalize_dispatch_result(result, message_preview)
+        closeout_id = str(parsed.get("closeout_id") or "")
+        template_name = str(parsed.get("template_name") or "")
+        allowlist = load_dispatch_allowlist(args.dispatch_allowlist_file)
+        template = find_dispatch_template(allowlist, template_name)
+        if template is None:
+            names = ", ".join(str(item.get("name") or "") for item in dispatch_templates(allowlist)[:5])
+            message_preview = render_dispatch_error_message(
+                profile=args.profile,
+                generated_at=generated_at,
+                headline=f"{template_name} 템플릿이 없습니다",
+                detail=(f"가능: {names}" if names else "/run 으로 템플릿을 확인하세요."),
+            )
+            return finalize_dispatch_result(result, message_preview)
+        try:
+            surface = export_workstation_surface(args.forager_bin, args.profile)
+            item = runtime_dispatch_item(surface, closeout_id)
+            if item is None:
+                message_preview = render_dispatch_error_message(
+                    profile=args.profile,
+                    generated_at=generated_at,
+                    headline=f"{closeout_id} 런타임 항목이 없습니다",
+                    detail="/runtime 로 대기열을 확인하세요.",
+                )
+            else:
+                confirmation = build_confirmation(
+                    kind="runtime",
+                    target_id=closeout_id,
+                    action_kind="dispatch",
+                    observed_hash="",
+                    note=str(template.get("command") or ""),
+                    chat_hash=None,
+                    ttl_sec=args.dispatch_confirm_ttl_sec,
+                )
+                confirmation["runner"] = str(template.get("runner") or "")
+                confirmation["command"] = str(template.get("command") or "")
+                # The template name is authoritative: at confirm time the command
+                # is re-resolved from the current allowlist by this name, so the
+                # stored command is only a preview and cannot outlive its template.
+                confirmation["template"] = str(template.get("name") or "")
+                result["pending_dispatch_confirmation"] = confirmation
+                message_preview = render_run_confirm_message(
+                    profile=args.profile,
+                    generated_at=generated_at,
+                    closeout_id=closeout_id,
+                    template_name=str(template.get("name") or ""),
+                    command=str(template.get("command") or ""),
+                    token=confirmation["token"],
+                )
+        except RemoteOperatorTelegramError as error:
+            message_preview = render_dispatch_error_message(
+                profile=args.profile,
+                generated_at=generated_at,
+                headline="실행 확인을 준비하지 못했습니다",
+                detail=str(error),
+            )
+        return finalize_dispatch_result(result, message_preview)
     if command == "tasks":
         try:
             surface = export_workstation_surface(args.forager_bin, args.profile)
@@ -1211,7 +1305,7 @@ def resolve_dispatch_confirmation(
         rendered["message_preview"] = message_preview
         rendered["mobile_card_contract"] = mobile_card_contract(message_preview)
         return
-    if command in {"decision", "recover", "dispatch", "cancel_task", "resume"}:
+    if command in {"decision", "recover", "dispatch", "run", "cancel_task", "resume"}:
         confirmation = rendered.get("pending_dispatch_confirmation")
         if isinstance(confirmation, dict):
             confirmation["chat_id_hash"] = chat_hash
@@ -1251,9 +1345,36 @@ def resolve_dispatch_confirmation(
             detail="/decisions 로 다시 시작하세요.",
         )
     elif str(confirmation.get("kind") or "") == "runtime":
-        # Runtime dispatch has no envelope hash; runtime-preflight re-verifies
-        # the closeout against the latest decision receipt at execution time.
-        if not args.enable_runtime_dispatch:
+        template_name = str(confirmation.get("template") or "")
+        runner = str(confirmation.get("runner") or "")
+        command = str(confirmation.get("command") or "")
+        dispatch_allowed = bool(args.enable_runtime_dispatch)
+        template_error = None
+        if template_name:
+            # Curated dispatch: re-resolve runner/command from the current
+            # allowlist by name so only a still-vetted template can run. The
+            # operator never supplied the command, and this path is allowed
+            # without --enable-runtime-dispatch because the command is bounded
+            # by the local allowlist rather than free-form operator input.
+            template = find_dispatch_template(
+                load_dispatch_allowlist(args.dispatch_allowlist_file), template_name
+            )
+            if template is None:
+                template_error = True
+            else:
+                runner = str(template.get("runner") or "")
+                command = str(template.get("command") or "")
+                dispatch_allowed = True
+        if template_error:
+            message_preview = render_dispatch_error_message(
+                profile=args.profile,
+                generated_at=generated_at,
+                headline="실행 템플릿이 더 이상 없습니다",
+                detail="/run 으로 템플릿을 확인하세요.",
+            )
+        elif not dispatch_allowed:
+            # Runtime dispatch has no envelope hash; runtime-preflight re-verifies
+            # the closeout against the latest decision receipt at execution time.
             message_preview = render_runtime_disabled_message(
                 profile=args.profile, generated_at=generated_at
             )
@@ -1263,8 +1384,8 @@ def resolve_dispatch_confirmation(
                     args.forager_bin,
                     args.profile,
                     closeout_id=str(confirmation.get("target_id") or ""),
-                    runner=str(confirmation.get("runner") or ""),
-                    command=str(confirmation.get("command") or ""),
+                    runner=runner,
+                    command=command,
                 )
                 rendered["dispatch_result"] = dispatch_result
                 message_preview = render_runtime_result_message(
@@ -1531,6 +1652,8 @@ def render_command_result(
         "recover",
         "runtime",
         "dispatch",
+        "run_list",
+        "run",
         "tasks",
         "cancel_task",
         "pause",
@@ -1851,6 +1974,7 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
             "decision",
             "recover",
             "dispatch",
+            "run",
             "cancel_task",
             "pause",
             "resume",

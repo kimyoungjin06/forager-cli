@@ -797,6 +797,36 @@ re-verifies the closeout against the latest canonical decision receipt, then
 process: the queued command runs later only through `forager offdesk tick` and
 the scheduler gate.
 
+### Curated dispatch allowlist (safer alternative)
+
+`/run` is the safe alternative to free-form `/dispatch`. Instead of typing a
+command, the operator names a pre-vetted template from a local allowlist. The
+runner and command come from a JSON file on the trusted machine, never from the
+Telegram message, so a compromised chat can only trigger commands that were
+already vetted locally.
+
+Point the listener at the file with `--dispatch-allowlist-file <path>` (or
+`OFFDESK_REMOTE_OPERATOR_DISPATCH_ALLOWLIST`). It is off by default and is a
+**separate** opt-in from `--enable-runtime-dispatch`: a setup can allow named
+commands without allowing free-form ones. The file shape is:
+
+```json
+{ "templates": [
+  { "name": "smoke", "runner": "local-background", "command": "cargo test", "description": "run tests" }
+] }
+```
+
+Templates missing a name, runner, or command are dropped, and a malformed or
+missing file degrades to "not configured" rather than crashing the poll loop.
+`/run` (or `/run --list`) shows the available templates; `/run <closeout-id>
+<name>` builds a confirm card. On `/confirm` the command is **re-resolved from
+the current allowlist by name** and run through the same `runtime-preflight` ->
+`runtime-dispatch` chain, so removing a template from the file revokes it even
+for an outstanding confirmation, and the executed command is always a currently
+vetted template. Curated `/run` works without `--enable-runtime-dispatch`
+because the command is bounded by the local allowlist rather than operator
+input.
+
 Telegram messages should stay short enough for mobile scanning: a compact
 title, the current state, and the next local-safe action. Longer listener
 diagnostics belong in local health output, not in the chat message.

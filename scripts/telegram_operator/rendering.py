@@ -572,7 +572,7 @@ def help_message(*, profile: Any, generated_at: Any) -> str:
             title_with_profile("Forager 원격 조작", profile),
             "평문은 에이전트 채팅으로 답합니다.",
             "한눈 요약: /attention",
-            "실행/정지: /decisions · /recovery · /tasks · /pause",
+            "실행/정지: /decisions · /recovery · /run · /tasks · /pause",
             "다음 조치: /status · /feedback · /plan",
         ]
     )
@@ -655,6 +655,62 @@ def render_runtime_result_message(*, profile: Any, generated_at: Any, result: di
         if error:
             lines.append(html.escape(dispatch_safe_detail(error)))
     lines.append("다음 조치: /runtime · /status")
+    return "\n".join(lines)
+
+
+def render_run_list_message(
+    *,
+    profile: Any,
+    generated_at: Any,
+    templates: list[dict[str, Any]],
+    configured: bool,
+) -> str:
+    lines = [title_with_profile("실행 템플릿", profile)]
+    if not configured:
+        lines.append("큐레이션 실행이 설정되지 않았습니다.")
+        lines.append("로컬에서 --dispatch-allowlist-file 로 켜야 합니다.")
+        lines.append("다음 조치: /runtime · /status")
+        return "\n".join(lines)
+    if not templates:
+        lines.append("등록된 실행 템플릿이 없습니다.")
+        lines.append("다음 조치: /runtime · /status")
+        return "\n".join(lines)
+    for template in templates[:3]:
+        name = str(template.get("name") or "")
+        description = sanitize_text(str(template.get("description") or ""), max_chars=48)
+        if description:
+            lines.append(f"{html.escape(name)}: {html.escape(description)}")
+        else:
+            lines.append(html.escape(name))
+    lines.append("다음 조치: /run <closeout-id> <name>")
+    return "\n".join(lines)
+
+
+def render_run_disabled_message(*, profile: Any, generated_at: Any) -> str:
+    return "\n".join(
+        [
+            title_with_profile("큐레이션 실행 비활성", profile),
+            "이름 붙은 실행 템플릿이 설정되지 않았습니다.",
+            "로컬에서 --dispatch-allowlist-file 로 켜야 합니다.",
+            "다음 조치: /run · /status",
+        ]
+    )
+
+
+def render_run_confirm_message(
+    *,
+    profile: Any,
+    generated_at: Any,
+    closeout_id: str,
+    template_name: str,
+    command: str,
+    token: str,
+) -> str:
+    lines = [title_with_profile("실행 확인", profile)]
+    lines.append(f"클로즈아웃 {html.escape(str(closeout_id))} / {html.escape(str(template_name))}")
+    lines.append(f"명령: {html.escape(sanitize_text(command, max_chars=120))}")
+    lines.append("확인 시 tick에서 실행 대기열에 올립니다.")
+    lines.append(f"다음 조치: /confirm {html.escape(str(token))} 또는 취소")
     return "\n".join(lines)
 
 

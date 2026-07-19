@@ -2416,6 +2416,255 @@ fn remote_operator_telegram_dispatch_queues_runtime_task_after_confirmation() ->
 
 #[test]
 #[serial]
+fn remote_operator_telegram_run_dispatches_curated_template_without_runtime_flag() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let profile = profile_dir(temp.path());
+    seed_pending_decision(&profile)?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+
+    // Curated allowlist on the trusted local machine; the operator only names it.
+    let allowlist_path = temp.path().join("dispatch_allowlist.json");
+    fs::write(
+        &allowlist_path,
+        serde_json::to_vec(&serde_json::json!({
+            "templates": [
+                {
+                    "name": "smoke",
+                    "runner": "local-background",
+                    "command": "echo hello-from-run",
+                    "description": "smoke check"
+                }
+            ]
+        }))?,
+    )?;
+
+    // Deliberately no --enable-runtime-dispatch: curated /run is the safe path.
+    let replay = |update: &Path, out: &Path| -> Result<Value> {
+        let output = remote_operator_command(temp.path())
+            .arg("--dry-run")
+            .arg("--once")
+            .arg("--dispatch-allowlist-file")
+            .arg(&allowlist_path)
+            .arg("--replay-update-file")
+            .arg(update)
+            .arg("--forager-bin")
+            .arg(env!("CARGO_BIN_EXE_forager"))
+            .arg("--env-file")
+            .arg(&env_path)
+            .arg("--state-file")
+            .arg(&state_path)
+            .arg("--feedback-file")
+            .arg(&feedback_file)
+            .arg("--feedback-ingest-dir")
+            .arg(&ingest_dir)
+            .arg("--out")
+            .arg(out)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(serde_json::from_slice(&fs::read(out)?)?)
+    };
+    let confirm_token = |chat_hash: &str| -> Result<String> {
+        let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+        Ok(
+            state["pending_dispatch_confirmations_by_chat"][chat_hash]["token"]
+                .as_str()
+                .expect("confirmation token")
+                .to_string(),
+        )
+    };
+
+    // Apply the decision so it reaches "receipted" and becomes a runtime handoff.
+    let decision_update = temp.path().join("decision_update.json");
+    write_text_update(
+        &decision_update,
+        770,
+        970,
+        "/decision decision-user revise 수정",
+    )?;
+    let decision_out = temp.path().join("decision_out.json");
+    let decision_result = replay(&decision_update, &decision_out)?;
+    let chat_hash = decision_result["target_chat_id_hash"]
+        .as_str()
+        .expect("chat hash")
+        .to_string();
+    let apply_update = temp.path().join("apply_update.json");
+    write_text_update(
+        &apply_update,
+        771,
+        971,
+        &format!("/confirm {}", confirm_token(&chat_hash)?),
+    )?;
+    let apply_out = temp.path().join("apply_out.json");
+    let apply_result = replay(&apply_update, &apply_out)?;
+    assert_eq!(apply_result["dispatch_result"]["stage"], "applied");
+
+    let surface_output = Command::new(env!("CARGO_BIN_EXE_forager"))
+        .arg("--profile")
+        .arg("default")
+        .args(["ondesk", "workstation-surface", "--json"])
+        .env("HOME", temp.path())
+        .env("XDG_CONFIG_HOME", temp.path().join(".config"))
+        .env_remove("FORAGER_PROFILE")
+        .output()?;
+    assert!(surface_output.status.success());
+    let surface: Value = serde_json::from_slice(&surface_output.stdout)?;
+    let closeout_id = surface["runtime_dispatch"]["items"][0]["closeout_id"]
+        .as_str()
+        .expect("runtime dispatch closeout id")
+        .to_string();
+
+    // /run (list) surfaces the curated template by name.
+    let list_update = temp.path().join("run_list_update.json");
+    write_text_update(&list_update, 772, 972, "/run")?;
+    let list_out = temp.path().join("run_list_out.json");
+    let list_result = replay(&list_update, &list_out)?;
+    assert_eq!(list_result["parsed_command"]["command"], "run_list");
+    assert!(list_result["message_preview"]
+        .as_str()
+        .expect("preview")
+        .contains("smoke"));
+    assert_mobile_contract(&list_result);
+
+    // /run <closeout> <name> builds a confirm card and stashes a confirmation.
+    let run_update = temp.path().join("run_update.json");
+    write_text_update(&run_update, 773, 973, &format!("/run {closeout_id} smoke"))?;
+    let run_out = temp.path().join("run_out.json");
+    let run_result = replay(&run_update, &run_out)?;
+    assert_eq!(run_result["parsed_command"]["command"], "run");
+    assert!(run_result["message_preview"]
+        .as_str()
+        .expect("preview")
+        .contains("실행 확인"));
+    assert_mobile_contract(&run_result);
+
+    // Confirm queues the runtime task even though --enable-runtime-dispatch is off.
+    let confirm_update = temp.path().join("run_confirm_update.json");
+    write_text_update(
+        &confirm_update,
+        774,
+        974,
+        &format!("/confirm {}", confirm_token(&chat_hash)?),
+    )?;
+    let confirm_out = temp.path().join("run_confirm_out.json");
+    let confirm_result = replay(&confirm_update, &confirm_out)?;
+    assert_eq!(confirm_result["dispatch_result"]["ok"], true);
+    assert_eq!(confirm_result["dispatch_result"]["stage"], "queued");
+    assert_eq!(confirm_result["dispatch_result"]["kind"], "runtime");
+    assert_eq!(confirm_result["dispatch_result"]["task_enqueued"], true);
+    assert_mobile_contract(&confirm_result);
+
+    assert_eq!(
+        fs::read_to_string(profile.join("runtime_dispatch_receipts.jsonl"))?
+            .lines()
+            .count(),
+        1
+    );
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_run_refuses_unknown_and_unconfigured() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let profile = profile_dir(temp.path());
+    fs::create_dir_all(&profile)?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+
+    let allowlist_path = temp.path().join("dispatch_allowlist.json");
+    fs::write(
+        &allowlist_path,
+        serde_json::to_vec(&serde_json::json!({
+            "templates": [
+                {"name": "smoke", "runner": "local-background", "command": "echo hi"}
+            ]
+        }))?,
+    )?;
+
+    let replay = |update: &Path, out: &Path, allowlist: Option<&Path>| -> Result<Value> {
+        let mut command = remote_operator_command(temp.path());
+        command
+            .arg("--dry-run")
+            .arg("--once")
+            .arg("--replay-update-file")
+            .arg(update)
+            .arg("--forager-bin")
+            .arg(env!("CARGO_BIN_EXE_forager"))
+            .arg("--env-file")
+            .arg(&env_path)
+            .arg("--state-file")
+            .arg(&state_path)
+            .arg("--feedback-file")
+            .arg(&feedback_file)
+            .arg("--feedback-ingest-dir")
+            .arg(&ingest_dir)
+            .arg("--out")
+            .arg(out);
+        if let Some(path) = allowlist {
+            command.arg("--dispatch-allowlist-file").arg(path);
+        }
+        let output = command.output()?;
+        assert!(
+            output.status.success(),
+            "stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(serde_json::from_slice(&fs::read(out)?)?)
+    };
+
+    // Unknown template name: no confirmation is stored.
+    let unknown_update = temp.path().join("run_unknown_update.json");
+    write_text_update(&unknown_update, 780, 980, "/run closeout-x nope")?;
+    let unknown_out = temp.path().join("run_unknown_out.json");
+    let unknown_result = replay(&unknown_update, &unknown_out, Some(&allowlist_path))?;
+    assert_eq!(unknown_result["parsed_command"]["command"], "run");
+    assert!(unknown_result["dispatch_result"].is_null());
+    assert!(unknown_result["message_preview"]
+        .as_str()
+        .expect("preview")
+        .contains("템플릿이 없습니다"));
+    assert_mobile_contract(&unknown_result);
+    let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    assert!(
+        state["pending_dispatch_confirmations_by_chat"].is_null()
+            || state["pending_dispatch_confirmations_by_chat"]
+                .as_object()
+                .expect("map")
+                .is_empty()
+    );
+
+    // No allowlist configured: /run is refused as not configured.
+    let disabled_update = temp.path().join("run_disabled_update.json");
+    write_text_update(&disabled_update, 781, 981, "/run closeout-x smoke")?;
+    let disabled_out = temp.path().join("run_disabled_out.json");
+    let disabled_result = replay(&disabled_update, &disabled_out, None)?;
+    assert_eq!(disabled_result["parsed_command"]["command"], "run");
+    assert!(disabled_result["dispatch_result"].is_null());
+    assert!(disabled_result["message_preview"]
+        .as_str()
+        .expect("preview")
+        .contains("비활성"));
+    assert_mobile_contract(&disabled_result);
+
+    assert!(!profile.join("runtime_dispatch_receipts.jsonl").exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn remote_operator_telegram_dispatch_refuses_runtime_when_disabled() -> Result<()> {
     let temp = tempdir()?;
     let env_path = temp.path().join("telegram.env");

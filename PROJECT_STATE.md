@@ -218,15 +218,24 @@ out of product-facing docs. The product direction is defined in
   the emergency-stop slice of the urgent-handling roadmap (notify -> triage ->
   act -> stop).
 
+- Telegram has a curated dispatch allowlist: `/run` lets the operator dispatch a
+  named, pre-vetted command template without the free-form
+  `--enable-runtime-dispatch`. Templates live in a local JSON file
+  (`--dispatch-allowlist-file`); the operator only names one, and the command is
+  re-resolved from the current allowlist at confirm time (removing a template
+  revokes it even for an outstanding confirmation). This is the safer alternative
+  to free-form `/dispatch`. Logic in `scripts/telegram_operator/allowlist.py`.
+
 ## Next Work Candidates
 
 1. Split the large Offdesk CLI (`src/cli/offdesk.rs`, ~18k lines) into command
    handling and typed workflow transition modules, applying the same
    extraction pattern proven on the Telegram adapter.
-2. Optionally add a curated allowlist mode for `/dispatch` (named command
-   templates) as a safer alternative to free-form `--enable-runtime-dispatch`.
-3. Optionally split `scripts/telegram_operator/receipts.py` (~1,960 lines) by
+2. Optionally split `scripts/telegram_operator/receipts.py` (~1,960 lines) by
    stage family if it keeps growing; it is cohesive today.
+3. Optionally add parameterized `/run` templates (constrained argument
+   substitution) if fixed commands prove too rigid; keep injection surface in
+   mind.
 
 ## Refresh Rule
 

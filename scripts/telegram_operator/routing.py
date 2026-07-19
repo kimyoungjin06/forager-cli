@@ -34,6 +34,7 @@ CORE_OR_SLASH_COMMANDS = {
     "recover",
     "runtime",
     "dispatch",
+    "run",
     "tasks",
     "cancel_task",
     "pause",
@@ -47,6 +48,7 @@ DISPATCH_BUTTON_ALIASES = {
     "결정 목록": "/decisions",
     "복구 목록": "/recovery",
     "런타임 목록": "/runtime",
+    "실행 목록": "/run",
     "확인": "/confirm",
     "취소": "/cancel",
 }
@@ -204,6 +206,8 @@ def parse_remote_command(command_text: str) -> dict[str, Any]:
             "reason": "explicit_runtime_command",
             "command_text": original_text,
         }
+    if command == "run":
+        return parse_run_command(original_text, args)
     if command == "tasks":
         if args:
             return unsupported_command(original_text, "tasks_accepts_no_arguments")
@@ -325,6 +329,36 @@ def parse_dispatch_command(original_text: str, text: str) -> dict[str, Any]:
         "closeout_id": left_tokens[0],
         "runner": left_tokens[1],
         "dispatch_command_text": command,
+    }
+
+
+def parse_run_command(command_text: str, args: list[str]) -> dict[str, Any]:
+    # /run                    -> list curated templates (read-only)
+    # /run --list             -> same
+    # /run <closeout> <name>  -> dispatch the named template (confirm-gated)
+    positional = [arg for arg in args if arg != "--list"]
+    if not positional:
+        return {
+            "supported": True,
+            "command": "run_list",
+            "argv": [],
+            "reason": "explicit_run_list_command",
+            "command_text": command_text,
+        }
+    if len(positional) < 2:
+        return unsupported_command(command_text, "run_requires_closeout_and_template")
+    closeout_id = positional[0].strip()
+    template_name = positional[1].strip()
+    if not closeout_id or not template_name:
+        return unsupported_command(command_text, "run_requires_closeout_and_template")
+    return {
+        "supported": True,
+        "command": "run",
+        "argv": [],
+        "reason": "explicit_run_command",
+        "command_text": command_text,
+        "closeout_id": closeout_id,
+        "template_name": template_name,
     }
 
 
