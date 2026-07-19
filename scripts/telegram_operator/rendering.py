@@ -550,9 +550,9 @@ def help_message(*, profile: Any, generated_at: Any) -> str:
         [
             title_with_profile("Forager 원격 조작", profile),
             "평문은 에이전트 채팅으로 답합니다.",
-            "기록: /feedback · /remember · /plan",
-            "실행/정지: /decisions · /recovery · /tasks",
-            "다음 조치: /status · /pending · /plans",
+            "한눈 요약: /attention",
+            "실행/정지: /decisions · /recovery · /tasks · /pause",
+            "다음 조치: /status · /feedback · /plan",
         ]
     )
 
@@ -634,6 +634,26 @@ def render_runtime_result_message(*, profile: Any, generated_at: Any, result: di
         if error:
             lines.append(html.escape(dispatch_safe_detail(error)))
     lines.append("다음 조치: /runtime · /status")
+    return "\n".join(lines)
+
+
+def render_attention_summary_message(*, profile: Any, generated_at: Any, summary: dict[str, Any]) -> str:
+    lines = [title_with_profile("조치 필요 요약", profile)]
+    total = int(summary.get("total") or 0)
+    if total == 0:
+        lines.append("지금 조치가 필요한 항목이 없습니다.")
+        lines.append("다음 조치: /status · /pending")
+        return "\n".join(lines)
+    lines.append(
+        f"결정 {int(summary.get('decision_count') or 0)} · "
+        f"복구 {int(summary.get('recovery_count') or 0)} · "
+        f"작업 {int(summary.get('task_count') or 0)}"
+    )
+    top = summary.get("top")
+    if isinstance(top, dict):
+        title = sanitize_text(str(top.get("title") or ""), max_chars=60)
+        lines.append(f"먼저: {html.escape(title)} → {html.escape(str(top.get('command_hint') or ''))}")
+    lines.append("다음 조치: /decisions · /recovery · /tasks")
     return "\n".join(lines)
 
 

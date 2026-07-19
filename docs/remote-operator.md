@@ -678,6 +678,16 @@ updates. `--once` is for one-shot probes, and `--max-polls` is available for
 bounded smoke tests. `--send-command-text` sends one read-only projection to
 the configured owner chat without consuming updates.
 
+## One-look triage
+
+`/attention` is the fast "what needs me right now" summary. It reads the current
+operator-safe workstation surface and returns a single card aggregating every
+waiting item: open decisions, accepted-truth recovery follow-ups, and tasks the
+surface flags for operator review. The card shows the per-category counts, names
+the single most urgent action first (prioritizing decisions, then recovery, then
+tasks) with the exact command to run, and points at the detail commands
+(`/decisions`, `/recovery`, `/tasks`). It is read-only and never mutates state.
+
 ## Proactive attention notifications
 
 The live poller can also push, unprompted, when something is waiting so an

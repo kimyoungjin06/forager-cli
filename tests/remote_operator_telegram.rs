@@ -1513,6 +1513,76 @@ fn remote_operator_telegram_replay_remember_records_adaptive_wiki_candidate() ->
     Ok(())
 }
 
+#[test]
+#[serial]
+fn remote_operator_telegram_attention_summarizes_waiting_work() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let profile = profile_dir(temp.path());
+    seed_pending_decision(&profile)?;
+    // A task the surface flags for review counts toward the summary too.
+    let tasks = json!([{
+        "task_id": "task-stuck",
+        "request_id": "req-1",
+        "project_key": "project",
+        "status": "resume_pending",
+        "capability_id": "web.visual_review",
+        "runner_kind": "local_background",
+        "command": "echo hi",
+        "workdir": "/tmp",
+        "attempt_count": 1,
+        "created_at": "2026-07-17T00:00:00Z",
+        "updated_at": "2026-07-17T00:00:00Z"
+    }]);
+    fs::write(
+        profile.join("offdesk_tasks.json"),
+        serde_json::to_string(&tasks)?,
+    )?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+
+    let update = temp.path().join("attention_update.json");
+    write_text_update(&update, 900, 1, "/attention")?;
+    let out = temp.path().join("attention_out.json");
+    let output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&update)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--feedback-file")
+        .arg(&feedback_file)
+        .arg("--feedback-ingest-dir")
+        .arg(&ingest_dir)
+        .arg("--out")
+        .arg(&out)
+        .output()?;
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["parsed_command"]["command"], "attention");
+    let preview = result["message_preview"].as_str().expect("preview");
+    assert!(preview.contains("조치 필요 요약"));
+    // One decision and one review-flagged task are aggregated.
+    assert!(preview.contains("결정 1"));
+    assert!(preview.contains("작업 1"));
+    // The most urgent action is surfaced first.
+    assert!(preview.contains("/decision decision-user"));
+    assert_mobile_contract(&result);
+    Ok(())
+}
+
 fn seed_pending_decision(profile: &Path) -> Result<()> {
     fs::create_dir_all(profile)?;
     let decision = json!({

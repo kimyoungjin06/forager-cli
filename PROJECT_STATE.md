@@ -184,6 +184,11 @@ out of product-facing docs. The product direction is defined in
   (default off; this is remote command execution). On `/confirm`,
   `runtime-preflight` re-verifies the closeout and `runtime-dispatch` queues a
   durable task that runs only through `forager offdesk tick`.
+- Telegram has one-look triage: `/attention` reads the workstation surface and
+  returns a single card aggregating open decisions, recovery follow-ups, and
+  review-flagged tasks, with per-category counts and the single most urgent
+  action first. Read-only; logic in `attention_summary`
+  (`scripts/telegram_operator/notifier.py`).
 - The Telegram poller can proactively notify: with `--attention-notify` (the
   systemd installer enables it by default) each poll scans the workstation
   surface and pushes the owner chat a deduplicated card for newly waiting

@@ -38,6 +38,7 @@ CORE_OR_SLASH_COMMANDS = {
     "cancel_task",
     "pause",
     "resume",
+    "attention",
     "confirm",
     "cancel",
 }
@@ -210,6 +211,16 @@ def parse_remote_command(command_text: str) -> dict[str, Any]:
             "command": "tasks",
             "argv": [],
             "reason": "explicit_tasks_command",
+            "command_text": original_text,
+        }
+    if command == "attention":
+        if args:
+            return unsupported_command(original_text, "attention_accepts_no_arguments")
+        return {
+            "supported": True,
+            "command": "attention",
+            "argv": [],
+            "reason": "explicit_attention_command",
             "command_text": original_text,
         }
     if command == "pause":

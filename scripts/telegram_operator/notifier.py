@@ -66,6 +66,64 @@ def attention_items_from_surface(surface: dict[str, Any]) -> list[dict[str, Any]
     return items
 
 
+def tasks_needing_review_from_surface(surface: dict[str, Any]) -> list[dict[str, Any]]:
+    """Tasks the surface flags for operator review (stuck, failed, resume-pending)."""
+
+    items: list[dict[str, Any]] = []
+    projects = surface.get("projects")
+    if not isinstance(projects, list):
+        return items
+    for project in projects:
+        if not isinstance(project, dict):
+            continue
+        task_items = project.get("task_items")
+        if not isinstance(task_items, list):
+            continue
+        for item in task_items:
+            if not isinstance(item, dict):
+                continue
+            if not item.get("requires_operator_review"):
+                continue
+            task_id = str(item.get("task_id") or "").strip()
+            if not task_id:
+                continue
+            items.append(
+                {
+                    "kind": "task",
+                    "key": f"task:{task_id}",
+                    "id": task_id,
+                    "title": sanitize_text(str(item.get("title") or task_id), max_chars=80),
+                    "status": str(item.get("status") or ""),
+                    "command_hint": f"/cancel-task {task_id}",
+                }
+            )
+    return items
+
+
+def attention_summary(surface: dict[str, Any]) -> dict[str, Any]:
+    """Aggregate everything waiting for the operator into one triage summary.
+
+    Combines open decisions, accepted-truth recovery follow-ups, and tasks the
+    surface flags for review. The top item is the single most urgent action,
+    prioritizing decisions, then recovery, then tasks.
+    """
+
+    combined = attention_items_from_surface(surface)
+    decisions = [item for item in combined if item.get("kind") == "decision"]
+    recovery = [item for item in combined if item.get("kind") == "recovery"]
+    tasks = tasks_needing_review_from_surface(surface)
+    ordered = decisions + recovery + tasks
+    return {
+        "schema": ATTENTION_NOTIFICATION_SCHEMA,
+        "decision_count": len(decisions),
+        "recovery_count": len(recovery),
+        "task_count": len(tasks),
+        "total": len(ordered),
+        "top": ordered[0] if ordered else None,
+        "items": ordered,
+    }
+
+
 def select_items_to_notify(
     items: list[dict[str, Any]],
     notified: dict[str, Any],

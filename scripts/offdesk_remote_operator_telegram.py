@@ -77,6 +77,7 @@ from telegram_operator.dispatch import (
     store_confirmation,
 )
 from telegram_operator.notifier import (
+    attention_summary,
     build_attention_notification,
     render_attention_message,
 )
@@ -95,6 +96,7 @@ from telegram_operator.rendering import (
     render_dispatch_confirm_message,
     render_dispatch_error_message,
     render_dispatch_result_message,
+    render_attention_summary_message,
     render_cancel_task_confirm_message,
     render_cancel_task_result_message,
     render_pause_result_message,
@@ -1076,6 +1078,21 @@ def render_dispatch_command(
                 detail=str(error),
             )
         return finalize_dispatch_result(result, message_preview)
+    if command == "attention":
+        try:
+            surface = export_workstation_surface(args.forager_bin, args.profile)
+            summary = attention_summary(surface)
+            message_preview = render_attention_summary_message(
+                profile=args.profile, generated_at=generated_at, summary=summary
+            )
+        except RemoteOperatorTelegramError as error:
+            message_preview = render_dispatch_error_message(
+                profile=args.profile,
+                generated_at=generated_at,
+                headline="요약을 불러오지 못했습니다",
+                detail=str(error),
+            )
+        return finalize_dispatch_result(result, message_preview)
     if command == "cancel_task":
         task_id = str(parsed.get("cancel_task_id") or "")
         reason = str(parsed.get("cancel_reason") or "")
@@ -1478,6 +1495,7 @@ def render_command_result(
         "cancel_task",
         "pause",
         "resume",
+        "attention",
         "confirm",
         "cancel",
     }:
