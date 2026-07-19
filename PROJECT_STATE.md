@@ -189,6 +189,11 @@ out of product-facing docs. The product direction is defined in
   review-flagged tasks, with per-category counts and the single most urgent
   action first. Read-only; logic in `attention_summary`
   (`scripts/telegram_operator/notifier.py`).
+- Telegram confirmation cards carry one-tap `확인`/`취소` buttons: `확인` sends a
+  bare `/confirm` that confirms the single pending confirmation for the chat, so
+  the operator never types the token. `/attention` also offers the top action as
+  a one-tap button. This completes the urgent-handling roadmap
+  (notify -> triage -> act -> stop), now fully tap-driven.
 - The Telegram poller can proactively notify: with `--attention-notify` (the
   systemd installer enables it by default) each poll scans the workstation
   surface and pushes the owner chat a deduplicated card for newly waiting

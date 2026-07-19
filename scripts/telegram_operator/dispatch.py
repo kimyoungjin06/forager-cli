@@ -313,9 +313,13 @@ def pop_confirmation(
     confirmation = pending.get(key)
     if not isinstance(confirmation, dict):
         return None
-    if str(confirmation.get("token") or "") != str(token or "").strip():
+    token = str(token or "").strip()
+    # An empty token confirms the single pending confirmation for this chat (the
+    # "확인" button path); a non-empty token must match the pending one exactly
+    # (explicit /confirm <token>).
+    if token and str(confirmation.get("token") or "") != token:
         return None
-    # A matched token is single-use whether or not the chain later succeeds.
+    # A matched confirmation is single-use whether or not the chain later succeeds.
     del pending[key]
     return confirmation
 

@@ -854,8 +854,16 @@ def interaction_context_from_projection(projection: dict[str, Any]) -> dict[str,
 
 
 
-def finalize_dispatch_result(result: dict[str, Any], message_preview: str) -> dict[str, Any]:
-    attach_choice_surface(result, None)
+def finalize_dispatch_result(
+    result: dict[str, Any],
+    message_preview: str,
+    *,
+    context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    # A card that stashed a pending confirmation gets one-tap 확인/취소 buttons.
+    if context is None and isinstance(result.get("pending_dispatch_confirmation"), dict):
+        context = {"context_kind": "dispatch_confirm"}
+    attach_choice_surface(result, context)
     result.update(
         {
             "status": "rendered",
@@ -1079,12 +1087,18 @@ def render_dispatch_command(
             )
         return finalize_dispatch_result(result, message_preview)
     if command == "attention":
+        attention_context = None
         try:
             surface = export_workstation_surface(args.forager_bin, args.profile)
             summary = attention_summary(surface)
             message_preview = render_attention_summary_message(
                 profile=args.profile, generated_at=generated_at, summary=summary
             )
+            top = summary.get("top") if isinstance(summary, dict) else None
+            top_command = str(top.get("command_hint") or "") if isinstance(top, dict) else ""
+            # One-tap button for the single most urgent action.
+            if top_command:
+                attention_context = {"next_command": top_command}
         except RemoteOperatorTelegramError as error:
             message_preview = render_dispatch_error_message(
                 profile=args.profile,
@@ -1092,7 +1106,7 @@ def render_dispatch_command(
                 headline="요약을 불러오지 못했습니다",
                 detail=str(error),
             )
-        return finalize_dispatch_result(result, message_preview)
+        return finalize_dispatch_result(result, message_preview, context=attention_context)
     if command == "cancel_task":
         task_id = str(parsed.get("cancel_task_id") or "")
         reason = str(parsed.get("cancel_reason") or "")

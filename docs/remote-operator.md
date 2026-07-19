@@ -741,6 +741,14 @@ surface, and returns a confirmation card carrying a single-use token bound to
 the decision id, action kind, and observed hash, with a TTL
 (`--dispatch-confirm-ttl-sec`, default 300s).
 
+Every confirmation card carries one-tap `확인` / `취소` buttons so the operator
+does not have to type the token. `확인` sends a bare `/confirm` (no token),
+which confirms the single pending confirmation for that chat; a typed
+`/confirm <token>` still works and must match. `/attention` and the notification
+cards additionally offer the single most urgent action as a one-tap button
+(e.g. `/decision <id> revise`), so an urgent item can be handled by tapping the
+action and then `확인`.
+
 `/confirm <token>` is the only step that applies a decision. It re-exports the
 surface, rejects the request if the decision's observed hash changed since the
 token was issued, then runs the existing receipt-gated executor chain

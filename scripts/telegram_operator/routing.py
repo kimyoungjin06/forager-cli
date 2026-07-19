@@ -47,6 +47,7 @@ DISPATCH_BUTTON_ALIASES = {
     "결정 목록": "/decisions",
     "복구 목록": "/recovery",
     "런타임 목록": "/runtime",
+    "확인": "/confirm",
     "취소": "/cancel",
 }
 
@@ -260,9 +261,9 @@ def parse_remote_command(command_text: str) -> dict[str, Any]:
             "cancel_reason": reason,
         }
     if command == "confirm":
+        # An empty token confirms the single pending confirmation (the "확인"
+        # button); an explicit token is still accepted for typed confirms.
         token = args[0].strip() if args else ""
-        if not token:
-            return unsupported_command(original_text, "confirm_requires_token")
         return {
             "supported": True,
             "command": "confirm",

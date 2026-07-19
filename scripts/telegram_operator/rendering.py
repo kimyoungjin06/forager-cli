@@ -456,6 +456,10 @@ def choice_keyboard(context: dict[str, Any] | None = None) -> dict[str, Any]:
             "one_time_keyboard": False,
             "input_field_placeholder": "작업 버튼/경로 입력 · 질문은 채팅",
         }
+    if context_kind == "dispatch_confirm":
+        # Confirm cards get one-tap 확인/취소 buttons so the operator does not
+        # have to type /confirm <token>.
+        add_row("확인", "취소")
     if next_command and next_command not in {"/status", "/pending", "/plans --latest", "/help"}:
         add_row(next_command)
     if context_kind == "status_attention":

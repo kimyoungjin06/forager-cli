@@ -1579,7 +1579,99 @@ fn remote_operator_telegram_attention_summarizes_waiting_work() -> Result<()> {
     assert!(preview.contains("작업 1"));
     // The most urgent action is surfaced first.
     assert!(preview.contains("/decision decision-user"));
+    // ...and offered as a one-tap button.
+    let keyboard = result["reply_markup_preview"]["keyboard"]
+        .as_array()
+        .expect("keyboard");
+    let has_action_button = keyboard.iter().any(|row| {
+        row.as_array().is_some_and(|labels| {
+            labels.iter().any(|label| {
+                label
+                    .as_str()
+                    .is_some_and(|text| text.contains("/decision decision-user"))
+            })
+        })
+    });
+    assert!(
+        has_action_button,
+        "attention card should offer the top action as a button"
+    );
     assert_mobile_contract(&result);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_confirm_button_applies_pending_without_token() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let profile = profile_dir(temp.path());
+    seed_pending_decision(&profile)?;
+    let state_path = temp.path().join("telegram_state.json");
+    let feedback_file = temp.path().join("feedback.jsonl");
+    let ingest_dir = temp.path().join("feedback_ingest");
+
+    let replay = |update: &Path, out: &Path| -> Result<Value> {
+        let output = remote_operator_command(temp.path())
+            .arg("--dry-run")
+            .arg("--once")
+            .arg("--replay-update-file")
+            .arg(update)
+            .arg("--forager-bin")
+            .arg(env!("CARGO_BIN_EXE_forager"))
+            .arg("--env-file")
+            .arg(&env_path)
+            .arg("--state-file")
+            .arg(&state_path)
+            .arg("--feedback-file")
+            .arg(&feedback_file)
+            .arg("--feedback-ingest-dir")
+            .arg(&ingest_dir)
+            .arg("--out")
+            .arg(out)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(serde_json::from_slice(&fs::read(out)?)?)
+    };
+
+    // The confirm card offers 확인/취소 as one-tap buttons.
+    let decision_update = temp.path().join("decision_update.json");
+    write_text_update(
+        &decision_update,
+        930,
+        1,
+        "/decision decision-user revise 수정",
+    )?;
+    let decision_out = temp.path().join("decision_out.json");
+    let decision_result = replay(&decision_update, &decision_out)?;
+    let keyboard = decision_result["reply_markup_preview"]["keyboard"]
+        .as_array()
+        .expect("keyboard");
+    let has_confirm_button = keyboard.iter().any(|row| {
+        row.as_array()
+            .is_some_and(|labels| labels.iter().any(|label| label == "확인"))
+    });
+    assert!(
+        has_confirm_button,
+        "confirm card should offer a 확인 button"
+    );
+
+    // Tapping 확인 sends the plain label; it confirms the single pending action
+    // without the operator typing the token.
+    let confirm_update = temp.path().join("confirm_update.json");
+    write_text_update(&confirm_update, 931, 2, "확인")?;
+    let confirm_out = temp.path().join("confirm_out.json");
+    let confirm_result = replay(&confirm_update, &confirm_out)?;
+    assert_eq!(confirm_result["parsed_command"]["command"], "confirm");
+    assert_eq!(confirm_result["parsed_command"]["confirm_token"], "");
+    assert_eq!(confirm_result["dispatch_result"]["ok"], true);
+    assert_eq!(confirm_result["dispatch_result"]["stage"], "applied");
     Ok(())
 }
 
