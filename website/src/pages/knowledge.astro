@@ -76,20 +76,7 @@ const statusCounts = wikiGraph.nodes
         </label>
         <div class="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by knowledge facet">
           <span class="mr-1 text-xs font-semibold uppercase tracking-wider text-slate-500">Facet</span>
-          {[
-            ['all', 'all'],
-            ['research', 'research'],
-            ['ops', 'ops'],
-          ].map(([value, label]) => (
-            <button
-              type="button"
-              data-facet={value}
-              class="facet-btn rounded-md border border-slate-700 bg-[#0c1622] px-3 py-1.5 text-sm text-slate-400 transition-colors hover:text-white aria-pressed:border-brand-400 aria-pressed:bg-brand-500/15 aria-pressed:text-white"
-              aria-pressed={value === 'all' ? 'true' : 'false'}
-            >
-              {label}
-            </button>
-          ))}
+          <div id="facet-buttons" class="flex flex-wrap items-center gap-1.5"></div>
         </div>
       </div>
       <div class="relative rounded-xl border border-slate-700/70 bg-[#0b141f] p-2 sm:p-3">
@@ -331,7 +318,30 @@ const statusCounts = wikiGraph.nodes
     // ---- multi-view state: one store per profile, sliced by knowledge facet ----
     let fullView = embedded;
     let currentFacet = 'all';
-    const VALID_FACETS = ['all', 'research', 'ops'];
+
+    // Facets are data-driven: each profile declares its own (research/ops for a
+    // research project, product/ops for a software one, ops for forager-ops).
+    function distinctFacets(view) {
+      return [...new Set(view.nodes.filter((n) => n.type !== 'tag' && n.facet).map((n) => n.facet))].sort();
+    }
+    function renderFacetButtons(facets) {
+      const host = document.getElementById('facet-buttons');
+      const values = ['all', ...facets];
+      if (!values.includes(currentFacet)) currentFacet = 'all';
+      host.innerHTML = values
+        .map(
+          (v) =>
+            `<button type="button" data-facet="${v}" class="facet-btn rounded-md border border-slate-700 bg-[#0c1622] px-3 py-1.5 text-sm text-slate-400 transition-colors hover:text-white aria-pressed:border-brand-400 aria-pressed:bg-brand-500/15 aria-pressed:text-white" aria-pressed="${v === currentFacet}">${v}</button>`,
+        )
+        .join('');
+      host.querySelectorAll('.facet-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          setActiveFacet(btn.dataset.facet);
+          updateUrl();
+          applyAndRender();
+        });
+      });
+    }
 
     function filterView(view, facet) {
       if (!facet || facet === 'all') return view;
@@ -363,6 +373,7 @@ const statusCounts = wikiGraph.nodes
 
     function setFullView(view, sourceLabel) {
       fullView = view;
+      renderFacetButtons(distinctFacets(view));
       updateMetrics(view, sourceLabel);
       applyAndRender();
     }
@@ -383,17 +394,10 @@ const statusCounts = wikiGraph.nodes
       history.replaceState(null, '', qs ? `${location.pathname}?${qs}` : location.pathname);
     }
 
-    document.querySelectorAll('.facet-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        setActiveFacet(btn.dataset.facet);
-        updateUrl();
-        applyAndRender();
-      });
-    });
-
     const params = new URLSearchParams(location.search);
-    if (VALID_FACETS.includes(params.get('facet'))) setActiveFacet(params.get('facet'));
-    applyAndRender();
+    const urlFacet = params.get('facet');
+    if (urlFacet) currentFacet = urlFacet; // renderFacetButtons validates and resets if absent
+    setFullView(embedded, 'sample fixture');
     initProfiles(params.get('profile'));
 
     async function initProfiles(wantedProfile) {
