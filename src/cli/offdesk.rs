@@ -2236,6 +2236,10 @@ pub enum WikiCommands {
     /// Reconstruct the evidence chain captured at promotion time
     PromotionChain(WikiPromotionChainArgs),
 
+    /// Record an operator-authored learning candidate (e.g. from a doc review)
+    #[command(name = "record-candidate")]
+    RecordCandidate(WikiRecordCandidateArgs),
+
     /// Promote a candidate into a scoped wiki entry
     Promote(WikiPromoteArgs),
 
@@ -2607,6 +2611,61 @@ pub struct WikiPromotionChainArgs {
     /// Preview the report without writing report files
     #[arg(long)]
     dry_run: bool,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct WikiRecordCandidateArgs {
+    /// Knowledge kind
+    #[arg(long, value_parser = parse_adaptive_wiki_kind)]
+    kind: AdaptiveWikiKind,
+
+    /// Applicability scope
+    #[arg(long, value_parser = parse_adaptive_wiki_scope)]
+    scope: AdaptiveWikiScope,
+
+    /// Scope reference (e.g. project key). Required unless scope is user_global.
+    #[arg(long)]
+    scope_ref: Option<String>,
+
+    /// One-line durable claim
+    #[arg(long)]
+    claim: String,
+
+    /// Compact instruction for the AI projection
+    #[arg(long, default_value = "")]
+    ai_instruction: String,
+
+    /// Operator-facing governance summary
+    #[arg(long, default_value = "")]
+    human_summary: String,
+
+    /// Evidence reference (repeatable), e.g. doc:/path/AGENTS.md#section
+    #[arg(long = "evidence-ref")]
+    evidence_refs: Vec<String>,
+
+    /// Agent work mode this candidate applies to (repeatable; omit for universal)
+    #[arg(long = "agent-mode", value_parser = parse_adaptive_wiki_agent_mode)]
+    agent_modes: Vec<AdaptiveWikiAgentMode>,
+
+    /// Controlled core tag (repeatable), e.g. domain/twinpaper or harness/dispatch
+    #[arg(long = "core-tag")]
+    core_tags: Vec<String>,
+
+    /// Proposed (reviewable) tag (repeatable)
+    #[arg(long = "proposed-tag")]
+    proposed_tags: Vec<String>,
+
+    /// Confidence level
+    #[arg(long, default_value = "explicit", value_parser = parse_adaptive_wiki_confidence)]
+    confidence: AdaptiveWikiConfidence,
+
+    /// Why this is worth reviewing/promoting
+    #[arg(long, default_value = "")]
+    review_reason: String,
 
     /// Output as JSON
     #[arg(long)]
@@ -4944,6 +5003,7 @@ async fn wiki(profile: &str, args: WikiArgs) -> Result<()> {
         WikiCommands::EpisodeTrace(args) => wiki_episode_trace(profile, args).await,
         WikiCommands::EvaluateRecurrence(args) => wiki_evaluate_recurrence(profile, args).await,
         WikiCommands::PromotionChain(args) => wiki_promotion_chain(profile, args).await,
+        WikiCommands::RecordCandidate(args) => wiki_record_candidate(profile, args).await,
         WikiCommands::Promote(args) => wiki_promote(profile, args).await,
         WikiCommands::Reject(args) => wiki_reject(profile, args).await,
         WikiCommands::Rescope(args) => wiki_rescope(profile, args).await,
@@ -7360,6 +7420,68 @@ async fn wiki_promotion_chain(profile: &str, args: WikiPromotionChainArgs) -> Re
     }
 
     print_wiki_promotion_chain_report(&report);
+    Ok(())
+}
+
+async fn wiki_record_candidate(profile: &str, args: WikiRecordCandidateArgs) -> Result<()> {
+    let scope_ref = args
+        .scope_ref
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if args.scope != AdaptiveWikiScope::UserGlobal && scope_ref.is_none() {
+        bail!("--scope-ref is required when --scope is not user_global");
+    }
+    if args.claim.trim().is_empty() {
+        bail!("--claim must not be empty");
+    }
+
+    let evidence_refs: Vec<String> = args
+        .evidence_refs
+        .iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect();
+
+    let input = AdaptiveWikiCandidateInput {
+        kind: args.kind,
+        scope: args.scope,
+        scope_ref: scope_ref.unwrap_or("*").to_string(),
+        claim: args.claim.trim().to_string(),
+        suggested_ai_instruction: args.ai_instruction.trim().to_string(),
+        human_summary: args.human_summary.trim().to_string(),
+        // Primary evidence lands in evidence_refs; the full doc list is kept as
+        // source provenance so nothing from the review is lost.
+        evidence_ref: evidence_refs.first().cloned(),
+        signal_kind: AdaptiveWikiSignalKind::ImportedDoc,
+        origin: AdaptiveWikiOrigin::OperatorExplicit,
+        source_refs: evidence_refs.clone(),
+        source_hashes: Vec::new(),
+        suggested_scope: None,
+        agent_modes: args.agent_modes.clone(),
+        core_tags: args.core_tags.clone(),
+        proposed_tags: args.proposed_tags.clone(),
+        review_reason: args.review_reason.trim().to_string(),
+        confidence: args.confidence,
+    };
+
+    let store = writable_wiki_store(profile)?;
+    let candidate = store.record_candidate(input, Utc::now())?;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&candidate)?);
+    } else {
+        println!("Recorded candidate {}", candidate.id);
+        println!(
+            "  {:?} · {:?}:{} · confidence {:?}",
+            candidate.kind, candidate.scope, candidate.scope_ref, candidate.confidence
+        );
+        println!("  claim: {}", candidate.claim);
+        println!("  occurrences: {}", candidate.occurrence_count);
+        println!(
+            "  promote: forager -p {profile} offdesk wiki promote {} --activation-mode context_only",
+            candidate.id
+        );
+    }
     Ok(())
 }
 
@@ -16375,6 +16497,33 @@ fn parse_adaptive_wiki_scope(value: &str) -> std::result::Result<AdaptiveWikiSco
         "project" => Ok(AdaptiveWikiScope::Project),
         "user_global" | "user-global" | "global" => Ok(AdaptiveWikiScope::UserGlobal),
         _ => Err("scope must be one of session, artifact_kind, project, user_global".to_string()),
+    }
+}
+
+fn parse_adaptive_wiki_kind(value: &str) -> std::result::Result<AdaptiveWikiKind, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "preference" | "pref" => Ok(AdaptiveWikiKind::Preference),
+        "procedure" | "proc" => Ok(AdaptiveWikiKind::Procedure),
+        "failure_pattern" | "failure-pattern" | "failure" | "fail" => {
+            Ok(AdaptiveWikiKind::FailurePattern)
+        }
+        "policy_rule" | "policy-rule" | "policy" => Ok(AdaptiveWikiKind::PolicyRule),
+        "fact" => Ok(AdaptiveWikiKind::Fact),
+        _ => Err(
+            "kind must be one of preference, procedure, failure_pattern, policy_rule, fact"
+                .to_string(),
+        ),
+    }
+}
+
+fn parse_adaptive_wiki_confidence(
+    value: &str,
+) -> std::result::Result<AdaptiveWikiConfidence, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "explicit" => Ok(AdaptiveWikiConfidence::Explicit),
+        "repeated" => Ok(AdaptiveWikiConfidence::Repeated),
+        "inferred" => Ok(AdaptiveWikiConfidence::Inferred),
+        _ => Err("confidence must be one of explicit, repeated, inferred".to_string()),
     }
 }
 
