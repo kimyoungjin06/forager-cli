@@ -266,6 +266,14 @@ out of product-facing docs. The product direction is defined in
   separate reviewed step. This filled the missing capture primitive (previously
   candidates came only from `/remember`, overnight ingest, or learning-signals).
   Used to seed the TwinPaper wiki from `AGENTS.md`/`README.md` (5 -> 13 entries).
+- Entries are editable in place: `forager offdesk wiki edit <id> [--claim]
+  [--ai-instruction] [--human-summary] [--evidence-ref]...` and
+  `forager offdesk wiki add-tag <id> [--core-tag]... [--proposed-tag]...`. This
+  lets a reviewer's compress / evidence-fix / retag verdicts apply without
+  reject + re-record; each appends an audit record (`edit` / `retag`). The
+  doc->distillation contract and review rubric live in
+  `docs/adaptive-wiki-distillation.md`, validated by an A/B test (18-40% less
+  projected context) and an independent reviewing-agent pass.
 
 ## Next Work Candidates
 

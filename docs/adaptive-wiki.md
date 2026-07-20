@@ -422,8 +422,11 @@ The current CLI exposes both inspection and governed review mutation commands:
 - `forager offdesk wiki evaluate-recurrence <entry-id> --dry-run --json`
 - `forager offdesk wiki promotion-chain <entry-id> --json`
 - `forager offdesk wiki promotion-chain <entry-id> --dry-run --json`
+- `forager offdesk wiki record-candidate --kind <kind> --scope <scope> --scope-ref <ref> --claim <text> [--ai-instruction <text>] [--evidence-ref <ref>]... [--core-tag <tag>]...`
 - `forager offdesk wiki promote <candidate-id> --scope <scope> --scope-ref <ref> --activation-mode <mode> --agent-mode <mode>`
 - `forager offdesk wiki reject <candidate-id> --reason <text>`
+- `forager offdesk wiki edit <entry-id> [--claim <text>] [--ai-instruction <text>] [--human-summary <text>] [--evidence-ref <ref>]... --reason <text>`
+- `forager offdesk wiki add-tag <entry-id> [--core-tag <tag>]... [--proposed-tag <tag>]... --reason <text>`
 - `forager offdesk wiki rescope <entry-id> --scope <scope> --scope-ref <ref>`
 - `forager offdesk wiki deprecate <entry-id> --reason <text>`
 - `forager offdesk wiki renew-review-after <entry-id> --review-after <rfc3339> --reason <text>`

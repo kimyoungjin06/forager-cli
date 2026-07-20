@@ -176,6 +176,8 @@ pub enum AdaptiveWikiAuditAction {
     AddCounterexample,
     UpdateRunbook,
     RenewReviewAfter,
+    Edit,
+    Retag,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1612,6 +1614,68 @@ impl AdaptiveWikiStore {
             return Ok(None);
         };
         entry.review_after = Some(review_after);
+        entry.updated_at = now;
+        let entry = entry.clone();
+        self.save_entries(&state)?;
+        Ok(Some(entry))
+    }
+
+    /// Edit an entry's text and/or add evidence refs. Only the provided fields
+    /// change, so a reviewer's `compress` verdict (new claim/instruction) and
+    /// evidence-ref fixes apply in place without reject + re-record.
+    pub fn edit_entry(
+        &self,
+        entry_id: &str,
+        claim: Option<&str>,
+        ai_instruction: Option<&str>,
+        human_summary: Option<&str>,
+        add_evidence_refs: &[String],
+        now: DateTime<Utc>,
+    ) -> Result<Option<AdaptiveWikiEntry>> {
+        let mut state = self.load_entries()?;
+        let Some(entry) = state.entries.iter_mut().find(|entry| entry.id == entry_id) else {
+            return Ok(None);
+        };
+        if let Some(claim) = claim {
+            let claim = claim.trim();
+            if !claim.is_empty() {
+                entry.claim = claim.to_string();
+            }
+        }
+        if let Some(ai_instruction) = ai_instruction {
+            entry.ai_instruction = ai_instruction.trim().to_string();
+        }
+        if let Some(human_summary) = human_summary {
+            entry.human_summary = human_summary.trim().to_string();
+        }
+        push_unique_many(
+            &mut entry.evidence_refs,
+            clean_refs(add_evidence_refs.to_vec()).iter(),
+        );
+        entry.updated_at = now;
+        let entry = entry.clone();
+        self.save_entries(&state)?;
+        Ok(Some(entry))
+    }
+
+    /// Add controlled/proposed tags to an entry (e.g. a reviewer's `facet/*` or
+    /// `domain/*` classification), without changing any other field.
+    pub fn add_entry_tags(
+        &self,
+        entry_id: &str,
+        core_tags: &[String],
+        proposed_tags: &[String],
+        now: DateTime<Utc>,
+    ) -> Result<Option<AdaptiveWikiEntry>> {
+        let mut state = self.load_entries()?;
+        let Some(entry) = state.entries.iter_mut().find(|entry| entry.id == entry_id) else {
+            return Ok(None);
+        };
+        push_unique_many(&mut entry.core_tags, clean_tags(core_tags.to_vec()).iter());
+        push_unique_many(
+            &mut entry.proposed_tags,
+            clean_tags(proposed_tags.to_vec()).iter(),
+        );
         entry.updated_at = now;
         let entry = entry.clone();
         self.save_entries(&state)?;
@@ -5918,7 +5982,9 @@ fn live_event_kind_for_audit(
         AdaptiveWikiAuditAction::Reject
         | AdaptiveWikiAuditAction::Rescope
         | AdaptiveWikiAuditAction::UpdateRunbook
-        | AdaptiveWikiAuditAction::RenewReviewAfter => None,
+        | AdaptiveWikiAuditAction::RenewReviewAfter
+        | AdaptiveWikiAuditAction::Edit
+        | AdaptiveWikiAuditAction::Retag => None,
     }
 }
 
@@ -7194,6 +7260,8 @@ fn audit_action_label(action: AdaptiveWikiAuditAction) -> &'static str {
         AdaptiveWikiAuditAction::AddCounterexample => "add_counterexample",
         AdaptiveWikiAuditAction::UpdateRunbook => "update_runbook",
         AdaptiveWikiAuditAction::RenewReviewAfter => "renew_review_after",
+        AdaptiveWikiAuditAction::Edit => "edit",
+        AdaptiveWikiAuditAction::Retag => "retag",
     }
 }
 
@@ -8665,6 +8733,74 @@ mod tests {
         let audit = fs::read_to_string(store.audit_path())?;
         assert!(audit.contains("\"action\":\"deprecate\""));
         assert!(audit.contains("\"reason\":\"Superseded by newer rule\""));
+        Ok(())
+    }
+
+    #[test]
+    fn edit_entry_and_add_tags_update_in_place() -> Result<()> {
+        let temp = tempdir()?;
+        let store = AdaptiveWikiStore::new(temp.path());
+        let candidate = store.record_candidate(
+            AdaptiveWikiCandidateInput {
+                kind: AdaptiveWikiKind::PolicyRule,
+                scope: AdaptiveWikiScope::Project,
+                scope_ref: "project-a".to_string(),
+                claim: "A verbose original claim that should be compressed".to_string(),
+                suggested_ai_instruction: "old instruction".to_string(),
+                evidence_ref: Some("doc:one".to_string()),
+                core_tags: vec!["project/project-a".to_string()],
+                ..AdaptiveWikiCandidateInput::default()
+            },
+            now(),
+        )?;
+        let entry = store
+            .promote_candidate(
+                &candidate.id,
+                AdaptiveWikiActivationMode::ContextOnly,
+                now(),
+            )?
+            .expect("candidate promoted");
+
+        // edit compresses the claim/instruction and adds an evidence ref in place
+        let edited = store
+            .edit_entry(
+                &entry.id,
+                Some("Tight compressed claim."),
+                Some("Do the tight thing."),
+                None,
+                &["doc:two".to_string()],
+                now(),
+            )?
+            .expect("entry edited");
+        assert_eq!(edited.claim, "Tight compressed claim.");
+        assert_eq!(edited.ai_instruction, "Do the tight thing.");
+        assert_eq!(edited.evidence_refs, vec!["doc:one", "doc:two"]);
+
+        // add-tag appends controlled tags without touching other fields
+        let retagged = store
+            .add_entry_tags(
+                &entry.id,
+                &[
+                    "facet/research".to_string(),
+                    "project/project-a".to_string(),
+                ],
+                &["method/baseline-first".to_string()],
+                now(),
+            )?
+            .expect("entry retagged");
+        // existing project tag is not duplicated; new facet tag is added
+        assert_eq!(
+            retagged.core_tags,
+            vec!["project/project-a", "facet/research"]
+        );
+        assert_eq!(retagged.proposed_tags, vec!["method/baseline-first"]);
+        // edit is preserved after retag
+        assert_eq!(retagged.claim, "Tight compressed claim.");
+
+        // unknown entry id returns None rather than erroring
+        assert!(store
+            .edit_entry("missing", Some("x"), None, None, &[], now())?
+            .is_none());
         Ok(())
     }
 

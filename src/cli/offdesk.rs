@@ -2249,6 +2249,13 @@ pub enum WikiCommands {
     /// Change an entry scope
     Rescope(WikiRescopeArgs),
 
+    /// Edit an entry's claim, instruction, summary, or evidence refs in place
+    Edit(WikiEditArgs),
+
+    /// Add controlled/proposed tags to an entry (e.g. facet/* or domain/*)
+    #[command(name = "add-tag")]
+    AddTag(WikiAddTagArgs),
+
     /// Deprecate an entry so it no longer appears in AI projection
     Deprecate(WikiDeprecateArgs),
 
@@ -2751,6 +2758,66 @@ pub struct WikiRescopeArgs {
 }
 
 #[derive(Args)]
+pub struct WikiEditArgs {
+    /// Adaptive wiki entry id
+    entry_id: String,
+
+    /// Replace the durable claim
+    #[arg(long)]
+    claim: Option<String>,
+
+    /// Replace the compact AI instruction
+    #[arg(long)]
+    ai_instruction: Option<String>,
+
+    /// Replace the operator-facing summary
+    #[arg(long)]
+    human_summary: Option<String>,
+
+    /// Add an evidence reference (repeatable)
+    #[arg(long = "evidence-ref")]
+    evidence_refs: Vec<String>,
+
+    /// Operator or surface performing the edit
+    #[arg(long, default_value = "cli")]
+    by: String,
+
+    /// Optional edit reason for audit
+    #[arg(long, default_value = "")]
+    reason: String,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct WikiAddTagArgs {
+    /// Adaptive wiki entry id
+    entry_id: String,
+
+    /// Controlled core tag (repeatable), e.g. facet/research or domain/twinpaper
+    #[arg(long = "core-tag")]
+    core_tags: Vec<String>,
+
+    /// Proposed (reviewable) tag (repeatable)
+    #[arg(long = "proposed-tag")]
+    proposed_tags: Vec<String>,
+
+    /// Operator or surface performing the retag
+    #[arg(long, default_value = "cli")]
+    by: String,
+
+    /// Optional retag reason for audit
+    #[arg(long, default_value = "")]
+    reason: String,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
 pub struct WikiDeprecateArgs {
     /// Adaptive wiki entry id
     entry_id: String,
@@ -2977,6 +3044,14 @@ enum WikiMutationResult {
         audit: AdaptiveWikiAuditRecord,
     },
     Rescope {
+        entry: AdaptiveWikiHumanEntry,
+        audit: AdaptiveWikiAuditRecord,
+    },
+    Edit {
+        entry: AdaptiveWikiHumanEntry,
+        audit: AdaptiveWikiAuditRecord,
+    },
+    Retag {
         entry: AdaptiveWikiHumanEntry,
         audit: AdaptiveWikiAuditRecord,
     },
@@ -5007,6 +5082,8 @@ async fn wiki(profile: &str, args: WikiArgs) -> Result<()> {
         WikiCommands::Promote(args) => wiki_promote(profile, args).await,
         WikiCommands::Reject(args) => wiki_reject(profile, args).await,
         WikiCommands::Rescope(args) => wiki_rescope(profile, args).await,
+        WikiCommands::Edit(args) => wiki_edit(profile, args).await,
+        WikiCommands::AddTag(args) => wiki_add_tag(profile, args).await,
         WikiCommands::Deprecate(args) => wiki_deprecate(profile, args).await,
         WikiCommands::RenewReviewAfter(args) => wiki_renew_review_after(profile, args).await,
         WikiCommands::AddCounterexample(args) => wiki_add_counterexample(profile, args).await,
@@ -7636,6 +7713,83 @@ async fn wiki_rescope(profile: &str, args: WikiRescopeArgs) -> Result<()> {
     });
     store.append_audit(&audit)?;
     let result = WikiMutationResult::Rescope {
+        entry: human_entry(entry),
+        audit,
+    };
+    print_wiki_mutation(&result, args.json)
+}
+
+async fn wiki_edit(profile: &str, args: WikiEditArgs) -> Result<()> {
+    if args.claim.is_none()
+        && args.ai_instruction.is_none()
+        && args.human_summary.is_none()
+        && args.evidence_refs.is_empty()
+    {
+        bail!(
+            "wiki edit needs at least one of --claim, --ai-instruction, --human-summary, or --evidence-ref"
+        );
+    }
+    let now = Utc::now();
+    let store = writable_wiki_store(profile)?;
+    let entry = store
+        .edit_entry(
+            &args.entry_id,
+            args.claim.as_deref(),
+            args.ai_instruction.as_deref(),
+            args.human_summary.as_deref(),
+            &args.evidence_refs,
+            now,
+        )?
+        .ok_or_else(|| anyhow::anyhow!("Adaptive wiki entry not found: {}", args.entry_id))?;
+    let audit = wiki_audit_record(WikiAuditRecordInput {
+        action: AdaptiveWikiAuditAction::Edit,
+        subject_id: &entry.id,
+        candidate_id: None,
+        entry_id: Some(&entry.id),
+        actor: &args.by,
+        reason: &args.reason,
+        evidence_ref: None,
+        before_scope: None,
+        after_scope: None,
+        activation_mode: None,
+        candidate_snapshot: None,
+        entry_snapshot: None,
+        now,
+    });
+    store.append_audit(&audit)?;
+    let result = WikiMutationResult::Edit {
+        entry: human_entry(entry),
+        audit,
+    };
+    print_wiki_mutation(&result, args.json)
+}
+
+async fn wiki_add_tag(profile: &str, args: WikiAddTagArgs) -> Result<()> {
+    if args.core_tags.is_empty() && args.proposed_tags.is_empty() {
+        bail!("wiki add-tag needs at least one --core-tag or --proposed-tag");
+    }
+    let now = Utc::now();
+    let store = writable_wiki_store(profile)?;
+    let entry = store
+        .add_entry_tags(&args.entry_id, &args.core_tags, &args.proposed_tags, now)?
+        .ok_or_else(|| anyhow::anyhow!("Adaptive wiki entry not found: {}", args.entry_id))?;
+    let audit = wiki_audit_record(WikiAuditRecordInput {
+        action: AdaptiveWikiAuditAction::Retag,
+        subject_id: &entry.id,
+        candidate_id: None,
+        entry_id: Some(&entry.id),
+        actor: &args.by,
+        reason: &args.reason,
+        evidence_ref: None,
+        before_scope: None,
+        after_scope: None,
+        activation_mode: None,
+        candidate_snapshot: None,
+        entry_snapshot: None,
+        now,
+    });
+    store.append_audit(&audit)?;
+    let result = WikiMutationResult::Retag {
         entry: human_entry(entry),
         audit,
     };
@@ -16876,6 +17030,24 @@ fn print_wiki_mutation(result: &WikiMutationResult, json: bool) -> Result<()> {
                 "  scope: {}",
                 wiki_scope_label(entry.scope, &entry.scope_ref)
             );
+            println!("  audit: {}", audit.id);
+        }
+        WikiMutationResult::Edit { entry, audit } => {
+            println!("Edited adaptive wiki entry {}", entry.id);
+            println!("  claim: {}", entry.claim);
+            if !entry.evidence_refs.is_empty() {
+                println!("  evidence: {}", entry.evidence_refs.join(", "));
+            }
+            println!("  audit: {}", audit.id);
+        }
+        WikiMutationResult::Retag { entry, audit } => {
+            println!("Retagged adaptive wiki entry {}", entry.id);
+            if !entry.core_tags.is_empty() {
+                println!("  core tags: {}", entry.core_tags.join(", "));
+            }
+            if !entry.proposed_tags.is_empty() {
+                println!("  proposed tags: {}", entry.proposed_tags.join(", "));
+            }
             println!("  audit: {}", audit.id);
         }
         WikiMutationResult::Deprecate { entry, audit } => {
