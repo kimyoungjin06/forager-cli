@@ -8,6 +8,7 @@
     "serve:actions": "node scripts/serve-local-actions.mjs",
     "export:review-surface": "node scripts/export-review-surface.mjs",
     "export:workstation-surface": "node scripts/export-workstation-surface.mjs",
+    "export:wiki-graph": "node scripts/export-wiki-graph.mjs",
     "test:visual": "node scripts/run-visual-tests.mjs",
     "test:bridge": "node --test tests/bridge/*.test.mjs"
   },
@@ -15,6 +16,7 @@
     "@astrojs/sitemap": "^3.7.3",
     "@tailwindcss/vite": "^4.3.1",
     "astro": "^6.4.7",
+    "plotly.js-dist-min": "^3.7.0",
     "tailwindcss": "^4.3.1"
   },
   "devDependencies": {

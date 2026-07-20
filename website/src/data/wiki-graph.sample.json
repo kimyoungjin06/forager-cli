@@ -1,0 +1,1298 @@
+{
+  "schema": "wiki_knowledge_graph_view.v1",
+  "generated_at": "2026-07-20T06:06:34.518552363Z",
+  "profile": "default",
+  "summary": {
+    "entries": 7,
+    "candidates": 6,
+    "tag_nodes": 38,
+    "core_tag_edges": 13,
+    "proposed_tag_edges": 5,
+    "derived_core_tag_edges": 84,
+    "review_issues": 3,
+    "records": 13
+  },
+  "registry": [
+    {
+      "prefix": "project/",
+      "description": "Project or repository key.",
+      "lifecycle": "core"
+    },
+    {
+      "prefix": "agent/",
+      "description": "Agent mode or role lens.",
+      "lifecycle": "core"
+    },
+    {
+      "prefix": "mode/",
+      "description": "Execution mode such as offdesk.",
+      "lifecycle": "core"
+    },
+    {
+      "prefix": "artifact/",
+      "description": "Artifact class such as report or evidence.",
+      "lifecycle": "core"
+    },
+    {
+      "prefix": "evidence/",
+      "description": "Evidence class or gate name.",
+      "lifecycle": "core"
+    },
+    {
+      "prefix": "risk/",
+      "description": "Operator or runtime risk class.",
+      "lifecycle": "core"
+    },
+    {
+      "prefix": "status/",
+      "description": "Lifecycle or reportability status.",
+      "lifecycle": "core"
+    },
+    {
+      "prefix": "capability/",
+      "description": "Capability id used by Offdesk rails.",
+      "lifecycle": "core"
+    },
+    {
+      "prefix": "kind/",
+      "description": "Adaptive wiki entry kind.",
+      "lifecycle": "derived_core"
+    },
+    {
+      "prefix": "scope/",
+      "description": "Adaptive wiki scope kind.",
+      "lifecycle": "derived_core"
+    },
+    {
+      "prefix": "confidence/",
+      "description": "Adaptive wiki confidence class.",
+      "lifecycle": "derived_core"
+    },
+    {
+      "prefix": "signal/",
+      "description": "Candidate signal kind.",
+      "lifecycle": "derived_core"
+    }
+  ],
+  "review_issues": [
+    {
+      "severity": "warning",
+      "subject_kind": "candidate",
+      "subject_id": "wiki_candidate_report_checklist",
+      "tag": "agent/review",
+      "code": "overbroad_tag",
+      "message": "Tag is likely too broad to improve retrieval, routing, or review."
+    },
+    {
+      "severity": "info",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_destructive_guard",
+      "tag": "scope/global-guard",
+      "code": "proposed_tag_matches_core_prefix",
+      "message": "Proposed tag uses a controlled prefix; reviewer should promote it to core or normalize to an existing core tag."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_report_evidence_split",
+      "tag": "agent/review",
+      "code": "overbroad_tag",
+      "message": "Tag is likely too broad to improve retrieval, routing, or review."
+    }
+  ],
+  "nodes": [
+    {
+      "id": "candidate:wiki_candidate_forager_denial",
+      "type": "candidate",
+      "wiki_id": "wiki_candidate_forager_denial",
+      "label": "Observed from an operator approval denial.",
+      "kind": "policy_rule",
+      "scope": "project",
+      "scope_ref": "forager-cli",
+      "status": "candidate",
+      "confidence": "inferred",
+      "agent_modes": [],
+      "signal_kind": "approval_denial",
+      "occurrence": 2,
+      "evidence_count": 2,
+      "degree": 9,
+      "weight": 2
+    },
+    {
+      "id": "candidate:wiki_candidate_forager_fail_repeat",
+      "type": "candidate",
+      "wiki_id": "wiki_candidate_forager_fail_repeat",
+      "label": "Observed from a failed runtime task.",
+      "kind": "failure_pattern",
+      "scope": "project",
+      "scope_ref": "forager-cli",
+      "status": "candidate",
+      "confidence": "repeated",
+      "agent_modes": [
+        "development"
+      ],
+      "signal_kind": "repeated_failure",
+      "occurrence": 3,
+      "evidence_count": 3,
+      "degree": 8,
+      "weight": 3
+    },
+    {
+      "id": "candidate:wiki_candidate_forager_rollback",
+      "type": "candidate",
+      "wiki_id": "wiki_candidate_forager_rollback",
+      "label": "Observed from a rollback-derived signal.",
+      "kind": "failure_pattern",
+      "scope": "project",
+      "scope_ref": "forager-cli",
+      "status": "candidate",
+      "confidence": "inferred",
+      "agent_modes": [
+        "development"
+      ],
+      "signal_kind": "rollback",
+      "occurrence": 1,
+      "evidence_count": 1,
+      "degree": 7,
+      "weight": 1
+    },
+    {
+      "id": "candidate:wiki_candidate_remember_pref",
+      "type": "candidate",
+      "wiki_id": "wiki_candidate_remember_pref",
+      "label": "Operator /remember note about mobile card density.",
+      "kind": "preference",
+      "scope": "user_global",
+      "scope_ref": "*",
+      "status": "candidate",
+      "confidence": "explicit",
+      "agent_modes": [
+        "writing"
+      ],
+      "signal_kind": "explicit_preference",
+      "occurrence": 1,
+      "evidence_count": 1,
+      "degree": 7,
+      "weight": 1
+    },
+    {
+      "id": "candidate:wiki_candidate_report_checklist",
+      "type": "candidate",
+      "wiki_id": "wiki_candidate_report_checklist",
+      "label": "Recurring review structure worth promoting.",
+      "kind": "procedure",
+      "scope": "artifact_kind",
+      "scope_ref": "report",
+      "status": "candidate",
+      "confidence": "repeated",
+      "agent_modes": [
+        "review"
+      ],
+      "signal_kind": "unknown",
+      "occurrence": 2,
+      "evidence_count": 2,
+      "degree": 9,
+      "weight": 2
+    },
+    {
+      "id": "candidate:wiki_candidate_wiki_resume",
+      "type": "candidate",
+      "wiki_id": "wiki_candidate_wiki_resume",
+      "label": "Observed from a resume-pending recovery row.",
+      "kind": "failure_pattern",
+      "scope": "project",
+      "scope_ref": "adaptive-wiki",
+      "status": "candidate",
+      "confidence": "inferred",
+      "agent_modes": [
+        "analysis"
+      ],
+      "signal_kind": "repeated_failure",
+      "occurrence": 1,
+      "evidence_count": 1,
+      "degree": 7,
+      "weight": 1
+    },
+    {
+      "id": "entry:wiki_entry_baseline_first",
+      "type": "entry",
+      "wiki_id": "wiki_entry_baseline_first",
+      "label": "Operator prefers baseline-first planning.",
+      "kind": "preference",
+      "scope": "project",
+      "scope_ref": "forager-cli",
+      "status": "promoted",
+      "confidence": "repeated",
+      "activation_mode": "context_only",
+      "agent_modes": [
+        "planning"
+      ],
+      "evidence_count": 1,
+      "degree": 8,
+      "weight": 1
+    },
+    {
+      "id": "entry:wiki_entry_destructive_guard",
+      "type": "entry",
+      "wiki_id": "wiki_entry_destructive_guard",
+      "label": "Operator wants destructive cleanup gated globally.",
+      "kind": "policy_rule",
+      "scope": "user_global",
+      "scope_ref": "*",
+      "status": "promoted",
+      "confidence": "explicit",
+      "activation_mode": "confirm",
+      "agent_modes": [
+        "maintenance"
+      ],
+      "evidence_count": 1,
+      "degree": 7,
+      "weight": 1
+    },
+    {
+      "id": "entry:wiki_entry_forager_denied_canonical",
+      "type": "entry",
+      "wiki_id": "wiki_entry_forager_denied_canonical",
+      "label": "Operator denied canonical.apply from an offdesk run.",
+      "kind": "policy_rule",
+      "scope": "project",
+      "scope_ref": "forager-cli",
+      "status": "promoted",
+      "confidence": "explicit",
+      "activation_mode": "confirm",
+      "agent_modes": [
+        "development"
+      ],
+      "evidence_count": 1,
+      "degree": 8,
+      "weight": 1
+    },
+    {
+      "id": "entry:wiki_entry_forager_runtime_failure",
+      "type": "entry",
+      "wiki_id": "wiki_entry_forager_runtime_failure",
+      "label": "Repeated background dispatch failures traced to a missing tmux session.",
+      "kind": "failure_pattern",
+      "scope": "project",
+      "scope_ref": "forager-cli",
+      "status": "promoted",
+      "confidence": "repeated",
+      "activation_mode": "context_only",
+      "agent_modes": [
+        "development"
+      ],
+      "evidence_count": 2,
+      "degree": 8,
+      "weight": 2
+    },
+    {
+      "id": "entry:wiki_entry_report_evidence_split",
+      "type": "entry",
+      "wiki_id": "wiki_entry_report_evidence_split",
+      "label": "Operator repeatedly corrected report rewrites that merged evidence with recommendations.",
+      "kind": "procedure",
+      "scope": "artifact_kind",
+      "scope_ref": "report",
+      "status": "promoted",
+      "confidence": "repeated",
+      "activation_mode": "confirm",
+      "agent_modes": [
+        "writing",
+        "review"
+      ],
+      "evidence_count": 3,
+      "degree": 10,
+      "weight": 3
+    },
+    {
+      "id": "entry:wiki_entry_stale_analysis",
+      "type": "entry",
+      "wiki_id": "wiki_entry_stale_analysis",
+      "label": "Retired after the projection budget increased.",
+      "kind": "failure_pattern",
+      "scope": "project",
+      "scope_ref": "adaptive-wiki",
+      "status": "deprecated",
+      "confidence": "repeated",
+      "activation_mode": "context_only",
+      "agent_modes": [
+        "analysis"
+      ],
+      "evidence_count": 1,
+      "degree": 7,
+      "weight": 1
+    },
+    {
+      "id": "entry:wiki_entry_wiki_projection_fact",
+      "type": "entry",
+      "wiki_id": "wiki_entry_wiki_projection_fact",
+      "label": "Projection boundary fact for the adaptive wiki module.",
+      "kind": "fact",
+      "scope": "project",
+      "scope_ref": "adaptive-wiki",
+      "status": "promoted",
+      "confidence": "inferred",
+      "activation_mode": "context_only",
+      "agent_modes": [],
+      "evidence_count": 1,
+      "degree": 7,
+      "weight": 1
+    },
+    {
+      "id": "tag:agent/analysis",
+      "type": "tag",
+      "label": "#agent/analysis",
+      "tag": "agent/analysis",
+      "tag_class": "derived_core",
+      "prefix": "agent",
+      "degree": 2
+    },
+    {
+      "id": "tag:agent/development",
+      "type": "tag",
+      "label": "#agent/development",
+      "tag": "agent/development",
+      "tag_class": "derived_core",
+      "prefix": "agent",
+      "degree": 4
+    },
+    {
+      "id": "tag:agent/maintenance",
+      "type": "tag",
+      "label": "#agent/maintenance",
+      "tag": "agent/maintenance",
+      "tag_class": "derived_core",
+      "prefix": "agent",
+      "degree": 1
+    },
+    {
+      "id": "tag:agent/planning",
+      "type": "tag",
+      "label": "#agent/planning",
+      "tag": "agent/planning",
+      "tag_class": "derived_core",
+      "prefix": "agent",
+      "degree": 1
+    },
+    {
+      "id": "tag:agent/review",
+      "type": "tag",
+      "label": "#agent/review",
+      "tag": "agent/review",
+      "tag_class": "derived_core",
+      "prefix": "agent",
+      "degree": 2
+    },
+    {
+      "id": "tag:agent/shared",
+      "type": "tag",
+      "label": "#agent/shared",
+      "tag": "agent/shared",
+      "tag_class": "derived_core",
+      "prefix": "agent",
+      "degree": 2
+    },
+    {
+      "id": "tag:agent/writing",
+      "type": "tag",
+      "label": "#agent/writing",
+      "tag": "agent/writing",
+      "tag_class": "derived_core",
+      "prefix": "agent",
+      "degree": 2
+    },
+    {
+      "id": "tag:artifact/report",
+      "type": "tag",
+      "label": "#artifact/report",
+      "tag": "artifact/report",
+      "tag_class": "core",
+      "prefix": "artifact",
+      "degree": 4
+    },
+    {
+      "id": "tag:capability/canonical.syncback",
+      "type": "tag",
+      "label": "#capability/canonical.syncback",
+      "tag": "capability/canonical.syncback",
+      "tag_class": "derived_core",
+      "prefix": "capability",
+      "degree": 1
+    },
+    {
+      "id": "tag:confidence/explicit",
+      "type": "tag",
+      "label": "#confidence/explicit",
+      "tag": "confidence/explicit",
+      "tag_class": "derived_core",
+      "prefix": "confidence",
+      "degree": 3
+    },
+    {
+      "id": "tag:confidence/inferred",
+      "type": "tag",
+      "label": "#confidence/inferred",
+      "tag": "confidence/inferred",
+      "tag_class": "derived_core",
+      "prefix": "confidence",
+      "degree": 4
+    },
+    {
+      "id": "tag:confidence/repeated",
+      "type": "tag",
+      "label": "#confidence/repeated",
+      "tag": "confidence/repeated",
+      "tag_class": "derived_core",
+      "prefix": "confidence",
+      "degree": 6
+    },
+    {
+      "id": "tag:kind/fact",
+      "type": "tag",
+      "label": "#kind/fact",
+      "tag": "kind/fact",
+      "tag_class": "derived_core",
+      "prefix": "kind",
+      "degree": 1
+    },
+    {
+      "id": "tag:kind/failure_pattern",
+      "type": "tag",
+      "label": "#kind/failure_pattern",
+      "tag": "kind/failure_pattern",
+      "tag_class": "derived_core",
+      "prefix": "kind",
+      "degree": 5
+    },
+    {
+      "id": "tag:kind/policy_rule",
+      "type": "tag",
+      "label": "#kind/policy_rule",
+      "tag": "kind/policy_rule",
+      "tag_class": "derived_core",
+      "prefix": "kind",
+      "degree": 3
+    },
+    {
+      "id": "tag:kind/preference",
+      "type": "tag",
+      "label": "#kind/preference",
+      "tag": "kind/preference",
+      "tag_class": "derived_core",
+      "prefix": "kind",
+      "degree": 2
+    },
+    {
+      "id": "tag:kind/procedure",
+      "type": "tag",
+      "label": "#kind/procedure",
+      "tag": "kind/procedure",
+      "tag_class": "derived_core",
+      "prefix": "kind",
+      "degree": 2
+    },
+    {
+      "id": "tag:method/baseline-first",
+      "type": "tag",
+      "label": "#method/baseline-first",
+      "tag": "method/baseline-first",
+      "tag_class": "proposed",
+      "prefix": "method",
+      "degree": 1
+    },
+    {
+      "id": "tag:method/checklist",
+      "type": "tag",
+      "label": "#method/checklist",
+      "tag": "method/checklist",
+      "tag_class": "proposed",
+      "prefix": "method",
+      "degree": 1
+    },
+    {
+      "id": "tag:method/evidence-first",
+      "type": "tag",
+      "label": "#method/evidence-first",
+      "tag": "method/evidence-first",
+      "tag_class": "proposed",
+      "prefix": "method",
+      "degree": 1
+    },
+    {
+      "id": "tag:method/mobile-first",
+      "type": "tag",
+      "label": "#method/mobile-first",
+      "tag": "method/mobile-first",
+      "tag_class": "proposed",
+      "prefix": "method",
+      "degree": 1
+    },
+    {
+      "id": "tag:project/adaptive-wiki",
+      "type": "tag",
+      "label": "#project/adaptive-wiki",
+      "tag": "project/adaptive-wiki",
+      "tag_class": "core",
+      "prefix": "project",
+      "degree": 5
+    },
+    {
+      "id": "tag:project/forager-cli",
+      "type": "tag",
+      "label": "#project/forager-cli",
+      "tag": "project/forager-cli",
+      "tag_class": "core",
+      "prefix": "project",
+      "degree": 11
+    },
+    {
+      "id": "tag:risk/destructive",
+      "type": "tag",
+      "label": "#risk/destructive",
+      "tag": "risk/destructive",
+      "tag_class": "core",
+      "prefix": "risk",
+      "degree": 1
+    },
+    {
+      "id": "tag:risk/operator-denial",
+      "type": "tag",
+      "label": "#risk/operator-denial",
+      "tag": "risk/operator-denial",
+      "tag_class": "core",
+      "prefix": "risk",
+      "degree": 2
+    },
+    {
+      "id": "tag:risk/runtime-failure",
+      "type": "tag",
+      "label": "#risk/runtime-failure",
+      "tag": "risk/runtime-failure",
+      "tag_class": "core",
+      "prefix": "risk",
+      "degree": 1
+    },
+    {
+      "id": "tag:scope/artifact_kind",
+      "type": "tag",
+      "label": "#scope/artifact_kind",
+      "tag": "scope/artifact_kind",
+      "tag_class": "derived_core",
+      "prefix": "scope",
+      "degree": 2
+    },
+    {
+      "id": "tag:scope/global-guard",
+      "type": "tag",
+      "label": "#scope/global-guard",
+      "tag": "scope/global-guard",
+      "tag_class": "proposed",
+      "prefix": "scope",
+      "degree": 1
+    },
+    {
+      "id": "tag:scope/project",
+      "type": "tag",
+      "label": "#scope/project",
+      "tag": "scope/project",
+      "tag_class": "derived_core",
+      "prefix": "scope",
+      "degree": 9
+    },
+    {
+      "id": "tag:scope/user_global",
+      "type": "tag",
+      "label": "#scope/user_global",
+      "tag": "scope/user_global",
+      "tag_class": "derived_core",
+      "prefix": "scope",
+      "degree": 2
+    },
+    {
+      "id": "tag:signal/approval_denial",
+      "type": "tag",
+      "label": "#signal/approval_denial",
+      "tag": "signal/approval_denial",
+      "tag_class": "derived_core",
+      "prefix": "signal",
+      "degree": 1
+    },
+    {
+      "id": "tag:signal/explicit_preference",
+      "type": "tag",
+      "label": "#signal/explicit_preference",
+      "tag": "signal/explicit_preference",
+      "tag_class": "derived_core",
+      "prefix": "signal",
+      "degree": 1
+    },
+    {
+      "id": "tag:signal/repeated_failure",
+      "type": "tag",
+      "label": "#signal/repeated_failure",
+      "tag": "signal/repeated_failure",
+      "tag_class": "derived_core",
+      "prefix": "signal",
+      "degree": 2
+    },
+    {
+      "id": "tag:signal/rollback",
+      "type": "tag",
+      "label": "#signal/rollback",
+      "tag": "signal/rollback",
+      "tag_class": "derived_core",
+      "prefix": "signal",
+      "degree": 1
+    },
+    {
+      "id": "tag:signal/unknown",
+      "type": "tag",
+      "label": "#signal/unknown",
+      "tag": "signal/unknown",
+      "tag_class": "derived_core",
+      "prefix": "signal",
+      "degree": 1
+    },
+    {
+      "id": "tag:status/candidate",
+      "type": "tag",
+      "label": "#status/candidate",
+      "tag": "status/candidate",
+      "tag_class": "derived_core",
+      "prefix": "status",
+      "degree": 6
+    },
+    {
+      "id": "tag:status/deprecated",
+      "type": "tag",
+      "label": "#status/deprecated",
+      "tag": "status/deprecated",
+      "tag_class": "derived_core",
+      "prefix": "status",
+      "degree": 1
+    },
+    {
+      "id": "tag:status/promoted",
+      "type": "tag",
+      "label": "#status/promoted",
+      "tag": "status/promoted",
+      "tag_class": "derived_core",
+      "prefix": "status",
+      "degree": 6
+    }
+  ],
+  "edges": [
+    {
+      "source": "candidate:wiki_candidate_forager_denial",
+      "target": "tag:project/forager-cli",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "candidate:wiki_candidate_forager_denial",
+      "target": "tag:risk/operator-denial",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "candidate:wiki_candidate_forager_denial",
+      "target": "tag:agent/shared",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_forager_denial",
+      "target": "tag:confidence/inferred",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_forager_denial",
+      "target": "tag:kind/policy_rule",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_forager_denial",
+      "target": "tag:project/forager-cli",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_forager_denial",
+      "target": "tag:scope/project",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_forager_denial",
+      "target": "tag:signal/approval_denial",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_forager_denial",
+      "target": "tag:status/candidate",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_forager_fail_repeat",
+      "target": "tag:project/forager-cli",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "candidate:wiki_candidate_forager_fail_repeat",
+      "target": "tag:agent/development",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_forager_fail_repeat",
+      "target": "tag:confidence/repeated",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_forager_fail_repeat",
+      "target": "tag:kind/failure_pattern",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_forager_fail_repeat",
+      "target": "tag:project/forager-cli",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_forager_fail_repeat",
+      "target": "tag:scope/project",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_forager_fail_repeat",
+      "target": "tag:signal/repeated_failure",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_forager_fail_repeat",
+      "target": "tag:status/candidate",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_forager_rollback",
+      "target": "tag:agent/development",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_forager_rollback",
+      "target": "tag:confidence/inferred",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_forager_rollback",
+      "target": "tag:kind/failure_pattern",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_forager_rollback",
+      "target": "tag:project/forager-cli",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_forager_rollback",
+      "target": "tag:scope/project",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_forager_rollback",
+      "target": "tag:signal/rollback",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_forager_rollback",
+      "target": "tag:status/candidate",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_remember_pref",
+      "target": "tag:agent/writing",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_remember_pref",
+      "target": "tag:confidence/explicit",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_remember_pref",
+      "target": "tag:kind/preference",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_remember_pref",
+      "target": "tag:scope/user_global",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_remember_pref",
+      "target": "tag:signal/explicit_preference",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_remember_pref",
+      "target": "tag:status/candidate",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_remember_pref",
+      "target": "tag:method/mobile-first",
+      "relationship": "has_proposed_tag",
+      "tag_class": "proposed"
+    },
+    {
+      "source": "candidate:wiki_candidate_report_checklist",
+      "target": "tag:artifact/report",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "candidate:wiki_candidate_report_checklist",
+      "target": "tag:agent/review",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_report_checklist",
+      "target": "tag:artifact/report",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_report_checklist",
+      "target": "tag:confidence/repeated",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_report_checklist",
+      "target": "tag:kind/procedure",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_report_checklist",
+      "target": "tag:scope/artifact_kind",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_report_checklist",
+      "target": "tag:signal/unknown",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_report_checklist",
+      "target": "tag:status/candidate",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_report_checklist",
+      "target": "tag:method/checklist",
+      "relationship": "has_proposed_tag",
+      "tag_class": "proposed"
+    },
+    {
+      "source": "candidate:wiki_candidate_wiki_resume",
+      "target": "tag:agent/analysis",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_wiki_resume",
+      "target": "tag:confidence/inferred",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_wiki_resume",
+      "target": "tag:kind/failure_pattern",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_wiki_resume",
+      "target": "tag:project/adaptive-wiki",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_wiki_resume",
+      "target": "tag:scope/project",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_wiki_resume",
+      "target": "tag:signal/repeated_failure",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "candidate:wiki_candidate_wiki_resume",
+      "target": "tag:status/candidate",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_baseline_first",
+      "target": "tag:project/forager-cli",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_baseline_first",
+      "target": "tag:agent/planning",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_baseline_first",
+      "target": "tag:confidence/repeated",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_baseline_first",
+      "target": "tag:kind/preference",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_baseline_first",
+      "target": "tag:project/forager-cli",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_baseline_first",
+      "target": "tag:scope/project",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_baseline_first",
+      "target": "tag:status/promoted",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_baseline_first",
+      "target": "tag:method/baseline-first",
+      "relationship": "has_proposed_tag",
+      "tag_class": "proposed"
+    },
+    {
+      "source": "entry:wiki_entry_destructive_guard",
+      "target": "tag:risk/destructive",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_destructive_guard",
+      "target": "tag:agent/maintenance",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_destructive_guard",
+      "target": "tag:confidence/explicit",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_destructive_guard",
+      "target": "tag:kind/policy_rule",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_destructive_guard",
+      "target": "tag:scope/user_global",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_destructive_guard",
+      "target": "tag:status/promoted",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_destructive_guard",
+      "target": "tag:scope/global-guard",
+      "relationship": "has_proposed_tag",
+      "tag_class": "proposed"
+    },
+    {
+      "source": "entry:wiki_entry_forager_denied_canonical",
+      "target": "tag:project/forager-cli",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_forager_denied_canonical",
+      "target": "tag:risk/operator-denial",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_forager_denied_canonical",
+      "target": "tag:agent/development",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_forager_denied_canonical",
+      "target": "tag:confidence/explicit",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_forager_denied_canonical",
+      "target": "tag:kind/policy_rule",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_forager_denied_canonical",
+      "target": "tag:project/forager-cli",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_forager_denied_canonical",
+      "target": "tag:scope/project",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_forager_denied_canonical",
+      "target": "tag:status/promoted",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_forager_runtime_failure",
+      "target": "tag:project/forager-cli",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_forager_runtime_failure",
+      "target": "tag:risk/runtime-failure",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_forager_runtime_failure",
+      "target": "tag:agent/development",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_forager_runtime_failure",
+      "target": "tag:confidence/repeated",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_forager_runtime_failure",
+      "target": "tag:kind/failure_pattern",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_forager_runtime_failure",
+      "target": "tag:project/forager-cli",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_forager_runtime_failure",
+      "target": "tag:scope/project",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_forager_runtime_failure",
+      "target": "tag:status/promoted",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_report_evidence_split",
+      "target": "tag:artifact/report",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_report_evidence_split",
+      "target": "tag:agent/review",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_report_evidence_split",
+      "target": "tag:agent/writing",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_report_evidence_split",
+      "target": "tag:artifact/report",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_report_evidence_split",
+      "target": "tag:capability/canonical.syncback",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_report_evidence_split",
+      "target": "tag:confidence/repeated",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_report_evidence_split",
+      "target": "tag:kind/procedure",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_report_evidence_split",
+      "target": "tag:scope/artifact_kind",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_report_evidence_split",
+      "target": "tag:status/promoted",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_report_evidence_split",
+      "target": "tag:method/evidence-first",
+      "relationship": "has_proposed_tag",
+      "tag_class": "proposed"
+    },
+    {
+      "source": "entry:wiki_entry_stale_analysis",
+      "target": "tag:project/adaptive-wiki",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_stale_analysis",
+      "target": "tag:agent/analysis",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_stale_analysis",
+      "target": "tag:confidence/repeated",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_stale_analysis",
+      "target": "tag:kind/failure_pattern",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_stale_analysis",
+      "target": "tag:project/adaptive-wiki",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_stale_analysis",
+      "target": "tag:scope/project",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_stale_analysis",
+      "target": "tag:status/deprecated",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_wiki_projection_fact",
+      "target": "tag:project/adaptive-wiki",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_wiki_projection_fact",
+      "target": "tag:agent/shared",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_wiki_projection_fact",
+      "target": "tag:confidence/inferred",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_wiki_projection_fact",
+      "target": "tag:kind/fact",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_wiki_projection_fact",
+      "target": "tag:project/adaptive-wiki",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_wiki_projection_fact",
+      "target": "tag:scope/project",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_wiki_projection_fact",
+      "target": "tag:status/promoted",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    }
+  ]
+}

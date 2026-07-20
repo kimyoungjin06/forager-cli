@@ -10,3 +10,5 @@ public/assets/*
 sitemap.xml
 public/review-surface.json
 public/workstation-surface.json
+public/wiki-graph.json
+public/wiki-graph/

@@ -237,6 +237,36 @@ out of product-facing docs. The product direction is defined in
   candidates still require the existing reviewed promotion path. Logic in
   `src/offdesk/learning_signals.rs`.
 
+- The adaptive-wiki knowledge graph now has a servable web visualization: the
+  `/knowledge` route (`website/src/pages/knowledge.astro`) renders the tag graph
+  with Plotly (`plotly.js-dist-min`) as a clustered network -- records
+  (promoted/candidate/deprecated) grouped into regions by tag prefix, derived
+  structural edges hidden by default, hover detail, read-only/advisory. Data is
+  plugged in via `npm run export:wiki-graph` (`website/scripts/export-wiki-graph.mjs`
+  runs `forager offdesk wiki graph --json`, enriches nodes with
+  status/kind/scope/occurrence, writes the gitignored `public/wiki-graph.json`);
+  the route builds from the committed `src/data/wiki-graph.sample.json` fixture and
+  hydrates from the live export at runtime, mirroring the workstation-surface
+  pattern. Note: bundling Plotly adds a large (~4.8 MB) JS chunk scoped to the
+  `/knowledge` page only.
+- `/knowledge` is multi-view along two axes: a **profile** selector (tenant; from
+  a `public/wiki-graph/index.json` manifest written by `--profiles`) and a
+  **facet** filter (research vs ops) sliced within a profile. Facet is derived
+  per record in the export (`facet/*` tag wins; else research modes ->research,
+  development/maintenance ->ops, governance tags ->ops). `?profile=&facet=`
+  deep-link the view. This realizes the "knowledge planes" model: a project's
+  research knowledge and its operational (harness-use) knowledge separate by
+  facet, while Forager's own operating knowledge is intended to live in a
+  dedicated `forager-ops` profile (not yet stood up). Astro dev/preview bind to
+  all interfaces (`server.host`/`preview.host`) for remote access.
+- Operators can author knowledge directly (e.g. from a doc review) with
+  `forager offdesk wiki record-candidate --kind --scope --scope-ref --claim ...`
+  which records a governed candidate (origin `operator_explicit`, signal
+  `imported_doc`) via the existing `record_candidate` path; promotion stays a
+  separate reviewed step. This filled the missing capture primitive (previously
+  candidates came only from `/remember`, overnight ingest, or learning-signals).
+  Used to seed the TwinPaper wiki from `AGENTS.md`/`README.md` (5 -> 13 entries).
+
 ## Next Work Candidates
 
 1. Extend learning signals to the remaining lifecycle events (pre-compression
