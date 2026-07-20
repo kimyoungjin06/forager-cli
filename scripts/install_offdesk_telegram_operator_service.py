@@ -53,6 +53,14 @@ def parse_args() -> argparse.Namespace:
         "(recommended for urgent handling). Use --no-attention-notify to disable.",
     )
     parser.add_argument("--attention-reminder-sec", type=int, default=0)
+    parser.add_argument(
+        "--dispatch-allowlist-file",
+        type=pathlib.Path,
+        default=None,
+        help="Path to a JSON file of curated /run command templates. When set, the operator can "
+        "dispatch named, pre-vetted commands over Telegram without the free-form "
+        "--enable-runtime-dispatch. Off by default.",
+    )
     parser.add_argument("--install", action="store_true", help="Write the unit into ~/.config/systemd/user.")
     parser.add_argument("--enable", action="store_true", help="Enable the service after installing it.")
     parser.add_argument("--start", action="store_true", help="Start the service after installing it.")
@@ -106,6 +114,8 @@ def render_unit(args: argparse.Namespace) -> str:
         command.append("--attention-notify")
         if int(args.attention_reminder_sec) > 0:
             command.extend(["--attention-reminder-sec", args.attention_reminder_sec])
+    if args.dispatch_allowlist_file is not None:
+        command.extend(["--dispatch-allowlist-file", args.dispatch_allowlist_file])
     exec_start = " ".join(systemd_arg(item) for item in command)
     return "\n".join(
         [

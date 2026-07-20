@@ -1,0 +1,22 @@
+{
+  "templates": [
+    {
+      "name": "test",
+      "runner": "local-background",
+      "command": "cargo test",
+      "description": "Run the test suite"
+    },
+    {
+      "name": "build",
+      "runner": "local-background",
+      "command": "cargo build --release",
+      "description": "Release build"
+    },
+    {
+      "name": "fmt-check",
+      "runner": "local-background",
+      "command": "cargo fmt -- --check",
+      "description": "Verify formatting"
+    }
+  ]
+}

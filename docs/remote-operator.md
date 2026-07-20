@@ -816,6 +816,13 @@ commands without allowing free-form ones. The file shape is:
 ] }
 ```
 
+A copy-ready starter file lives at
+`docs/examples/offdesk_dispatch_allowlist.example.json`; copy it, edit the
+templates, and point `--dispatch-allowlist-file` at your copy. The systemd
+installer accepts the same flag:
+`install_offdesk_telegram_operator_service.py --dispatch-allowlist-file <path>`
+appends it to the unit's `ExecStart`.
+
 Templates missing a name, runner, or command are dropped, and a malformed or
 missing file degrades to "not configured" rather than crashing the poll loop.
 `/run` (or `/run --list`) shows the available templates; `/run <closeout-id>
