@@ -32,7 +32,7 @@ The adaptive knowledge follow-up is archived under
 | 6 | Tool registry | Task Team capability registry | Can capabilities be declared with risk, scope, backend, approval, and offdesk eligibility? | First pass active |
 | 7 | Redaction and context fencing | operator-facing summaries and debug bundles | Can runner-only context and secrets be stripped at every upload/share boundary? | First pass active |
 | 8 | Adaptive wiki | canonical wiki store and AI/human/runtime projections | Can repeated corrections become promoted, scoped knowledge without exposing raw human wiki pages to runtime prompts? | First pass active |
-| 9 | Memory lifecycle hooks | Offdesk event-driven learning signals | Can task/approval/resume/compression events feed learning candidates without hidden memory truth? | Benchmarked |
+| 9 | Memory lifecycle hooks | Offdesk event-driven learning signals | Can task/approval/resume/compression events feed learning candidates without hidden memory truth? | First pass active |
 | 10 | Curator | recommendation-only wiki review reports | Can stale/conflicting knowledge be surfaced for review without autonomous mutation? | Benchmarked |
 | 11 | Skills/procedural memory | governed procedure/runbook entries | Can procedural knowledge stay compact and scoped without becoming a self-mutating tool layer? | Benchmarked |
 
@@ -328,6 +328,43 @@ implementation notes are archived under `archive/domain-history/`.
 - Legacy or partial adaptive wiki JSON loads with safe defaults for new fields.
 - Promotion creates a promoted canonical entry and removes the candidate without
   auto-applying behavior.
+
+## Ninth Pass: Memory Lifecycle Hooks (Learning Signals)
+
+Hermes' useful shape is not a generic external memory provider. The useful
+pattern is that lifecycle events feed learning candidates. Forager translates
+this into Offdesk events that emit adaptive-wiki *candidates* only, never
+promoted knowledge and never runtime mutation:
+
+- `src/offdesk/learning_signals.rs` scans the Forager-owned stores and emits an
+  `AdaptiveWikiCandidateInput` through the existing `record_candidate` path for
+  each denied approval (`policy_rule` / `approval_denial`), failed runtime task
+  (`failure_pattern` / `repeated_failure`), and resume-pending recovery row
+  (`failure_pattern` / `repeated_failure`), all with `runtime_observed` origin;
+- a durable cursor (`learning_signals_state.json`) records processed event keys
+  so each event emits exactly once, while the candidate store still merges by
+  claim so repeated patterns accrue `occurrence_count`;
+- `run_offdesk_tick` runs the scan after saving tasks and reports
+  `learning_signals_emitted`; the scan never fails the tick (errors are logged);
+- `forager offdesk learning-scan [--json]` runs the same scan on demand;
+- all free-text (reason, error, phase) passes through `operator_safe_text`
+  before it reaches a candidate.
+
+This does not add hidden memory truth, auto-promotion, or `auto_apply`. Emitted
+candidates are recommendation-only and still require the reviewed promotion path
+before they can influence any projection.
+
+### Learning Signals Acceptance Checks
+
+- A denied approval, a failed task, and a resume-pending row each emit exactly
+  one candidate on first scan and none on re-scan (durable cursor).
+- Two same-shape failures merge into one candidate with `occurrence_count` 2
+  while each distinct event is counted once by the cursor.
+- Secrets and runner-only context are redacted before reaching a candidate.
+- `offdesk tick` emits new candidates automatically and never fails when the
+  scan errors.
+- Candidates are `status: candidate` and require existing review/promotion to
+  affect any AI or human projection.
 
 ## Remaining Adaptive Knowledge Benchmark
 

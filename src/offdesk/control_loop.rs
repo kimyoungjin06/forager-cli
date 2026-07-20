@@ -83,6 +83,10 @@ pub struct OffdeskTickReport {
     pub held: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pause_reason: Option<String>,
+    /// Adaptive-wiki learning candidates emitted from this tick's observed
+    /// denials, failures, and resume-recovery rows (recommendation-only).
+    #[serde(default)]
+    pub learning_signals_emitted: usize,
     pub updated_task_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub next_safe_actions: Vec<OffdeskNextSafeAction>,
@@ -221,6 +225,17 @@ pub fn run_offdesk_tick(
     approval_session.flush()?;
     refresh_tick_next_safe_actions(&mut report);
     task_store.save(&tasks)?;
+
+    // Event-driven learning: translate this tick's observed denials, failures,
+    // and resume-recovery rows into adaptive-wiki candidates (recommendation-only;
+    // never auto-applied). A durable cursor emits each event once. This must never
+    // fail the tick, so its error is logged and swallowed.
+    match crate::offdesk::learning_signals::scan_and_emit_learning_signals(profile_dir, options.now)
+    {
+        Ok(scan) => report.learning_signals_emitted = scan.emitted_count(),
+        Err(error) => tracing::warn!(error = %error, "learning signal scan failed"),
+    }
+
     Ok(report)
 }
 

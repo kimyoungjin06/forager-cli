@@ -11,6 +11,7 @@ pub mod capability;
 pub mod control_loop;
 pub mod decision;
 pub mod implementation_packet;
+pub mod learning_signals;
 pub mod mode_contract;
 pub mod mutation;
 pub mod operator_pause;
@@ -97,6 +98,10 @@ pub use implementation_packet::{
     IMPLEMENTATION_PACKET_SCHEMA, RECURSIVE_ALIGNMENT_REVIEW_FILE,
     RECURSIVE_ALIGNMENT_REVIEW_SCHEMA, WORK_SLICE_EXECUTION_RECEIPTS_FILE,
     WORK_SLICE_EXECUTION_RECEIPT_SCHEMA,
+};
+pub use learning_signals::{
+    scan_and_emit_learning_signals, EmittedLearningSignal, LearningScanReport,
+    LearningSignalSource, LearningSignalStore, LEARNING_SIGNALS_FILE, LEARNING_SIGNALS_SCHEMA,
 };
 pub use mode_contract::{
     assess_offdesk_mode, mode_requires_separate_review, OffdeskModeAssessment,

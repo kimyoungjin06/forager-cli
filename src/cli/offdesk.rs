@@ -22,7 +22,7 @@ use crate::offdesk::{
     implementation_packet_record_from_path, latest_implementation_packet_for_project,
     launch_background_command, launch_background_run, operator_safe_report, operator_safe_text,
     pending_approval_operator_views, poll_background_runs, recommend_provider_fallback,
-    reconcile_tasks_with_background_outcomes, run_offdesk_tick,
+    reconcile_tasks_with_background_outcomes, run_offdesk_tick, scan_and_emit_learning_signals,
     work_slice_execution_receipts_from_path, ActionApprovalRequest, AdaptiveWikiActivationMode,
     AdaptiveWikiAgentMode, AdaptiveWikiAgentModeFilter, AdaptiveWikiAuditAction,
     AdaptiveWikiAuditRecord, AdaptiveWikiCandidate, AdaptiveWikiCandidateInput,
@@ -48,16 +48,17 @@ use crate::offdesk::{
     DecisionRecord, DecisionRecordView, DecisionRequest, DecisionRoute, DecisionRouteTarget,
     DecisionStatus, DecisionTraceRef, DecisionValidationIssue, ExecutionBrief, ExecutionHandoff,
     ImplementationPacket, ImplementationPacketSummary, JudgmentEvaluator, JudgmentRoute,
-    LatestImplementationPacket, LocalCommandLaunchSpec, MutationRestoreOperation,
-    MutationRestorePlan, MutationSnapshot, MutationSnapshotStore, MutationSnapshotVerification,
-    OffdeskModeAssessment, OffdeskModeLifecycle, OffdeskNextSafeAction, OffdeskPendingApprovalView,
-    OffdeskTask, OffdeskTaskInput, OffdeskTaskLifecycleReport, OffdeskTaskStatus, OffdeskTaskStore,
-    OffdeskTaskView, OffdeskTickOptions, OperatorPauseState, OperatorPauseStore,
-    PendingActionApproval, ProviderCapacityState, ProviderCapacityStore,
-    ProviderFallbackRecommendation, ResumeStatus, RiskLevel, SchedulerGate, SchedulerGateRequest,
-    SchedulerGateStatus, TaskResumeState, TaskResumeStore, WorkSliceExecutionReceipt,
-    WorkSliceExecutionStatus, WorkSliceReceiptProducerRole, WorkSliceVerificationStatus,
-    DECISION_RECORD_SCHEMA, JUDGMENT_ROUTE_SCHEMA, WORK_SLICE_EXECUTION_RECEIPTS_FILE,
+    LatestImplementationPacket, LearningScanReport, LocalCommandLaunchSpec,
+    MutationRestoreOperation, MutationRestorePlan, MutationSnapshot, MutationSnapshotStore,
+    MutationSnapshotVerification, OffdeskModeAssessment, OffdeskModeLifecycle,
+    OffdeskNextSafeAction, OffdeskPendingApprovalView, OffdeskTask, OffdeskTaskInput,
+    OffdeskTaskLifecycleReport, OffdeskTaskStatus, OffdeskTaskStore, OffdeskTaskView,
+    OffdeskTickOptions, OperatorPauseState, OperatorPauseStore, PendingActionApproval,
+    ProviderCapacityState, ProviderCapacityStore, ProviderFallbackRecommendation, ResumeStatus,
+    RiskLevel, SchedulerGate, SchedulerGateRequest, SchedulerGateStatus, TaskResumeState,
+    TaskResumeStore, WorkSliceExecutionReceipt, WorkSliceExecutionStatus,
+    WorkSliceReceiptProducerRole, WorkSliceVerificationStatus, DECISION_RECORD_SCHEMA,
+    JUDGMENT_ROUTE_SCHEMA, WORK_SLICE_EXECUTION_RECEIPTS_FILE,
 };
 use crate::session::{get_profile_dir, resolved_app_dir_path, DEFAULT_PROFILE};
 
@@ -132,6 +133,11 @@ pub enum OffdeskCommands {
     /// Show the current global operator pause state
     #[command(name = "pause-status")]
     PauseStatus(JsonArgs),
+
+    /// Emit adaptive-wiki learning candidates from observed denials, failures,
+    /// and resume-recovery rows (recommendation-only; runs each event once)
+    #[command(name = "learning-scan")]
+    LearningScan(JsonArgs),
 
     /// Requeue a failed, resume-pending, or cancelled durable task
     RetryTask(RetryTaskArgs),
@@ -3697,6 +3703,7 @@ pub async fn run(profile: &str, command: OffdeskCommands) -> Result<()> {
         OffdeskCommands::Pause(args) => pause_dispatch(profile, args).await,
         OffdeskCommands::Unpause(args) => unpause_dispatch(profile, args).await,
         OffdeskCommands::PauseStatus(args) => pause_status(profile, args).await,
+        OffdeskCommands::LearningScan(args) => learning_scan(profile, args).await,
         OffdeskCommands::RetryTask(args) => retry_task(profile, args).await,
         OffdeskCommands::ResumeTask(args) => resume_task(profile, args).await,
         OffdeskCommands::AbandonTask(args) => abandon_task(profile, args).await,
@@ -7693,6 +7700,35 @@ async fn unpause_dispatch(profile: &str, args: UnpauseArgs) -> Result<()> {
 async fn pause_status(profile: &str, args: JsonArgs) -> Result<()> {
     let state = OperatorPauseStore::new(get_profile_dir(profile)?).load()?;
     print_operator_pause_state(&state, args.json)
+}
+
+async fn learning_scan(profile: &str, args: JsonArgs) -> Result<()> {
+    let report = scan_and_emit_learning_signals(get_profile_dir(profile)?, Utc::now())?;
+    print_learning_scan_report(&report, args.json)
+}
+
+fn print_learning_scan_report(report: &LearningScanReport, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(report)?);
+        return Ok(());
+    }
+    if report.emitted.is_empty() {
+        println!(
+            "No new learning signals ({} already recorded).",
+            report.skipped_already_processed
+        );
+        return Ok(());
+    }
+    println!(
+        "Emitted {} learning candidate(s) ({} already recorded):",
+        report.emitted.len(),
+        report.skipped_already_processed
+    );
+    for signal in &report.emitted {
+        println!("  [{}] {}", signal.source.as_str(), signal.claim);
+    }
+    println!("Candidates are recommendation-only; review with `forager offdesk wiki candidates`.");
+    Ok(())
 }
 
 fn print_operator_pause_state(state: &OperatorPauseState, json: bool) -> Result<()> {

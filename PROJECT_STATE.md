@@ -226,14 +226,28 @@ out of product-facing docs. The product direction is defined in
   revokes it even for an outstanding confirmation). This is the safer alternative
   to free-form `/dispatch`. Logic in `scripts/telegram_operator/allowlist.py`.
 
+- Offdesk has event-driven learning signals (Hermes pattern #9): each denied
+  approval, failed runtime task, and resume-pending recovery row emits an
+  adaptive-wiki *candidate* (recommendation-only, redacted, `runtime_observed`).
+  A durable cursor (`learning_signals_state.json`) emits each event once while
+  the candidate store merges by claim so repeated patterns accrue
+  `occurrence_count`. `run_offdesk_tick` runs the scan automatically (reports
+  `learning_signals_emitted`, never fails the tick) and
+  `forager offdesk learning-scan [--json]` runs it on demand. No auto-promotion;
+  candidates still require the existing reviewed promotion path. Logic in
+  `src/offdesk/learning_signals.rs`.
+
 ## Next Work Candidates
 
-1. Split the large Offdesk CLI (`src/cli/offdesk.rs`, ~18k lines) into command
+1. Extend learning signals to the remaining lifecycle events (pre-compression
+   extraction, wiki projection usage) and add a curator-style staleness report
+   (Hermes patterns #9 follow-up and #10).
+2. Split the large Offdesk CLI (`src/cli/offdesk.rs`, ~18k lines) into command
    handling and typed workflow transition modules, applying the same
    extraction pattern proven on the Telegram adapter.
-2. Optionally split `scripts/telegram_operator/receipts.py` (~1,960 lines) by
+3. Optionally split `scripts/telegram_operator/receipts.py` (~1,960 lines) by
    stage family if it keeps growing; it is cohesive today.
-3. Optionally add parameterized `/run` templates (constrained argument
+4. Optionally add parameterized `/run` templates (constrained argument
    substitution) if fixed commands prove too rigid; keep injection surface in
    mind.
 

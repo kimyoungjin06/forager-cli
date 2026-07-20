@@ -10820,3 +10820,108 @@ fn offdesk_pause_unpause_round_trips_and_tick_holds_dispatch() -> Result<()> {
     assert_eq!(unpause["paused"], false);
     Ok(())
 }
+
+#[test]
+#[serial]
+fn offdesk_learning_scan_emits_candidates_once_and_tick_auto_scans() -> Result<()> {
+    use forager::offdesk::{
+        AdaptiveWikiKind, AdaptiveWikiStore, BackgroundRunnerKind, OffdeskTask, OffdeskTaskInput,
+        OffdeskTaskStatus, OffdeskTaskStore,
+    };
+
+    let temp = tempdir()?;
+    let profile = profile_dir(temp.path());
+    fs::create_dir_all(&profile)?;
+    let now = Utc::now();
+
+    let failed_task = |task_id: &str, last_error: &str| -> OffdeskTask {
+        let mut task = OffdeskTask::new(
+            OffdeskTaskInput {
+                task_id: Some(task_id.to_string()),
+                request_id: "req-1".to_string(),
+                project_key: "proj-a".to_string(),
+                capability_id: "dispatch.runtime".to_string(),
+                runner_kind: BackgroundRunnerKind::LocalBackground,
+                command: "cargo build".to_string(),
+                workdir: "/tmp".to_string(),
+                execution_brief: None,
+                not_before: None,
+                mutation_class: None,
+                artifact_refs: Vec::new(),
+                implementation_packet: None,
+                artifact_kind: None,
+                agent_mode: None,
+                provider_id: None,
+                model: None,
+                preview: String::new(),
+                reason: String::new(),
+                log_artifact_path: None,
+                result_artifact_path: None,
+            },
+            now,
+        );
+        task.status = OffdeskTaskStatus::Failed;
+        task.last_error = Some(last_error.to_string());
+        task
+    };
+
+    // Seed one failed task, then run the CLI scan.
+    let store = OffdeskTaskStore::new(&profile);
+    store.save(&[failed_task("task-1", "compile error: token=sk-secret")])?;
+
+    let scan = forager_command(temp.path())
+        .args(["offdesk", "learning-scan", "--json"])
+        .output()?;
+    assert!(
+        scan.status.success(),
+        "{}",
+        String::from_utf8_lossy(&scan.stderr)
+    );
+    let scan: serde_json::Value = serde_json::from_slice(&scan.stdout)?;
+    assert_eq!(scan["emitted"].as_array().unwrap().len(), 1);
+    assert_eq!(scan["emitted"][0]["source"], "task_failed");
+
+    // Re-running is idempotent: the durable cursor skips the processed event.
+    let rescan = forager_command(temp.path())
+        .args(["offdesk", "learning-scan", "--json"])
+        .output()?;
+    assert!(rescan.status.success());
+    let rescan: serde_json::Value = serde_json::from_slice(&rescan.stdout)?;
+    assert_eq!(rescan["emitted"].as_array().unwrap().len(), 0);
+    assert_eq!(rescan["skipped_already_processed"], 1);
+
+    // A second failed task of the same shape is a new event; a tick auto-scans it.
+    store.save(&[
+        failed_task("task-1", "compile error: token=sk-secret"),
+        failed_task("task-2", "another failure"),
+    ])?;
+    let tick = forager_command(temp.path())
+        .args(["offdesk", "tick", "--limit", "5", "--json"])
+        .output()?;
+    assert!(
+        tick.status.success(),
+        "{}",
+        String::from_utf8_lossy(&tick.stderr)
+    );
+    let tick: serde_json::Value = serde_json::from_slice(&tick.stdout)?;
+    assert_eq!(tick["learning_signals_emitted"], 1);
+
+    // Both failures share a runner/project, so they merge into one candidate whose
+    // occurrence_count reflects the repeated pattern, and no secret leaks.
+    let candidates = AdaptiveWikiStore::new(&profile)
+        .load_candidates()?
+        .candidates;
+    assert_eq!(
+        candidates.len(),
+        1,
+        "same-shape failures should merge into one candidate"
+    );
+    assert_eq!(candidates[0].kind, AdaptiveWikiKind::FailurePattern);
+    assert_eq!(candidates[0].occurrence_count, 2);
+    assert!(
+        !candidates[0].human_summary.contains("sk-secret"),
+        "secret leaked into candidate: {}",
+        candidates[0].human_summary
+    );
+    Ok(())
+}
