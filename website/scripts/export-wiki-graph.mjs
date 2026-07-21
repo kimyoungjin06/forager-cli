@@ -10,6 +10,7 @@
 // counts for weighting. The graph command is read-only and never mutates state.
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,8 +28,9 @@ if (options.profiles) {
   const outDir = path.resolve(siteRoot, options.output ?? 'public/wiki-graph');
   mkdirSync(outDir, { recursive: true });
   const manifest = [];
-  for (const profile of profiles) {
-    const view = buildProfileView(profile);
+  const views = profiles.map((profile) => [profile, buildProfileView(profile)]);
+  await translateClaims(views.map(([, view]) => view));
+  for (const [profile, view] of views) {
     writeFileSync(path.join(outDir, `${profile}.json`), `${JSON.stringify(view, null, 2)}\n`);
     manifest.push({
       key: profile,
@@ -49,12 +51,88 @@ if (options.profiles) {
   const profile = options.profile ?? process.env.FORAGER_PROFILE ?? 'default';
   const outputPath = path.resolve(siteRoot, options.output ?? 'public/wiki-graph.json');
   const view = buildProfileView(profile);
+  await translateClaims([view]);
   mkdirSync(path.dirname(outputPath), { recursive: true });
   writeFileSync(outputPath, `${JSON.stringify(view, null, 2)}\n`);
   console.log(
     `Exported ${view.schema} to ${path.relative(siteRoot, outputPath)} ` +
       `(${view.summary.records} records, ${view.summary.tag_nodes} tags, ${view.edges.length} edges)`,
   );
+}
+
+// ---- projection-time Korean translation (canonical store stays untouched) ----
+// Claims are distilled to English; the operator reads Korean. Translation is a
+// view concern, so it happens here with a local model and a content-hash cache
+// (re-exports only translate new/changed claims). Missing endpoint degrades to
+// English-only output instead of failing the export.
+function i18nCachePath() {
+  return path.resolve(siteRoot, '.wiki-i18n-cache.json');
+}
+
+function loadI18nCache() {
+  try {
+    return JSON.parse(readFileSync(i18nCachePath(), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+async function translateClaims(views) {
+  const baseUrl = process.env.OFFDESK_LLM_BASE_URL;
+  if (!baseUrl) return; // no endpoint configured: English-only export
+  const model = process.env.OFFDESK_LLM_MODEL || 'qwen3-coder:30b';
+  const cache = loadI18nCache();
+  const keyOf = (text) => createHash('md5').update(text).digest('hex');
+  const pending = new Map();
+  for (const view of views) {
+    for (const node of view.nodes) {
+      if (node.type === 'tag' || !node.label) continue;
+      const key = keyOf(node.label);
+      if (cache[key]) node.claim_ko = cache[key];
+      else pending.set(key, node.label);
+    }
+  }
+  const batch = [...pending.entries()];
+  for (let start = 0; start < batch.length; start += 30) {
+    const slice = batch.slice(start, start + 30);
+    const prompt =
+      'Translate each numbered English claim into concise natural Korean for a researcher. ' +
+      'Keep technical terms, code identifiers, file names, and numbers as-is. ' +
+      'Return STRICT JSON only: {"translations": ["...", ...]} with exactly ' +
+      slice.length + ' strings in the same order.\n\n' +
+      slice.map(([, text], i) => `[${i + 1}] ${text}`).join('\n');
+    try {
+      const res = await fetch(baseUrl.replace(/\/$/, '') + '/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model, prompt, stream: false, think: false, format: 'json',
+          options: { temperature: 0.1, num_ctx: 8192, num_predict: 4096 },
+        }),
+      });
+      const body = await res.json();
+      const out = JSON.parse(body.response || '{}').translations;
+      if (Array.isArray(out) && out.length === slice.length) {
+        slice.forEach(([key], i) => {
+          const ko = String(out[i] || '').trim();
+          if (ko) cache[key] = ko;
+        });
+      }
+    } catch (error) {
+      process.stderr.write(`translation batch skipped: ${error.message}\n`);
+      break; // endpoint trouble: keep what we have, stay English-only for the rest
+    }
+  }
+  writeFileSync(i18nCachePath(), JSON.stringify(cache, null, 1));
+  let translated = 0;
+  for (const view of views) {
+    for (const node of view.nodes) {
+      if (node.type === 'tag' || !node.label) continue;
+      const ko = cache[keyOf(node.label)];
+      if (ko) { node.claim_ko = ko; translated += 1; }
+    }
+  }
+  console.log(`translated ${translated} claims (cache: ${Object.keys(cache).length})`);
 }
 
 function buildProfileView(profile) {

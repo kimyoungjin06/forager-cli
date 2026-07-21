@@ -92,6 +92,23 @@ const statusCounts = wikiGraph.nodes
           </p>
         </div>
       </div>
+      <div class="mt-6">
+        <div class="mb-3 flex flex-wrap items-center gap-3">
+          <h2 class="text-lg font-semibold tracking-tight text-white">Entries</h2>
+          <input
+            id="entry-search"
+            type="search"
+            placeholder="검색: 한국어 / English / tag / id"
+            autocomplete="off"
+            class="w-72 max-w-full rounded-md border border-slate-700 bg-[#0c1622] px-3 py-1.5 text-sm text-slate-100 placeholder:text-slate-600 focus:border-brand-400 focus:outline-none"
+          />
+          <span id="entry-count" class="text-xs tabular-nums text-slate-500"></span>
+        </div>
+        <div
+          id="entry-list"
+          class="divide-y divide-slate-800/70 overflow-hidden rounded-xl border border-slate-700/70 bg-[#0b141f]"
+        ></div>
+      </div>
       <p class="mt-3 text-xs leading-relaxed text-slate-500">
         Drag to pan &middot; scroll to zoom &middot; hover a node for detail &middot; click a legend entry to toggle a series.
         Derived structural tags (kind/scope/status/&hellip;) are hidden by default &mdash; enable
@@ -363,12 +380,74 @@ const statusCounts = wikiGraph.nodes
       if (src && sourceLabel) src.textContent = sourceLabel;
     }
 
+    // ---- bilingual entries browser ----
+    const KIND_BADGE = {
+      policy_rule: ['policy', 'bg-rose-500/15 text-rose-300'],
+      failure_pattern: ['failure', 'bg-amber-500/15 text-amber-300'],
+      procedure: ['procedure', 'bg-sky-500/15 text-sky-300'],
+      preference: ['preference', 'bg-violet-500/15 text-violet-300'],
+      fact: ['fact', 'bg-emerald-500/15 text-emerald-300'],
+    };
+    const STATUS_DOT = { promoted: '#46c98b', candidate: '#e2a63c', deprecated: '#6b7688' };
+    let entryQuery = '';
+    document.getElementById('entry-search').addEventListener('input', (e) => {
+      entryQuery = e.target.value.trim().toLowerCase();
+      renderEntries();
+    });
+
+    function renderEntries() {
+      const view = filterView(fullView, currentFacet);
+      let recs = view.nodes.filter((n) => n.type !== 'tag');
+      if (entryQuery) {
+        recs = recs.filter((n) =>
+          `${n.label ?? ''} ${n.claim_ko ?? ''} ${n.kind ?? ''} ${n.wiki_id ?? ''} ${(view.edges || [])
+            .filter((e) => e.source === n.id)
+            .map((e) => e.target)
+            .join(' ')}`.toLowerCase().includes(entryQuery),
+        );
+      }
+      const rank = { promoted: 0, candidate: 1, deprecated: 2 };
+      recs.sort((a, b) => (rank[a.status] ?? 3) - (rank[b.status] ?? 3) || (b.occurrence ?? 0) - (a.occurrence ?? 0) || (b.evidence_count ?? 0) - (a.evidence_count ?? 0));
+      const host = document.getElementById('entry-list');
+      const count = document.getElementById('entry-count');
+      if (count) count.textContent = `${recs.length}건`;
+      if (!recs.length) {
+        host.innerHTML = '<p class="px-4 py-6 text-sm text-slate-500">일치하는 엔트리가 없습니다.</p>';
+        return;
+      }
+      host.innerHTML = recs
+        .map((n) => {
+          const [kindLabel, kindCls] = KIND_BADGE[n.kind] ?? [n.kind ?? '?', 'bg-slate-600/20 text-slate-300'];
+          const dot = STATUS_DOT[n.status] ?? '#94a3b8';
+          const tags = (view.edges || [])
+            .filter((e) => e.source === n.id && /^tag:(tool|risk|method|domain)\//.test(e.target))
+            .map((e) => `<span class="rounded bg-slate-800/80 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">${esc(e.target.slice(4))}</span>`)
+            .join(' ');
+          const ko = n.claim_ko ? `<p class="text-sm leading-snug text-slate-100">${esc(n.claim_ko)}</p>` : '';
+          const en = `<p class="${n.claim_ko ? 'mt-0.5 text-xs leading-snug text-slate-500' : 'text-sm leading-snug text-slate-100'}">${esc(n.label ?? '')}</p>`;
+          const meta = [n.scope_ref && n.scope_ref !== '*' ? n.scope_ref : n.scope, n.occurrence ? `x${n.occurrence}` : '', n.evidence_count ? `evidence ${n.evidence_count}` : '']
+            .filter(Boolean).join(' · ');
+          return `<div class="flex items-start gap-3 px-4 py-3">
+            <span class="mt-1.5 h-2 w-2 flex-none rounded-full" style="background:${dot}" title="${esc(n.status ?? '')}"></span>
+            <div class="min-w-0 flex-1">${ko}${en}
+              <div class="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+                <span class="rounded px-1.5 py-0.5 text-[10px] font-medium ${kindCls}">${esc(kindLabel)}</span>
+                <span class="font-mono">${esc(meta)}</span> ${tags}
+              </div>
+            </div>
+          </div>`;
+        })
+        .join('');
+    }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+
     function applyAndRender() {
       const filtered = filterView(fullView, currentFacet);
       const recordCount = filtered.nodes.filter((n) => n.type !== 'tag').length;
       const empty = document.getElementById('wiki-graph-empty');
       if (empty) empty.style.display = recordCount === 0 ? 'flex' : 'none';
       render(filtered);
+      renderEntries();
     }
 
     function setFullView(view, sourceLabel) {

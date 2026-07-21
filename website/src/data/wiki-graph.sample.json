@@ -1,6 +1,6 @@
 {
   "schema": "wiki_knowledge_graph_view.v1",
-  "generated_at": "2026-07-21T04:56:52.755202092Z",
+  "generated_at": "2026-07-21T09:46:45.203863370Z",
   "profile": "forager-ops",
   "summary": {
     "entries": 17,
@@ -428,7 +428,8 @@
       "evidence_count": 1,
       "degree": 8,
       "weight": 1,
-      "facet": "ops"
+      "facet": "ops",
+      "claim_ko": "보안 제한이 허용될 경우, 메커니즘 추가보다는 명시적으로 문서화하라."
     },
     {
       "id": "entry:wiki_entry_1900ee70-22bb-4e2f-84a3-916177ab11e7",
@@ -448,7 +449,8 @@
       "evidence_count": 1,
       "degree": 10,
       "weight": 1,
-      "facet": "ops"
+      "facet": "ops",
+      "claim_ko": "방향 검토는 먼저 목표 완료 여부를 확인하고, Hermes/기타 허니스 추세를 조사한 후 기능을 선택하라."
     },
     {
       "id": "entry:wiki_entry_4d962e51-fb1d-49e9-8bdc-b852788f2170",
@@ -465,7 +467,8 @@
       "evidence_count": 1,
       "degree": 7,
       "weight": 1,
-      "facet": "ops"
+      "facet": "ops",
+      "claim_ko": "학습 신호: 거부된 승인, 실패한 작업, 재개 대기 행은 offdesk tick 및 learning-scan을 통해 적응형 위키 후보를 방출; 추천 전용, 지속적 커서로 중복 제거, 자동 적용되지 않음."
     },
     {
       "id": "entry:wiki_entry_52dcbe4b-60d1-4722-aa27-641beae1bea4",
@@ -482,7 +485,8 @@
       "evidence_count": 1,
       "degree": 7,
       "weight": 1,
-      "facet": "ops"
+      "facet": "ops",
+      "claim_ko": "완료된 실행은 인정된 진실이 아니다: 완료된 프로세스는 증거, 위험, 다음 행동이 검토 가능할 때까지 대기 상태에 머무름; 인정된 진실은 명시적 검토를 통해만 기록됨."
     },
     {
       "id": "entry:wiki_entry_55979e74-5050-44da-9e6c-3e23e1c10513",
@@ -499,7 +503,8 @@
       "evidence_count": 1,
       "degree": 7,
       "weight": 1,
-      "facet": "ops"
+      "facet": "ops",
+      "claim_ko": "텔레그램 보호 실행: /decision, /recover, /dispatch는 /confirm 토큰(nonce/TTL/관찰된 해시) 필요; /run은 큐리된 허용 목록 템플릿만 디스패치; 자유형 /dispatch는 --enable-runtime-dispatch 필요; /pause는 즉각적인 비상 정지."
     },
     {
       "id": "entry:wiki_entry_5a2ce6c9-8a2f-422b-b946-926ee0c896e0",
@@ -516,7 +521,8 @@
       "evidence_count": 1,
       "degree": 7,
       "weight": 1,
-      "facet": "ops"
+      "facet": "ops",
+      "claim_ko": "적응형 위키 승격은 운영자 제어: 후보는 자동 승격되지 않으며, AI 프로젝션은 승격된 범위 내 항목만 포함하고, auto_apply는 런타임 변이에 연결되지 않음."
     },
     {
       "id": "entry:wiki_entry_5a422997-892d-4ddc-81ec-c8b971a3cf8f",
@@ -536,7 +542,8 @@
       "evidence_count": 1,
       "degree": 9,
       "weight": 1,
-      "facet": "ops"
+      "facet": "ops",
+      "claim_ko": "저장된 데이터 변경 시 메이그레이션 시스템(src/migrations/)을 사용하라 (멱등성, 버전 증가); 메인 코드 내 대체/호환 로직은 사용하지 않음."
     },
     {
       "id": "entry:wiki_entry_6d504a06-0215-4f70-af94-7d3eee76d3a7",
@@ -553,7 +560,8 @@
       "evidence_count": 1,
       "degree": 7,
       "weight": 1,
-      "facet": "ops"
+      "facet": "ops",
+      "claim_ko": "제공자 대체는 승인 제어: 제공자 용량 쿨다운은 디스패치 지연 및 retry_at 기록; 대체는 dispatch.provider_fallback 승인 후보 생성, 승인 전 자동 라우팅은 하지 않음."
     },
     {
       "id": "entry:wiki_entry_791af2f7-2157-4d67-ab45-b2c9f0953495",
@@ -570,7 +578,8 @@
       "evidence_count": 1,
       "degree": 8,
       "weight": 1,
-      "facet": "ops"
+      "facet": "ops",
+      "claim_ko": "텔레그램은 긴급 처리의 주 표면이며, 웹 대시보드는 보조 표면이다."
     },
     {
       "id": "entry:wiki_entry_83131577-56ae-4f26-8713-75ac144013b7",
@@ -589,7 +598,8 @@
       "evidence_count": 1,
       "degree": 8,
       "weight": 1,
-      "facet": "ops"
+      "facet": "ops",
+      "claim_ko": "변경사항 실행 전 cargo fmt, cargo clippy, cargo test 실행하라; 문서나 주석에 emdashes 사용 금지; OS별 로직은 src/process/{macos,linux}.rs에 유지."
     },
     {
       "id": "entry:wiki_entry_9c3b3639-efc1-43a2-8725-26fd1efbe977",
@@ -606,7 +616,8 @@
       "evidence_count": 1,
       "degree": 7,
       "weight": 1,
-      "facet": "ops"
+      "facet": "ops",
+      "claim_ko": "런타임 변이 전 승인: 런타임 실행, 제공자 재지정, 정리, 표준 승인은 명시적 승인/검토를 통과해야 함; dispatch.runtime은 offdesk tick 시작 전 운영자 승인 대기."
     },
     {
       "id": "entry:wiki_entry_b6a5b323-6f22-4410-a9b7-c4e4a3f42787",
@@ -623,7 +634,8 @@
       "evidence_count": 1,
       "degree": 7,
       "weight": 1,
-      "facet": "ops"
+      "facet": "ops",
+      "claim_ko": "스크롤백 상태: 표준 상태는 텔레그램, 채팅 기록, 터미널 스크롤백이 아닌 Forager 아티팩트에 존재해야 함; 중요한 전환은 지속적 아티팩트 생성 필요."
     },
     {
       "id": "entry:wiki_entry_d926122e-b4b0-45c6-8cc4-b8ad41947517",
@@ -642,7 +654,8 @@
       "evidence_count": 1,
       "degree": 7,
       "weight": 1,
-      "facet": "ops"
+      "facet": "ops",
+      "claim_ko": "offdesk tick은 유일한 실행기: runtime-dispatch는 지속적 OffdeskTask를 큐에 넣지만 프로세스 시작은 하지 않음; 실행은 forager offdesk tick과 스케줄러 게이트를 통해만 실행."
     },
     {
       "id": "entry:wiki_entry_e1b06f7e-eba5-4efe-b2be-c99b570f2025",
@@ -659,7 +672,8 @@
       "evidence_count": 1,
       "degree": 9,
       "weight": 1,
-      "facet": "ops"
+      "facet": "ops",
+      "claim_ko": "연구-면과 허니스/운영 위키 지식은 별도 그래프/프로필에 유지하라; 절대 혼합하지 말 것."
     },
     {
       "id": "entry:wiki_entry_e289d464-fa86-4f5c-a9c2-c6d8a7b9812a",
@@ -676,7 +690,8 @@
       "evidence_count": 1,
       "degree": 8,
       "weight": 1,
-      "facet": "ops"
+      "facet": "ops",
+      "claim_ko": "시각화는 내장 데이터로 자체 호스팅, 원격 접근 가능해야 함; Claude 아티팩트나 localhost 제한은 사용하지 않음."
     },
     {
       "id": "entry:wiki_entry_e4859f1a-4e2d-4635-823f-902693cdbfdd",
@@ -695,7 +710,8 @@
       "evidence_count": 1,
       "degree": 8,
       "weight": 1,
-      "facet": "ops"
+      "facet": "ops",
+      "claim_ko": "설정 TUI 일치: 모든 활성 사용자-facing 구성 필드는 설정 TUI에서 편집 가능해야 함 (FieldKey + build_*_fields + apply_field_to_global/profile + profile-override 병합)."
     },
     {
       "id": "entry:wiki_entry_f0b42ad0-88e4-461f-b3ef-eb8daec29760",
@@ -712,7 +728,8 @@
       "evidence_count": 1,
       "degree": 7,
       "weight": 1,
-      "facet": "ops"
+      "facet": "ops",
+      "claim_ko": "삭제 경계: 운영자 안전 표면은 업로드/공유 시 실행자 전용 컨텍스트와 시크릿 제거; 디버그 번들 출력은 내보내기 전 정화됨."
     },
     {
       "id": "tag:agent/development",
