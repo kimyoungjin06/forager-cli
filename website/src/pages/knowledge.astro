@@ -255,8 +255,8 @@ const statusCounts = wikiGraph.nodes
           text: group.map((n) => truncate(n.label, 34)),
           textposition: 'top center',
           textfont: { size: 10, color: '#cbd5e1', family: 'ui-monospace, monospace' },
-          customdata: group.map((n) => recordHover(n)),
-          hovertemplate: '%{customdata}<extra></extra>',
+          customdata: group.map((n) => [recordHover(n), n.id]),
+          hovertemplate: '%{customdata[0]}<extra></extra>',
           legendgroup: 'records',
         });
       }
@@ -273,11 +273,21 @@ const statusCounts = wikiGraph.nodes
           symbol: 'diamond',
           line: { color: '#0b141f', width: 0.6 },
         },
-        customdata: tags.map((n) => `<b>${n.label}</b><br>${n.tag_class} tag &middot; ${n.degree} links`),
-        hovertemplate: '%{customdata}<extra></extra>',
+        customdata: tags.map((n) => [`<b>${n.label}</b><br>${n.tag_class} tag &middot; ${n.degree} links`, n.id]),
+        hovertemplate: '%{customdata[0]}<extra></extra>',
         legendgroup: 'tags',
       });
 
+      if (selectedId) {
+        const sel = nodes.find((n) => n.id === selectedId);
+        if (sel) {
+          out.push({
+            x: [sel.x], y: [sel.y], mode: 'markers', type: 'scatter', name: 'selected',
+            marker: { size: 34, symbol: 'circle-open', color: '#7c8cff', line: { width: 3, color: '#7c8cff' } },
+            hoverinfo: 'skip', showlegend: false,
+          });
+        }
+      }
       return out;
     }
 
@@ -327,6 +337,34 @@ const statusCounts = wikiGraph.nodes
     function render(view) {
       const model = layout(view);
       Plotly.react(plotEl, traces(model), plotLayout(model), CONFIG);
+      if (!render._bound) {
+        render._bound = true;
+        plotEl.on('plotly_click', (ev) => {
+          const pt = ev.points && ev.points[0];
+          const id = pt && Array.isArray(pt.customdata) ? pt.customdata[1] : null;
+          if (!id) return;
+          if (id.startsWith('tag:')) {
+            const search = document.getElementById('entry-search');
+            search.value = id.slice(4);
+            entryQuery = search.value.toLowerCase();
+            applyAndRender();
+          } else {
+            selectNode(id, 'graph');
+          }
+        });
+      }
+    }
+
+    function selectNode(id, origin) {
+      selectedId = selectedId === id ? null : id;
+      applyAndRender();
+      if (!selectedId) return;
+      if (origin === 'graph') {
+        const row = document.querySelector(`.entry-row[data-node-id="${CSS.escape(selectedId)}"]`);
+        if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } else {
+        plotEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
     }
 
     function truncate(s, n) { s = s == null ? '' : String(s); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
@@ -335,6 +373,7 @@ const statusCounts = wikiGraph.nodes
     // ---- multi-view state: one store per profile, sliced by knowledge facet ----
     let fullView = embedded;
     let currentFacet = 'all';
+    let entryQuery = '';
 
     // Facets are data-driven: each profile declares its own (research/ops for a
     // research project, product/ops for a software one, ops for forager-ops).
@@ -360,9 +399,21 @@ const statusCounts = wikiGraph.nodes
       });
     }
 
+    let selectedId = null;
+
+    function recordMatchesQuery(view, n) {
+      if (!entryQuery) return true;
+      const tagText = (view.edges || []).filter((e) => e.source === n.id).map((e) => e.target).join(' ');
+      return `${n.label ?? ''} ${n.claim_ko ?? ''} ${n.kind ?? ''} ${n.wiki_id ?? ''} ${tagText}`
+        .toLowerCase().includes(entryQuery);
+    }
+
     function filterView(view, facet) {
-      if (!facet || facet === 'all') return view;
-      const keep = new Set(view.nodes.filter((n) => n.type !== 'tag' && n.facet === facet).map((n) => n.id));
+      const keep = new Set(
+        view.nodes
+          .filter((n) => n.type !== 'tag' && (!facet || facet === 'all' || n.facet === facet) && recordMatchesQuery(view, n))
+          .map((n) => n.id),
+      );
       const edges = view.edges.filter((e) => keep.has(e.source));
       const keptTags = new Set(edges.map((e) => e.target));
       const nodes = view.nodes.filter((n) => (n.type !== 'tag' ? keep.has(n.id) : keptTags.has(n.id)));
@@ -389,23 +440,14 @@ const statusCounts = wikiGraph.nodes
       fact: ['fact', 'bg-emerald-500/15 text-emerald-300'],
     };
     const STATUS_DOT = { promoted: '#46c98b', candidate: '#e2a63c', deprecated: '#6b7688' };
-    let entryQuery = '';
     document.getElementById('entry-search').addEventListener('input', (e) => {
       entryQuery = e.target.value.trim().toLowerCase();
-      renderEntries();
+      applyAndRender();
     });
 
     function renderEntries() {
       const view = filterView(fullView, currentFacet);
-      let recs = view.nodes.filter((n) => n.type !== 'tag');
-      if (entryQuery) {
-        recs = recs.filter((n) =>
-          `${n.label ?? ''} ${n.claim_ko ?? ''} ${n.kind ?? ''} ${n.wiki_id ?? ''} ${(view.edges || [])
-            .filter((e) => e.source === n.id)
-            .map((e) => e.target)
-            .join(' ')}`.toLowerCase().includes(entryQuery),
-        );
-      }
+      const recs = view.nodes.filter((n) => n.type !== 'tag');
       const rank = { promoted: 0, candidate: 1, deprecated: 2 };
       recs.sort((a, b) => (rank[a.status] ?? 3) - (rank[b.status] ?? 3) || (b.occurrence ?? 0) - (a.occurrence ?? 0) || (b.evidence_count ?? 0) - (a.evidence_count ?? 0));
       const host = document.getElementById('entry-list');
@@ -427,7 +469,8 @@ const statusCounts = wikiGraph.nodes
           const en = `<p class="${n.claim_ko ? 'mt-0.5 text-xs leading-snug text-slate-500' : 'text-sm leading-snug text-slate-100'}">${esc(n.label ?? '')}</p>`;
           const meta = [n.scope_ref && n.scope_ref !== '*' ? n.scope_ref : n.scope, n.occurrence ? `x${n.occurrence}` : '', n.evidence_count ? `evidence ${n.evidence_count}` : '']
             .filter(Boolean).join(' · ');
-          return `<div class="flex items-start gap-3 px-4 py-3">
+          const selCls = n.id === selectedId ? ' bg-brand-500/10 ring-1 ring-inset ring-brand-400/40' : '';
+          return `<div class="entry-row flex cursor-pointer items-start gap-3 px-4 py-3 transition-colors hover:bg-slate-800/40${selCls}" data-node-id="${esc(n.id)}">
             <span class="mt-1.5 h-2 w-2 flex-none rounded-full" style="background:${dot}" title="${esc(n.status ?? '')}"></span>
             <div class="min-w-0 flex-1">${ko}${en}
               <div class="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
@@ -438,6 +481,9 @@ const statusCounts = wikiGraph.nodes
           </div>`;
         })
         .join('');
+      host.querySelectorAll('.entry-row').forEach((row) => {
+        row.addEventListener('click', () => selectNode(row.getAttribute('data-node-id'), 'list'));
+      });
     }
     function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
 
