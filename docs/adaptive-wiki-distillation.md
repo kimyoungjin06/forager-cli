@@ -78,6 +78,20 @@ promote (with activation mode and scope), compress, rescope, merge, or reject.
 This keeps observation separate from the decision to trust knowledge, and it is
 where promotion precision is actually validated.
 
+Review can be a single agent or a Council of independent reviewers with distinct
+lenses whose verdicts are synthesized into a consensus. Three lenses have proven
+useful and catch different defects:
+
+- accuracy and evidence: verify each claim against the cited source (and, for a
+  tool wiki, against the code); flag drift and unresolved refs.
+- value and distillation: is it non-obvious and durable, or a doc-mirror or
+  generic best-practice that should be pruned or compressed.
+- classification and scope: is the kind, scope, facet, tags, and agent-mode
+  projection correct.
+
+The value lens reliably catches the doc-mirrors; the classification lens catches
+scope and agent-mode mistakes a value-only review misses.
+
 Apply the verdicts in place, without reject and re-record:
 
 - `compress` -> `forager offdesk wiki edit <id> --claim <shorter> [--ai-instruction <text>]`
