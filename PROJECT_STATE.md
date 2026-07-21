@@ -303,7 +303,13 @@ out of product-facing docs. The product direction is defined in
    agent-mode projection on migrations (drop maintenance), tick (universal),
    and figure-anchors (+analysis).
 
-1. Extend learning signals to the remaining lifecycle events (pre-compression
+1. Fix harvest-pipeline defects found by the first tier-3 pass: the
+   prereview quote fallback turns missing quotes into unverifiable
+   "pointer quotes" (should mark unclear instead), review_reason truncation
+   can cut the stored quote, and the session distiller fans one quote into
+   many near-duplicate claims (needs a per-quote cap). Also spot-check
+   prereview-"supported" items for quote-claim mismatch.
+2. Extend learning signals to the remaining lifecycle events (pre-compression
    extraction, wiki projection usage) and add a curator-style staleness report
    (Hermes patterns #9 follow-up and #10).
 2. Split the large Offdesk CLI (`src/cli/offdesk.rs`, ~18k lines) into command
