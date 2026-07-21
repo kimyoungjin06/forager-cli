@@ -52,6 +52,28 @@ as the wiki grows.
 - Prefer one precise sentence over a paragraph. If it needs a paragraph, it is
   probably two entries or belongs in the doc.
 
+## Environment and compute gotchas (highest-value class)
+
+Settings that silently break large computations are the wiki's highest-value
+entries, because they live nowhere else: the workaround lands in code (a pinned
+`PRAGMA threads=8`, an `OMP_NUM_THREADS=1`, a batch-size cap) while the reason
+evaporates with the debugging session, and the mistake recurs months later.
+
+Capture them at the moment of resolution, with all three parts:
+
+1. the exact failure (error text, OOM/kill, wrong result, hang);
+2. the working setting (verbatim: pragma, env var, flag, version pin);
+3. why -- what about the machine or data triggers it (core count vs memory,
+   dataset scale, thread oversubscription between libraries).
+
+Conventions: kind `failure_pattern` (the breakage) or `procedure` (the working
+recipe); facet `ops`; scope `user_global` when the constraint is the machine's
+(shared server, GPU box), `project` when it is the dataset's; tags
+`tool/<duckdb|torch|sklearn|...>` plus `env/<host>` so one server's constraints
+are queryable across projects. A code fossil (a pinned setting with no comment)
+is capturable evidence -- record it with `src:<file>:<line>` refs and a review
+note asking the operator to confirm the original failure mode.
+
 ## Classify
 
 - `kind`: preference, procedure, failure_pattern, policy_rule, or fact. Pick the

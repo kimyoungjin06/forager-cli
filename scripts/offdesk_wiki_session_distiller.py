@@ -60,7 +60,8 @@ RUBRIC = """You review numbered exchanges from a work session between an OPERATO
 Extract ONLY:
 - corrections: the operator redirects, rejects, or points out a wrong assumption or mistake by the assistant;
 - durable boundaries or preferences the operator states;
-- decisions that should persist beyond this session.
+- decisions that should persist beyond this session;
+- environment/tooling gotchas resolved in the session: a computation or tool that failed until a specific setting changed (thread counts, memory limits, env vars, version pins) -- capture the exact failure AND the working setting.
 SKIP pure approvals ("okay", "proceed"), one-time task instructions, and anything with no future value.
 
 Each candidate:
