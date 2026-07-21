@@ -103,6 +103,36 @@ Apply the verdicts in place, without reject and re-record:
 
 Each mutation appends an audit record, so the review decision stays traceable.
 
+## Continuous distillation with a local LLM
+
+`scripts/offdesk_wiki_distiller.py` runs this contract continuously with a
+local Ollama-compatible model (cost ~0, data stays on the machine):
+
+```bash
+OFFDESK_LLM_BASE_URL=http://<gpu-server>:11434 \
+OFFDESK_LLM_MODEL=qwen3-coder:30b \
+scripts/offdesk_wiki_distiller.py --doc <PROJECT>/AGENTS.md \
+  --profile <project> --scope-ref <project> [--record]
+```
+
+The rubric above is the model's prompt contract. Two mechanical safety valves
+make a small model trustworthy enough to author candidates:
+
+- every candidate must carry a verbatim evidence quote that is verified
+  (whitespace-normalized substring) against the source document; a fabricated
+  or paraphrased quote rejects the candidate outright, so hallucinated
+  provenance cannot enter the store;
+- output is validated (kind/facet enums, claim length cap, per-run candidate
+  cap, in-run claim de-dup) and truncated model responses are salvaged down to
+  the last complete candidate.
+
+The distiller NEVER promotes: `--record` writes candidates with
+`origin=background_review` and `confidence=inferred` through the same
+`record-candidate` path, and they wait in the normal review queue. Default is
+a dry run. In live testing qwen3-coder:30b yielded noticeably more verified
+candidates than gemma4:26b on the same document, with the quote check catching
+its paraphrased evidence.
+
 ## Review rubric (for the reviewing agent)
 
 For each candidate, decide a verdict and give a one-line reason:

@@ -266,6 +266,15 @@ out of product-facing docs. The product direction is defined in
   separate reviewed step. This filled the missing capture primitive (previously
   candidates came only from `/remember`, overnight ingest, or learning-signals).
   Used to seed the TwinPaper wiki from `AGENTS.md`/`README.md` (5 -> 13 entries).
+- Continuous doc distillation is live: `scripts/offdesk_wiki_distiller.py`
+  sends a project document plus the distillation rubric to a local
+  Ollama-compatible model, verifies every candidate's evidence quote verbatim
+  against the source (fabricated provenance is rejected mechanically), and with
+  `--record` writes survivors as unpromoted candidates
+  (`origin=background_review`, `confidence=inferred`) via `record-candidate
+  --origin`. Dry-run by default; never promotes. Chat-log and session-transcript
+  distillation are planned follow-ups behind the same evidence/redaction
+  boundary.
 - Entries are editable in place: `forager offdesk wiki edit <id> [--claim]
   [--ai-instruction] [--human-summary] [--evidence-ref]...` and
   `forager offdesk wiki add-tag <id> [--core-tag]... [--proposed-tag]...`. This

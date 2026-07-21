@@ -2670,6 +2670,10 @@ pub struct WikiRecordCandidateArgs {
     #[arg(long, default_value = "explicit", value_parser = parse_adaptive_wiki_confidence)]
     confidence: AdaptiveWikiConfidence,
 
+    /// Provenance of this candidate: who observed it
+    #[arg(long, default_value = "operator_explicit", value_parser = parse_adaptive_wiki_origin)]
+    origin: AdaptiveWikiOrigin,
+
     /// Why this is worth reviewing/promoting
     #[arg(long, default_value = "")]
     review_reason: String,
@@ -7531,7 +7535,7 @@ async fn wiki_record_candidate(profile: &str, args: WikiRecordCandidateArgs) -> 
         // source provenance so nothing from the review is lost.
         evidence_ref: evidence_refs.first().cloned(),
         signal_kind: AdaptiveWikiSignalKind::ImportedDoc,
-        origin: AdaptiveWikiOrigin::OperatorExplicit,
+        origin: args.origin,
         source_refs: evidence_refs.clone(),
         source_hashes: Vec::new(),
         suggested_scope: None,
@@ -16678,6 +16682,21 @@ fn parse_adaptive_wiki_confidence(
         "repeated" => Ok(AdaptiveWikiConfidence::Repeated),
         "inferred" => Ok(AdaptiveWikiConfidence::Inferred),
         _ => Err("confidence must be one of explicit, repeated, inferred".to_string()),
+    }
+}
+
+fn parse_adaptive_wiki_origin(value: &str) -> std::result::Result<AdaptiveWikiOrigin, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "operator_explicit" | "operator-explicit" | "operator" => {
+            Ok(AdaptiveWikiOrigin::OperatorExplicit)
+        }
+        "background_review" | "background-review" | "background" => {
+            Ok(AdaptiveWikiOrigin::BackgroundReview)
+        }
+        "imported" => Ok(AdaptiveWikiOrigin::Imported),
+        _ => {
+            Err("origin must be one of operator_explicit, background_review, imported".to_string())
+        }
     }
 }
 
