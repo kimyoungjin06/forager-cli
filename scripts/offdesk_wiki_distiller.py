@@ -25,6 +25,7 @@ Default is a dry run (report only). Typical use:
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import os
 import pathlib
@@ -178,26 +179,51 @@ def parse_candidates(raw_response: str) -> tuple[list, str]:
     return [], "model returned unparseable JSON"
 
 
-def verify_candidate(raw: dict, doc_norm: str) -> tuple[dict | None, str]:
-    """Validate one model-emitted candidate. Returns (clean, reason-if-rejected)."""
+def repair_quote(quote: str, doc_lines: list[str]) -> str | None:
+    """Small models often extract a TRUE fact but paraphrase the quote, which
+    would reject good knowledge. Fuzzy-match the model's quote against actual
+    document lines and return the best verbatim original above a similarity
+    threshold. Because WE copy the replacement out of the document, the
+    verbatim-provenance guarantee is preserved; only genuinely unsupported
+    quotes still fail."""
+    best_line, best_score = None, 0.0
+    quote_lower = quote.lower()
+    for line in doc_lines:
+        if len(line) < MIN_QUOTE_CHARS:
+            continue
+        score = difflib.SequenceMatcher(None, quote_lower, line.lower()).ratio()
+        if score > best_score:
+            best_line, best_score = line, score
+    if best_line is not None and best_score >= 0.55:
+        return best_line[:300]
+    return None
+
+
+def verify_candidate(raw: dict, doc_norm: str, doc_lines: list[str]) -> tuple[dict | None, str, bool]:
+    """Validate one model-emitted candidate.
+    Returns (clean, reason-if-rejected, quote_was_repaired)."""
     kind = str(raw.get("kind") or "").strip().lower()
     if kind not in VALID_KINDS:
-        return None, f"invalid kind: {kind!r}"
+        return None, f"invalid kind: {kind!r}", False
     facet = str(raw.get("facet") or "").strip().lower()
     if facet not in VALID_FACETS:
-        return None, f"invalid facet: {facet!r}"
+        return None, f"invalid facet: {facet!r}", False
     claim = normalize(str(raw.get("claim") or ""))
     if not claim:
-        return None, "empty claim"
+        return None, "empty claim", False
     if len(claim) > CLAIM_HARD_CAP:
-        return None, f"claim too long ({len(claim)} > {CLAIM_HARD_CAP})"
+        return None, f"claim too long ({len(claim)} > {CLAIM_HARD_CAP})", False
     quote = normalize(str(raw.get("evidence_quote") or ""))
     if len(quote) < MIN_QUOTE_CHARS:
-        return None, f"evidence quote too short ({len(quote)} chars)"
+        return None, f"evidence quote too short ({len(quote)} chars)", False
     # The safety core: the quote must exist verbatim (whitespace-normalized) in
     # the source document, so fabricated provenance is rejected mechanically.
+    repaired = False
     if quote not in doc_norm:
-        return None, "evidence quote not found verbatim in source"
+        fixed = repair_quote(quote, doc_lines)
+        if fixed is None:
+            return None, "evidence quote not found in source (no close line match)", False
+        quote, repaired = fixed, True
     modes = [m for m in (raw.get("agent_modes") or []) if str(m).strip().lower() in VALID_MODES]
     return {
         "kind": kind,
@@ -207,7 +233,7 @@ def verify_candidate(raw: dict, doc_norm: str) -> tuple[dict | None, str]:
         "agent_modes": [str(m).strip().lower() for m in modes],
         "evidence_quote": quote,
         "section": normalize(str(raw.get("section") or ""))[:80],
-    }, ""
+    }, "", repaired
 
 
 def record_candidate(args: argparse.Namespace, doc: pathlib.Path, cand: dict) -> tuple[bool, str]:
@@ -258,6 +284,7 @@ def main() -> int:
             report["documents"].append({"doc": str(doc), "error": str(error)})
             continue
         doc_norm = normalize(text)
+        doc_lines = [normalize(line) for line in text.splitlines() if normalize(line)]
         accepted: list[dict] = []
         rejected: list[dict] = []
         for chunk in chunk_document(text, args.chunk_chars):
@@ -280,10 +307,12 @@ def main() -> int:
                     break
                 if not isinstance(raw, dict):
                     continue
-                clean, reason = verify_candidate(raw, doc_norm)
+                clean, reason, repaired = verify_candidate(raw, doc_norm, doc_lines)
                 if clean is None:
                     rejected.append({"reason": reason, "claim": normalize(str(raw.get("claim") or ""))[:100]})
                     continue
+                if repaired:
+                    clean["quote_repaired"] = True
                 # de-dup within this run by normalized claim
                 if any(c["claim"].lower() == clean["claim"].lower() for c in accepted):
                     rejected.append({"reason": "duplicate claim in run", "claim": clean["claim"][:100]})
@@ -302,7 +331,8 @@ def main() -> int:
         print(f"{doc}: accepted {len(accepted)}, rejected {len(rejected)}"
               + ("" if args.record else " (dry-run, nothing recorded)"))
         for c in accepted:
-            print(f"  + [{c['kind']}/{c['facet']}] {c['claim']}")
+            marker = " (quote repaired)" if c.get("quote_repaired") else ""
+            print(f"  + [{c['kind']}/{c['facet']}] {c['claim']}{marker}")
         for r in rejected:
             print(f"  - rejected: {r['reason']}" + (f" | {r.get('claim','')}" if r.get("claim") else ""))
 

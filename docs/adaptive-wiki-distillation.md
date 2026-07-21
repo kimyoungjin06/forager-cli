@@ -119,9 +119,15 @@ The rubric above is the model's prompt contract. Two mechanical safety valves
 make a small model trustworthy enough to author candidates:
 
 - every candidate must carry a verbatim evidence quote that is verified
-  (whitespace-normalized substring) against the source document; a fabricated
-  or paraphrased quote rejects the candidate outright, so hallucinated
-  provenance cannot enter the store;
+  (whitespace-normalized substring) against the source document, so
+  hallucinated provenance cannot enter the store. Small models often extract a
+  TRUE fact but paraphrase the quote, which would silently discard good
+  knowledge (a live run lost 3 of 8 true candidates this way); a non-matching
+  quote is therefore fuzzy-matched against actual document lines and replaced
+  with the best verbatim original when similarity is high. Because the
+  replacement is copied out of the document by the tool, the guarantee is
+  preserved -- only genuinely unsupported quotes still reject, and a rejection
+  now actually signals an unsupported claim;
 - output is validated (kind/facet enums, claim length cap, per-run candidate
   cap, in-run claim de-dup) and truncated model responses are salvaged down to
   the last complete candidate.
