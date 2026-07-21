@@ -78,6 +78,21 @@ promote (with activation mode and scope), compress, rescope, merge, or reject.
 This keeps observation separate from the decision to trust knowledge, and it is
 where promotion precision is actually validated.
 
+Review is tiered by cost, cheapest first:
+
+1. **Operator packet** (tier 1): `scripts/offdesk_wiki_prereview.py --packet`
+   emits a sorted markdown packet with pre-filter flags and apply commands; ten
+   quoted claims read in two or three minutes, making the operator the cheapest
+   high-quality reviewer.
+2. **Local pre-filter** (tier 2): the same script has a local model judge each
+   candidate's claim against its stored evidence quote
+   (supported / inverted / unsupported / unclear). In live testing it caught a
+   planted inversion for ~2s and ~1k local tokens -- three orders of magnitude
+   cheaper than an agent Council -- with occasional false positives on compound
+   sentences, which is why flags stay advisory.
+3. **Agent Council** (tier 3): reserve multi-agent review for contested or
+   high-stakes sets.
+
 Review can be a single agent or a Council of independent reviewers with distinct
 lenses whose verdicts are synthesized into a consensus. Three lenses have proven
 useful and catch different defects:
@@ -138,6 +153,29 @@ The distiller NEVER promotes: `--record` writes candidates with
 a dry run. In live testing qwen3-coder:30b yielded noticeably more verified
 candidates than gemma4:26b on the same document, with the quote check catching
 its paraphrased evidence.
+
+## Continuous operation (nightly recipe)
+
+The pipeline composes into an unattended loop that still keeps promotion
+operator-gated. A nightly cron (or systemd timer) per project:
+
+```bash
+# 1) capture: docs + latest session transcript -> unpromoted candidates
+export OFFDESK_LLM_BASE_URL=http://<gpu-server>:11434 OFFDESK_LLM_MODEL=qwen3-coder:30b
+scripts/offdesk_wiki_distiller.py --doc <PROJECT>/AGENTS.md \
+  --profile <project> --scope-ref <project> --record
+scripts/offdesk_wiki_session_distiller.py \
+  --transcript "$(ls -t ~/.claude/projects/<proj-dir>/*.jsonl | head -1)" \
+  --profile <project> --scope-ref <project> --scope project --record
+
+# 2) pre-filter + operator packet (tier 1+2)
+scripts/offdesk_wiki_prereview.py --profile <project> \
+  --packet <out>/wiki-review-packet.md
+```
+
+Morning review stays explicit: the operator reads the packet and applies
+promote/reject; occurrence merging absorbs re-observed candidates across
+nights, so re-running is idempotent in effect. Nothing in the loop promotes.
 
 ## Review rubric (for the reviewing agent)
 
