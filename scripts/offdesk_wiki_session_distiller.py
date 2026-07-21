@@ -55,7 +55,9 @@ MIN_OPERATOR_QUOTE = 10
 INCIDENT_PATTERN = re.compile(
     r"segfault|segmentation fault|out of memory|outofmemory|memoryerror|oom-kill|oom kill"
     r"|killed process|process killed| killed by |no space left|errno 28|disk full"
-    r"|cuda out of memory|too many open files|deadlock|/tmp wiped|wiped;|reboot",
+    r"|cuda out of memory|too many open files|deadlock|/tmp wiped|wiped;|reboot"
+    # Korean operational logs use these failure markers.
+    r"|실패|오류|에러|중단됨|재시도|멈춤|죽음|먹통",
     re.IGNORECASE,
 )
 SECRET_PATTERNS = [
@@ -118,6 +120,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-mine-incidents", action="store_true",
                         help="Skip the failure-signature incident pass (on by default; it is where env/compute gotchas live).")
     parser.add_argument("--max-incidents", type=int, default=12)
+    parser.add_argument("--format", choices=["auto", "claude", "codex", "text"], default="auto",
+                        help="Log format: Claude Code JSONL, Codex CLI rollout JSONL, or plain text (run logs, RunLog.md, notebook exports).")
     parser.add_argument("--forager-bin", default=str(repo_root() / "target" / "debug" / "forager"))
     parser.add_argument("--out", type=pathlib.Path)
     args = parser.parse_args()
@@ -144,38 +148,88 @@ def message_text(content) -> str:
     return ""
 
 
-def extract_exchanges(transcript: pathlib.Path, assistant_tail_chars: int) -> list[dict]:
-    """Pair each real operator message with the assistant text just before it."""
-    exchanges: list[dict] = []
-    last_assistant = ""
+def detect_format(transcript: pathlib.Path) -> str:
+    """claude (Claude Code JSONL) | codex (Codex CLI rollout JSONL) | text."""
+    if transcript.suffix != ".jsonl":
+        return "text"
+    with transcript.open() as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except ValueError:
+                return "text"
+            if "payload" in record:
+                return "codex"
+            return "claude"
+    return "text"
+
+
+def iter_records(transcript: pathlib.Path, fmt: str):
+    """Unified stream of {"role": operator|assistant|tool, "text": str}."""
+    if fmt == "text":
+        yield {"role": "tool", "text": transcript.read_text(encoding="utf-8", errors="replace")}
+        return
     with transcript.open() as handle:
         for line in handle:
             try:
                 record = json.loads(line)
             except ValueError:
                 continue
-            kind = record.get("type")
-            message = record.get("message") or {}
-            if kind == "assistant":
-                text = normalize(message_text(message.get("content")))
-                if text:
-                    last_assistant = text
-                continue
-            if kind != "user":
-                continue
-            text = normalize(message_text(message.get("content")))
-            # Skip tool results, harness wrappers, and empty messages. Long
-            # "user" records are almost always injected skill/system prompts
-            # rendered as user messages, not the human operator typing.
-            if not text or text.startswith("<") or len(text) > 900:
-                continue
-            exchanges.append(
-                {
-                    "n": len(exchanges) + 1,
-                    "assistant_before": redact(last_assistant[-assistant_tail_chars:]),
-                    "operator": redact(text[:600]),
-                }
-            )
+            if fmt == "claude":
+                kind = record.get("type")
+                message = record.get("message") or {}
+                if kind == "assistant":
+                    text = message_text(message.get("content"))
+                    if text:
+                        yield {"role": "assistant", "text": text}
+                    tool = full_text(message.get("content"))
+                    if tool and tool != text:
+                        yield {"role": "tool", "text": tool}
+                elif kind == "user":
+                    text = message_text(message.get("content"))
+                    if text:
+                        yield {"role": "operator", "text": text}
+                    tool = full_text(message.get("content"))
+                    if tool and tool != text:
+                        yield {"role": "tool", "text": tool}
+            elif fmt == "codex":
+                kind = record.get("type")
+                payload = record.get("payload") or {}
+                ptype = payload.get("type")
+                if kind == "event_msg" and ptype == "user_message":
+                    yield {"role": "operator", "text": str(payload.get("message") or "")}
+                elif kind == "event_msg" and ptype == "agent_message":
+                    yield {"role": "assistant", "text": str(payload.get("message") or "")}
+                elif kind == "response_item" and ptype == "function_call_output":
+                    yield {"role": "tool", "text": str(payload.get("output") or "")}
+
+
+def extract_exchanges(transcript: pathlib.Path, assistant_tail_chars: int, fmt: str) -> list[dict]:
+    """Pair each real operator message with the assistant text just before it."""
+    exchanges: list[dict] = []
+    last_assistant = ""
+    for record in iter_records(transcript, fmt):
+        text = normalize(record["text"])
+        if not text:
+            continue
+        if record["role"] == "assistant":
+            last_assistant = text
+            continue
+        if record["role"] != "operator":
+            continue
+        # Skip harness wrappers and injected prompts rendered as user messages.
+        if text.startswith("<") or len(text) > 900:
+            continue
+        exchanges.append(
+            {
+                "n": len(exchanges) + 1,
+                "assistant_before": redact(last_assistant[-assistant_tail_chars:]),
+                "operator": redact(text[:600]),
+            }
+        )
     return exchanges
 
 
@@ -200,23 +254,12 @@ def full_text(content) -> str:
     return ""
 
 
-def extract_incidents(transcript: pathlib.Path, max_incidents: int = 12, window: int = 500) -> list[dict]:
+def extract_incidents(transcript: pathlib.Path, fmt: str, max_incidents: int = 12, window: int = 500) -> list[dict]:
     """Scan the WHOLE log (tool output included) for failure signatures and cut
     an incident window around each: the error plus the following narrative
     (usually the fix). Overlapping hits merge into one window."""
     incidents: list[dict] = []
-    texts: list[str] = []
-    with transcript.open() as handle:
-        for line in handle:
-            try:
-                record = json.loads(line)
-            except ValueError:
-                continue
-            if record.get("type") not in ("user", "assistant"):
-                continue
-            text = normalize(full_text((record.get("message") or {}).get("content")))
-            if text:
-                texts.append(text)
+    texts = [normalize(r["text"]) for r in iter_records(transcript, fmt) if normalize(r["text"])]
     joined = " § ".join(texts)
     last_end = -1
     for match in INCIDENT_PATTERN.finditer(joined):
@@ -326,9 +369,10 @@ def record_candidate(args: argparse.Namespace, session_label: str, cand: dict) -
 
 def main() -> int:
     args = parse_args()
-    exchanges = extract_exchanges(args.transcript, args.assistant_tail_chars)
-    if not exchanges:
-        print("no operator messages found in transcript", file=sys.stderr)
+    fmt = args.format if args.format != "auto" else detect_format(args.transcript)
+    exchanges = extract_exchanges(args.transcript, args.assistant_tail_chars, fmt)
+    if not exchanges and args.no_mine_incidents:
+        print("no operator messages found and incident mining disabled", file=sys.stderr)
         return 1
     session_label = args.transcript.stem[:8]
     operator_lines = [e["operator"] for e in exchanges]
@@ -370,7 +414,7 @@ def main() -> int:
     # ---- incident pass: env/compute gotchas live in tool output, not operator text ----
     incidents: list[dict] = []
     if not args.no_mine_incidents:
-        incidents = extract_incidents(args.transcript, args.max_incidents)
+        incidents = extract_incidents(args.transcript, fmt, args.max_incidents)
         if incidents:
             incident_norm = normalize(" \n ".join(i["text"] for i in incidents))
             # repair matching needs sentence-sized fragments: fuzzy similarity of a
