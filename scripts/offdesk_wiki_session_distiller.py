@@ -49,6 +49,15 @@ from offdesk_wiki_distiller import (  # noqa: E402
 )
 
 MIN_OPERATOR_QUOTE = 10
+# Failure signatures worth mining from tool output and assistant text. The
+# environment gotchas an operator can never recall (segfaults, OOM kills,
+# wiped tmp, thread oversubscription) live HERE, not in operator messages.
+INCIDENT_PATTERN = re.compile(
+    r"segfault|segmentation fault|out of memory|outofmemory|memoryerror|oom-kill|oom kill"
+    r"|killed process|process killed| killed by |no space left|errno 28|disk full"
+    r"|cuda out of memory|too many open files|deadlock|/tmp wiped|wiped;|reboot",
+    re.IGNORECASE,
+)
 SECRET_PATTERNS = [
     re.compile(r"(sk-[A-Za-z0-9_-]{8,})"),
     re.compile(r"((?:token|password|secret|api_key|apikey)\s*[=:]\s*\S+)", re.IGNORECASE),
@@ -75,6 +84,19 @@ Each candidate:
 
 Return STRICT JSON only: {"candidates": [...]}. At most {max_candidates} candidates; fewer, well-chosen lessons beat many weak ones."""
 
+INCIDENT_RUBRIC = """You review numbered INCIDENT windows from a work-session log. Each window contains a computation/tool failure signature (segfault, OOM, killed process, wiped tmp, disk full, ...) plus the surrounding narrative, often including how it was resolved.
+
+Extract environment/compute gotchas worth remembering so the failure is not repeated. Each candidate:
+- kind: failure_pattern (what breaks and why) | procedure (the working recipe that resolved it);
+- claim: <=120 chars, English, one durable lesson naming BOTH the failure and the fix/working setting when visible (e.g. "Printing huge dataframes segfaults; aggregate large edge tables via DuckDB streaming instead");
+- ai_instruction: <=200 chars imperative, or "";
+- tool: the tool/library involved (duckdb, pandas, torch, tmpfs, ...) or "";
+- evidence_quote: a VERBATIM fragment (>=15 chars, exact characters) copied from a window;
+- incident: the window number.
+SKIP transient one-off glitches with no durable lesson (a network blip, a typo). If a window shows a failure but no resolution, you may still emit a failure_pattern stating what to avoid.
+
+Return STRICT JSON only: {"candidates": [...]}. At most {max_candidates} candidates."""
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -93,6 +115,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--chunk-chars", type=int, default=18000)
     parser.add_argument("--assistant-tail-chars", type=int, default=320)
     parser.add_argument("--record", action="store_true", help="Record verified candidates (origin background_review). Default dry-run.")
+    parser.add_argument("--no-mine-incidents", action="store_true",
+                        help="Skip the failure-signature incident pass (on by default; it is where env/compute gotchas live).")
+    parser.add_argument("--max-incidents", type=int, default=12)
     parser.add_argument("--forager-bin", default=str(repo_root() / "target" / "debug" / "forager"))
     parser.add_argument("--out", type=pathlib.Path)
     args = parser.parse_args()
@@ -154,6 +179,58 @@ def extract_exchanges(transcript: pathlib.Path, assistant_tail_chars: int) -> li
     return exchanges
 
 
+def full_text(content) -> str:
+    """Message text INCLUDING tool_result payloads -- error signatures live there."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") == "text":
+                parts.append(block.get("text", ""))
+            elif block.get("type") == "tool_result":
+                inner = block.get("content")
+                if isinstance(inner, str):
+                    parts.append(inner)
+                elif isinstance(inner, list):
+                    parts += [b.get("text", "") for b in inner if isinstance(b, dict)]
+        return " ".join(p for p in parts if p)
+    return ""
+
+
+def extract_incidents(transcript: pathlib.Path, max_incidents: int = 12, window: int = 500) -> list[dict]:
+    """Scan the WHOLE log (tool output included) for failure signatures and cut
+    an incident window around each: the error plus the following narrative
+    (usually the fix). Overlapping hits merge into one window."""
+    incidents: list[dict] = []
+    texts: list[str] = []
+    with transcript.open() as handle:
+        for line in handle:
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            if record.get("type") not in ("user", "assistant"):
+                continue
+            text = normalize(full_text((record.get("message") or {}).get("content")))
+            if text:
+                texts.append(text)
+    joined = " § ".join(texts)
+    last_end = -1
+    for match in INCIDENT_PATTERN.finditer(joined):
+        if len(incidents) >= max_incidents:
+            break
+        if match.start() < last_end:  # merge overlapping hits into one window
+            continue
+        start = max(0, match.start() - window)
+        end = min(len(joined), match.end() + window * 2)  # more room after: the fix follows the error
+        last_end = end
+        incidents.append({"n": len(incidents) + 1, "text": redact(joined[start:end])})
+    return incidents
+
+
 def chunk_exchanges(exchanges: list[dict], chunk_chars: int) -> list[list[dict]]:
     chunks: list[list[dict]] = []
     current: list[dict] = []
@@ -213,8 +290,12 @@ def verify(raw: dict, operator_norm: str, operator_lines: list[str]) -> tuple[di
 
 
 def record_candidate(args: argparse.Namespace, session_label: str, cand: dict) -> tuple[bool, str]:
-    signal = "operator_correction" if cand["kind"] == "failure_pattern" else "explicit_preference"
-    evidence = f"chat:{session_label}#ex{cand['exchange']}"
+    if cand.get("incident"):
+        signal = "repeated_failure"
+        evidence = f"chat:{session_label}#incident{cand['incident']}"
+    else:
+        signal = "operator_correction" if cand["kind"] == "failure_pattern" else "explicit_preference"
+        evidence = f"chat:{session_label}#ex{cand['exchange']}"
     command = [
         args.forager_bin, "-p", args.profile, "offdesk", "wiki", "record-candidate",
         "--kind", cand["kind"], "--scope", args.scope,
@@ -225,7 +306,7 @@ def record_candidate(args: argparse.Namespace, session_label: str, cand: dict) -
         "--evidence-ref", evidence,
         "--core-tag", f"facet/{cand['facet']}",
         "--core-tag", "source/chat",
-        "--review-reason", f"session retrospective; operator said: \"{cand['operator_quote'][:120]}\"",
+        "--review-reason", f"session retrospective; grounded in: \"{cand.get('operator_quote') or cand.get('evidence_quote') or ''}\""[:200],
     ]
     if args.scope != "user_global":
         command += ["--scope-ref", args.scope_ref]
@@ -233,7 +314,9 @@ def record_candidate(args: argparse.Namespace, session_label: str, cand: dict) -
         command += ["--core-tag", f"domain/{args.domain_tag}"]
     if cand["ai_instruction"]:
         command += ["--ai-instruction", cand["ai_instruction"]]
-    for mode in cand["agent_modes"]:
+    if cand.get("tool"):
+        command += ["--core-tag", f"tool/{cand['tool']}"]
+    for mode in cand.get("agent_modes", []):
         command += ["--agent-mode", mode]
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode != 0:
@@ -284,12 +367,73 @@ def main() -> int:
                     clean["record_error"] = error
             accepted.append(clean)
 
-    print(f"{args.transcript.name}: {len(exchanges)} exchanges -> accepted {len(accepted)}, rejected {len(rejected)}"
-          + ("" if args.record else " (dry-run)"))
+    # ---- incident pass: env/compute gotchas live in tool output, not operator text ----
+    incidents: list[dict] = []
+    if not args.no_mine_incidents:
+        incidents = extract_incidents(args.transcript, args.max_incidents)
+        if incidents:
+            incident_norm = normalize(" \n ".join(i["text"] for i in incidents))
+            # repair matching needs sentence-sized fragments: fuzzy similarity of a
+            # short quote against a whole 1500-char window is always near zero.
+            incident_lines = [
+                frag.strip()
+                for i in incidents
+                for frag in re.split(r"(?<=[.!?;:]) +|\s+§\s+|(?<=\)) (?=[A-Z가-힣])", i["text"])
+                if len(frag.strip()) >= 15
+            ]
+            prompt = INCIDENT_RUBRIC.replace("{max_candidates}", str(args.max_candidates)) + "\n\n--- INCIDENTS ---\n"
+            prompt += "\n\n".join(f"[{i['n']}] {i['text']}" for i in incidents)
+            raw_candidates, note = parse_candidates(call_ollama(args, prompt))
+            if note:
+                rejected.append({"reason": f"incident pass: {note}"})
+            for raw in raw_candidates:
+                if not isinstance(raw, dict):
+                    continue
+                kind = str(raw.get("kind") or "").strip().lower()
+                if kind not in ("failure_pattern", "procedure"):
+                    rejected.append({"reason": f"incident: invalid kind {kind!r}", "claim": normalize(str(raw.get("claim") or ""))[:100]})
+                    continue
+                claim = normalize(str(raw.get("claim") or ""))
+                quote = normalize(str(raw.get("evidence_quote") or ""))
+                if not claim or len(claim) > CLAIM_HARD_CAP or len(quote) < 15:
+                    rejected.append({"reason": "incident: claim/quote out of bounds", "claim": claim[:100]})
+                    continue
+                repaired = False
+                if quote not in incident_norm:
+                    fixed = repair_quote(quote, incident_lines)
+                    if fixed is None:
+                        rejected.append({"reason": "incident: quote not found in windows", "claim": claim[:100]})
+                        continue
+                    quote, repaired = normalize(fixed)[:300], True
+                tool = re.sub(r"[^a-z0-9_-]", "", str(raw.get("tool") or "").strip().lower())[:24]
+                clean = {
+                    "kind": kind, "facet": "ops", "claim": claim,
+                    "ai_instruction": normalize(str(raw.get("ai_instruction") or ""))[:200],
+                    "agent_modes": [], "evidence_quote": quote,
+                    "incident": int(raw.get("incident") or 0), "tool": tool,
+                }
+                if repaired:
+                    clean["quote_repaired"] = True
+                if any(c["claim"].lower() == clean["claim"].lower() for c in accepted):
+                    continue
+                clean["recorded"] = False
+                if args.record:
+                    ok, error = record_candidate(args, session_label, clean)
+                    clean["recorded"] = ok
+                    if not ok:
+                        clean["record_error"] = error
+                accepted.append(clean)
+
+    print(f"{args.transcript.name}: {len(exchanges)} exchanges, {len(incidents)} incident windows -> "
+          f"accepted {len(accepted)}, rejected {len(rejected)}" + ("" if args.record else " (dry-run)"))
     for c in accepted:
         marker = " (quote repaired)" if c.get("quote_repaired") else ""
+        src = f"incident#{c['incident']}" + (f" tool={c['tool']}" if c.get("tool") else "") if c.get("incident") else None
         print(f"  + [{c['kind']}/{c['facet']}] {c['claim']}{marker}")
-        print(f"      ↳ operator: \"{c['operator_quote'][:80]}\"")
+        if src:
+            print(f"      ↳ {src}: \"{c['evidence_quote'][:80]}\"")
+        else:
+            print(f"      ↳ operator: \"{c['operator_quote'][:80]}\"")
     for r in rejected:
         print(f"  - rejected: {r['reason']}" + (f" | {r.get('claim','')}" if r.get("claim") else ""))
 
