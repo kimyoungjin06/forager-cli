@@ -97,6 +97,10 @@ hard constraints, enforced mechanically where possible:
    established procedures, which teaches agents the opposite of the truth.
 5. **Status narration is not knowledge.** "Running X", "completed Y",
    mid-investigation speculation, and one-off task steps are rejected.
+6. **Rubrics carry no example claims.** Small models parrot a rubric's example
+   sentence into unrelated evidence: the same example claim surfaced verbatim
+   in three different projects' harvests before the example was removed.
+   Describe the desired shape abstractly; never show a complete claim.
 
 ## Classify
 

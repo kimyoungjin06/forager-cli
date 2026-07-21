@@ -99,7 +99,7 @@ INCIDENT_RUBRIC = """You review numbered INCIDENT windows from a work-session lo
 
 Extract environment/compute gotchas worth remembering so the failure is not repeated. Each candidate:
 - kind: failure_pattern (what breaks and why) | procedure (the working recipe that resolved it);
-- claim: <=120 chars, English, one durable lesson naming BOTH the failure and the fix/working setting when visible (e.g. "Printing huge dataframes segfaults; aggregate large edge tables via DuckDB streaming instead");
+- claim: <=120 chars, English, one durable lesson naming BOTH the failure and the fix/working setting when visible, derived ONLY from this window's own content;
 - ai_instruction: <=200 chars imperative, or "";
 - tool: the tool/library involved (duckdb, pandas, torch, tmpfs, ...) or "";
 - evidence_quote: a VERBATIM fragment (>=15 chars, exact characters) copied from a window;
