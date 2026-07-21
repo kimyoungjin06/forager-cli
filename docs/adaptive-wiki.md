@@ -380,6 +380,12 @@ task/probe lifecycle and selected `agent_mode`; they do not mutate task state,
 approve actions, or replace artifact review. A missing `agent_mode` is reported
 as `mode_verdict=unscoped` and `mode_risk=missing_agent_mode`.
 
+How documents, session transcripts, and reviews turn into candidates is
+governed by [`adaptive-wiki-distillation.md`](adaptive-wiki-distillation.md):
+the distillation rules, the local-LLM distillers with verbatim evidence
+verification, and the tiered review (operator packet, local pre-filter, agent
+Council).
+
 ## Operator Review Commands
 
 The current CLI exposes both inspection and governed review mutation commands:
@@ -422,7 +428,7 @@ The current CLI exposes both inspection and governed review mutation commands:
 - `forager offdesk wiki evaluate-recurrence <entry-id> --dry-run --json`
 - `forager offdesk wiki promotion-chain <entry-id> --json`
 - `forager offdesk wiki promotion-chain <entry-id> --dry-run --json`
-- `forager offdesk wiki record-candidate --kind <kind> --scope <scope> --scope-ref <ref> --claim <text> [--ai-instruction <text>] [--evidence-ref <ref>]... [--core-tag <tag>]...`
+- `forager offdesk wiki record-candidate --kind <kind> --scope <scope> --scope-ref <ref> --claim <text> [--ai-instruction <text>] [--evidence-ref <ref>]... [--core-tag <tag>]... [--origin <who>] [--signal-kind <what>]`
 - `forager offdesk wiki promote <candidate-id> --scope <scope> --scope-ref <ref> --activation-mode <mode> --agent-mode <mode>`
 - `forager offdesk wiki reject <candidate-id> --reason <text>`
 - `forager offdesk wiki edit <entry-id> [--claim <text>] [--ai-instruction <text>] [--human-summary <text>] [--evidence-ref <ref>]... --reason <text>`

@@ -69,7 +69,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scope-ref", default="", help="Scope reference (e.g. project key). Required unless scope=user_global.")
     parser.add_argument("--domain-tag", default="", help="domain/<x> tag; defaults to the scope-ref.")
     parser.add_argument("--base-url", default=os.environ.get("OFFDESK_LLM_BASE_URL", "http://127.0.0.1:11434"))
-    parser.add_argument("--model", default=os.environ.get("OFFDESK_LLM_MODEL", "gemma4:26b"))
+    parser.add_argument("--model", default=os.environ.get("OFFDESK_LLM_MODEL", "qwen3-coder:30b"))
     parser.add_argument("--temperature", type=float, default=0.2)
     parser.add_argument("--num-ctx", type=int, default=16384)
     # 8 candidates with quotes can exceed 2048 tokens; a truncated response

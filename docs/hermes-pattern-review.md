@@ -35,6 +35,7 @@ The adaptive knowledge follow-up is archived under
 | 9 | Memory lifecycle hooks | Offdesk event-driven learning signals | Can task/approval/resume/compression events feed learning candidates without hidden memory truth? | First pass active |
 | 10 | Curator | recommendation-only wiki review reports | Can stale/conflicting knowledge be surfaced for review without autonomous mutation? | Benchmarked |
 | 11 | Skills/procedural memory | governed procedure/runbook entries | Can procedural knowledge stay compact and scoped without becoming a self-mutating tool layer? | Benchmarked |
+| 12 | Correction capture (absent in Hermes) | session retrospective distiller | Can operator corrections in a session become reviewed wiki candidates with verbatim provenance? | First pass active |
 
 ## First Pass: Approval Rail
 

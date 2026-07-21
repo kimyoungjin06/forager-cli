@@ -1,6 +1,6 @@
 # Project State
 
-Updated: 2026-06-19
+Updated: 2026-07-21
 
 This is the small current surface for Forager development work. It is separate
 from the public product README and from the mdBook user guides.
@@ -295,6 +295,13 @@ out of product-facing docs. The product direction is defined in
   projected context) and an independent reviewing-agent pass.
 
 ## Next Work Candidates
+
+0. Apply the deferred council verdicts once a kind/agent-mode edit primitive
+   exists (`wiki edit` covers text/evidence only): reclassify
+   telegram-guarded-execution and offdesk-tick entries (forager-ops),
+   direction-review entry (twinpaper-review, procedure->policy_rule), and fix
+   agent-mode projection on migrations (drop maintenance), tick (universal),
+   and figure-anchors (+analysis).
 
 1. Extend learning signals to the remaining lifecycle events (pre-compression
    extraction, wiki projection usage) and add a curator-style staleness report

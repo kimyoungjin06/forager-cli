@@ -52,6 +52,7 @@
 - [Forager And Orchestrator Boundary](forager-orchestrator-boundary.md)
 - [Adaptive Wiki](adaptive-wiki.md)
 - [Adaptive Wiki Tag Graph](adaptive-wiki-tag-graph.md)
+- [Adaptive Wiki Distillation](adaptive-wiki-distillation.md)
 
 # Contributing
 
