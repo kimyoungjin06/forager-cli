@@ -111,6 +111,12 @@ def chunk_document(text: str, chunk_chars: int) -> list[str]:
     return chunks
 
 
+# Accumulated local-LLM usage for this process, so reports can state what a
+# run actually cost (tokens are free locally, but wall-clock and GPU time are
+# the real budget; per-lesson cost makes the pipeline's economics reviewable).
+LLM_USAGE = {"calls": 0, "prompt_tokens": 0, "output_tokens": 0, "duration_ms": 0}
+
+
 def call_ollama(args: argparse.Namespace, prompt: str) -> str:
     payload = {
         "model": args.model,
@@ -134,6 +140,10 @@ def call_ollama(args: argparse.Namespace, prompt: str) -> str:
     )
     with urllib.request.urlopen(request, timeout=args.timeout_sec) as response:
         body = json.loads(response.read().decode("utf-8"))
+    LLM_USAGE["calls"] += 1
+    LLM_USAGE["prompt_tokens"] += int(body.get("prompt_eval_count") or 0)
+    LLM_USAGE["output_tokens"] += int(body.get("eval_count") or 0)
+    LLM_USAGE["duration_ms"] += int(body.get("total_duration") or 0) // 1_000_000
     return str(body.get("response") or "")
 
 
@@ -336,6 +346,11 @@ def main() -> int:
         for r in rejected:
             print(f"  - rejected: {r['reason']}" + (f" | {r.get('claim','')}" if r.get("claim") else ""))
 
+    report["llm_usage"] = dict(LLM_USAGE)
+    if LLM_USAGE["calls"]:
+        per = LLM_USAGE["duration_ms"] // max(1, total_accepted or 1)
+        print(f"llm cost: {LLM_USAGE['calls']} call(s), {LLM_USAGE['prompt_tokens']}+{LLM_USAGE['output_tokens']} tokens, "
+              f"{LLM_USAGE['duration_ms']/1000:.1f}s wall ({per/1000:.1f}s per accepted candidate)")
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

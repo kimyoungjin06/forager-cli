@@ -37,6 +37,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from offdesk_wiki_distiller import (  # noqa: E402
     CLAIM_HARD_CAP,
+    LLM_USAGE,
     VALID_FACETS,
     VALID_KINDS,
     VALID_MODES,
@@ -291,6 +292,9 @@ def main() -> int:
     for r in rejected:
         print(f"  - rejected: {r['reason']}" + (f" | {r.get('claim','')}" if r.get("claim") else ""))
 
+    if LLM_USAGE["calls"]:
+        print(f"llm cost: {LLM_USAGE['calls']} call(s), {LLM_USAGE['prompt_tokens']}+{LLM_USAGE['output_tokens']} tokens, "
+              f"{LLM_USAGE['duration_ms']/1000:.1f}s wall ({LLM_USAGE['duration_ms']/1000/max(1,len(accepted)):.1f}s per accepted lesson)")
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         report = {
@@ -301,6 +305,7 @@ def main() -> int:
             "exchanges": len(exchanges),
             "accepted": accepted,
             "rejected": rejected,
+            "llm_usage": dict(LLM_USAGE),
         }
         args.out.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(f"report: {args.out}")
