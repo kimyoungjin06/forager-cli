@@ -401,6 +401,12 @@ The current CLI exposes both inspection and governed review mutation commands:
 - `forager offdesk wiki entries --json`
 - `forager offdesk wiki show <id> --json`
 - `forager offdesk wiki projection --project-key <key> --artifact-kind <kind> --agent-mode <mode> --json`
+- `forager offdesk wiki brief --project-key <key> [--agent-mode <mode>] [--out <path>]`
+  renders the projection as a session-start markdown brief with per-entry
+  trust signals (confidence, evidence count, age, STALE past `review_after`)
+  and an explicit skepticism contract: conflicting entries are verified and
+  recorded (counterexample/deprecate), never silently obeyed or ignored.
+  Promotion now sets `review_after` (+90d default, `--review-after-days`).
 - `forager offdesk wiki projection --project-key <key> --report --max-entries <n> --json`
 - `forager offdesk wiki projection --project-key <key> --compare-review-expired-policy --json`
 - `forager offdesk wiki runtime-policy-acks --json`

@@ -60,3 +60,6 @@ sdd-*/
 *.screenstudio/
 
 debug.log
+
+# Generated wiki brief (derived from local profile data)
+.wiki-brief.md
