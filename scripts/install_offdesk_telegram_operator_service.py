@@ -54,6 +54,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--attention-reminder-sec", type=int, default=0)
     parser.add_argument(
+        "--autonomy-propose",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Propose starting the armed overnight autonomy window via Telegram when the "
+        "workstation goes idle. Off by default; the operator's tap is the only approval.",
+    )
+    parser.add_argument(
         "--dispatch-allowlist-file",
         type=pathlib.Path,
         default=None,
@@ -114,6 +121,8 @@ def render_unit(args: argparse.Namespace) -> str:
         command.append("--attention-notify")
         if int(args.attention_reminder_sec) > 0:
             command.extend(["--attention-reminder-sec", args.attention_reminder_sec])
+    if args.autonomy_propose:
+        command.append("--autonomy-propose")
     if args.dispatch_allowlist_file is not None:
         command.extend(["--dispatch-allowlist-file", args.dispatch_allowlist_file])
     exec_start = " ".join(systemd_arg(item) for item in command)

@@ -96,6 +96,7 @@ from telegram_operator.persistence import (
 )
 from telegram_operator.rendering import (
     agent_assistant_reply,
+    choice_keyboard,
     render_decisions_message,
     render_dispatch_cancel_message,
     render_dispatch_confirm_message,
@@ -247,6 +248,24 @@ def parse_args() -> argparse.Namespace:
         help="On each poll, proactively send the owner chat a card for newly waiting decisions "
         "and recovery follow-ups, so urgent items can be handled without polling first.",
     )
+    parser.add_argument(
+        "--autonomy-propose",
+        action="store_true",
+        default=os.environ.get("OFFDESK_REMOTE_OPERATOR_AUTONOMY_PROPOSE", "").strip().lower()
+        in {"1", "true", "yes", "on"},
+        help="When the workstation goes idle, propose starting the armed overnight autonomy "
+        "window via a Telegram confirm card. The operator's tap is the approval; nothing arms itself.",
+    )
+    parser.add_argument("--autonomy-idle-min", type=int, default=30,
+                        help="Idle minutes across watch paths before proposing.")
+    parser.add_argument("--autonomy-propose-from-hour", type=int, default=17,
+                        help="Do not propose before this local hour (avoids lunch-break proposals).")
+    parser.add_argument("--autonomy-until-hour", type=int, default=9,
+                        help="Local hour when an approved autonomy window closes.")
+    parser.add_argument("--autonomy-backoff-sec", type=int, default=7200,
+                        help="Minimum seconds between proposals (unanswered or declined).")
+    parser.add_argument("--autonomy-watch-path", action="append", type=pathlib.Path, default=[],
+                        help="Activity probe path (repeatable). Defaults to Claude/Codex session dirs.")
     parser.add_argument(
         "--attention-reminder-sec",
         type=int,
@@ -1422,6 +1441,35 @@ def resolve_dispatch_confirmation(
                 headline="작업 취소에 실패했습니다",
                 detail=str(error),
             )
+    elif str(confirmation.get("kind") or "") == "autonomy_start":
+        try:
+            proc = subprocess.run(
+                [sys.executable, str(AUTONOMY_RUNNER), "--arm",
+                 "--until-hour", str(int(args.autonomy_until_hour)),
+                 "--by", "telegram", "--profile", args.profile,
+                 "--reason", str(confirmation.get("note") or "")],
+                capture_output=True, text=True, timeout=30,
+            )
+            ok = proc.returncode == 0
+            rendered["dispatch_result"] = {"ok": ok, "kind": "autonomy_start"}
+            if ok:
+                message_preview = "\n".join([
+                    "<b>자율주행 시작</b>",
+                    f"{int(args.autonomy_until_hour):02d}:00까지 armed: tick · 야간 증류 · 아침 브리핑.",
+                    "이미 승인된 작업만 실행됩니다.",
+                    "다음 조치: /status · /pause",
+                ])
+            else:
+                message_preview = render_dispatch_error_message(
+                    profile=args.profile, generated_at=generated_at,
+                    headline="자율주행 시작에 실패했습니다",
+                    detail=sanitize_text((proc.stderr or proc.stdout or "")[:200], max_chars=200),
+                )
+        except Exception as error:  # noqa: BLE001 - poll loop must never crash here
+            message_preview = render_dispatch_error_message(
+                profile=args.profile, generated_at=generated_at,
+                headline="자율주행 시작에 실패했습니다", detail=str(error),
+            )
     elif str(confirmation.get("kind") or "") == "resume":
         try:
             dispatch_result = apply_operator_resume(args.forager_bin, args.profile)
@@ -1776,6 +1824,129 @@ def update_is_allowed(config: dict[str, Any], message: dict[str, Any]) -> tuple[
     return True, "allowed"
 
 
+AUTONOMY_RUNNER = pathlib.Path(__file__).resolve().parent / "offdesk_autonomy_run.py"
+DEFAULT_AUTONOMY_WATCH = [
+    pathlib.Path.home() / ".claude" / "projects",
+    pathlib.Path.home() / ".codex" / "sessions",
+]
+
+
+def latest_activity_epoch(paths: list[pathlib.Path], max_depth: int = 3) -> float:
+    """Newest mtime across shallow levels of the watch trees (cheap idle probe)."""
+    newest = 0.0
+    for root in paths:
+        if not root.exists():
+            continue
+        stack = [(root, 0)]
+        while stack:
+            current, depth = stack.pop()
+            try:
+                newest = max(newest, current.stat().st_mtime)
+                if depth >= max_depth or not current.is_dir():
+                    continue
+                for child in current.iterdir():
+                    stack.append((child, depth + 1))
+            except OSError:
+                continue
+    return newest
+
+
+def autonomy_is_armed(profile: str) -> bool:
+    try:
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+        from offdesk_autonomy_run import is_armed  # noqa: PLC0415
+
+        return bool(is_armed(profile))
+    except Exception:  # noqa: BLE001 - probe must never break the loop
+        return False
+
+
+def scan_and_propose_autonomy(
+    args: argparse.Namespace,
+    config: dict[str, Any],
+    state: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Offer (never start) overnight autonomy when the workstation goes idle.
+
+    The proposal is a normal confirmation card: the operator's 확인 tap arms a
+    bounded window; 취소 or silence leaves everything off. Never raises into
+    the poll loop.
+    """
+
+    if not getattr(args, "autonomy_propose", False):
+        return None
+    try:
+        target_chat_id = str(config.get("target_chat_id") or "").strip()
+        chat_hash = str(config.get("target_chat_id_hash") or "").strip()
+        if not target_chat_id or not chat_hash:
+            return {"status": "no_target_chat"}
+        now = time.time()
+        local_hour = time.localtime(now).tm_hour
+        if not (local_hour >= int(args.autonomy_propose_from_hour) or local_hour < 2):
+            return {"status": "outside_window"}
+        if autonomy_is_armed(args.profile):
+            return {"status": "already_armed"}
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+        from offdesk_autonomy_run import profile_dir as autonomy_profile_dir  # noqa: PLC0415
+
+        pause_file = autonomy_profile_dir(args.profile) / "offdesk_operator_pause.json"
+        try:
+            if pause_file.exists() and json.loads(pause_file.read_text()).get("paused"):
+                return {"status": "paused"}
+        except (OSError, ValueError):
+            pass
+        pending = (state.get("pending_dispatch_confirmations_by_chat") or {}).get(chat_hash)
+        if isinstance(pending, dict):
+            return {"status": "confirmation_already_pending"}
+        last = float(state.get("autonomy_proposal_at") or 0)
+        if now - last < int(args.autonomy_backoff_sec):
+            return {"status": "backoff"}
+        watch = list(args.autonomy_watch_path) or DEFAULT_AUTONOMY_WATCH
+        newest = latest_activity_epoch(watch)
+        idle_min = int((now - newest) / 60) if newest else 0
+        if not newest or idle_min < int(args.autonomy_idle_min):
+            return {"status": "active", "idle_min": idle_min}
+
+        confirmation = build_confirmation(
+            kind="autonomy_start",
+            target_id="overnight",
+            action_kind="arm",
+            observed_hash="",
+            note=f"idle {idle_min}m",
+            chat_hash=chat_hash,
+            ttl_sec=1800,
+        )
+        store_confirmation(state, chat_hash, confirmation)
+        message = "\n".join(
+            [
+                "<b>자율주행 제안</b>",
+                f"{idle_min}분째 활동이 없습니다.",
+                f"승인 시 {int(args.autonomy_until_hour):02d}:00까지: tick 심장박동 · 야간 증류 · 아침 브리핑.",
+                "이미 승인된 작업만 실행되며 /pause 로 즉시 중단됩니다.",
+                "다음 조치: 확인 또는 취소",
+            ]
+        )
+        send_status = "sent"
+        try:
+            send_message(
+                config, target_chat_id, message, args,
+                reply_markup=choice_keyboard({"context_kind": "dispatch_confirm"}),
+            )
+            send_status = "dry_run" if args.dry_run else "sent"
+        except RemoteOperatorTelegramError:
+            send_status = "failed"
+        state["autonomy_proposal_at"] = now
+        return {
+            "status": "proposed",
+            "idle_min": idle_min,
+            "send_status": send_status,
+            "message_preview": message,
+            "mobile_card_contract": mobile_card_contract(message),
+        }
+    except Exception as error:  # noqa: BLE001 - poll loop must never crash here
+        return {"status": "scan_failed", "error": sanitize_text(str(error), max_chars=240)}
+
+
 def scan_and_notify_attention(
     args: argparse.Namespace,
     config: dict[str, Any],
@@ -2024,6 +2195,9 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
     attention = scan_and_notify_attention(args, config, state)
     if attention is not None:
         result["attention_notification"] = attention
+    autonomy = scan_and_propose_autonomy(args, config, state)
+    if autonomy is not None:
+        result["autonomy_proposal"] = autonomy
     offset_advanced = max_update_id >= int(state.get("offset") or 0)
     if offset_advanced:
         state["offset"] = max_update_id + 1

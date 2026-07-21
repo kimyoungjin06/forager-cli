@@ -294,6 +294,15 @@ out of product-facing docs. The product direction is defined in
   `docs/adaptive-wiki-distillation.md`, validated by an A/B test (18-40% less
   projected context) and an independent reviewing-agent pass.
 
+- Commute autonomy (퇴근→출근) is wired end-to-end: idle-watch in the Telegram
+  listener proposes arming a bounded overnight window (one confirm card;
+  operator tap is the only approval; backoff + quiet-hours + pause/pending
+  suppression), `offdesk_autonomy_run.py` manages the armed state
+  (auto-expiring, /pause-independent), and three armed-gated systemd timers
+  run the night: tick heartbeat every 10 min, nightly distillation playbook
+  at 02:00, morning brief at 08:50 which then disarms. Timers are installed
+  by `install_offdesk_autonomy_timers.py` and are inert unless armed.
+
 ## Next Work Candidates
 
 0. Apply the deferred council verdicts once a kind/agent-mode edit primitive

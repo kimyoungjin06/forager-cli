@@ -678,6 +678,27 @@ updates. `--once` is for one-shot probes, and `--max-polls` is available for
 bounded smoke tests. `--send-command-text` sends one read-only projection to
 the configured owner chat without consuming updates.
 
+## Idle-Proposed Overnight Autonomy
+
+With `--autonomy-propose` the listener watches local activity (newest mtimes
+under the Claude/Codex session trees by default). When the workstation has
+been idle past the threshold (default 30 minutes, only after
+`--autonomy-propose-from-hour`, default 17:00), it sends ONE confirmation
+card offering to arm the bounded overnight window; the operator's 확인 tap is
+the only thing that arms it. Unanswered or declined proposals back off
+(default 2h); an already-armed window, an active operator pause, or another
+pending confirmation suppresses proposals entirely.
+
+Approval runs `offdesk_autonomy_run.py --arm` (window until 09:00 local by
+default). While armed, three systemd user timers do the night work: an
+`offdesk tick` heartbeat every 10 minutes (launching only already-approved
+tasks), the operator-owned nightly distillation playbook at 02:00
+(candidate-only), and the 08:50 morning brief (/attention card + wiki
+candidate-queue summary), which then disarms for the day. `/pause` still
+halts dispatch instantly regardless of the armed state. Install the timers
+with `scripts/install_offdesk_autonomy_timers.py --install --enable`; they
+are inert unless armed.
+
 ## One-look triage
 
 `/attention` is the fast "what needs me right now" summary. It reads the current
