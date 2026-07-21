@@ -90,14 +90,15 @@ def load_candidates(args: argparse.Namespace) -> list[dict]:
 
 
 def evidence_quote(candidate: dict) -> str:
-    """The verbatim quote stored at record time lives in review_reason."""
+    """The verbatim quote stored at record time lives in review_reason.
+
+    No fallback to evidence refs: a reference is not evidence, and feeding
+    pointer strings to the judge produced unverifiable "supported" verdicts
+    (measured failure mode). Candidates without a stored quote are marked
+    unclear before any LLM call."""
     reason = str(candidate.get("review_reason") or "")
     match = re.search(r'"(.+)"', reason, re.DOTALL)
-    if match:
-        return normalize(match.group(1))
-    # fall back to the first evidence ref (still human-checkable in the packet)
-    refs = candidate.get("evidence_refs") or []
-    return normalize(refs[0]) if refs else ""
+    return normalize(match.group(1)) if match else ""
 
 
 def render_batch(items: list[dict]) -> str:
@@ -126,8 +127,13 @@ def main() -> int:
             "quote": evidence_quote(c),
         })
 
-    prompt = RUBRIC + "\n\n--- CANDIDATES ---\n" + render_batch(items)
-    raw = call_ollama(args, prompt)
+    quoteless = [i for i in items if len(i["quote"]) < 15]
+    for item in quoteless:
+        item["verdict"] = "unclear"
+        item["reason"] = "no stored evidence quote; needs operator eyes"
+    judged = [i for i in items if len(i["quote"]) >= 15]
+    prompt = RUBRIC + "\n\n--- CANDIDATES ---\n" + render_batch(judged)
+    raw = call_ollama(args, prompt) if judged else '{"verdicts": []}' 
     try:
         verdicts = {int(v.get("n")): v for v in json.loads(raw).get("verdicts", []) if isinstance(v, dict)}
     except (ValueError, TypeError):
@@ -137,6 +143,10 @@ def main() -> int:
 
     flagged = 0
     for item in items:
+        if item.get("verdict") == "unclear" and item.get("reason"):
+            flagged += 1
+            print(f"  ?  [unclear    ] {item['claim'][:70]} (no stored quote)")
+            continue
         v = verdicts.get(item["n"], {})
         verdict = str(v.get("verdict") or "unclear").lower()
         item["verdict"] = verdict if verdict in VERDICTS else "unclear"

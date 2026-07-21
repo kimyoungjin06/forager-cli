@@ -74,6 +74,30 @@ are queryable across projects. A code fossil (a pinned setting with no comment)
 is capturable evidence -- record it with `src:<file>:<line>` refs and a review
 note asking the operator to confirm the original failure mode.
 
+## Constraints (measured failure modes)
+
+The first batch harvest (60 sessions -> 364 machine candidates -> tier-2/3
+review) measured how local-model distillation actually fails. These are now
+hard constraints, enforced mechanically where possible:
+
+1. **One claim per evidence quote.** The dominant noise source was fan-out:
+   one quote inflated into up to seven near-duplicate claims. The distillers
+   reject a second candidate reusing the same normalized quote in a run.
+2. **A reference is not a quote.** Pointer strings (`chat:...#incident3`,
+   `#ex19`) appeared in the quote field and passed existence checks while
+   carrying no evidence. Quotes that look like refs are rejected mechanically,
+   and the pre-review marks candidates with no stored quote `unclear` instead
+   of falling back to the evidence ref.
+3. **Contentless speech grounds nothing.** Approvals ("좋아 진행하자"),
+   rhetorical questions, and opinion-seeking prompts cannot ground a
+   methodology claim; models attached invented rules to them. If the quote
+   does not itself carry the lesson, do not emit.
+4. **Preserve gap polarity.** A statement that something does NOT exist ("no
+   independent human validation") must stay a gap; models recast gaps as
+   established procedures, which teaches agents the opposite of the truth.
+5. **Status narration is not knowledge.** "Running X", "completed Y",
+   mid-investigation speculation, and one-off task steps are rejected.
+
 ## Classify
 
 - `kind`: preference, procedure, failure_pattern, policy_rule, or fact. Pick the

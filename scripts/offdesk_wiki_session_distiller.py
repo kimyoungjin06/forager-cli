@@ -49,6 +49,9 @@ from offdesk_wiki_distiller import (  # noqa: E402
 )
 
 MIN_OPERATOR_QUOTE = 10
+# A reference is not a quote: pointer strings in the quote field pass existence
+# checks while carrying no evidence (measured failure mode, tier-3 review).
+POINTER_QUOTE = re.compile(r"^(chat|doc|src):|#ex\d+|#incident\d+")
 # Failure signatures worth mining from tool output and assistant text. The
 # environment gotchas an operator can never recall (segfaults, OOM kills,
 # wiped tmp, thread oversubscription) live HERE, not in operator messages.
@@ -74,6 +77,12 @@ Extract ONLY:
 - decisions that should persist beyond this session;
 - environment/tooling gotchas resolved in the session: a computation or tool that failed until a specific setting changed (thread counts, memory limits, env vars, version pins) -- capture the exact failure AND the working setting.
 SKIP pure approvals ("okay", "proceed"), one-time task instructions, and anything with no future value.
+
+HARD CONSTRAINTS (violations are discarded):
+- exactly ONE candidate per quote; never fan one quote into multiple claims;
+- the quote must itself carry the lesson: approvals, rhetorical questions, and opinion-seeking prompts ground nothing;
+- preserve polarity: a statement that something does NOT exist stays a gap; never recast it as an established procedure;
+- status narration ("running X", "completed Y") is not durable knowledge.
 
 Each candidate:
 - kind: failure_pattern (mistake to avoid) | preference | policy_rule | procedure | fact;
@@ -314,6 +323,8 @@ def verify(raw: dict, operator_norm: str, operator_lines: list[str]) -> tuple[di
     quote = normalize(str(raw.get("operator_quote") or ""))
     if len(quote) < MIN_OPERATOR_QUOTE:
         return None, f"operator quote too short ({len(quote)} chars)", False
+    if POINTER_QUOTE.search(quote):
+        return None, "quote is a reference, not evidence", False
     repaired = False
     if quote not in operator_norm:
         fixed = repair_quote(quote, operator_lines)
@@ -349,7 +360,7 @@ def record_candidate(args: argparse.Namespace, session_label: str, cand: dict) -
         "--evidence-ref", evidence,
         "--core-tag", f"facet/{cand['facet']}",
         "--core-tag", "source/chat",
-        "--review-reason", f"session retrospective; grounded in: \"{cand.get('operator_quote') or cand.get('evidence_quote') or ''}\""[:200],
+        "--review-reason", "session retrospective; grounded in: \"%s\"" % (cand.get("operator_quote") or cand.get("evidence_quote") or "")[:150],
     ]
     if args.scope != "user_global":
         command += ["--scope-ref", args.scope_ref]
@@ -380,6 +391,7 @@ def main() -> int:
 
     accepted: list[dict] = []
     rejected: list[dict] = []
+    used_quotes: set[str] = set()
     for chunk in chunk_exchanges(exchanges, args.chunk_chars):
         if len(accepted) >= args.max_candidates:
             break
@@ -401,6 +413,10 @@ def main() -> int:
             if any(c["claim"].lower() == clean["claim"].lower() for c in accepted):
                 rejected.append({"reason": "duplicate claim in run", "claim": clean["claim"][:100]})
                 continue
+            if clean["operator_quote"].lower() in used_quotes:
+                rejected.append({"reason": "quote fan-out (one claim per quote)", "claim": clean["claim"][:100]})
+                continue
+            used_quotes.add(clean["operator_quote"].lower())
             if repaired:
                 clean["quote_repaired"] = True
             clean["recorded"] = False
@@ -442,6 +458,9 @@ def main() -> int:
                 if not claim or len(claim) > CLAIM_HARD_CAP or len(quote) < 15:
                     rejected.append({"reason": "incident: claim/quote out of bounds", "claim": claim[:100]})
                     continue
+                if POINTER_QUOTE.search(quote):
+                    rejected.append({"reason": "incident: quote is a reference, not evidence", "claim": claim[:100]})
+                    continue
                 repaired = False
                 if quote not in incident_norm:
                     fixed = repair_quote(quote, incident_lines)
@@ -460,6 +479,10 @@ def main() -> int:
                     clean["quote_repaired"] = True
                 if any(c["claim"].lower() == clean["claim"].lower() for c in accepted):
                     continue
+                if clean["evidence_quote"].lower() in used_quotes:
+                    rejected.append({"reason": "incident: quote fan-out (one claim per quote)", "claim": clean["claim"][:100]})
+                    continue
+                used_quotes.add(clean["evidence_quote"].lower())
                 clean["recorded"] = False
                 if args.record:
                     ok, error = record_candidate(args, session_label, clean)
