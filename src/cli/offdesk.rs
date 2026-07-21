@@ -2674,6 +2674,11 @@ pub struct WikiRecordCandidateArgs {
     #[arg(long, default_value = "operator_explicit", value_parser = parse_adaptive_wiki_origin)]
     origin: AdaptiveWikiOrigin,
 
+    /// What kind of signal produced this candidate. operator_correction also
+    /// appends a first-class correction record for recurrence evaluation.
+    #[arg(long, default_value = "imported_doc", value_parser = parse_adaptive_wiki_signal_kind)]
+    signal_kind: AdaptiveWikiSignalKind,
+
     /// Why this is worth reviewing/promoting
     #[arg(long, default_value = "")]
     review_reason: String,
@@ -7534,7 +7539,7 @@ async fn wiki_record_candidate(profile: &str, args: WikiRecordCandidateArgs) -> 
         // Primary evidence lands in evidence_refs; the full doc list is kept as
         // source provenance so nothing from the review is lost.
         evidence_ref: evidence_refs.first().cloned(),
-        signal_kind: AdaptiveWikiSignalKind::ImportedDoc,
+        signal_kind: args.signal_kind,
         origin: args.origin,
         source_refs: evidence_refs.clone(),
         source_hashes: Vec::new(),
@@ -16682,6 +16687,25 @@ fn parse_adaptive_wiki_confidence(
         "repeated" => Ok(AdaptiveWikiConfidence::Repeated),
         "inferred" => Ok(AdaptiveWikiConfidence::Inferred),
         _ => Err("confidence must be one of explicit, repeated, inferred".to_string()),
+    }
+}
+
+fn parse_adaptive_wiki_signal_kind(
+    value: &str,
+) -> std::result::Result<AdaptiveWikiSignalKind, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "operator_correction" | "operator-correction" | "correction" => {
+            Ok(AdaptiveWikiSignalKind::OperatorCorrection)
+        }
+        "explicit_preference" | "explicit-preference" | "preference" => {
+            Ok(AdaptiveWikiSignalKind::ExplicitPreference)
+        }
+        "imported_doc" | "imported-doc" | "doc" => Ok(AdaptiveWikiSignalKind::ImportedDoc),
+        "repeated_failure" | "repeated-failure" => Ok(AdaptiveWikiSignalKind::RepeatedFailure),
+        _ => Err(
+            "signal kind must be one of operator_correction, explicit_preference, imported_doc, repeated_failure"
+                .to_string(),
+        ),
     }
 }
 

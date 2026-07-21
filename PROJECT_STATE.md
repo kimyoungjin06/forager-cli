@@ -275,6 +275,16 @@ out of product-facing docs. The product direction is defined in
   --origin`. Dry-run by default; never promotes. Chat-log and session-transcript
   distillation are planned follow-ups behind the same evidence/redaction
   boundary.
+- Session retrospective distillation closes the mistake-prevention loop:
+  `scripts/offdesk_wiki_session_distiller.py` extracts operator corrections,
+  boundaries, and preferences from a local session transcript with a local LLM,
+  verifies each lesson's operator quote verbatim against the real messages,
+  filters injected prompts, and records survivors as unpromoted candidates
+  (failure patterns carry `signal_kind=operator_correction`, feeding correction
+  records and `evaluate-recurrence`). Benchmarked against Hermes source: Hermes
+  has no automatic correction extraction (model-in-the-loop memory tool only),
+  so this is a deliberate divergence, not an adoption. `record-candidate` gains
+  `--signal-kind`.
 - Entries are editable in place: `forager offdesk wiki edit <id> [--claim]
   [--ai-instruction] [--human-summary] [--evidence-ref]...` and
   `forager offdesk wiki add-tag <id> [--core-tag]... [--proposed-tag]...`. This

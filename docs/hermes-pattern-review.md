@@ -366,6 +366,42 @@ before they can influence any projection.
 - Candidates are `status: candidate` and require existing review/promotion to
   affect any AI or human projection.
 
+## Tenth Pass: Session Retrospective Distillation
+
+A deeper 2026-07 source benchmark of Hermes' correction capture found the
+useful shape is NOT there to copy: Hermes has no automatic correction
+extraction. Its built-in memory writes only when the model itself calls the
+memory tool mid-turn (steered by prompt guidance: "User corrects you or says
+'don't do that again' -> save"), stores unstructured text with no
+type/confidence/provenance/timestamps, dedups only exact strings, and has no
+failure/mistake memory type anywhere. Hosted memory providers extract
+server-side (uninspectable). The documented `on_pre_compress` lesson-preserving
+contract is not actually honored by the implementation (return value dropped).
+
+What Forager adopted instead is the post-hoc alternative both systems lacked:
+`scripts/offdesk_wiki_session_distiller.py` pairs each operator message in a
+local session transcript with the assistant activity before it, has a local
+LLM extract durable lessons under the distillation rubric, verifies every
+candidate's operator quote verbatim against the real messages (fuzzy-repaired;
+fabricated provenance rejects), redacts secrets, filters injected
+skill-prompt "user" messages, and records survivors as unpromoted candidates
+(origin `background_review`; failure patterns carry
+`signal_kind=operator_correction`, feeding first-class correction records and
+`evaluate-recurrence`). What was worth keeping from Hermes: the capture
+priority heuristic (corrections > preferences > procedural; the most valuable
+memory prevents the operator repeating themselves), adopted into the
+extraction rubric.
+
+### Session Retrospective Acceptance Checks
+
+- Operator quotes on extracted lessons resolve verbatim against the
+  transcript; fabricated quotes reject.
+- Injected skill/system prompts rendered as user messages are filtered before
+  extraction.
+- Failure-pattern lessons append correction records so post-promotion
+  recurrence is measurable.
+- The distiller never promotes; lessons wait in the candidate review queue.
+
 ## Remaining Adaptive Knowledge Benchmark
 
 The second Hermes pass found three additional patterns worth adapting behind
