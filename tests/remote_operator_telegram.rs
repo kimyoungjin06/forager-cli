@@ -7304,6 +7304,15 @@ fn remote_operator_telegram_guide_renders_full_command_surface() -> Result<()> {
         ] {
             assert!(preview.contains(usage), "missing command {usage}");
         }
+        // Telegram HTML: every non-tag "<" must be escaped or sendMessage 400s.
+        assert!(preview.contains("&lt;목표&gt;"));
+        for line in preview.lines() {
+            let stripped = line.replace("<b>", "").replace("</b>", "");
+            assert!(
+                !stripped.contains('<') && !stripped.contains('>'),
+                "unescaped angle bracket in guide line: {line}"
+            );
+        }
         // Guide uses the relaxed reference-sheet budget, still warning-free.
         assert_mobile_contract(&result);
         assert!(
