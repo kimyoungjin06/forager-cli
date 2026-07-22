@@ -503,12 +503,7 @@ fn remote_operator_telegram_rejects_approval_command_without_projection() -> Res
         .expect("forbidden intents")
         .iter()
         .any(|item| item == "approve_launch"));
-    assert!(!temp
-        .path()
-        .join(".config")
-        .join("forager")
-        .join("profiles")
-        .join("default")
+    assert!(!profile_dir(temp.path())
         .join("pending_action_approvals.json")
         .exists());
     Ok(())
@@ -1245,13 +1240,7 @@ fn remote_operator_telegram_replay_feedback_records_decision_inbox_item() -> Res
     assert_eq!(feedback_rows.lines().count(), 1);
     assert!(feedback_rows.contains("remote_operator_telegram_feedback.v1"));
 
-    let ledger_path = temp
-        .path()
-        .join(".config")
-        .join("forager")
-        .join("profiles")
-        .join("default")
-        .join("offdesk_decisions.jsonl");
+    let ledger_path = profile_dir(temp.path()).join("offdesk_decisions.jsonl");
     let ledger = fs::read_to_string(&ledger_path)?;
     assert_eq!(ledger.lines().count(), 1);
     let decision: Value = serde_json::from_str(ledger.lines().next().expect("ledger row"))?;
@@ -5390,9 +5379,16 @@ fn remote_operator_telegram_replay_plan_session_builds_init_preview_receipt() ->
     assert_eq!(artifact["launch_authorized"], false);
     assert_eq!(artifact["enqueue_authorized"], false);
     assert_eq!(artifact["runtime_authorized"], false);
+    // The adapter canonicalizes the path; on macOS /var is a symlink to
+    // /private/var, so the expectation must be canonicalized too.
     assert_eq!(
         artifact["prepared_task_json"],
-        Value::String(prepared_task_path.to_string_lossy().into_owned())
+        Value::String(
+            prepared_task_path
+                .canonicalize()?
+                .to_string_lossy()
+                .into_owned()
+        )
     );
     let bound_args = artifact["bound_enqueue_args"]
         .as_array()
