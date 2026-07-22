@@ -603,7 +603,7 @@ def guide_message(*, profile: Any, generated_at: Any) -> str:
     lines = [
         title_with_profile("Forager 사용 안내", profile),
         "평문 메시지 = 에이전트 채팅. 상태·작업공간 질문에 실데이터로 답합니다.",
-        "할 일을 맡기려면 /plan <목표> 로 계획 후보를 큐잉하세요.",
+        "할 일을 맡기려면 /plan &lt;목표&gt; 로 계획 후보를 큐잉하세요.",
     ]
     for group in ("조회", "실행", "기록", "제어", "도움말"):
         entries = groups.get(group)
