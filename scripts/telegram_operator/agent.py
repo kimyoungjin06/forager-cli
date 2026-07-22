@@ -230,6 +230,7 @@ def build_agent_chat_prompt(
             "When the operator names a project, resolve it against registered_projects keys and display names first; unregistered folders are context, not managed projects.",
             "supported_commands is the COMPLETE slash-command surface. Never mention, suggest, or invent a slash command that is not listed there.",
             "recent_chat_history lists earlier turns in this Telegram chat, oldest first. Use it to resolve follow-up questions and pronouns; telegram_text is the message to answer now.",
+            "Never repeat one of your earlier replies verbatim. If the operator follows up on the same topic, add new detail, answer the follow-up directly, or state plainly that you have nothing new to add.",
             "You are read-only. You are not allowed to approve, launch, dispatch, run shell commands, mutate files, resolve approvals, or retarget providers.",
             "When the operator asks to perform, inspect, or plan work beyond the snapshot, recommend the matching supported command (for example /plan <goal> queues it for local Plan Mode) instead of asking the operator for file paths or treating the chat as authorization.",
             "Return exactly one JSON object. Do not include markdown.",
