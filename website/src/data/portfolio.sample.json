@@ -1,0 +1,134 @@
+{
+  "schema": "portfolio_surface.v1",
+  "generated_at": "2026-07-22T06:56:59.441Z",
+  "profile": "default",
+  "registry_loaded": true,
+  "attention_counts": {
+    "accepted_truth_missing": 0,
+    "blocked_tasks": 0,
+    "closeout_required": 0,
+    "failed_tasks": 0,
+    "followup_decisions_required": 7,
+    "pending_approvals": 0,
+    "pending_decisions": 7
+  },
+  "health": [
+    {
+      "id": "telegram",
+      "status": "ok"
+    },
+    {
+      "id": "runtime_store",
+      "status": "ok"
+    },
+    {
+      "id": "closeout",
+      "status": "ok"
+    },
+    {
+      "id": "local_llm",
+      "status": "unknown"
+    }
+  ],
+  "unassigned_sessions": 0,
+  "projects": [
+    {
+      "key": "twinpaper",
+      "display_name": "TwinPaper",
+      "session_group": "Twin",
+      "wiki_profile": "twinpaper-review",
+      "workspace_patterns": [
+        "1.2.8.TwinPaper"
+      ],
+      "session_count": 3,
+      "session_tools": {
+        "codex": 2,
+        "claude": 1
+      },
+      "wiki_candidates": 0,
+      "wiki_entries": 12
+    },
+    {
+      "key": "nanoclustering",
+      "display_name": "KISTI NanoClustering",
+      "session_group": "Nano",
+      "wiki_profile": "nanoclustering",
+      "workspace_patterns": [
+        "1.1.4.KISTI_NanoClustering"
+      ],
+      "session_count": 4,
+      "session_tools": {
+        "codex": 4
+      },
+      "wiki_candidates": 0,
+      "wiki_entries": 21
+    },
+    {
+      "key": "lrnm",
+      "display_name": "Local Map Analysis",
+      "session_group": "Local_Map",
+      "wiki_profile": "lrnm",
+      "workspace_patterns": [
+        "1.4.5.Local_Map_Analysis"
+      ],
+      "session_count": 4,
+      "session_tools": {
+        "codex": 4
+      },
+      "wiki_candidates": 0,
+      "wiki_entries": 36
+    },
+    {
+      "key": "overton-openalex",
+      "display_name": "Overton OpenAlex",
+      "session_group": "Overton",
+      "wiki_profile": "overton-openalex",
+      "workspace_patterns": [
+        "1.2.6.1.Overton_OpenAlex"
+      ],
+      "session_count": 0,
+      "session_tools": {},
+      "wiki_candidates": 0,
+      "wiki_entries": 10
+    },
+    {
+      "key": "sciscape",
+      "display_name": "Sciscape",
+      "session_group": "Sciscape",
+      "wiki_profile": "sciscape",
+      "workspace_patterns": [
+        "1.4.4.Sciscape"
+      ],
+      "session_count": 0,
+      "session_tools": {},
+      "wiki_candidates": 0,
+      "wiki_entries": 24
+    },
+    {
+      "key": "science-atlas",
+      "display_name": "Science Atlas Explorer",
+      "session_group": "Atlas",
+      "wiki_profile": "science-atlas",
+      "workspace_patterns": [
+        "1.1.5.science-atlas-explorer"
+      ],
+      "session_count": 0,
+      "session_tools": {},
+      "wiki_candidates": 0,
+      "wiki_entries": 9
+    },
+    {
+      "key": "forager",
+      "display_name": "Forager Harness",
+      "session_group": "Harness",
+      "wiki_profile": "forager-ops",
+      "workspace_patterns": [
+        "98.Harness/forager-cli"
+      ],
+      "session_count": 0,
+      "session_tools": {},
+      "wiki_candidates": 1,
+      "wiki_entries": 17
+    }
+  ]
+}

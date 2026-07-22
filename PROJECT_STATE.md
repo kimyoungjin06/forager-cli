@@ -317,6 +317,20 @@ out of product-facing docs. The product direction is defined in
   table under a relaxed reference-sheet budget; `/help` stays a 5-line card
   and points to it.
 
+- Multi-project orchestration now has a single project registry:
+  `~/.config/forager/projects.toml` (`forager_project_registry.v1`) maps each
+  project key to workspace path patterns, forager session group, and wiki
+  profile. Consumers: the Telegram chat snapshot (`registered_projects`), the
+  session miner (`--use-project-registry`, replacing hardcoded
+  `--project-map` lines in the nightly playbook), and the web portfolio
+  surface (`website/scripts/export-portfolio.mjs` ->
+  `public/portfolio-surface.json` -> `/portfolio` page: one row per project
+  with live session counts by tool, wiki plane entry/candidate counts, and a
+  link into `/knowledge?profile=...`). Loader:
+  `scripts/telegram_operator/projects.py`. Fan-out routing (focus-sticky
+  project context, `/p <key>` prefix) and per-project attention cards are the
+  next slices and should resolve through this registry.
+
 ## Next Work Candidates
 
 0. Apply the deferred council verdicts once a kind/agent-mode edit primitive

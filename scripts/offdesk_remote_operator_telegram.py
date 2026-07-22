@@ -91,6 +91,7 @@ from telegram_operator.project_candidates import (
     relative_path_hint,
     workspace_roots,
 )
+from telegram_operator.projects import load_registry, registry_summary
 from telegram_operator.persistence import (
     append_chat_history,
     chat_history_for_chat_hash,
@@ -1590,6 +1591,9 @@ def build_chat_operator_snapshot(args: argparse.Namespace) -> dict[str, Any]:
             "error": sanitize_text(str(error), max_chars=120),
         }
     snapshot["autonomy_armed"] = autonomy_is_armed(args.profile)
+    registry = load_registry()
+    if registry:
+        snapshot["registered_projects"] = registry_summary(registry)
     try:
         roots = workspace_roots(args)
         paths = discover_project_paths(roots, max_paths=60)

@@ -123,13 +123,11 @@ REPO="__REPO__"
 OUT=~/.cache/forager/nightly-distill/$(date +%Y%m%d)
 mkdir -p "$OUT"
 
+# Project routing comes from the registry (~/.config/forager/projects.toml);
+# add --project-map needle=profile[:scope] lines only for one-off overrides.
 "$REPO/scripts/offdesk_wiki_mine_sessions.py" \\
   --sessions-dir ~/.codex/sessions --sessions-dir ~/.claude/projects \\
-  --project-map 1.2.8.TwinPaper=twinpaper-review:twinpaper \\
-  --project-map 1.2.6.1.Overton_OpenAlex=overton-openalex \\
-  --project-map 1.4.5.Local_Map_Analysis=lrnm \\
-  --project-map 1.1.4.KISTI_NanoClustering=nanoclustering \\
-  --project-map 1.4.4.Sciscape=sciscape \\
+  --use-project-registry \\
   --max-sessions 40 --record --out-dir "$OUT/mine"
 
 for P in twinpaper-review overton-openalex lrnm nanoclustering sciscape forager-ops; do

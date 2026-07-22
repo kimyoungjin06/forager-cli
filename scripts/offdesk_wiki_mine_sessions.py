@@ -40,6 +40,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sessions-dir", action="append", required=True, type=pathlib.Path)
     parser.add_argument("--project-map", action="append", default=[],
                         help="cwd-substring=profile[:scope_ref]; sessions whose cwd matches route there.")
+    parser.add_argument("--use-project-registry", action="store_true",
+                        help="Load cwd->profile mappings from the forager project registry "
+                        "(~/.config/forager/projects.toml) in addition to --project-map.")
     parser.add_argument("--default-profile", default="", help="Profile for unmapped sessions; unmapped are skipped if empty.")
     parser.add_argument("--min-operator-messages", type=int, default=5,
                         help="Keep signature-free sessions only if they have at least this many operator messages.")
@@ -97,6 +100,17 @@ def main() -> int:
         profile, _, scope_ref = target.partition(":")
         if needle and profile:
             mappings.append((needle, profile, scope_ref or profile))
+    if args.use_project_registry:
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+        from telegram_operator.projects import load_registry  # noqa: PLC0415
+
+        for entry in load_registry().values():
+            profile = entry.get("wiki_profile")
+            if not profile:
+                continue
+            for pattern in entry.get("workspace_patterns") or []:
+                mappings.append((pattern, profile, entry["key"]))
+        print(f"project registry loaded: {len(mappings)} total mappings")
 
     transcripts = sorted(
         {p for d in args.sessions_dir for p in d.rglob("*.jsonl")},

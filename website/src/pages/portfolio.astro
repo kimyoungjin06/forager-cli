@@ -1,0 +1,230 @@
+---
+import Base from '../layouts/Base.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import { sitePath } from '../lib/paths';
+import portfolioSample from '../data/portfolio.sample.json';
+
+const surface = portfolioSample;
+const projects = surface.projects ?? [];
+const totalSessions = projects.reduce((acc, project) => acc + (project.session_count ?? 0), 0);
+const totalCandidates = projects.reduce(
+  (acc, project) => acc + (project.wiki_candidates ?? 0),
+  0,
+);
+const pendingDecisions = surface.attention_counts?.pending_decisions ?? 0;
+const generatedAt = (surface.generated_at ?? '').replace('T', ' ').slice(0, 19);
+---
+
+<Base
+  title="Forager Portfolio"
+  description="Multi-project orchestration portfolio: every registered project with its live sessions, wiki knowledge plane, and queue sizes in one read-only view."
+>
+  <Nav />
+
+  <main
+    id="portfolio-app"
+    class="min-h-screen bg-[#08111d] pt-24 text-slate-100"
+    data-live-surface-url={sitePath('/portfolio-surface.json')}
+    data-knowledge-url={sitePath('/knowledge/')}
+  >
+    <section class="border-y border-slate-700/70 bg-[#101a27] px-6 py-5">
+      <div class="mx-auto grid max-w-7xl gap-5 xl:grid-cols-[1fr_auto] xl:items-center">
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-[0.16em] text-brand-300">
+            Multi-Project Orchestration
+          </p>
+          <h1 class="mt-2 text-3xl font-semibold tracking-tight text-white md:text-4xl">Portfolio</h1>
+          <p class="mt-2 max-w-3xl text-sm leading-relaxed text-slate-400">
+            One row per registered project: live agent sessions, wiki knowledge plane, and
+            queue sizes. The registry (<span class="font-mono">projects.toml</span>) is the same
+            source Telegram routing and nightly distillation use.
+            <span class="text-slate-600"> / </span>
+            Source: <span class="font-medium text-slate-200" data-portfolio-source>sample</span>
+            <span class="text-slate-600"> / </span>
+            Generated: <span class="font-mono text-slate-200" data-portfolio-generated>{generatedAt}</span>
+          </p>
+        </div>
+
+        <div class="grid gap-3 text-sm sm:grid-cols-4">
+          <div class="border border-slate-700 bg-slate-950/55 px-4 py-3">
+            <p class="text-slate-400">Projects</p>
+            <p class="mt-1 font-mono text-lg text-slate-100" data-portfolio-projects>{projects.length}</p>
+          </div>
+          <div class="border border-slate-700 bg-slate-950/55 px-4 py-3">
+            <p class="text-slate-400">Sessions</p>
+            <p class="mt-1 font-mono text-lg text-slate-100" data-portfolio-sessions>{totalSessions}</p>
+          </div>
+          <div class="border border-slate-700 bg-slate-950/55 px-4 py-3">
+            <p class="text-slate-400">Decisions</p>
+            <p class="mt-1 font-mono text-lg text-amber-300" data-portfolio-decisions>{pendingDecisions}</p>
+          </div>
+          <div class="border border-slate-700 bg-slate-950/55 px-4 py-3">
+            <p class="text-slate-400">Wiki queue</p>
+            <p class="mt-1 font-mono text-lg text-slate-100" data-portfolio-candidates>{totalCandidates}</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="px-6 py-8">
+      <div class="mx-auto max-w-7xl overflow-x-auto">
+        <table class="w-full min-w-[760px] border-collapse text-sm">
+          <thead>
+            <tr class="border-b border-slate-700 text-left text-xs uppercase tracking-[0.12em] text-slate-400">
+              <th class="px-3 py-2">Project</th>
+              <th class="px-3 py-2">Sessions</th>
+              <th class="px-3 py-2">Agents</th>
+              <th class="px-3 py-2">Wiki plane</th>
+              <th class="px-3 py-2">Promoted</th>
+              <th class="px-3 py-2">Candidates</th>
+              <th class="px-3 py-2">Workspace</th>
+            </tr>
+          </thead>
+          <tbody id="portfolio-rows">
+            {projects.map((project) => (
+              <tr class="border-b border-slate-800/80 hover:bg-slate-900/50">
+                <td class="px-3 py-3">
+                  <span class="font-medium text-white">{project.display_name}</span>
+                  <span class="ml-2 font-mono text-xs text-slate-500">{project.key}</span>
+                </td>
+                <td class="px-3 py-3 font-mono">{project.session_count}</td>
+                <td class="px-3 py-3 text-slate-300">
+                  {Object.entries(project.session_tools ?? {})
+                    .map(([tool, count]) => `${tool}×${count}`)
+                    .join(' · ') || '—'}
+                </td>
+                <td class="px-3 py-3">
+                  {project.wiki_profile ? (
+                    <a
+                      class="font-mono text-xs text-brand-300 hover:text-brand-200"
+                      href={`${sitePath('/knowledge/')}?profile=${project.wiki_profile}`}
+                    >
+                      {project.wiki_profile}
+                    </a>
+                  ) : (
+                    '—'
+                  )}
+                </td>
+                <td class="px-3 py-3 font-mono">{project.wiki_entries ?? '—'}</td>
+                <td class="px-3 py-3 font-mono">{project.wiki_candidates ?? '—'}</td>
+                <td class="px-3 py-3 font-mono text-xs text-slate-500">
+                  {(project.workspace_patterns ?? []).join(', ')}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p class="mt-4 text-xs text-slate-500">
+          <span data-portfolio-unassigned>{surface.unassigned_sessions ?? 0}</span> unassigned
+          session(s) outside the registry. Refresh live data with
+          <span class="font-mono"> node website/scripts/export-portfolio.mjs</span>.
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <Footer />
+
+  <script>
+    const app = document.getElementById('portfolio-app');
+    const liveUrl = app?.dataset.liveSurfaceUrl;
+    if (app && liveUrl) {
+      fetch(liveUrl, { cache: 'no-store' })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((surface) => {
+          if (!surface || surface.schema !== 'portfolio_surface.v1') return;
+          renderPortfolio(surface);
+        })
+        .catch(() => {});
+    }
+
+    function renderPortfolio(surface) {
+      const projects = surface.projects ?? [];
+      setText('[data-portfolio-source]', 'live export');
+      setText(
+        '[data-portfolio-generated]',
+        String(surface.generated_at ?? '').replace('T', ' ').slice(0, 19),
+      );
+      setText('[data-portfolio-projects]', projects.length);
+      setText(
+        '[data-portfolio-sessions]',
+        projects.reduce((acc, project) => acc + (project.session_count ?? 0), 0),
+      );
+      setText('[data-portfolio-decisions]', surface.attention_counts?.pending_decisions ?? 0);
+      setText(
+        '[data-portfolio-candidates]',
+        projects.reduce((acc, project) => acc + (project.wiki_candidates ?? 0), 0),
+      );
+      setText('[data-portfolio-unassigned]', surface.unassigned_sessions ?? 0);
+
+      const body = document.getElementById('portfolio-rows');
+      if (!body) return;
+      body.replaceChildren(
+        ...projects.map((project) => {
+          const row = document.createElement('tr');
+          row.className = 'border-b border-slate-800/80 hover:bg-slate-900/50';
+          row.append(
+            cell(
+              nameFragment(project.display_name ?? project.key, project.key),
+              'px-3 py-3',
+            ),
+            cell(String(project.session_count ?? 0), 'px-3 py-3 font-mono'),
+            cell(
+              Object.entries(project.session_tools ?? {})
+                .map(([tool, count]) => `${tool}×${count}`)
+                .join(' · ') || '—',
+              'px-3 py-3 text-slate-300',
+            ),
+            cell(wikiLink(project.wiki_profile), 'px-3 py-3'),
+            cell(String(project.wiki_entries ?? '—'), 'px-3 py-3 font-mono'),
+            cell(String(project.wiki_candidates ?? '—'), 'px-3 py-3 font-mono'),
+            cell(
+              (project.workspace_patterns ?? []).join(', '),
+              'px-3 py-3 font-mono text-xs text-slate-500',
+            ),
+          );
+          return row;
+        }),
+      );
+    }
+
+    function nameFragment(displayName, key) {
+      const fragment = document.createDocumentFragment();
+      const name = document.createElement('span');
+      name.className = 'font-medium text-white';
+      name.textContent = displayName;
+      const keySpan = document.createElement('span');
+      keySpan.className = 'ml-2 font-mono text-xs text-slate-500';
+      keySpan.textContent = key;
+      fragment.append(name, keySpan);
+      return fragment;
+    }
+
+    function wikiLink(profile) {
+      if (!profile) return '—';
+      const link = document.createElement('a');
+      link.className = 'font-mono text-xs text-brand-300 hover:text-brand-200';
+      const base = app?.dataset.knowledgeUrl ?? '/knowledge/';
+      link.href = `${base}?profile=${encodeURIComponent(profile)}`;
+      link.textContent = profile;
+      return link;
+    }
+
+    function cell(content, className) {
+      const td = document.createElement('td');
+      td.className = className;
+      if (typeof content === 'string') {
+        td.textContent = content;
+      } else {
+        td.append(content);
+      }
+      return td;
+    }
+
+    function setText(selector, value) {
+      const node = document.querySelector(selector);
+      if (node) node.textContent = String(value);
+    }
+  </script>
+</Base>
