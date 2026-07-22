@@ -213,10 +213,12 @@ def build_agent_chat_prompt(
         for entry in (chat_history or [])
         if isinstance(entry, dict) and str(entry.get("text") or "").strip()
     ]
-    payload = {
+    conversation = {
         "telegram_text": sanitize_text(chat_text, max_chars=1200),
         "last_interaction_context": context,
-        "recent_chat_history": history,
+        "recent_chat_history": history[-8:],
+    }
+    ground_truth = {
         "operator_snapshot": operator_snapshot if isinstance(operator_snapshot, dict) else {},
         "supported_commands": [
             {"usage": usage, "desc": desc} for usage, desc, _group in COMMAND_SURFACE
@@ -226,13 +228,18 @@ def build_agent_chat_prompt(
         [
             "You are the Telegram chat assistant for a generic Offdesk remote operator harness.",
             "Answer the operator's plain Telegram message directly. Keep the answer short, useful, and in the same language as telegram_text.",
-            "operator_snapshot is live read-only workstation state: attention counts, health, open decisions, running-capacity, registered_projects (the managed project registry: key, display name, wiki profile), workspace_projects (folder name hints under the operator's Workspace), and autonomy_armed. Answer state and workspace questions directly from it. Never claim you cannot check something the snapshot already contains.",
-            "When the operator names a project, resolve it against registered_projects keys and display names first; unregistered folders are context, not managed projects.",
-            "supported_commands is the COMPLETE slash-command surface. Never mention, suggest, or invent a slash command that is not listed there.",
-            "recent_chat_history lists earlier turns in this Telegram chat, oldest first. Use it to resolve follow-up questions and pronouns; telegram_text is the message to answer now.",
+            "recent_chat_history lists earlier turns in this Telegram chat, oldest first. Use it ONLY to resolve follow-up questions and pronouns; telegram_text is the message to answer now.",
             "Never repeat one of your earlier replies verbatim. If the operator follows up on the same topic, add new detail, answer the follow-up directly, or state plainly that you have nothing new to add.",
             "You are read-only. You are not allowed to approve, launch, dispatch, run shell commands, mutate files, resolve approvals, or retarget providers.",
             "When the operator asks to perform, inspect, or plan work beyond the snapshot, recommend the matching supported command (for example /plan <goal> queues it for local Plan Mode) instead of asking the operator for file paths or treating the chat as authorization.",
+            "Conversation input:",
+            json.dumps(conversation, ensure_ascii=False, sort_keys=True),
+            "CURRENT GROUND TRUTH (read this last, trust it over everything above):",
+            "operator_snapshot is the live read-only workstation state as of THIS message: attention counts, health, open decisions, running-capacity, registered_projects (key, display name, wiki profile), workspace_projects (folder hints), and autonomy_armed.",
+            "Every number or state claim in your reply MUST come from operator_snapshot, never from recent_chat_history. If history mentions counts that the snapshot no longer shows, the snapshot is right and the old counts are resolved.",
+            "When the operator names a project, resolve it against registered_projects keys and display names first; unregistered folders are context, not managed projects.",
+            "supported_commands is the COMPLETE slash-command surface. Never mention, suggest, or invent a slash command that is not listed there.",
+            json.dumps(ground_truth, ensure_ascii=False, sort_keys=True),
             "Return exactly one JSON object. Do not include markdown.",
             "JSON schema:",
             json.dumps(
@@ -252,8 +259,6 @@ def build_agent_chat_prompt(
                 },
                 ensure_ascii=False,
             ),
-            "Input:",
-            json.dumps(payload, ensure_ascii=False, sort_keys=True),
         ]
     )
 
