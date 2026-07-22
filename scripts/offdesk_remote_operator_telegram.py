@@ -126,8 +126,11 @@ from telegram_operator.rendering import (
     render_tasks_message,
     display_action,
     display_review_status,
+    guide_message,
     help_message,
     mobile_card_contract,
+    GUIDE_SHEET_MAX_CHARS,
+    GUIDE_SHEET_MAX_LINES,
     number,
     profile_label_from_projection,
     projection_payload,
@@ -1632,6 +1635,23 @@ def render_command_result(
                 "projection": None,
                 "message_preview": message_preview,
                 "mobile_card_contract": mobile_card_contract(message_preview),
+            }
+        )
+        return result
+    if parsed.get("command") == "guide":
+        result["parsed_command"] = parsed
+        message_preview = guide_message(profile=args.profile, generated_at=result["generated_at"])
+        attach_choice_surface(result, None)
+        result.update(
+            {
+                "status": "rendered",
+                "projection": None,
+                "message_preview": message_preview,
+                "mobile_card_contract": mobile_card_contract(
+                    message_preview,
+                    max_lines=GUIDE_SHEET_MAX_LINES,
+                    max_chars=GUIDE_SHEET_MAX_CHARS,
+                ),
             }
         )
         return result

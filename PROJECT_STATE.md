@@ -312,7 +312,10 @@ out of product-facing docs. The product direction is defined in
   and `scrub_unknown_commands()` rewrites hallucinated slash commands to
   `/help`. Before this the agent answered state questions with "cannot check"
   and invented commands like `/list` and `/projects` that bounced as
-  unsupported.
+  unsupported. `/guide` (aliases `/qna`, `/usage`, `/commands`) renders the
+  full grouped command reference sheet from the same `COMMAND_SURFACE` truth
+  table under a relaxed reference-sheet budget; `/help` stays a 5-line card
+  and points to it.
 
 ## Next Work Candidates
 

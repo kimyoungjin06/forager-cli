@@ -7259,3 +7259,91 @@ fn remote_operator_telegram_autonomy_stale_confirmation_does_not_block_proposal(
     assert_ne!(pending["token"], "deadbeef0000");
     Ok(())
 }
+
+#[test]
+#[serial]
+fn remote_operator_telegram_guide_renders_full_command_surface() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+
+    for command in ["/guide", "/qna"] {
+        let out = temp.path().join("guide_result.json");
+        let output = remote_operator_command(temp.path())
+            .arg("--dry-run")
+            .arg("--command-text")
+            .arg(command)
+            .arg("--env-file")
+            .arg(&env_path)
+            .arg("--out")
+            .arg(&out)
+            .output()?;
+
+        assert!(
+            output.status.success(),
+            "stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+        assert_eq!(result["status"], "rendered");
+        assert_eq!(result["parsed_command"]["command"], "guide");
+        let preview = result["message_preview"].as_str().expect("message preview");
+        // The reference sheet must teach the whole surface, grouped.
+        assert!(preview.contains("<b>Forager 사용 안내</b>"));
+        for group in ["[조회]", "[실행]", "[기록]", "[제어]"] {
+            assert!(preview.contains(group), "missing group {group}");
+        }
+        for usage in [
+            "/attention",
+            "/decision",
+            "/plan",
+            "/remember",
+            "/pause",
+            "/guide",
+        ] {
+            assert!(preview.contains(usage), "missing command {usage}");
+        }
+        // Guide uses the relaxed reference-sheet budget, still warning-free.
+        assert_mobile_contract(&result);
+        assert!(
+            result["mobile_card_contract"]["max_lines"]
+                .as_u64()
+                .expect("guide max lines")
+                > 5
+        );
+    }
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_help_points_to_guide() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let out = temp.path().join("help_result.json");
+
+    let output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--command-text")
+        .arg("/help")
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--out")
+        .arg(&out)
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["status"], "rendered");
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(preview.contains("/guide"));
+    assert_mobile_contract(&result);
+    Ok(())
+}

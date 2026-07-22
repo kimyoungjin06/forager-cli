@@ -219,7 +219,7 @@ def build_agent_chat_prompt(
         "recent_chat_history": history,
         "operator_snapshot": operator_snapshot if isinstance(operator_snapshot, dict) else {},
         "supported_commands": [
-            {"usage": usage, "desc": desc} for usage, desc in COMMAND_SURFACE
+            {"usage": usage, "desc": desc} for usage, desc, _group in COMMAND_SURFACE
         ],
     }
     return "\n".join(

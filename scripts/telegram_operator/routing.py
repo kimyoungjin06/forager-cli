@@ -17,6 +17,10 @@ CORE_BUTTON_LABELS = ("상태", "승인 대기", "계획", "도움말")
 CORE_OR_SLASH_COMMANDS = {
     "start",
     "help",
+    "guide",
+    "qna",
+    "usage",
+    "commands",
     "status",
     "pending",
     "plans",
@@ -44,32 +48,34 @@ CORE_OR_SLASH_COMMANDS = {
     "cancel",
 }
 SESSION_INPUT_COMMANDS = {"select", "choose", "path", "workload", "session_input", "plan_input"}
-# One usage/description line per operator-facing command. This is handed to the
-# local chat agent as the complete command surface, so keep it in sync with
+# One (usage, description, group) row per operator-facing command. This is the
+# single source of truth for the /guide reference sheet and for the command
+# surface handed to the local chat agent, so keep it in sync with
 # parse_remote_command when commands are added or removed.
 COMMAND_SURFACE = (
-    ("/status", "offdesk 상태 요약"),
-    ("/pending [--all]", "승인 대기 항목"),
-    ("/plans", "계획 목록"),
-    ("/show <id>", "항목 상세 보기"),
-    ("/decisions", "결정 대기함"),
-    ("/decision <id> <action> [메모]", "결정 처리 (확인 카드 후 실행)"),
-    ("/recovery", "복구 대기 항목"),
-    ("/recover <id>", "복구 실행"),
-    ("/runtime", "런타임 디스패치 상태"),
-    ("/run [name]", "사전 승인된 명령 목록/실행"),
-    ("/tasks", "실행 중 작업 목록"),
-    ("/cancel_task <id> [이유]", "작업 취소"),
-    ("/attention", "주의 필요 항목 카드"),
-    ("/pause [이유]", "전체 일시정지"),
-    ("/resume", "재개"),
-    ("/confirm", "대기 중인 확인 승인"),
-    ("/cancel", "대기 중인 확인 취소"),
-    ("/plan <내용>", "계획 후보로 기록 (로컬 Plan Mode에서 이어감)"),
-    ("/feedback <내용>", "의견 기록"),
-    ("/remember <내용>", "위키 후보로 기록"),
-    ("/chat <내용>", "에이전트 채팅 (평문과 동일)"),
-    ("/help", "도움말"),
+    ("/attention", "한눈 요약 (가장 급한 것부터)", "조회"),
+    ("/status", "offdesk 상태 요약", "조회"),
+    ("/pending [--all]", "승인 대기 항목", "조회"),
+    ("/plans", "계획 목록", "조회"),
+    ("/show <id>", "항목 상세 보기", "조회"),
+    ("/decisions", "결정 대기함", "조회"),
+    ("/recovery", "복구 대기 항목", "조회"),
+    ("/runtime", "런타임 디스패치 상태", "조회"),
+    ("/tasks", "실행 중 작업 목록", "조회"),
+    ("/decision <id> <action> [메모]", "결정 처리 (확인 카드 후 실행)", "실행"),
+    ("/recover <id>", "복구 실행", "실행"),
+    ("/run [name]", "사전 승인된 명령 목록/실행", "실행"),
+    ("/confirm", "대기 중인 확인 승인", "실행"),
+    ("/cancel", "대기 중인 확인 취소", "실행"),
+    ("/cancel_task <id> [이유]", "작업 취소", "실행"),
+    ("/plan <내용>", "계획 후보로 기록 (로컬 Plan Mode에서 이어감)", "기록"),
+    ("/feedback <내용>", "의견 기록", "기록"),
+    ("/remember <내용>", "위키 후보로 기록", "기록"),
+    ("/pause [이유]", "전체 일시정지", "제어"),
+    ("/resume", "재개", "제어"),
+    ("/chat <내용>", "에이전트 채팅 (평문과 동일)", "도움말"),
+    ("/guide", "전체 사용 안내 (별칭: /qna)", "도움말"),
+    ("/help", "짧은 도움말", "도움말"),
 )
 DISPATCH_BUTTON_ALIASES = {
     "결정 목록": "/decisions",
@@ -132,6 +138,8 @@ def parse_remote_command(command_text: str) -> dict[str, Any]:
     args = tokens[1:]
     if command in {"start", "help"}:
         return {"supported": True, "command": "help", "argv": [], "reason": "help"}
+    if command in {"guide", "qna", "usage", "commands", "사용법"}:
+        return {"supported": True, "command": "guide", "argv": [], "reason": "guide"}
     if command in {"chat", "ask"}:
         chat_text = " ".join(args).strip()
         if not chat_text:

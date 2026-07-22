@@ -692,7 +692,11 @@ scripts/offdesk_remote_operator_telegram.py \
 The adapter accepts plain Telegram text as read-only chat. Structured surfaces
 are explicit slash commands: `/status`, `/pending`, `/plans`, `/show <plan-id>`,
 `/feedback`, `/remember`, `/plan`, `/decisions`, `/decision`, `/confirm`,
-`/cancel`, and `/help`, plus the bounded plan-session buttons described below.
+`/cancel`, `/help`, and `/guide` (aliases `/qna`, `/usage`, `/commands`), plus
+the bounded plan-session buttons described below. `/guide` renders the full
+grouped command reference sheet from `routing.py::COMMAND_SURFACE` under a
+relaxed reference-sheet budget (36 lines / 2000 chars) instead of the 5-line
+mobile card contract; `/help` stays a compact card and points to `/guide`.
 Unsupported commands such as `/approve`, `/launch`, `/exec`, or `/git push`
 return an unsupported result and do not call mutation-capable local surfaces.
 Without `--once`, live polling stays attached and keeps reading Telegram

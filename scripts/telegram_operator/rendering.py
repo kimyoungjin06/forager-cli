@@ -6,7 +6,7 @@ import html
 import re
 from typing import Any
 
-from .routing import BUTTON_COMMAND_ALIASES, CORE_BUTTON_LABELS
+from .routing import BUTTON_COMMAND_ALIASES, COMMAND_SURFACE, CORE_BUTTON_LABELS
 
 
 MOBILE_CARD_CONTRACT_SCHEMA = "telegram_mobile_card_contract.v1"
@@ -15,6 +15,11 @@ REMOTE_PLAN_SESSION_CONTEXT_KIND = "remote_plan_project_selection"
 REMOTE_PLAN_INIT_CONTEXT_KIND = "remote_plan_init_review"
 MOBILE_CARD_MAX_LINES = 5
 MOBILE_CARD_MAX_CHARS = 360
+# The /guide reference sheet is deliberately not a glanceable card: it is the
+# one message allowed to enumerate the whole command surface, so it gets its
+# own (still bounded) budget.
+GUIDE_SHEET_MAX_LINES = 36
+GUIDE_SHEET_MAX_CHARS = 2000
 # Reply budget inside the 360-char mobile card once the title and
 # next-action lines are accounted for. Normalization and rendering must
 # agree on this so replies are truncated exactly once.
@@ -360,13 +365,18 @@ def interaction_context_label(context: dict[str, Any] | None) -> str:
     return command
 
 
-def mobile_card_contract(message: str) -> dict[str, Any]:
+def mobile_card_contract(
+    message: str,
+    *,
+    max_lines: int = MOBILE_CARD_MAX_LINES,
+    max_chars: int = MOBILE_CARD_MAX_CHARS,
+) -> dict[str, Any]:
     lines = str(message or "").splitlines()
     content_lines = [line.strip() for line in lines if line.strip()]
     warnings: list[str] = []
-    if len(lines) > MOBILE_CARD_MAX_LINES:
+    if len(lines) > max_lines:
         warnings.append("too_many_lines")
-    if len(str(message or "")) > MOBILE_CARD_MAX_CHARS:
+    if len(str(message or "")) > max_chars:
         warnings.append("too_many_chars")
     has_title = bool(content_lines and content_lines[0].startswith("<b>"))
     body_lines = content_lines[1:] if has_title else content_lines
@@ -401,8 +411,8 @@ def mobile_card_contract(message: str) -> dict[str, Any]:
         "schema": MOBILE_CARD_CONTRACT_SCHEMA,
         "line_count": len(lines),
         "char_count": len(str(message or "")),
-        "max_lines": MOBILE_CARD_MAX_LINES,
-        "max_chars": MOBILE_CARD_MAX_CHARS,
+        "max_lines": max_lines,
+        "max_chars": max_chars,
         "has_title": has_title,
         "has_status_headline": has_status_headline,
         "has_next_action": has_next_action,
@@ -571,11 +581,39 @@ def help_message(*, profile: Any, generated_at: Any) -> str:
         [
             title_with_profile("Forager 원격 조작", profile),
             "평문은 에이전트 채팅으로 답합니다.",
-            "한눈 요약: /attention",
+            "한눈 요약: /attention · 전체 사용 안내: /guide",
             "실행/정지: /decisions · /recovery · /run · /tasks · /pause",
             "다음 조치: /status · /feedback · /plan",
         ]
     )
+
+
+def guide_message(*, profile: Any, generated_at: Any) -> str:
+    """Full usage reference sheet built from the COMMAND_SURFACE truth table.
+
+    Rendered under the guide-sheet budget, not the 5-line card contract; this
+    is the one place the operator can learn the whole surface from the phone.
+    """
+
+    groups: dict[str, list[str]] = {}
+    for usage, desc, group in COMMAND_SURFACE:
+        groups.setdefault(group, []).append(
+            f"{html.escape(usage)} · {html.escape(desc)}"
+        )
+    lines = [
+        title_with_profile("Forager 사용 안내", profile),
+        "평문 메시지 = 에이전트 채팅. 상태·작업공간 질문에 실데이터로 답합니다.",
+        "할 일을 맡기려면 /plan <목표> 로 계획 후보를 큐잉하세요.",
+    ]
+    for group in ("조회", "실행", "기록", "제어", "도움말"):
+        entries = groups.get(group)
+        if not entries:
+            continue
+        lines.append(f"<b>[{group}]</b>")
+        lines.extend(entries)
+    lines.append("자율주행: 저녁 유휴 시 제안 카드가 오면 확인 탭으로 승인, /pause 로 즉시 중단.")
+    lines.append("다음 조치: /attention · /status")
+    return "\n".join(lines)
 
 
 def render_decisions_message(*, profile: Any, generated_at: Any, decisions: list[dict[str, Any]]) -> str:
