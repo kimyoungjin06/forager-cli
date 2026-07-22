@@ -3040,18 +3040,17 @@ fn projection_conflict_signature(instruction: &str) -> Option<ProjectionConflict
             AdaptiveWikiProjectionConflictPolarity::Negative,
             strip_projection_action_prefix(target),
         )
-    } else if let Some(target) = strip_first_prefix(
-        &normalized,
-        &[
-            "always ", "must ", "should ", "use ", "prefer ", "allow ", "include ", "keep ",
-        ],
-    ) {
+    } else {
+        let target = strip_first_prefix(
+            &normalized,
+            &[
+                "always ", "must ", "should ", "use ", "prefer ", "allow ", "include ", "keep ",
+            ],
+        )?;
         (
             AdaptiveWikiProjectionConflictPolarity::Positive,
             strip_projection_action_prefix(target),
         )
-    } else {
-        return None;
     };
     let target = target.trim();
     if target.split_whitespace().count() < 2 || target.len() < 8 {

@@ -2214,8 +2214,14 @@ fn test_uppercase_l_grows_list() {
 fn orchestration_summary_reads_armed_state_and_registry() {
     let temp = TempDir::new().unwrap();
     setup_test_home(&temp);
-    let config_dir = temp.path().join(".config").join("forager");
-    std::fs::create_dir_all(config_dir.join("profiles").join("test")).unwrap();
+    // The registry lives under XDG config on every platform, but the profile
+    // dir (armed file) is platform-specific (~/.forager on macOS), so both
+    // paths must come from the real resolvers.
+    let registry_file = crate::session::project_registry::registry_path();
+    std::fs::create_dir_all(registry_file.parent().unwrap()).unwrap();
+    let profile_dir = crate::session::get_profile_dir("test").unwrap();
+    std::fs::create_dir_all(&profile_dir).unwrap();
+    let armed_file = profile_dir.join("offdesk_autonomy_armed.json");
 
     // No registry, no armed file: everything quiet.
     let summary = super::load_orchestration_summary("test");
@@ -2223,16 +2229,13 @@ fn orchestration_summary_reads_armed_state_and_registry() {
     assert_eq!(summary.registered_projects, 0);
 
     std::fs::write(
-        config_dir.join("projects.toml"),
+        &registry_file,
         "schema = \"forager_project_registry.v1\"\n\n[projects.demo]\nworkspace_patterns = [\"Demo\"]\n",
     )
     .unwrap();
     let future = chrono::Utc::now() + chrono::Duration::hours(8);
     std::fs::write(
-        config_dir
-            .join("profiles")
-            .join("test")
-            .join("offdesk_autonomy_armed.json"),
+        &armed_file,
         format!(
             "{{\"armed\": true, \"until\": \"{}\"}}",
             future.to_rfc3339()
@@ -2247,10 +2250,7 @@ fn orchestration_summary_reads_armed_state_and_registry() {
     // An expired window must not read as armed.
     let past = chrono::Utc::now() - chrono::Duration::hours(1);
     std::fs::write(
-        config_dir
-            .join("profiles")
-            .join("test")
-            .join("offdesk_autonomy_armed.json"),
+        &armed_file,
         format!("{{\"armed\": true, \"until\": \"{}\"}}", past.to_rfc3339()),
     )
     .unwrap();
