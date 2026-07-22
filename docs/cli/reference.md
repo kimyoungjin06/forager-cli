@@ -42,6 +42,7 @@ This document contains the help content for the `forager` command-line program.
 * [`forager project retention-apply`↴](#forager-project-retention-apply)
 * [`forager project retention-promote`↴](#forager-project-retention-promote)
 * [`forager project implementation-packet`↴](#forager-project-implementation-packet)
+* [`forager project sync`↴](#forager-project-sync)
 * [`forager worktree`↴](#forager-worktree)
 * [`forager worktree list`↴](#forager-worktree-list)
 * [`forager worktree info`↴](#forager-worktree-info)
@@ -609,6 +610,7 @@ Initialize and inspect project operation packets
 * `retention-apply` — Consume an approved artifact retention decision into a profile receipt
 * `retention-promote` — Promote a retained artifact into DELIVERABLES.md with snapshot evidence
 * `implementation-packet` — Draft a design-first implementation packet before delegated execution
+* `sync` — Scan workspace roots and bulk-register unmatched projects into the registry
 
 
 
@@ -841,6 +843,23 @@ Draft a design-first implementation packet before delegated execution
 * `--out <OUT>` — Write the packet artifacts to this directory
 * `--force` — Overwrite known packet files when --out already contains files
 * `--json` — Output machine-readable JSON
+
+
+
+## `forager project sync`
+
+Scan workspace roots and bulk-register unmatched projects into the registry
+
+**Usage:** `forager project sync [OPTIONS] <ROOTS>...`
+
+###### **Arguments:**
+
+* `<ROOTS>` — Workspace root directories to scan (immediate children only)
+
+###### **Options:**
+
+* `--apply` — Write the new entries to the registry (default: dry-run report only)
+* `--no-wiki` — Do not assign a wiki plane to auto-registered projects
 
 
 

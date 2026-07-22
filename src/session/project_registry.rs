@@ -124,6 +124,20 @@ pub fn slugify_key(name: &str) -> String {
     }
 }
 
+/// Drop leading all-numeric dot segments from a workspace folder name so
+/// numbering prefixes ("1.2.8.TwinPaper") do not leak into project keys.
+fn key_base_from_folder(folder: &str) -> String {
+    let rest: Vec<&str> = folder
+        .split('.')
+        .skip_while(|segment| !segment.is_empty() && segment.chars().all(|c| c.is_ascii_digit()))
+        .collect();
+    if rest.is_empty() {
+        folder.to_string()
+    } else {
+        rest.join(".")
+    }
+}
+
 /// Default registry entry for onboarding a workspace directory: the folder
 /// name becomes the workspace pattern, and the (slugified) key doubles as the
 /// wiki profile so a fresh knowledge plane comes up with the project.
@@ -132,7 +146,9 @@ pub fn default_entry_for_path(path: &Path, key: Option<&str>) -> ProjectRegistry
         .file_name()
         .map(|name| name.to_string_lossy().to_string())
         .unwrap_or_else(|| "project".to_string());
-    let key = key.map(slugify_key).unwrap_or_else(|| slugify_key(&folder));
+    let key = key
+        .map(slugify_key)
+        .unwrap_or_else(|| slugify_key(&key_base_from_folder(&folder)));
     ProjectRegistryEntry {
         display_name: folder.clone(),
         workspace_patterns: vec![folder],
@@ -197,6 +213,57 @@ pub fn append_project(path: &Path, entry: &ProjectRegistryEntry) -> anyhow::Resu
 
 fn toml_string(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// Markers that make a directory look like a real project during a workspace
+/// scan (stricter than the Telegram candidate ranker: a bare README does not
+/// qualify for bulk registration).
+pub const SCAN_MARKERS: &[&str] = &[
+    ".git",
+    ".forager",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "Cargo.toml",
+    "pyproject.toml",
+    "package.json",
+    "uv.lock",
+];
+
+/// Immediate child directories of `root` that carry at least one project
+/// marker. Hidden directories are skipped; the result is sorted by name.
+pub fn scan_workspace_projects(root: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut projects: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .filter(|path| {
+            path.file_name()
+                .map(|name| !name.to_string_lossy().starts_with('.'))
+                .unwrap_or(false)
+        })
+        .filter(|path| SCAN_MARKERS.iter().any(|marker| path.join(marker).exists()))
+        .collect();
+    projects.sort();
+    projects
+}
+
+/// Key that does not collide with any registered project (base, base-2, ...).
+pub fn unique_key(registry: &[ProjectRegistryEntry], base: &str) -> String {
+    let taken: std::collections::HashSet<&str> =
+        registry.iter().map(|entry| entry.key.as_str()).collect();
+    if !taken.contains(base) {
+        return base.to_string();
+    }
+    for counter in 2..1000 {
+        let candidate = format!("{base}-{counter}");
+        if !taken.contains(candidate.as_str()) {
+            return candidate;
+        }
+    }
+    format!("{base}-{}", uuid::Uuid::new_v4())
 }
 
 /// Match a filesystem path against workspace patterns (substring match, same
@@ -272,6 +339,18 @@ wiki_profile = "twinpaper-review"
         assert_eq!(slugify_key("1.2.8.TwinPaper"), "1-2-8-twinpaper");
         assert_eq!(slugify_key("My Project"), "my-project");
         assert_eq!(slugify_key("---"), "project");
+    }
+
+    #[test]
+    fn default_key_drops_numbering_prefix() {
+        let key =
+            |folder: &str| default_entry_for_path(Path::new(&format!("/ws/{folder}")), None).key;
+        assert_eq!(key("1.2.8.TwinPaper"), "twinpaper");
+        assert_eq!(key("1.4.1.1.RAG-mLLM"), "rag-mllm");
+        assert_eq!(key("0.4.2024Mobility"), "2024mobility");
+        assert_eq!(key("3.n8n"), "n8n");
+        assert_eq!(key("aoe_orch_control"), "aoe-orch-control");
+        assert_eq!(key("1.9.0"), "1-9-0");
     }
 
     #[test]

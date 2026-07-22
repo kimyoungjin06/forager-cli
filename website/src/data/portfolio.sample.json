@@ -1,6 +1,6 @@
 {
   "schema": "portfolio_surface.v1",
-  "generated_at": "2026-07-22T06:56:59.441Z",
+  "generated_at": "2026-07-22T08:54:16.286Z",
   "profile": "default",
   "registry_loaded": true,
   "attention_counts": {
@@ -129,6 +129,188 @@
       "session_tools": {},
       "wiki_candidates": 1,
       "wiki_entries": 17
+    },
+    {
+      "key": "kisti-db-manager",
+      "display_name": "1.1.1.KISTI_DB_Manager",
+      "session_group": null,
+      "wiki_profile": "kisti-db-manager",
+      "workspace_patterns": [
+        "1.1.1.KISTI_DB_Manager"
+      ],
+      "session_count": 0,
+      "session_tools": {},
+      "wiki_candidates": 0,
+      "wiki_entries": 0
+    },
+    {
+      "key": "kisti-disampy",
+      "display_name": "1.1.2.KISTI_Disampy",
+      "session_group": null,
+      "wiki_profile": "kisti-disampy",
+      "workspace_patterns": [
+        "1.1.2.KISTI_Disampy"
+      ],
+      "session_count": 0,
+      "session_tools": {},
+      "wiki_candidates": 0,
+      "wiki_entries": 0
+    },
+    {
+      "key": "kisti-sosa",
+      "display_name": "1.1.3.KISTI_SoSA",
+      "session_group": null,
+      "wiki_profile": "kisti-sosa",
+      "workspace_patterns": [
+        "1.1.3.KISTI_SoSA"
+      ],
+      "session_count": 0,
+      "session_tools": {},
+      "wiki_candidates": 0,
+      "wiki_entries": 0
+    },
+    {
+      "key": "ntis",
+      "display_name": "1.2.7.NTIS",
+      "session_group": null,
+      "wiki_profile": "ntis",
+      "workspace_patterns": [
+        "1.2.7.NTIS"
+      ],
+      "session_count": 0,
+      "session_tools": {},
+      "wiki_candidates": 0,
+      "wiki_entries": 0
+    },
+    {
+      "key": "rag-mllm",
+      "display_name": "1.4.1.1.RAG-mLLM",
+      "session_group": null,
+      "wiki_profile": "rag-mllm",
+      "workspace_patterns": [
+        "1.4.1.1.RAG-mLLM"
+      ],
+      "session_count": 0,
+      "session_tools": {},
+      "wiki_candidates": 0,
+      "wiki_entries": 0
+    },
+    {
+      "key": "kriss",
+      "display_name": "1.4.2.KRISS",
+      "session_group": null,
+      "wiki_profile": "kriss",
+      "workspace_patterns": [
+        "1.4.2.KRISS"
+      ],
+      "session_count": 0,
+      "session_tools": {},
+      "wiki_candidates": 0,
+      "wiki_entries": 0
+    },
+    {
+      "key": "kiom",
+      "display_name": "1.4.3.KIOM",
+      "session_group": null,
+      "wiki_profile": "kiom",
+      "workspace_patterns": [
+        "1.4.3.KIOM"
+      ],
+      "session_count": 0,
+      "session_tools": {},
+      "wiki_candidates": 0,
+      "wiki_entries": 0
+    },
+    {
+      "key": "neural-abm",
+      "display_name": "1.4.6.Neural_ABM",
+      "session_group": null,
+      "wiki_profile": "neural-abm",
+      "workspace_patterns": [
+        "1.4.6.Neural_ABM"
+      ],
+      "session_count": 0,
+      "session_tools": {},
+      "wiki_candidates": 0,
+      "wiki_entries": 0
+    },
+    {
+      "key": "lecture",
+      "display_name": "1.5.1.Lecture",
+      "session_group": null,
+      "wiki_profile": "lecture",
+      "workspace_patterns": [
+        "1.5.1.Lecture"
+      ],
+      "session_count": 0,
+      "session_tools": {},
+      "wiki_candidates": 0,
+      "wiki_entries": 0
+    },
+    {
+      "key": "msit",
+      "display_name": "5.1.MSIT",
+      "session_group": null,
+      "wiki_profile": "msit",
+      "workspace_patterns": [
+        "5.1.MSIT"
+      ],
+      "session_count": 0,
+      "session_tools": {},
+      "wiki_candidates": 0,
+      "wiki_entries": 0
+    },
+    {
+      "key": "aoe-orch-control",
+      "display_name": "aoe_orch_control",
+      "session_group": null,
+      "wiki_profile": "aoe-orch-control",
+      "workspace_patterns": [
+        "aoe_orch_control"
+      ],
+      "session_count": 0,
+      "session_tools": {},
+      "wiki_candidates": 0,
+      "wiki_entries": 0
+    },
+    {
+      "key": "cwts-networkanalysis",
+      "display_name": "cwts-networkanalysis",
+      "session_group": null,
+      "wiki_profile": "cwts-networkanalysis",
+      "workspace_patterns": [
+        "cwts-networkanalysis"
+      ],
+      "session_count": 0,
+      "session_tools": {},
+      "wiki_candidates": 0,
+      "wiki_entries": 0
+    },
+    {
+      "key": "open-repository-project",
+      "display_name": "open-repository-project",
+      "session_group": null,
+      "wiki_profile": "open-repository-project",
+      "workspace_patterns": [
+        "open-repository-project"
+      ],
+      "session_count": 0,
+      "session_tools": {},
+      "wiki_candidates": 0,
+      "wiki_entries": 0
+    },
+    {
+      "key": "sciscape-leiden",
+      "display_name": "sciscape-leiden",
+      "session_group": null,
+      "wiki_profile": "sciscape-leiden",
+      "workspace_patterns": [
+        "sciscape-leiden"
+      ],
+      "session_count": 0,
+      "session_tools": {},
+      "wiki_candidates": 0,
+      "wiki_entries": 0
     }
   ]
 }

@@ -72,6 +72,24 @@ pub enum ProjectCommands {
     /// Draft a design-first implementation packet before delegated execution
     #[command(name = "implementation-packet")]
     ImplementationPacket(Box<ProjectImplementationPacketArgs>),
+
+    /// Scan workspace roots and bulk-register unmatched projects into the registry
+    Sync(ProjectSyncArgs),
+}
+
+#[derive(Args)]
+pub struct ProjectSyncArgs {
+    /// Workspace root directories to scan (immediate children only)
+    #[arg(required = true)]
+    roots: Vec<PathBuf>,
+
+    /// Write the new entries to the registry (default: dry-run report only)
+    #[arg(long)]
+    apply: bool,
+
+    /// Do not assign a wiki plane to auto-registered projects
+    #[arg(long = "no-wiki")]
+    no_wiki: bool,
 }
 
 #[derive(Args)]
@@ -678,7 +696,84 @@ pub async fn run(profile: &str, command: ProjectCommands) -> Result<()> {
             artifact_index::run_retention_promote(profile, args).await
         }
         ProjectCommands::ImplementationPacket(args) => run_implementation_packet(profile, *args),
+        ProjectCommands::Sync(args) => run_sync(args),
     }
+}
+
+/// Bulk onboarding for a workspace full of projects: scan each root's
+/// immediate children for project markers, skip anything the registry
+/// already matches, and report (or, with --apply, append) the rest.
+fn run_sync(args: ProjectSyncArgs) -> Result<()> {
+    use crate::session::project_registry as registry;
+
+    let mut current = registry::load_registry();
+    let registry_file = registry::registry_path();
+    let mut planned: Vec<registry::ProjectRegistryEntry> = Vec::new();
+    let mut skipped_registered = 0usize;
+
+    for root in &args.roots {
+        let root = root
+            .canonicalize()
+            .with_context(|| format!("resolve workspace root {}", root.display()))?;
+        let candidates = registry::scan_workspace_projects(&root);
+        if candidates.is_empty() {
+            println!("{}: no project-marker directories found", root.display());
+            continue;
+        }
+        for path in candidates {
+            if registry::resolve_project_for_path(&path, &current).is_some() {
+                skipped_registered += 1;
+                continue;
+            }
+            let mut entry = registry::default_entry_for_path(&path, None);
+            entry.key = registry::unique_key(&current, &entry.key);
+            entry.wiki_profile = if args.no_wiki {
+                None
+            } else {
+                Some(entry.key.clone())
+            };
+            // Track the planned entry locally so later candidates in the same
+            // run cannot claim the same key or re-match the same pattern.
+            current.push(entry.clone());
+            planned.push(entry);
+        }
+    }
+
+    if planned.is_empty() {
+        println!("Nothing to register ({skipped_registered} already covered by the registry).");
+        return Ok(());
+    }
+
+    println!(
+        "{} new project(s) ({} already registered):",
+        planned.len(),
+        skipped_registered
+    );
+    for entry in &planned {
+        println!(
+            "  {:32} <- {}  (wiki: {})",
+            entry.key,
+            entry.display_name,
+            entry.wiki_profile.as_deref().unwrap_or("-")
+        );
+    }
+
+    if !args.apply {
+        println!(
+            "\nDry run. Re-run with --apply to append these to {}",
+            registry_file.display()
+        );
+        return Ok(());
+    }
+    for entry in &planned {
+        registry::append_project(&registry_file, entry)?;
+    }
+    println!(
+        "\nRegistered {} project(s) in {}",
+        planned.len(),
+        registry_file.display()
+    );
+    Ok(())
 }
 
 async fn run_init(profile: &str, args: ProjectInitArgs) -> Result<()> {
