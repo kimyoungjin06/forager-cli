@@ -79,7 +79,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-candidates", type=int, default=8, help="Cap per document.")
     parser.add_argument("--chunk-chars", type=int, default=24000, help="Split longer docs on heading boundaries near this size.")
     parser.add_argument("--record", action="store_true", help="Record verified candidates via `forager offdesk wiki record-candidate` (origin background_review). Default is dry-run.")
-    parser.add_argument("--forager-bin", default=os.environ.get("FORAGER_BIN", str(repo_root() / "target" / "debug" / "forager")))
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    from forager_bin import resolve_forager_bin
+
+    parser.add_argument("--forager-bin", default=resolve_forager_bin())
     parser.add_argument("--mock", action="store_true", help="Deterministic offline mode for smoke tests (no LLM call).")
     parser.add_argument("--out", type=pathlib.Path, help="Write the full JSON report here.")
     return parser.parse_args()

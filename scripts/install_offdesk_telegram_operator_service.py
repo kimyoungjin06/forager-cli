@@ -28,7 +28,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--service-name", default="forager-telegram-operator.service")
     parser.add_argument("--repo-root", type=pathlib.Path, default=REPO_ROOT)
     parser.add_argument("--python-bin", default=sys.executable or "python3")
-    parser.add_argument("--forager-bin", type=pathlib.Path, default=REPO_ROOT / "target" / "debug" / "forager")
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    from forager_bin import resolve_forager_bin
+
+    parser.add_argument("--forager-bin", type=pathlib.Path, default=pathlib.Path(resolve_forager_bin()))
     parser.add_argument("--env-file", type=pathlib.Path, default=DEFAULT_ENV_FILE)
     parser.add_argument("--profile", default=os.environ.get("FORAGER_PROFILE", "default"))
     parser.add_argument("--state-file", type=pathlib.Path, default=DEFAULT_CACHE_DIR / "remote_operator_telegram_state.json")

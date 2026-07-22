@@ -342,6 +342,12 @@ out of product-facing docs. The product direction is defined in
   claude'`. Waiting-state Telegram notification for these sessions is the
   next wrapper slice.
 
+- Harness services resolve the forager binary through
+  `scripts/forager_bin.py` (`$FORAGER_BIN` -> `~/.local/bin/forager` ->
+  newest target build -> PATH) instead of hardcoding `target/debug`, which a
+  rebuild can rewrite mid-run. Refresh the stable binary deliberately with
+  `cargo build --release && cp target/release/forager ~/.local/bin/`.
+
 - The wrapper value loop is closed: `forager status` now emits per-session
   rows (id/title/tool/path/status/registry project) in `--json`, a
   per-project rollup line and a `harness: autonomy ... · wiki candidates ...`

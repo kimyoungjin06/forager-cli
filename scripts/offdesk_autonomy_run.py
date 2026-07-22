@@ -101,7 +101,10 @@ def disarm(profile: str, reason: str) -> None:
 
 
 def forager_bin() -> str:
-    return os.environ.get("FORAGER_BIN", str(REPO / "target" / "debug" / "forager"))
+    sys.path.insert(0, str(REPO / "scripts"))
+    from forager_bin import resolve_forager_bin  # noqa: PLC0415
+
+    return resolve_forager_bin()
 
 
 def log(msg: str) -> None:

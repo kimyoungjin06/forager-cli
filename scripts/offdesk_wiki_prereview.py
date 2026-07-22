@@ -65,7 +65,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-ctx", type=int, default=16384)
     parser.add_argument("--num-predict", type=int, default=2048)
     parser.add_argument("--timeout-sec", type=int, default=600)
-    parser.add_argument("--forager-bin", default=str(repo_root() / "target" / "debug" / "forager"))
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+    from forager_bin import resolve_forager_bin
+
+    parser.add_argument("--forager-bin", default=resolve_forager_bin())
     parser.add_argument("--packet", type=pathlib.Path, help="Write the operator review packet (markdown) here.")
     parser.add_argument("--out", type=pathlib.Path, help="Write the JSON report here.")
     args = parser.parse_args()
