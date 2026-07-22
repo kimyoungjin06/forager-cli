@@ -642,6 +642,25 @@ impl HomeView {
             Span::styled(" View ", desc_style),
         ]);
 
+        if self.orchestration.autonomy_armed {
+            spans.extend([
+                Span::styled("│", sep_style),
+                Span::styled(
+                    " Autonomy ARMED ",
+                    Style::default().fg(theme.waiting).bold(),
+                ),
+            ]);
+        }
+        if self.orchestration.wiki_candidates > 0 {
+            spans.extend([
+                Span::styled("│", sep_style),
+                Span::styled(
+                    format!(" Wiki cand {} ", self.orchestration.wiki_candidates),
+                    Style::default().fg(theme.accent),
+                ),
+            ]);
+        }
+
         if self.offdesk_resume.fresh_pending > 0 || self.offdesk_resume.stale_pending > 0 {
             let resume_style = if self.offdesk_resume.fresh_pending > 0 {
                 Style::default().fg(theme.waiting).bold()

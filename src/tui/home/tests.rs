@@ -2208,3 +2208,51 @@ fn test_uppercase_l_grows_list() {
     env.view.handle_key(key(KeyCode::Char('L')));
     assert_eq!(env.view.list_width, 40);
 }
+
+#[test]
+#[serial]
+fn orchestration_summary_reads_armed_state_and_registry() {
+    let temp = TempDir::new().unwrap();
+    setup_test_home(&temp);
+    let config_dir = temp.path().join(".config").join("forager");
+    std::fs::create_dir_all(config_dir.join("profiles").join("test")).unwrap();
+
+    // No registry, no armed file: everything quiet.
+    let summary = super::load_orchestration_summary("test");
+    assert!(!summary.autonomy_armed);
+    assert_eq!(summary.registered_projects, 0);
+
+    std::fs::write(
+        config_dir.join("projects.toml"),
+        "schema = \"forager_project_registry.v1\"\n\n[projects.demo]\nworkspace_patterns = [\"Demo\"]\n",
+    )
+    .unwrap();
+    let future = chrono::Utc::now() + chrono::Duration::hours(8);
+    std::fs::write(
+        config_dir
+            .join("profiles")
+            .join("test")
+            .join("offdesk_autonomy_armed.json"),
+        format!(
+            "{{\"armed\": true, \"until\": \"{}\"}}",
+            future.to_rfc3339()
+        ),
+    )
+    .unwrap();
+
+    let summary = super::load_orchestration_summary("test");
+    assert!(summary.autonomy_armed);
+    assert_eq!(summary.registered_projects, 1);
+
+    // An expired window must not read as armed.
+    let past = chrono::Utc::now() - chrono::Duration::hours(1);
+    std::fs::write(
+        config_dir
+            .join("profiles")
+            .join("test")
+            .join("offdesk_autonomy_armed.json"),
+        format!("{{\"armed\": true, \"until\": \"{}\"}}", past.to_rfc3339()),
+    )
+    .unwrap();
+    assert!(!super::load_orchestration_summary("test").autonomy_armed);
+}

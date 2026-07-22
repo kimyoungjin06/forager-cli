@@ -206,7 +206,15 @@ impl HomeView {
             match dialog.handle_key(key) {
                 DialogResult::Continue => {}
                 DialogResult::Cancel => {
+                    let action = dialog.action().to_string();
                     self.confirm_dialog = None;
+                    if action == "register_project" {
+                        // Declined: still attach to the session we created.
+                        self.pending_registry_path = None;
+                        if let Some(id) = self.pending_attach_after_registry.take() {
+                            return Some(Action::AttachSession(id));
+                        }
+                    }
                 }
                 DialogResult::Submit(_) => {
                     let action = dialog.action().to_string();
@@ -214,6 +222,29 @@ impl HomeView {
                     if action == "delete_group" {
                         if let Err(e) = self.delete_selected_group() {
                             tracing::error!("Failed to delete group: {}", e);
+                        }
+                    }
+                    if action == "register_project" {
+                        if let Some(path) = self.pending_registry_path.take() {
+                            let entry = crate::session::project_registry::default_entry_for_path(
+                                &path, None,
+                            );
+                            let registry_file = crate::session::project_registry::registry_path();
+                            match crate::session::project_registry::append_project(
+                                &registry_file,
+                                &entry,
+                            ) {
+                                Ok(()) => {
+                                    self.orchestration =
+                                        super::load_orchestration_summary(self.storage.profile());
+                                }
+                                Err(e) => {
+                                    tracing::error!("Failed to register project: {}", e);
+                                }
+                            }
+                        }
+                        if let Some(id) = self.pending_attach_after_registry.take() {
+                            return Some(Action::AttachSession(id));
                         }
                     }
                 }
@@ -712,9 +743,33 @@ impl HomeView {
             return None;
         }
 
+        let session_path = data.path.clone();
         match self.create_session(data) {
             Ok(session_id) => {
                 self.new_dialog = None;
+                // Onboarding: when a registry exists and this path is outside
+                // it, offer to register before attaching (attach takes over
+                // the terminal, so the prompt must come first).
+                let registry = crate::session::project_registry::load_registry();
+                let path = std::path::PathBuf::from(&session_path);
+                if !registry.is_empty()
+                    && crate::session::project_registry::resolve_project_for_path(&path, &registry)
+                        .is_none()
+                {
+                    let entry =
+                        crate::session::project_registry::default_entry_for_path(&path, None);
+                    self.confirm_dialog = Some(ConfirmDialog::new(
+                        "Register Project",
+                        &format!(
+                            "'{}' is not in the project registry.\nRegister it? (key: {}, wiki plane: {})",
+                            entry.display_name, entry.key, entry.key
+                        ),
+                        "register_project",
+                    ));
+                    self.pending_registry_path = Some(path);
+                    self.pending_attach_after_registry = Some(session_id);
+                    return None;
+                }
                 Some(Action::AttachSession(session_id))
             }
             Err(e) => {

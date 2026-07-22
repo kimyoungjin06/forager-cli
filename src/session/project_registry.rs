@@ -95,6 +95,110 @@ pub fn load_registry_from(path: &Path) -> Vec<ProjectRegistryEntry> {
         .collect()
 }
 
+/// Slug usable as a project key and wiki profile name.
+pub fn slugify_key(name: &str) -> String {
+    let slug: String = name
+        .to_lowercase()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || ('가'..='힣').contains(&c) {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let slug = slug.trim_matches('-').to_string();
+    // Collapse runs of '-' left by consecutive separators (e.g. "1.2.8.").
+    let mut collapsed = String::with_capacity(slug.len());
+    for c in slug.chars() {
+        if c == '-' && collapsed.ends_with('-') {
+            continue;
+        }
+        collapsed.push(c);
+    }
+    if collapsed.is_empty() {
+        "project".to_string()
+    } else {
+        collapsed
+    }
+}
+
+/// Default registry entry for onboarding a workspace directory: the folder
+/// name becomes the workspace pattern, and the (slugified) key doubles as the
+/// wiki profile so a fresh knowledge plane comes up with the project.
+pub fn default_entry_for_path(path: &Path, key: Option<&str>) -> ProjectRegistryEntry {
+    let folder = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| "project".to_string());
+    let key = key.map(slugify_key).unwrap_or_else(|| slugify_key(&folder));
+    ProjectRegistryEntry {
+        display_name: folder.clone(),
+        workspace_patterns: vec![folder],
+        session_group: None,
+        wiki_profile: Some(key.clone()),
+        key,
+    }
+}
+
+/// Append a project to the registry file, creating it (with the schema
+/// header) when missing. Existing content is never rewritten; a duplicate
+/// key is an error so hand-edited entries stay authoritative.
+pub fn append_project(path: &Path, entry: &ProjectRegistryEntry) -> anyhow::Result<()> {
+    let existing = load_registry_from(path);
+    if existing.iter().any(|item| item.key == entry.key) {
+        anyhow::bail!("project key already registered: {}", entry.key);
+    }
+    if path.exists() {
+        let raw = std::fs::read_to_string(path)?;
+        let parsed: Result<RegistryFile, _> = toml::from_str(&raw);
+        let schema_ok = matches!(parsed, Ok(ref file) if file.schema.as_deref() == Some(PROJECT_REGISTRY_SCHEMA));
+        if !raw.trim().is_empty() && !schema_ok {
+            anyhow::bail!(
+                "refusing to append to {} (unexpected schema or unparsable TOML)",
+                path.display()
+            );
+        }
+    }
+    let mut block = String::new();
+    if !path.exists() || std::fs::read_to_string(path)?.trim().is_empty() {
+        block.push_str(&format!("schema = \"{PROJECT_REGISTRY_SCHEMA}\"\n"));
+    }
+    block.push_str(&format!("\n[projects.{}]\n", entry.key));
+    block.push_str(&format!(
+        "display_name = {}\n",
+        toml_string(&entry.display_name)
+    ));
+    let patterns = entry
+        .workspace_patterns
+        .iter()
+        .map(|pattern| toml_string(pattern))
+        .collect::<Vec<_>>()
+        .join(", ");
+    block.push_str(&format!("workspace_patterns = [{patterns}]\n"));
+    if let Some(group) = &entry.session_group {
+        block.push_str(&format!("session_group = {}\n", toml_string(group)));
+    }
+    if let Some(profile) = &entry.wiki_profile {
+        block.push_str(&format!("wiki_profile = {}\n", toml_string(profile)));
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    file.write_all(block.as_bytes())?;
+    Ok(())
+}
+
+fn toml_string(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
 /// Match a filesystem path against workspace patterns (substring match, same
 /// semantics as the Python loader and the nightly session miner).
 pub fn resolve_project_for_path(
@@ -161,5 +265,44 @@ wiki_profile = "twinpaper-review"
     #[test]
     fn missing_file_yields_empty() {
         assert!(load_registry_from(Path::new("/nonexistent/projects.toml")).is_empty());
+    }
+
+    #[test]
+    fn slugify_produces_stable_keys() {
+        assert_eq!(slugify_key("1.2.8.TwinPaper"), "1-2-8-twinpaper");
+        assert_eq!(slugify_key("My Project"), "my-project");
+        assert_eq!(slugify_key("---"), "project");
+    }
+
+    #[test]
+    fn append_creates_and_extends_registry() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let registry_file = dir.path().join("projects.toml");
+        let entry = default_entry_for_path(Path::new("/ws/1.9.9.NewThing"), Some("newthing"));
+        assert_eq!(entry.key, "newthing");
+        assert_eq!(entry.wiki_profile.as_deref(), Some("newthing"));
+        assert_eq!(entry.workspace_patterns, vec!["1.9.9.NewThing"]);
+
+        append_project(&registry_file, &entry).expect("append into fresh file");
+        let loaded = load_registry_from(&registry_file);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].display_name, "1.9.9.NewThing");
+
+        // Duplicate keys must be rejected; a second project appends cleanly.
+        assert!(append_project(&registry_file, &entry).is_err());
+        let second = default_entry_for_path(Path::new("/ws/Other"), None);
+        append_project(&registry_file, &second).expect("append second");
+        let loaded = load_registry_from(&registry_file);
+        assert_eq!(loaded.len(), 2);
+        assert!(resolve_project_for_path(Path::new("/ws/Other/src"), &loaded).is_some());
+    }
+
+    #[test]
+    fn append_refuses_foreign_toml() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let registry_file = dir.path().join("projects.toml");
+        std::fs::write(&registry_file, "schema = \"other.v1\"\n").expect("seed foreign file");
+        let entry = default_entry_for_path(Path::new("/ws/X"), None);
+        assert!(append_project(&registry_file, &entry).is_err());
     }
 }

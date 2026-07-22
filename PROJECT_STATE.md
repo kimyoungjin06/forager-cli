@@ -342,6 +342,18 @@ out of product-facing docs. The product direction is defined in
   claude'`. Waiting-state Telegram notification for these sessions is the
   next wrapper slice.
 
+- New-project onboarding is a one-liner or one tap: `forager go --register
+  [--key <key>]` appends the directory to the project registry (folder name
+  as pattern, key doubling as a fresh wiki plane) and continues straight into
+  brief + session; the TUI equivalent is a "Register Project" confirm shown
+  after creating a session at an unregistered path (only when a registry
+  exists), attaching either way. The TUI status bar now carries harness-wide
+  orchestration signals: `Autonomy ARMED` while the overnight window is
+  armed, and the wiki candidate queue total across every registered plane
+  (`load_orchestration_summary`, refreshed on reload). Remaining TUI
+  improvement slices deferred: project rollup view and an actionable
+  attention panel.
+
 ## Next Work Candidates
 
 0. Apply the deferred council verdicts once a kind/agent-mode edit primitive

@@ -36,6 +36,16 @@ pub struct GoArgs {
     #[arg(long = "trust-hooks")]
     trust_hooks: bool,
 
+    /// Register this directory in the project registry before launching.
+    /// The project key (see --key) doubles as the wiki profile, so a fresh
+    /// knowledge plane comes up with the project.
+    #[arg(long = "register")]
+    register: bool,
+
+    /// Project key for --register (default: slugified folder name)
+    #[arg(long = "key", requires = "register")]
+    key: Option<String>,
+
     /// Skip the wiki brief refresh
     #[arg(long = "no-brief")]
     no_brief: bool,
@@ -62,17 +72,43 @@ pub async fn run(profile: &str, args: GoArgs) -> Result<()> {
     };
     let tool = super::add::detect_tool(&command)?;
 
-    let registry = load_registry();
-    let project = resolve_project_for_path(&path, &registry);
+    let mut registry = load_registry();
+    let mut project = resolve_project_for_path(&path, &registry);
+
+    if args.register {
+        if let Some(entry) = &project {
+            println!(
+                "Already registered as {} ({}); --register ignored.",
+                entry.display_name, entry.key
+            );
+        } else {
+            let key = args.key.as_deref().filter(|value| !value.trim().is_empty());
+            let entry = crate::session::project_registry::default_entry_for_path(&path, key);
+            let registry_file = crate::session::project_registry::registry_path();
+            crate::session::project_registry::append_project(&registry_file, &entry)?;
+            println!(
+                "Registered project: {} (key: {}, wiki plane: {})",
+                entry.display_name,
+                entry.key,
+                entry.wiki_profile.as_deref().unwrap_or("-")
+            );
+            registry = load_registry();
+            project = resolve_project_for_path(&path, &registry);
+        }
+    }
+
     match &project {
         Some(entry) => println!("Project: {} ({})", entry.display_name, entry.key),
         None => {
             if registry.is_empty() {
-                println!("Project registry not found; running unregistered.");
+                println!(
+                    "Project registry not found; running unregistered.\n\
+                     Tip: rerun with --register to create it and onboard this project."
+                );
             } else {
                 println!(
                     "Path is not in the project registry; running unregistered.\n\
-                     Tip: add a [projects.<key>] entry with a matching workspace_pattern to {}",
+                     Tip: rerun with --register [--key <key>] to onboard it (registry: {})",
                     crate::session::project_registry::registry_path().display()
                 );
             }

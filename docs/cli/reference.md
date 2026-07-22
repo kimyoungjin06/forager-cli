@@ -240,6 +240,8 @@ Find-or-create a session for this directory, refresh its wiki brief, and attach
   Default value: `.`
 * `-y`, `--yolo` — Enable YOLO mode when creating a new session
 * `--trust-hooks` — Automatically trust repository hooks without prompting
+* `--register` — Register this directory in the project registry before launching. The project key (see --key) doubles as the wiki profile, so a fresh knowledge plane comes up with the project
+* `--key <KEY>` — Project key for --register (default: slugified folder name)
 * `--no-brief` — Skip the wiki brief refresh
 * `--no-attach` — Create/start the session but do not attach (for scripts and tests)
 

@@ -350,6 +350,63 @@ pub struct HomeView {
 
     // Offdesk durable artifact status
     pub(super) offdesk_resume: OffdeskResumeSummary,
+
+    // Orchestration signals for the status bar
+    pub(super) orchestration: OrchestrationSummary,
+
+    // Path awaiting a "register project?" confirmation after session creation
+    pub(super) pending_registry_path: Option<std::path::PathBuf>,
+
+    // Session to attach once the registry confirmation resolves either way
+    pub(super) pending_attach_after_registry: Option<String>,
+}
+
+/// Harness-wide signals surfaced in the status bar: overnight autonomy state
+/// and the wiki candidate queue across every registered knowledge plane.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct OrchestrationSummary {
+    pub(super) autonomy_armed: bool,
+    pub(super) registered_projects: usize,
+    pub(super) wiki_candidates: usize,
+}
+
+pub(super) fn load_orchestration_summary(profile: &str) -> OrchestrationSummary {
+    let autonomy_armed = get_profile_dir(profile)
+        .ok()
+        .map(|dir| dir.join("offdesk_autonomy_armed.json"))
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .map(|state| {
+            state
+                .get("armed")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+                && state
+                    .get("until")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                    .is_some_and(|until| until > chrono::Utc::now())
+        })
+        .unwrap_or(false);
+
+    let registry = crate::session::project_registry::load_registry();
+    let mut wiki_candidates = 0;
+    for entry in &registry {
+        let Some(wiki_profile) = &entry.wiki_profile else {
+            continue;
+        };
+        let Ok(dir) = get_profile_dir(wiki_profile) else {
+            continue;
+        };
+        if let Ok(state) = crate::offdesk::AdaptiveWikiStore::new(dir).load_candidates() {
+            wiki_candidates += state.candidates.len();
+        }
+    }
+    OrchestrationSummary {
+        autonomy_armed,
+        registered_projects: registry.len(),
+        wiki_candidates,
+    }
 }
 
 impl HomeView {
@@ -382,6 +439,7 @@ impl HomeView {
             .map(|config| config.sound.clone())
             .unwrap_or_default();
         let offdesk_resume = load_offdesk_summary(storage.profile());
+        let profile_name = storage.profile().to_string();
 
         let mut view = Self {
             storage,
@@ -427,6 +485,9 @@ impl HomeView {
                 .and_then(|c| c.app_state.home_list_width)
                 .unwrap_or(35),
             offdesk_resume,
+            orchestration: load_orchestration_summary(profile_name.as_str()),
+            pending_registry_path: None,
+            pending_attach_after_registry: None,
         };
 
         view.update_selected();
@@ -464,6 +525,7 @@ impl HomeView {
         self.group_tree = GroupTree::new_with_groups(&self.instances, &self.groups);
         self.flat_items = flatten_tree(&self.group_tree, &self.instances);
         self.offdesk_resume = load_offdesk_summary(self.storage.profile());
+        self.orchestration = load_orchestration_summary(self.storage.profile());
 
         if self.cursor >= self.flat_items.len() && !self.flat_items.is_empty() {
             self.cursor = self.flat_items.len() - 1;
