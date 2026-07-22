@@ -61,6 +61,13 @@ def parse_args() -> argparse.Namespace:
         "workstation goes idle. Off by default; the operator's tap is the only approval.",
     )
     parser.add_argument(
+        "--session-notify",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Push a card when a supervised agent session sits waiting for input "
+        "(recommended with forager go). Use --no-session-notify to disable.",
+    )
+    parser.add_argument(
         "--dispatch-allowlist-file",
         type=pathlib.Path,
         default=None,
@@ -123,6 +130,8 @@ def render_unit(args: argparse.Namespace) -> str:
             command.extend(["--attention-reminder-sec", args.attention_reminder_sec])
     if args.autonomy_propose:
         command.append("--autonomy-propose")
+    if args.session_notify:
+        command.append("--session-notify")
     if args.dispatch_allowlist_file is not None:
         command.extend(["--dispatch-allowlist-file", args.dispatch_allowlist_file])
     exec_start = " ".join(systemd_arg(item) for item in command)

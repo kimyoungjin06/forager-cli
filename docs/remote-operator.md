@@ -704,6 +704,19 @@ updates. `--once` is for one-shot probes, and `--max-polls` is available for
 bounded smoke tests. `--send-command-text` sends one read-only projection to
 the configured owner chat without consuming updates.
 
+## Waiting-Session Notifications
+
+With `--session-notify` (the systemd installer enables it by default) each
+poll runs `forager status --json` and pushes one card per waiting-episode of
+a supervised agent session: a `forager go` session that hits a permission
+prompt or question while the operator is away produces
+`세션 입력 대기 / ⏸ <project> · <title> (<tool>)` with the attach command as
+the next action. The project tag comes from the session's registry match.
+Per-session backoff (`--session-notify-backoff-sec`, default 1800) damps
+repeats; a session that leaves the waiting state is cleared so the next
+episode notifies immediately. `--session-status-file` overrides the probe
+for replay tests. Read-only: the card never acts on the session.
+
 ## Idle-Proposed Overnight Autonomy
 
 With `--autonomy-propose` the listener watches local activity (newest mtimes

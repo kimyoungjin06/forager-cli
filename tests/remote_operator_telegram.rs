@@ -7356,3 +7356,74 @@ fn remote_operator_telegram_help_points_to_guide() -> Result<()> {
     assert_mobile_contract(&result);
     Ok(())
 }
+
+#[test]
+#[serial]
+fn remote_operator_telegram_waiting_session_notifies_once_per_episode() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let state_path = temp.path().join("telegram_state.json");
+    let status_path = temp.path().join("status.json");
+    fs::write(
+        &status_path,
+        serde_json::to_string(&json!({
+            "sessions": [
+                {"id": "abc123", "title": "ClaudePilot", "tool": "claude",
+                 "path": "/ws/1.2.8.TwinPaper", "status": "waiting", "project": "twinpaper"},
+                {"id": "def456", "title": "Tuner", "tool": "codex",
+                 "path": "/ws/nano", "status": "running", "project": "nanoclustering"}
+            ]
+        }))?,
+    )?;
+
+    let mut results = Vec::new();
+    for (index, update_id) in [(1, 810), (2, 811)] {
+        let update_path = temp.path().join(format!("update_{index}.json"));
+        write_text_update(&update_path, update_id, 960 + index, "/status")?;
+        let out = temp.path().join(format!("waiting_result_{index}.json"));
+        let output = remote_operator_command(temp.path())
+            .arg("--dry-run")
+            .arg("--once")
+            .arg("--replay-update-file")
+            .arg(&update_path)
+            .arg("--forager-bin")
+            .arg(env!("CARGO_BIN_EXE_forager"))
+            .arg("--env-file")
+            .arg(&env_path)
+            .arg("--state-file")
+            .arg(&state_path)
+            .arg("--out")
+            .arg(&out)
+            .arg("--session-notify")
+            .arg("--session-status-file")
+            .arg(&status_path)
+            .output()?;
+        assert!(
+            output.status.success(),
+            "stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        results.push(serde_json::from_slice::<Value>(&fs::read(&out)?)?);
+    }
+
+    // First poll notifies the waiting session (project-tagged card), second
+    // poll is suppressed by the per-session backoff.
+    assert_eq!(results[0]["session_notification"]["status"], "notified");
+    let sent = results[0]["session_notification"]["sent"]
+        .as_array()
+        .expect("sent sessions");
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["session_id"], "abc123");
+    assert_eq!(sent[0]["project"], "twinpaper");
+    assert_eq!(
+        results[1]["session_notification"]["status"],
+        "no_new_waiting"
+    );
+    assert_eq!(results[1]["session_notification"]["waiting_count"], 1);
+
+    let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    assert!(state["waiting_notified_by_session"]["abc123"].is_number());
+    Ok(())
+}

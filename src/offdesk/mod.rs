@@ -15,6 +15,7 @@ pub mod learning_signals;
 pub mod mode_contract;
 pub mod mutation;
 pub mod operator_pause;
+pub mod orchestration;
 pub mod provider;
 pub mod redaction;
 pub mod resume;
@@ -114,6 +115,7 @@ pub use mutation::{
 pub use operator_pause::{
     OperatorPauseState, OperatorPauseStore, OPERATOR_PAUSE_FILE, OPERATOR_PAUSE_SCHEMA,
 };
+pub use orchestration::{load_orchestration_signals, OrchestrationSignals};
 pub use provider::{
     classify_provider_error, classify_provider_error_with_context, default_provider_profile,
     default_provider_profiles, recommend_provider_fallback, ProviderCapacityState,

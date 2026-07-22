@@ -342,6 +342,16 @@ out of product-facing docs. The product direction is defined in
   claude'`. Waiting-state Telegram notification for these sessions is the
   next wrapper slice.
 
+- The wrapper value loop is closed: `forager status` now emits per-session
+  rows (id/title/tool/path/status/registry project) in `--json`, a
+  per-project rollup line and a `harness: autonomy ... · wiki candidates ...`
+  line in human output (signals shared with the TUI via
+  `offdesk::orchestration`). The Telegram listener's `--session-notify`
+  (installer default on) pushes one card per waiting-episode of a supervised
+  session, project-tagged from the registry, with per-session backoff;
+  episodes that end clear immediately. A `forager go` session that hits a
+  permission prompt while the operator is away now reaches the phone.
+
 - New-project onboarding is a one-liner or one tap: `forager go --register
   [--key <key>]` appends the directory to the project registry (folder name
   as pattern, key doubling as a fresh wiki plane) and continues straight into

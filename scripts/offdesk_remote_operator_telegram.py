@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import html
 import json
 import os
 import pathlib
@@ -275,6 +276,18 @@ def parse_args() -> argparse.Namespace:
                         help="Minimum seconds between proposals (unanswered or declined).")
     parser.add_argument("--autonomy-watch-path", action="append", type=pathlib.Path, default=[],
                         help="Activity probe path (repeatable). Defaults to Claude/Codex session dirs.")
+    parser.add_argument(
+        "--session-notify",
+        action="store_true",
+        default=os.environ.get("OFFDESK_REMOTE_OPERATOR_SESSION_NOTIFY", "") == "1",
+        help="Push a card when a supervised agent session sits in the waiting state "
+        "(permission prompt / question) so the operator hears about it away from the desk.",
+    )
+    parser.add_argument("--session-notify-backoff-sec", type=int, default=1800,
+                        help="Minimum seconds between cards for the same session.")
+    parser.add_argument("--session-status-file", type=pathlib.Path, default=None,
+                        help="Read session status JSON from this file instead of running "
+                        "`forager status --json` (replay/testing).")
     parser.add_argument(
         "--attention-reminder-sec",
         type=int,
@@ -2021,6 +2034,84 @@ def scan_and_propose_autonomy(
         return {"status": "scan_failed", "error": sanitize_text(str(error), max_chars=240)}
 
 
+def scan_and_notify_waiting_sessions(
+    args: argparse.Namespace,
+    config: dict[str, Any],
+    state: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Push one card per waiting-episode of a supervised agent session.
+
+    A session that flips to waiting gets a card once, then again only after
+    the per-session backoff. Sessions that leave the waiting state are
+    cleared so the next episode notifies immediately. Never raises into the
+    poll loop.
+    """
+
+    if not getattr(args, "session_notify", False):
+        return None
+    target_chat_id = str(config.get("target_chat_id") or "").strip()
+    if not target_chat_id:
+        return {"status": "no_target_chat"}
+    try:
+        if args.session_status_file is not None:
+            status = json.loads(args.session_status_file.read_text())
+        else:
+            process = subprocess.run(
+                [args.forager_bin, "-p", args.profile, "status", "--json"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if process.returncode != 0:
+                return {
+                    "status": "scan_failed",
+                    "error": sanitize_text(process.stderr or process.stdout, max_chars=200),
+                }
+            status = json.loads(process.stdout)
+        sessions = [s for s in status.get("sessions") or [] if isinstance(s, dict)]
+        waiting = [s for s in sessions if s.get("status") == "waiting"]
+        notified = state.setdefault("waiting_notified_by_session", {})
+        if not isinstance(notified, dict):
+            notified = {}
+            state["waiting_notified_by_session"] = notified
+        now = time.time()
+        waiting_ids = {str(s.get("id") or "") for s in waiting}
+        # Episode end: forget sessions that are no longer waiting so the next
+        # episode notifies right away (entries younger than 300s stay to damp
+        # flapping between polls).
+        for session_id in list(notified):
+            if session_id not in waiting_ids and now - float(notified[session_id]) > 300:
+                del notified[session_id]
+        sent = []
+        for session in waiting:
+            session_id = str(session.get("id") or "")
+            if not session_id:
+                continue
+            last = float(notified.get(session_id) or 0)
+            if now - last < int(args.session_notify_backoff_sec):
+                continue
+            title = sanitize_text(str(session.get("title") or session_id), max_chars=60)
+            tool = sanitize_text(str(session.get("tool") or "agent"), max_chars=24)
+            project = sanitize_text(str(session.get("project") or "미등록"), max_chars=40)
+            message = "\n".join(
+                [
+                    "<b>세션 입력 대기</b>",
+                    f"⏸ {html.escape(project)} · {html.escape(title)} ({html.escape(tool)})",
+                    "에이전트가 승인/입력을 기다리고 있습니다.",
+                    f"다음 조치: forager session attach {html.escape(title)}",
+                ]
+            )
+            try:
+                send_message(config, target_chat_id, message, args)
+            except RemoteOperatorTelegramError:
+                continue
+            notified[session_id] = now
+            sent.append({"session_id": session_id, "title": title, "project": project})
+        if not sent:
+            return {"status": "no_new_waiting", "waiting_count": len(waiting)}
+        return {"status": "notified", "sent": sent, "waiting_count": len(waiting)}
+    except Exception as error:  # noqa: BLE001 - poll loop must never crash here
+        return {"status": "scan_failed", "error": sanitize_text(str(error), max_chars=240)}
+
+
 def scan_and_notify_attention(
     args: argparse.Namespace,
     config: dict[str, Any],
@@ -2272,6 +2363,9 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
     autonomy = scan_and_propose_autonomy(args, config, state)
     if autonomy is not None:
         result["autonomy_proposal"] = autonomy
+    session_notification = scan_and_notify_waiting_sessions(args, config, state)
+    if session_notification is not None:
+        result["session_notification"] = session_notification
     offset_advanced = max_update_id >= int(state.get("offset") or 0)
     if offset_advanced:
         state["offset"] = max_update_id + 1
@@ -2281,7 +2375,11 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
     attention_touched_state = bool(
         attention and attention.get("status") in {"notified", "no_new_attention"}
     )
-    if offset_advanced or attention_touched_state:
+    session_touched_state = bool(
+        session_notification
+        and session_notification.get("status") in {"notified", "no_new_waiting"}
+    )
+    if offset_advanced or attention_touched_state or session_touched_state:
         save_state(args.state_file, state)
     return result
 
