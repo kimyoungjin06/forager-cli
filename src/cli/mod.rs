@@ -4,6 +4,7 @@ pub mod add;
 pub mod artifact_index;
 pub mod definition;
 pub mod doctor;
+pub mod go;
 pub mod group;
 pub mod init;
 pub mod list;

@@ -6,6 +6,7 @@ This document contains the help content for the `forager` command-line program.
 
 * [`forager`↴](#forager)
 * [`forager add`↴](#forager-add)
+* [`forager go`↴](#forager-go)
 * [`forager init`↴](#forager-init)
 * [`forager list`↴](#forager-list)
 * [`forager remove`↴](#forager-remove)
@@ -74,6 +75,10 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk provider-capacity`↴](#forager-offdesk-provider-capacity)
 * [`forager offdesk provider-fallback`↴](#forager-offdesk-provider-fallback)
 * [`forager offdesk cancel-task`↴](#forager-offdesk-cancel-task)
+* [`forager offdesk pause`↴](#forager-offdesk-pause)
+* [`forager offdesk unpause`↴](#forager-offdesk-unpause)
+* [`forager offdesk pause-status`↴](#forager-offdesk-pause-status)
+* [`forager offdesk learning-scan`↴](#forager-offdesk-learning-scan)
 * [`forager offdesk retry-task`↴](#forager-offdesk-retry-task)
 * [`forager offdesk resume-task`↴](#forager-offdesk-resume-task)
 * [`forager offdesk abandon-task`↴](#forager-offdesk-abandon-task)
@@ -108,6 +113,7 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk wiki entries`↴](#forager-offdesk-wiki-entries)
 * [`forager offdesk wiki show`↴](#forager-offdesk-wiki-show)
 * [`forager offdesk wiki projection`↴](#forager-offdesk-wiki-projection)
+* [`forager offdesk wiki brief`↴](#forager-offdesk-wiki-brief)
 * [`forager offdesk wiki runtime-policy-acks`↴](#forager-offdesk-wiki-runtime-policy-acks)
 * [`forager offdesk wiki runtime-policy-ack-report`↴](#forager-offdesk-wiki-runtime-policy-ack-report)
 * [`forager offdesk wiki review-after-report`↴](#forager-offdesk-wiki-review-after-report)
@@ -120,9 +126,12 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk wiki episode-trace`↴](#forager-offdesk-wiki-episode-trace)
 * [`forager offdesk wiki evaluate-recurrence`↴](#forager-offdesk-wiki-evaluate-recurrence)
 * [`forager offdesk wiki promotion-chain`↴](#forager-offdesk-wiki-promotion-chain)
+* [`forager offdesk wiki record-candidate`↴](#forager-offdesk-wiki-record-candidate)
 * [`forager offdesk wiki promote`↴](#forager-offdesk-wiki-promote)
 * [`forager offdesk wiki reject`↴](#forager-offdesk-wiki-reject)
 * [`forager offdesk wiki rescope`↴](#forager-offdesk-wiki-rescope)
+* [`forager offdesk wiki edit`↴](#forager-offdesk-wiki-edit)
+* [`forager offdesk wiki add-tag`↴](#forager-offdesk-wiki-add-tag)
 * [`forager offdesk wiki deprecate`↴](#forager-offdesk-wiki-deprecate)
 * [`forager offdesk wiki renew-review-after`↴](#forager-offdesk-wiki-renew-review-after)
 * [`forager offdesk wiki add-counterexample`↴](#forager-offdesk-wiki-add-counterexample)
@@ -160,6 +169,7 @@ Run without arguments to launch the TUI dashboard. The legacy `aoe` binary remai
 ###### **Subcommands:**
 
 * `add` — Add a new session
+* `go` — Find-or-create a session for this directory, refresh its wiki brief, and attach
 * `init` — Initialize .forager/config.toml in a repository
 * `list` — List all sessions
 * `remove` — Remove a session
@@ -207,6 +217,31 @@ Add a new session
 * `-b`, `--new-branch` — Create a new branch (use with --worktree)
 * `-y`, `--yolo` — Enable YOLO mode (skip permission prompts)
 * `--trust-hooks` — Automatically trust repository hooks without prompting
+
+
+
+## `forager go`
+
+Find-or-create a session for this directory, refresh its wiki brief, and attach
+
+**Usage:** `forager go [OPTIONS] [TOOL] [TOOL_ARGS]...`
+
+###### **Arguments:**
+
+* `<TOOL>` — Agent tool to run (e.g. 'claude', 'codex', 'gemini', 'opencode')
+
+  Default value: `claude`
+* `<TOOL_ARGS>` — Extra arguments appended to the tool command (after `--`), e.g. `forager go claude -- --continue`
+
+###### **Options:**
+
+* `--path <PATH>` — Project directory (defaults to current directory)
+
+  Default value: `.`
+* `-y`, `--yolo` — Enable YOLO mode when creating a new session
+* `--trust-hooks` — Automatically trust repository hooks without prompting
+* `--no-brief` — Skip the wiki brief refresh
+* `--no-attach` — Create/start the session but do not attach (for scripts and tests)
 
 
 
@@ -880,6 +915,10 @@ Manage offdesk approvals and recovery artifacts
 * `provider-capacity` — Show provider capacity cooldown state
 * `provider-fallback` — Recommend provider/model fallbacks without retargeting tasks
 * `cancel-task` — Mark a durable task cancelled without stopping its background runner
+* `pause` — Halt all new offdesk dispatch until resumed (existing runs keep polling)
+* `unpause` — Clear the global operator pause so new dispatch can proceed again
+* `pause-status` — Show the current global operator pause state
+* `learning-scan` — Emit adaptive-wiki learning candidates from observed denials, failures, and resume-recovery rows (recommendation-only; runs each event once)
 * `retry-task` — Requeue a failed, resume-pending, or cancelled durable task
 * `resume-task` — Accept recovery for a resume-pending task and requeue it
 * `abandon-task` — Discard a failed or resume-pending task
@@ -1487,6 +1526,61 @@ Mark a durable task cancelled without stopping its background runner
 
 
 
+## `forager offdesk pause`
+
+Halt all new offdesk dispatch until resumed (existing runs keep polling)
+
+**Usage:** `forager offdesk pause [OPTIONS]`
+
+###### **Options:**
+
+* `--reason <REASON>` — Reason to record for the pause
+* `--by <BY>` — Actor engaging the pause
+
+  Default value: `cli`
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk unpause`
+
+Clear the global operator pause so new dispatch can proceed again
+
+**Usage:** `forager offdesk unpause [OPTIONS]`
+
+###### **Options:**
+
+* `--by <BY>` — Actor clearing the pause
+
+  Default value: `cli`
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk pause-status`
+
+Show the current global operator pause state
+
+**Usage:** `forager offdesk pause-status [OPTIONS]`
+
+###### **Options:**
+
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk learning-scan`
+
+Emit adaptive-wiki learning candidates from observed denials, failures, and resume-recovery rows (recommendation-only; runs each event once)
+
+**Usage:** `forager offdesk learning-scan [OPTIONS]`
+
+###### **Options:**
+
+* `--json` — Output as JSON
+
+
+
 ## `forager offdesk retry-task`
 
 Requeue a failed, resume-pending, or cancelled durable task
@@ -1892,6 +1986,7 @@ Inspect adaptive wiki candidates, entries, projections, and lint
 * `entries` — List adaptive wiki entries
 * `show` — Show one adaptive wiki entry or candidate
 * `projection` — Show the AI projection for a scope
+* `brief` — Render a compact, skepticism-aware knowledge brief for session start
 * `runtime-policy-acks` — List strict runtime projection policy acknowledgements
 * `runtime-policy-ack-report` — Report strict runtime projection acknowledgements that need attention
 * `review-after-report` — Report promoted entries whose review_after needs attention
@@ -1904,9 +1999,12 @@ Inspect adaptive wiki candidates, entries, projections, and lint
 * `episode-trace` — Trace live task/probe/wiki evidence for adaptive behavior review
 * `evaluate-recurrence` — Evaluate whether corrections recur after an entry is promoted
 * `promotion-chain` — Reconstruct the evidence chain captured at promotion time
+* `record-candidate` — Record an operator-authored learning candidate (e.g. from a doc review)
 * `promote` — Promote a candidate into a scoped wiki entry
 * `reject` — Reject a candidate without creating an entry
 * `rescope` — Change an entry scope
+* `edit` — Edit an entry's claim, instruction, summary, or evidence refs in place
+* `add-tag` — Add controlled/proposed tags to an entry (e.g. facet/* or domain/*)
 * `deprecate` — Deprecate an entry so it no longer appears in AI projection
 * `renew-review-after` — Renew an entry review_after timestamp without changing scope or instruction
 * `add-counterexample` — Add a counterexample evidence ref to an entry
@@ -2151,6 +2249,25 @@ Show the AI projection for a scope
 
 
 
+## `forager offdesk wiki brief`
+
+Render a compact, skepticism-aware knowledge brief for session start
+
+**Usage:** `forager offdesk wiki brief [OPTIONS]`
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEY>` — Project key scope to match
+* `--artifact-kind <ARTIFACT_KIND>` — Artifact kind scope to match
+* `--agent-mode <AGENT_MODE>` — Agent work mode to project for (omit for shared/universal entries)
+* `--max-entries <MAX_ENTRIES>` — Maximum entries in the brief
+
+  Default value: `12`
+* `--out <OUT>` — Write the brief to this path instead of stdout
+* `--json` — Output as JSON
+
+
+
 ## `forager offdesk wiki runtime-policy-acks`
 
 List strict runtime projection policy acknowledgements
@@ -2365,6 +2482,44 @@ Reconstruct the evidence chain captured at promotion time
 
 
 
+## `forager offdesk wiki record-candidate`
+
+Record an operator-authored learning candidate (e.g. from a doc review)
+
+**Usage:** `forager offdesk wiki record-candidate [OPTIONS] --kind <KIND> --scope <SCOPE> --claim <CLAIM>`
+
+###### **Options:**
+
+* `--kind <KIND>` — Knowledge kind
+* `--scope <SCOPE>` — Applicability scope
+* `--scope-ref <SCOPE_REF>` — Scope reference (e.g. project key). Required unless scope is user_global
+* `--claim <CLAIM>` — One-line durable claim
+* `--ai-instruction <AI_INSTRUCTION>` — Compact instruction for the AI projection
+
+  Default value: ``
+* `--human-summary <HUMAN_SUMMARY>` — Operator-facing governance summary
+
+  Default value: ``
+* `--evidence-ref <EVIDENCE_REFS>` — Evidence reference (repeatable), e.g. doc:/path/AGENTS.md#section
+* `--agent-mode <AGENT_MODES>` — Agent work mode this candidate applies to (repeatable; omit for universal)
+* `--core-tag <CORE_TAGS>` — Controlled core tag (repeatable), e.g. domain/twinpaper or harness/dispatch
+* `--proposed-tag <PROPOSED_TAGS>` — Proposed (reviewable) tag (repeatable)
+* `--confidence <CONFIDENCE>` — Confidence level
+
+  Default value: `explicit`
+* `--origin <ORIGIN>` — Provenance of this candidate: who observed it
+
+  Default value: `operator_explicit`
+* `--signal-kind <SIGNAL_KIND>` — What kind of signal produced this candidate. operator_correction also appends a first-class correction record for recurrence evaluation
+
+  Default value: `imported_doc`
+* `--review-reason <REVIEW_REASON>` — Why this is worth reviewing/promoting
+
+  Default value: ``
+* `--json` — Output as JSON
+
+
+
 ## `forager offdesk wiki promote`
 
 Promote a candidate into a scoped wiki entry
@@ -2389,6 +2544,9 @@ Promote a candidate into a scoped wiki entry
 * `--reason <REASON>` — Optional promotion reason for audit
 
   Default value: ``
+* `--review-after-days <REVIEW_AFTER_DAYS>` — Review window in days: entries must be re-reviewed after this horizon (skepticism-by-default; 0 disables)
+
+  Default value: `90`
 * `--json` — Output as JSON
 
 
@@ -2431,6 +2589,56 @@ Change an entry scope
 
   Default value: `cli`
 * `--reason <REASON>` — Optional rescope reason for audit
+
+  Default value: ``
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki edit`
+
+Edit an entry's claim, instruction, summary, or evidence refs in place
+
+**Usage:** `forager offdesk wiki edit [OPTIONS] <ENTRY_ID>`
+
+###### **Arguments:**
+
+* `<ENTRY_ID>` — Adaptive wiki entry id
+
+###### **Options:**
+
+* `--claim <CLAIM>` — Replace the durable claim
+* `--ai-instruction <AI_INSTRUCTION>` — Replace the compact AI instruction
+* `--human-summary <HUMAN_SUMMARY>` — Replace the operator-facing summary
+* `--evidence-ref <EVIDENCE_REFS>` — Add an evidence reference (repeatable)
+* `--by <BY>` — Operator or surface performing the edit
+
+  Default value: `cli`
+* `--reason <REASON>` — Optional edit reason for audit
+
+  Default value: ``
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki add-tag`
+
+Add controlled/proposed tags to an entry (e.g. facet/* or domain/*)
+
+**Usage:** `forager offdesk wiki add-tag [OPTIONS] <ENTRY_ID>`
+
+###### **Arguments:**
+
+* `<ENTRY_ID>` — Adaptive wiki entry id
+
+###### **Options:**
+
+* `--core-tag <CORE_TAGS>` — Controlled core tag (repeatable), e.g. facet/research or domain/twinpaper
+* `--proposed-tag <PROPOSED_TAGS>` — Proposed (reviewable) tag (repeatable)
+* `--by <BY>` — Operator or surface performing the retag
+
+  Default value: `cli`
+* `--reason <REASON>` — Optional retag reason for audit
 
   Default value: ``
 * `--json` — Output as JSON
@@ -2626,24 +2834,6 @@ Emit the workstation dashboard surface for the Web UI control plane
 
 **Usage:** `forager ondesk workstation-surface [OPTIONS]`
 
-The JSON output uses `workstation_surface.v1` and embeds the read-only
-`decision_inbox_surface.v1` projection used by the Web dashboard and
-`/decisions/` action center. Decision actions include preview-only
-`action_envelope.v1` cards with observed hashes, expiry timestamps,
-idempotency keys, forbidden effects, expected receipt schemas, and any matching
-latest `action_envelope_receipt.v1` verdict. The surface also attaches latest
-matching `decision_action_execution.v1` applied/blocked results when present.
-It also includes a separate `runtime_dispatch_surface.v1` for post-closeout
-handoffs, showing runtime preflight, queue-dispatch, and scheduler-gated tick
-fallback commands without re-opening receipted decisions. It also includes
-`accepted_truth_recovery_surface.v1` for closeout receipts that are not
-accepted truth, showing follow-up, blocked/revision, receipt-missing, and
-retired-incomplete states with local CLI fallbacks plus
-`accepted_truth_recovery_action_envelope.v1` previews. These UI projections
-remain non-mutating; accepted-truth recovery fallback validation writes only
-`accepted_truth_recovery_action_receipt.v1` receipts and does not execute the
-fallback or record accepted truth.
-
 ###### **Options:**
 
 * `--json` — Emit compact JSON. Without this flag, a human summary is printed
@@ -2656,18 +2846,12 @@ Validate a Web UI action envelope and record a receipt
 
 **Usage:** `forager ondesk action-envelope [OPTIONS] --envelope <ENVELOPE>`
 
-Reads an `action_envelope.v1` JSON file, verifies the target decision record,
-observed hash, expiry, allowed read-only command, forbidden effects, and
-expected receipt schema, then writes an idempotent
-`action_envelope_receipt.v1` line to the active profile. This command remains
-read-only with respect to project files, runtime dispatch, approval ledgers,
-and accepted-truth state.
-
 ###### **Options:**
 
-* `--envelope <ENVELOPE>` — JSON file containing an `action_envelope.v1` preview
-* `--dry-run` — Validate without writing `action_envelope_receipts.jsonl`
+* `--envelope <ENVELOPE>` — JSON file containing an action_envelope.v1 preview
+* `--dry-run` — Validate without writing action_envelope_receipts.jsonl
 * `--json` — Output as JSON
+
 
 
 ## `forager ondesk accepted-truth-recovery-envelope`
@@ -2676,19 +2860,10 @@ Validate an accepted-truth recovery envelope and record a receipt
 
 **Usage:** `forager ondesk accepted-truth-recovery-envelope [OPTIONS] --envelope <ENVELOPE>`
 
-Reads an `accepted_truth_recovery_action_envelope.v1` JSON file, regenerates
-the current `accepted_truth_recovery_surface.v1`, verifies the closeout review
-target, observed hash, expiry, allowed fallback command, forbidden effects,
-confirmation phrase, and expected receipt schema, then writes an idempotent
-`accepted_truth_recovery_action_receipt.v1` line to the active profile. This
-command is receipt-only: it does not run `closeout-decision`, retire closeouts,
-move files, promote wiki state, dispatch runtime work, or record accepted
-truth.
-
 ###### **Options:**
 
-* `--envelope <ENVELOPE>` — JSON file containing an `accepted_truth_recovery_action_envelope.v1` preview
-* `--dry-run` — Validate without writing `accepted_truth_recovery_action_receipts.jsonl`
+* `--envelope <ENVELOPE>` — JSON file containing an accepted_truth_recovery_action_envelope.v1 preview
+* `--dry-run` — Validate without writing accepted_truth_recovery_action_receipts.jsonl
 * `--json` — Output as JSON
 
 
@@ -2699,17 +2874,10 @@ Preflight a validated action receipt before any mutation-capable executor
 
 **Usage:** `forager ondesk action-preflight [OPTIONS] --receipt-id <RECEIPT_ID>`
 
-Reads `action_envelope_receipts.jsonl`, finds the requested
-`action_envelope_receipt.v1`, verifies that it is validated, non-stale, latest
-for that action, and still matches the live decision ledger hash, then writes
-an idempotent `action_execution_preflight.v1` record. This command does not
-mutate project files, runtime state, approval ledgers, or accepted-truth state;
-future action-specific executors must require a ready preflight id.
-
 ###### **Options:**
 
-* `--receipt-id <RECEIPT_ID>` — Receipt ID from `action_envelope_receipts.jsonl`
-* `--dry-run` — Validate without writing `action_execution_preflights.jsonl`
+* `--receipt-id <RECEIPT_ID>` — Receipt ID from action_envelope_receipts.jsonl
+* `--dry-run` — Validate without writing action_execution_preflights.jsonl
 * `--json` — Output as JSON
 
 
@@ -2720,20 +2888,15 @@ Execute a supported decision action from a ready action preflight
 
 **Usage:** `forager ondesk action-decision [OPTIONS] --preflight-id <PREFLIGHT_ID>`
 
-Reads `action_execution_preflights.jsonl`, verifies that the requested
-`action_execution_preflight.v1` is ready for execution, maps supported action
-kinds such as `revise`, `block`, `continue`, `stop`, `deny`, and `defer` into
-the canonical decision ledger, and writes an idempotent
-`decision_action_execution.v1` receipt. For `revise` and `block`, `--note` is
-required. This executor may append a decision handoff record, but it still does
-not dispatch runtime work, mutate project files, write accepted truth, or close
-the decision receipt.
-
 ###### **Options:**
 
-* `--preflight-id <PREFLIGHT_ID>` — Ready `action_execution_preflight.v1` ID
+* `--preflight-id <PREFLIGHT_ID>` — Ready action_execution_preflight.v1 ID
 * `--note <NOTE>` — Required bounded direction for revise/block/custom decisions
+
+  Default value: ``
 * `--by <BY>` — Actor recording the decision action
+
+  Default value: `operator`
 * `--target <TARGET>` — Override execution handoff target
 * `--dry-run` — Validate without appending the decision record or execution receipt
 * `--json` — Output as JSON
@@ -2746,21 +2909,17 @@ Close an applied decision action execution with a canonical decision receipt
 
 **Usage:** `forager ondesk action-closeout [OPTIONS] --execution-id <EXECUTION_ID>`
 
-Reads `decision_action_executions.jsonl`, verifies that the requested
-`decision_action_execution.v1` was applied, verifies that the latest canonical
-decision record is still `handoff_ready` with the matching execution handoff,
-then appends a `receipted` decision record plus an idempotent
-`decision_action_closeout.v1` receipt. This closes the Web/mobile decision
-handoff loop; it still does not dispatch runtime work, mutate project files,
-retarget providers, promote wiki state, or update accepted truth.
-
 ###### **Options:**
 
-* `--execution-id <EXECUTION_ID>` — Applied `decision_action_execution.v1` ID
+* `--execution-id <EXECUTION_ID>` — Applied decision_action_execution.v1 ID
 * `--by <BY>` — Actor recording the closeout receipt
+
+  Default value: `operator`
 * `--result-status <RESULT_STATUS>` — Result status for the consumed decision action handoff
-* `--evidence <EVIDENCE_SUMMARY>` — Evidence summary line. Repeat for multiple lines.
-* `--remaining-review <REMAINING_REVIEW>` — Remaining review item. Repeat for multiple lines.
+
+  Default value: `closed`
+* `--evidence <EVIDENCE_SUMMARY>` — Evidence summary line. Repeat for multiple lines
+* `--remaining-review <REMAINING_REVIEW>` — Remaining review item. Repeat for multiple lines
 * `--dry-run` — Validate without appending the decision receipt or closeout record
 * `--json` — Output as JSON
 
@@ -2772,17 +2931,10 @@ Preflight a receipted decision action closeout before runtime dispatch
 
 **Usage:** `forager ondesk runtime-preflight [OPTIONS] --closeout-id <CLOSEOUT_ID>`
 
-Reads `decision_action_closeouts.jsonl`, verifies that the requested
-`decision_action_closeout.v1` is receipted, and checks that the latest
-canonical decision record is still `receipted` with the matching
-`DecisionReceipt`. It writes an idempotent `runtime_dispatch_preflight.v1`.
-This command is non-mutating with respect to runtime work: it does not write
-`offdesk_tasks.json` and does not launch a process.
-
 ###### **Options:**
 
-* `--closeout-id <CLOSEOUT_ID>` — Receipted `decision_action_closeout.v1` ID
-* `--dry-run` — Validate without writing `runtime_dispatch_preflights.jsonl`
+* `--closeout-id <CLOSEOUT_ID>` — Receipted decision_action_closeout.v1 ID
+* `--dry-run` — Validate without writing runtime_dispatch_preflights.jsonl
 * `--json` — Output as JSON
 
 
@@ -2793,25 +2945,21 @@ Queue runtime work from a ready runtime dispatch preflight
 
 **Usage:** `forager ondesk runtime-dispatch [OPTIONS] --preflight-id <PREFLIGHT_ID> --runner <RUNNER> --cmd <COMMAND>`
 
-Reads `runtime_dispatch_preflights.jsonl`, requires a ready
-`runtime_dispatch_preflight.v1`, records an idempotent
-`runtime_dispatch_receipt.v1`, and queues a durable `OffdeskTask`. This command
-does not launch a process; actual runtime launch remains under
-`forager offdesk tick` and the existing scheduler gate.
-
 ###### **Options:**
 
-* `--preflight-id <PREFLIGHT_ID>` — Ready `runtime_dispatch_preflight.v1` ID
+* `--preflight-id <PREFLIGHT_ID>` — Ready runtime_dispatch_preflight.v1 ID
 * `--runner <RUNNER>` — Runner backend to queue for later offdesk tick dispatch
 * `--cmd <COMMAND>` — Shell command to execute when the queued task is dispatched
-* `--workdir <WORKDIR>` — Working directory for `--cmd`. Defaults to the current directory.
-* `--task-id <TASK_ID>` — Task ID. Generated deterministically if omitted.
-* `--capability-id <CAPABILITY_ID>` — Capability ID. Currently restricted to `dispatch.runtime`.
+* `--workdir <WORKDIR>` — Working directory for --cmd. Defaults to the current directory
+* `--task-id <TASK_ID>` — Task ID. Generated deterministically if omitted
+* `--capability-id <CAPABILITY_ID>` — Capability ID. Currently restricted to dispatch.runtime
+
+  Default value: `dispatch.runtime`
 * `--provider-id <PROVIDER_ID>` — Provider ID to check against provider capacity cooldown state when dispatched
 * `--model <MODEL>` — Provider model to check against provider capacity cooldown state when dispatched
 * `--log-artifact <LOG_ARTIFACT>` — Log artifact path for command stdout and stderr
 * `--result-artifact <RESULT_ARTIFACT>` — Result sidecar path used by tick to mark the task completed
-* `--dry-run` — Validate without writing `offdesk_tasks.json` or `runtime_dispatch_receipts.jsonl`
+* `--dry-run` — Validate without writing offdesk_tasks.json or runtime_dispatch_receipts.jsonl
 * `--json` — Output as JSON
 
 

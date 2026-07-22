@@ -63,6 +63,7 @@ pub async fn run_cli() -> Result<()> {
 
     match cli.command {
         Some(Commands::Add(args)) => cli::add::run(&profile, args).await,
+        Some(Commands::Go(args)) => cli::go::run(&profile, args).await,
         Some(Commands::List(args)) => cli::list::run(&profile, args).await,
         Some(Commands::Remove(args)) => cli::remove::run(&profile, args).await,
         Some(Commands::Status(args)) => cli::status::run(&profile, args).await,

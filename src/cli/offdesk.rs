@@ -6667,7 +6667,22 @@ async fn wiki_show(profile: &str, args: WikiShowArgs) -> Result<()> {
     Ok(())
 }
 
-async fn wiki_brief(profile: &str, args: WikiBriefArgs) -> Result<()> {
+impl WikiBriefArgs {
+    /// Brief scoped to one project plane, written to a file. Used by
+    /// `forager go` to refresh `.wiki-brief.md` before launching an agent.
+    pub(crate) fn scoped_to_file(project_key: String, out: std::path::PathBuf) -> Self {
+        Self {
+            project_key: Some(project_key),
+            artifact_kind: None,
+            agent_mode: None,
+            max_entries: 12,
+            out: Some(out),
+            json: false,
+        }
+    }
+}
+
+pub(crate) async fn wiki_brief(profile: &str, args: WikiBriefArgs) -> Result<()> {
     let store = wiki_store(profile)?;
     let query = wiki_query(
         &None,

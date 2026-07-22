@@ -331,6 +331,17 @@ out of product-facing docs. The product direction is defined in
   project context, `/p <key>` prefix) and per-project attention cards are the
   next slices and should resolve through this registry.
 
+- `forager go [tool] [-- args]` is the zero-friction wrapper for direct agent
+  work (`src/cli/go.rs`, Rust registry loader in
+  `src/session/project_registry.rs`): resolves cwd against the registry,
+  refreshes the project's `.wiki-brief.md` from its wiki plane (best-effort,
+  never blocks launch), then finds-or-creates the (path, tool) session and
+  attaches. Reuse is idempotent; extra args update a stopped session's
+  command but are ignored (with a notice) on a running one. `--no-attach`
+  and `--no-brief` exist for scripts. Recommended: `alias cc='forager go
+  claude'`. Waiting-state Telegram notification for these sessions is the
+  next wrapper slice.
+
 ## Next Work Candidates
 
 0. Apply the deferred council verdicts once a kind/agent-mode edit primitive
