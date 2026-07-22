@@ -36,6 +36,8 @@ deliberate knowledge promotion.
   Ondesk loop.
 - [Hosted Harness Agents](hosted-harness-agents.md) defines how external
   harness-backed agents fit into Forager.
+- [Remote Operator](remote-operator.md) defines the transport-agnostic remote
+  supervision model for mobile and chat surfaces such as Telegram.
 - [Evidence Search And Memory Boundary](evidence-search-and-memory-boundary.md)
   translates external memory, context-budget, and operator workflow patterns
   into Forager's evidence, candidate, and promotion boundaries.

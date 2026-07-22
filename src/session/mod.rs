@@ -7,6 +7,7 @@ pub mod config;
 mod groups;
 mod instance;
 pub mod profile_config;
+pub mod project_registry;
 pub mod repo_config;
 mod storage;
 

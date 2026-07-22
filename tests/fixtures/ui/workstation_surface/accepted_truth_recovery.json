@@ -1,0 +1,196 @@
+{
+  "schema": "workstation_surface.v1",
+  "generated_at": "2026-06-18T03:40:00Z",
+  "workstation_id": "workstation-default",
+  "profile": "default",
+  "source_label": "Fixture accepted truth recovery",
+  "workspace_roots": ["/workspace/nano"],
+  "health": [
+    {
+      "id": "telegram",
+      "label": "Telegram operator",
+      "status": "ok",
+      "summary": "Listener status is polling; stale=false."
+    },
+    {
+      "id": "runtime_store",
+      "label": "Runtime store",
+      "status": "ok",
+      "summary": "Profile store is readable; closeout follow-up remains unresolved."
+    },
+    {
+      "id": "closeout",
+      "label": "Closeout state",
+      "status": "attention",
+      "summary": "1 required, 0 accepted, 1 approved with follow-ups."
+    },
+    {
+      "id": "local_llm",
+      "label": "Local LLM",
+      "status": "unknown",
+      "summary": "The dashboard surface does not actively probe local model endpoints yet."
+    }
+  ],
+  "capacity": {
+    "active_runners": 0,
+    "queued_tasks": 0,
+    "provider_deferred": 0,
+    "budget_warnings": 0
+  },
+  "attention_counts": {
+    "pending_approvals": 0,
+    "pending_decisions": 1,
+    "blocked_tasks": 0,
+    "failed_tasks": 0,
+    "closeout_required": 1,
+    "accepted_truth_missing": 1,
+    "followup_decisions_required": 1
+  },
+  "top_attention": {
+    "kind": "accepted_truth_recovery",
+    "title": "Accepted truth recovery needed",
+    "severity": "attention",
+    "project_key": "NanoClustering",
+    "summary": "A closeout was approved with follow-ups, so accepted truth is not clean yet.",
+    "action_label": "Open decision inbox"
+  },
+  "next_safe_actions": [
+    {
+      "kind": "closeout_followup",
+      "label": "Closeout follow-up",
+      "reason": "Resolve the follow-up before treating the completed run as accepted truth.",
+      "command": "forager offdesk closeout-decision --json",
+      "requires_operator_review": true
+    }
+  ],
+  "accepted_truth_recovery": {
+    "schema": "accepted_truth_recovery_surface.v1",
+    "status": "attention",
+    "candidate_count": 1,
+    "visible_count": 1,
+    "summary": "1 accepted-truth recovery candidate(s): 1 with follow-ups, 0 blocked/revision, 0 retired incomplete.",
+    "items": [
+      {
+        "project_key": "NanoClustering",
+        "closeout_id": "closeout-nano-followup",
+        "review_id": "review-followup",
+        "receipt_id": "receipt-followup",
+        "acceptance_status": "approved_with_followups",
+        "verification_status": "pending",
+        "stage": "followup_required",
+        "severity": "attention",
+        "open_decision_count": 1,
+        "open_decision_kinds": ["archive_review"],
+        "evidence_status": "present",
+        "retention_review": "required",
+        "wiki_promotion_state": "not_required",
+        "stale_task_count": 0,
+        "next_safe_action": "Resolve archive review before accepting truth.",
+        "artifact_dir": "/workspace/nano/offdesk_closeouts/closeout-nano-followup",
+        "reviewed_at": "2026-06-18T03:39:00Z",
+        "resolve_command": "forager offdesk closeout-decision --closeout-id closeout-nano-followup --kind archive_review --decision preserve-in-place --reason <reason> --json",
+        "retire_command": "forager offdesk closeout-retire --closeout-id closeout-nano-followup --reason <reason> --json",
+        "action_envelopes": [
+          {
+            "schema": "accepted_truth_recovery_action_envelope.v1",
+            "action_id": "truth_action_closeout_nano_followup_resolve_followup_0123456789abcdef",
+            "action_kind": "resolve_followup",
+            "profile": "default",
+            "project_key": "NanoClustering",
+            "target_ref": {
+              "kind": "accepted_truth_recovery.v1",
+              "closeout_id": "closeout-nano-followup",
+              "review_id": "review-followup",
+              "receipt_id": "receipt-followup",
+              "acceptance_status": "approved_with_followups",
+              "reviewed_at": "2026-06-18T03:39:00Z"
+            },
+            "observed_hash": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "nonce": "truth_preview_0123456789abcdef",
+            "ttl": "PT10M",
+            "issued_at": "2026-06-18T03:40:00Z",
+            "expires_at": "2026-06-18T03:50:00Z",
+            "idempotency_key": "accepted_truth_recovery:closeout-nano-followup:review-followup:receipt-followup:resolve_followup:0123456789abcdef",
+            "preview": "Preview only: validate resolve_followup fallback for closeout closeout-nano-followup; this does not execute the fallback.",
+            "allowed_command": "forager offdesk closeout-decision --closeout-id closeout-nano-followup --kind archive_review --decision preserve-in-place --reason <reason> --json",
+            "forbidden_effects": [
+              "project_file_mutation",
+              "runtime_dispatch",
+              "approval_ledger_mutation",
+              "accepted_truth_mutation",
+              "arbitrary_shell",
+              "wiki_promotion",
+              "file_movement"
+            ],
+            "expected_receipt_schema": "accepted_truth_recovery_action_receipt.v1",
+            "requires_confirmation": true,
+            "confirmation_phrase": "confirm resolve_followup closeout_nano_followup",
+            "stale_rejection_reason": "Reject if the closeout review, receipt state, or selected recovery fallback no longer matches observed_hash.",
+            "receipt_history_count": 0
+          }
+        ],
+        "boundary": "Read-only accepted-truth recovery: this surface does not resolve follow-ups, retire closeouts, move files, promote wiki state, or record accepted truth."
+      }
+    ],
+    "empty_state": {
+      "title": "Accepted truth clear",
+      "summary": "No latest closeout receipt currently needs accepted-truth recovery.",
+      "cli_fallback": "forager ondesk review-surface --json"
+    },
+    "source_refs": {
+      "closeout_reviews": "offdesk_closeouts/*/closeout_review_*.json",
+      "closeout_plans": "offdesk_closeouts/*/closeout_plan.json",
+      "cli_fallback": "forager ondesk review-surface --json"
+    }
+  },
+  "projects": [
+    {
+      "project_key": "NanoClustering",
+      "display_name": "NanoClustering",
+      "severity": "attention",
+      "plan": "needs_decision",
+      "runtime": "completed",
+      "decisions": 1,
+      "closeout": "approved_with_followups",
+      "truth": "missing",
+      "last_activity": "2026-06-18T03:38:00Z"
+    }
+  ],
+  "decisions": [
+    {
+      "decision_id": "decision-accepted-truth-recovery",
+      "kind": "closeout_followup",
+      "severity": "attention",
+      "project_key": "NanoClustering",
+      "title": "Resolve accepted-truth follow-up",
+      "why_now": "The closeout verdict was approved with follow-ups, so accepted truth is not clean yet.",
+      "allowed_actions": ["Resolve follow-up", "Request evidence", "Retire closeout"],
+      "authorization_boundary": "This decision cannot accept project output without a closeout receipt."
+    }
+  ],
+  "graph_focus": {
+    "title": "Selected provenance path",
+    "nodes": [
+      { "id": "plan", "label": "Plan", "kind": "plan" },
+      { "id": "task", "label": "Task", "kind": "task" },
+      { "id": "closeout", "label": "Closeout", "kind": "closeout" },
+      { "id": "receipt", "label": "Receipt", "kind": "receipt" },
+      { "id": "truth", "label": "Accepted truth", "kind": "truth" }
+    ],
+    "edges": [
+      { "from": "plan", "to": "task", "label": "queued" },
+      { "from": "task", "to": "closeout", "label": "closed" },
+      { "from": "closeout", "to": "receipt", "label": "reviewed" },
+      { "from": "receipt", "to": "truth", "label": "needs follow-up" }
+    ]
+  },
+  "stale_state": {
+    "status": "fresh",
+    "last_seen_at": "2026-06-18T03:40:00Z",
+    "summary": "Surface was generated from current local Forager state."
+  },
+  "redaction": {
+    "operator_safe": true,
+    "path_policy": "summary_first"
+  }
+}

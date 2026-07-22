@@ -69,7 +69,7 @@ and handoff packaging, but profile JSONL remains the durable decision ledger.
 {
   "schema": "decision_record.v1",
   "decision_id": "decision-uuid-or-stable-id",
-  "project_key": "twinpaper",
+  "project_key": "<project-key>",
   "request_id": "request-id",
   "task_id": "task-id",
   "raised_by": "agent",
@@ -388,9 +388,9 @@ council record
   -> approval_brief.v1 projection
 ```
 
-The TwinPaper `build_operator_decision_request` shape is a useful prototype,
-but it should be normalized into `DecisionRecord` rather than becoming the
-generic contract.
+A workload-specific `build_operator_decision_request` shape can be a useful
+prototype, but it should be normalized into `DecisionRecord` rather than
+becoming the generic contract.
 
 Current producer behavior:
 
@@ -488,8 +488,8 @@ Validation should warn, not fail, when:
 - Keep Telegram relay input as `approval_brief.v1`.
 - Preserve current tests that verify Telegram cards do not leak raw ids or
   paths.
-- TwinPaper Council and Ondesk handoff producers now use the shared Python
-  producer helper; future producers should reuse that helper.
+- Council and Ondesk handoff producers now use the shared Python producer
+  helper; future producers should reuse that helper.
 
 ### Slice 4: Handoff And Receipt
 
@@ -500,9 +500,9 @@ Validation should warn, not fail, when:
   `decision receipt`.
 - Telegram relay artifacts can be ingested into the profile ledger through
   append-only `decision ingest-telegram`.
-- TwinPaper Council and Ondesk handoff producers now share the same Python
-  producer helper; remaining work is wiring future producer scripts to that
-  helper rather than copying ad hoc record dictionaries.
+- Council and Ondesk handoff producers now share the same Python producer
+  helper; remaining work is wiring future producer scripts to that helper
+  rather than copying ad hoc record dictionaries.
 
 ## Non-Goals
 
@@ -524,5 +524,5 @@ The Decision Pipeline does not:
   `action_audit.jsonl` for approval-adjacent decisions?
 - Which decisions should be deferred to closeout instead of interrupting a
   running Offdesk workload?
-- How much of the initial implementation should be generic before adapting the
-  TwinPaper-specific Council path?
+- How much of the initial implementation should be generic before adapting
+  workload-specific Council paths?

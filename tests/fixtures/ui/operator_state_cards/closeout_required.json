@@ -1,0 +1,29 @@
+{
+  "schema": "operator_state_card.v1",
+  "id": "closeout_required",
+  "title": "마무리 검토 필요",
+  "severity": "attention",
+  "state_summary": "실행은 끝났지만 accepted truth는 아직 아닙니다.",
+  "primary_blocker_or_decision": {
+    "label": "Closeout",
+    "summary": "결과 수용 전 보존, 위험, 남은 결정을 확인해야 합니다."
+  },
+  "next_safe_action": {
+    "label": "Closeout 리뷰 열기",
+    "reason": "완료와 수용을 분리해야 합니다.",
+    "command": "forager offdesk closeout --dry-run --json"
+  },
+  "detail_ref": {
+    "kind": "review_surface",
+    "label": "Ondesk review surface",
+    "command": "forager ondesk review-surface --json"
+  },
+  "authorization_boundary": "수용/삭제/보존 결정 아님.",
+  "counts": {
+    "pending_approvals": 0,
+    "failed": 0,
+    "closeout_required": 1,
+    "active": 0,
+    "queued": 0
+  }
+}

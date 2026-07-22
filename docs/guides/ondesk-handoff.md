@@ -14,14 +14,14 @@ should start from a compact package, not from a hidden raw resume.
 1. Record operator intent while the work is fresh.
 
 ```bash
-forager ondesk note --project-key twinpaper --mode writing \
+forager ondesk note --project-key <project-key> --mode writing \
   --text "Draft focuses on evidence chain before novelty claims."
 ```
 
 2. Capture the current harness context when you want cross-review or handoff.
 
 ```bash
-forager ondesk capture codex-harness --project-key twinpaper --mode writing --lines 250
+forager ondesk capture codex-harness --project-key <project-key> --mode writing --lines 250
 ```
 
 This writes an append-only capture under the active profile:
@@ -56,7 +56,7 @@ closeout return package, or whether no fresh audit was requested. Add
 immediately:
 
 ```bash
-forager ondesk prompt-package --project-key twinpaper --include-doc-audit
+forager ondesk prompt-package --project-key <project-key> --include-doc-audit
 ```
 
 The fresh audit path reports `source: fresh_project_audit`, keeps the full
@@ -191,10 +191,10 @@ Build the shared review packet, then build the request from closeout,
 prompt-package, and review-surface artifacts:
 
 ```bash
-forager ondesk review-surface --project-key twinpaper --json > "$REVIEW_SURFACE_JSON"
+forager ondesk review-surface --project-key <project-key> --json > "$REVIEW_SURFACE_JSON"
 
 scripts/build_ondesk_handoff_request.py \
-  --project-key twinpaper \
+  --project-key <project-key> \
   --closeout-artifact-dir "$CLOSEOUT_DIR" \
   --prompt-package "$ONDESK_PROMPT_PACKAGE" \
   --review-surface "$REVIEW_SURFACE_JSON" \

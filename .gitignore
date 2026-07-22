@@ -15,6 +15,7 @@ docs/assets/demo.gif
 
 # Website build output
 /dist/
+website/.forager-action-bridge/
 
 # Binaries
 *.exe
@@ -59,3 +60,6 @@ sdd-*/
 *.screenstudio/
 
 debug.log
+
+# Generated wiki brief (derived from local profile data)
+.wiki-brief.md

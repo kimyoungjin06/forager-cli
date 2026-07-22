@@ -1,0 +1,29 @@
+{
+  "schema": "operator_state_card.v1",
+  "id": "agent_outage",
+  "title": "원격 계획 막힘",
+  "severity": "blocked",
+  "state_summary": "로컬 모델 연결 실패로 새 계획과 야간주행 시작이 막혔습니다.",
+  "primary_blocker_or_decision": {
+    "label": "모델 연결",
+    "summary": "상태 조회는 가능하지만 새 계획 생성은 중단해야 합니다."
+  },
+  "next_safe_action": {
+    "label": "로컬 에이전트 상태 점검",
+    "reason": "고장 상태를 숨기면 야간주행이 시작된 것처럼 보일 수 있습니다.",
+    "command": "scripts/offdesk_remote_operator_telegram.py --health"
+  },
+  "detail_ref": {
+    "kind": "health",
+    "label": "Remote Operator health",
+    "command": "scripts/offdesk_remote_operator_telegram.py --health"
+  },
+  "authorization_boundary": "새 계획/실행 시작 금지. 읽기만 가능.",
+  "counts": {
+    "pending_approvals": 0,
+    "failed": 0,
+    "closeout_required": 0,
+    "active": 0,
+    "queued": 0
+  }
+}

@@ -733,6 +733,254 @@ fn offdesk_decision_ingest_telegram_appends_profile_handoff_and_receipt() -> Res
 
 #[test]
 #[serial]
+fn offdesk_decision_ingest_telegram_feedback_creates_reviewable_inbox_item() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let artifact_dir = temp.path().join("relay");
+    fs::create_dir_all(&artifact_dir)?;
+    let old_feedback = json!({
+        "schema": "remote_operator_telegram_feedback.v1",
+        "received_at": Utc::now(),
+        "profile": "default",
+        "chat_id_hash": "sha256:old-chat",
+        "user_id_hash": "sha256:old-user",
+        "message_id": 1,
+        "feedback_text": "old feedback",
+        "target_chat_id_hash": "sha256:old-chat",
+        "feedback_context": serde_json::Value::Null
+    });
+    let feedback = json!({
+        "schema": "remote_operator_telegram_feedback.v1",
+        "received_at": Utc::now(),
+        "profile": "default",
+        "chat_id_hash": "sha256:chat",
+        "user_id_hash": "sha256:user",
+        "message_id": 777,
+        "feedback_text": "실패 조건 보강 필요",
+        "target_chat_id_hash": "sha256:chat",
+        "feedback_context": {
+            "schema": "telegram_interaction_context.v1",
+            "command": "plans",
+            "profile": "default",
+            "context_kind": "plan_attention",
+            "focus_kind": "plan",
+            "focus_ref": "plan_harness_mobile",
+            "focus_label": "수정 필요",
+            "next_command": "/show plan_harness_mobile",
+            "project_key": "project",
+            "request_id": "request",
+            "task_id": "task"
+        }
+    });
+    let feedback_path = artifact_dir.join("feedback.jsonl");
+    fs::write(
+        &feedback_path,
+        format!(
+            "{}\n{}\n",
+            serde_json::to_string(&old_feedback)?,
+            serde_json::to_string(&feedback)?
+        ),
+    )?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "decision",
+            "ingest-telegram-feedback",
+            "--feedback",
+            feedback_path.to_str().expect("utf8 feedback path"),
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    let decision_id = report["decision_id"].as_str().expect("decision id");
+    assert!(decision_id.starts_with("telegram-feedback-"));
+    assert_eq!(report["appended"], true);
+    assert_eq!(report["record"]["status"], "user_pending");
+    assert_eq!(report["record"]["materiality"], "medium");
+    assert_eq!(
+        report["record"]["source_surface"],
+        "telegram.remote_operator.feedback"
+    );
+    assert_eq!(
+        report["record"]["decision_request"]["kind"],
+        "telegram_operator_feedback"
+    );
+    assert_eq!(report["record"]["route"]["target"], "user");
+    assert_eq!(
+        report["record"]["approval_brief"]["source"],
+        "telegram.remote_operator.feedback"
+    );
+    assert!(report["record"]["decision_request"]["non_authorized_scope"]
+        .as_array()
+        .expect("non-authorized scope")
+        .iter()
+        .any(|scope| scope.as_str() == Some("approval resolution")));
+    assert_eq!(report["validation_issues"], json!([]));
+    let ledger_path = profile_dir.join("offdesk_decisions.jsonl");
+    let ledger = fs::read_to_string(&ledger_path)?;
+    assert_eq!(ledger.lines().count(), 1);
+
+    let mut replay_feedback = feedback.clone();
+    replay_feedback["received_at"] = json!(Utc::now() + Duration::seconds(5));
+    fs::write(
+        &feedback_path,
+        format!("{}\n", serde_json::to_string(&replay_feedback)?),
+    )?;
+
+    let duplicate_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "decision",
+            "ingest-telegram-feedback",
+            "--feedback",
+            feedback_path.to_str().expect("utf8 feedback path"),
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        duplicate_output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&duplicate_output.stderr)
+    );
+    let duplicate_report: serde_json::Value = serde_json::from_slice(&duplicate_output.stdout)?;
+    assert_eq!(duplicate_report["decision_id"], decision_id);
+    assert_eq!(duplicate_report["appended"], false);
+    let ledger = fs::read_to_string(&ledger_path)?;
+    assert_eq!(ledger.lines().count(), 1);
+
+    let resolve_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "decision",
+            "resolve",
+            decision_id,
+            "--decision",
+            "revise",
+            "--note",
+            "Tighten the mobile feedback summary before the next offdesk run.",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        resolve_output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&resolve_output.stderr)
+    );
+    let resolved: serde_json::Value = serde_json::from_slice(&resolve_output.stdout)?;
+    assert_eq!(resolved["record"]["status"], "handoff_ready");
+    assert_eq!(
+        resolved["record"]["execution_handoff"]["approved_direction"],
+        "revise"
+    );
+
+    let receipt_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "decision",
+            "receipt",
+            decision_id,
+            "--result-status",
+            "reviewed",
+            "--evidence",
+            "Telegram feedback was reviewed by the planning harness.",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        receipt_output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&receipt_output.stderr)
+    );
+    let receipted: serde_json::Value = serde_json::from_slice(&receipt_output.stdout)?;
+    assert_eq!(receipted["record"]["status"], "receipted");
+    assert_eq!(
+        receipted["record"]["decision_receipt"]["result_status"],
+        "reviewed"
+    );
+    let ledger = fs::read_to_string(&ledger_path)?;
+    assert_eq!(ledger.lines().count(), 3);
+    Ok(())
+}
+
+#[test]
+fn offdesk_decision_ingest_telegram_planning_request_is_not_generic_feedback() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let artifact_dir = temp.path().join("relay");
+    fs::create_dir_all(&artifact_dir)?;
+    let feedback = json!({
+        "schema": "remote_operator_telegram_feedback.v1",
+        "received_at": Utc::now(),
+        "profile": "default",
+        "chat_id_hash": "sha256:chat",
+        "user_id_hash": "sha256:user",
+        "message_id": 706,
+        "feedback_text": "nanoclustering Fractal tree 개발쪽을 자율주행으로 처리할 수 있을지 검토해볼까",
+        "feedback_kind": "planning_request",
+        "target_chat_id_hash": "sha256:chat",
+        "feedback_context": {
+            "schema": "telegram_interaction_context.v1",
+            "command": "status",
+            "profile": "default",
+            "context_kind": "status_clear",
+            "focus_kind": "none",
+            "focus_label": "처리할 항목 없음"
+        }
+    });
+    let feedback_path = artifact_dir.join("feedback.json");
+    fs::write(&feedback_path, serde_json::to_string_pretty(&feedback)?)?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "decision",
+            "ingest-telegram-feedback",
+            "--feedback",
+            feedback_path.to_str().expect("utf8 feedback path"),
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(report["appended"], true);
+    assert_eq!(report["record"]["status"], "user_pending");
+    assert_eq!(report["record"]["materiality"], "medium");
+    assert_eq!(
+        report["record"]["source_surface"],
+        "telegram.remote_operator.plan_request"
+    );
+    assert_eq!(
+        report["record"]["decision_request"]["kind"],
+        "telegram_operator_plan_request"
+    );
+    assert_eq!(report["record"]["approval_brief"]["recommendation"], "plan");
+    assert!(report["record"]["approval_brief"]["summary_lines"][1]
+        .as_str()
+        .expect("summary line")
+        .contains("no work has started"));
+    assert!(report["record"]["decision_request"]["non_authorized_scope"]
+        .as_array()
+        .expect("non-authorized scope")
+        .iter()
+        .any(|scope| scope.as_str() == Some("background dispatch")));
+    assert_eq!(report["validation_issues"], json!([]));
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn offdesk_decisions_report_validation_issues() -> Result<()> {
     let temp = tempdir()?;
     let profile_dir = profile_dir(temp.path());
@@ -1217,6 +1465,118 @@ fn offdesk_gate_json_includes_adaptive_wiki_projection() -> Result<()> {
         !serde_json::to_string(&wiki[0])?.contains("Human-only summary"),
         "AI projection must not include human summary"
     );
+    Ok(())
+}
+
+#[test]
+fn offdesk_deck_writes_marp_markdown_from_closeout_json() -> Result<()> {
+    let temp = tempdir()?;
+    let source = temp.path().join("closeout_plan.json");
+    let deck = temp.path().join("closeout.marp.md");
+    fs::write(
+        &source,
+        serde_json::to_string_pretty(&json!({
+            "generated_at": "2026-06-11T00:00:00Z",
+            "closeout_id": "closeout_alpha",
+            "profile": "default",
+            "artifact_dir": temp.path().join("closeout_alpha"),
+            "summary": {
+                "completed_tasks": 3,
+                "active_or_blocked_tasks": 1,
+                "missing_artifacts": 0,
+                "return_package_required": true
+            },
+            "open_decisions": [
+                {
+                    "kind": "archive_review",
+                    "detail": "Review generated logs before archive."
+                }
+            ],
+            "verification_commands": [
+                "forager offdesk tasks --json"
+            ],
+            "required_first_reads": [
+                {
+                    "path": "REPORT.md",
+                    "reason": "Review result summary first."
+                }
+            ],
+            "artifacts": {
+                "closeout_plan_json": "closeout_plan.json",
+                "return_package_markdown": "RETURN_PACKAGE.md"
+            }
+        }))?,
+    )?;
+
+    let output = forager_command(temp.path())
+        .args(["offdesk", "deck", "--from"])
+        .arg(&source)
+        .args(["--out"])
+        .arg(&deck)
+        .arg("--json")
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "deck command failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(report["schema"], "offdesk_marp_deck.v1");
+    assert_eq!(report["source_kind"], "closeout");
+    assert_eq!(report["render_status"], "not_requested");
+    assert_eq!(
+        reported_path(&report["marp_markdown_path"]),
+        expected_path(&deck)
+    );
+
+    let markdown = fs::read_to_string(&deck)?;
+    assert!(markdown.contains("marp: true"));
+    assert!(markdown.contains("source JSON remains authoritative"));
+    assert!(markdown.contains("closeout_alpha"));
+    assert!(markdown.contains("forager offdesk tasks --json"));
+    assert!(markdown.contains("review surface only"));
+    Ok(())
+}
+
+#[test]
+fn offdesk_deck_without_render_does_not_require_marp_cli() -> Result<()> {
+    let temp = tempdir()?;
+    let source = temp.path().join("status.json");
+    let deck = temp.path().join("status.marp.md");
+    fs::write(
+        &source,
+        serde_json::to_string_pretty(&json!({
+            "status": "healthy",
+            "agent_runtime_status": "available",
+            "listener_status": "polling",
+            "model": "local-coder",
+            "pending_approvals": [],
+            "queued_offdesk_tasks": [],
+            "active_offdesk_tasks": []
+        }))?,
+    )?;
+
+    let output = forager_command(temp.path())
+        .args(["offdesk", "deck", "--from"])
+        .arg(&source)
+        .args(["--out"])
+        .arg(&deck)
+        .args(["--marp-bin", "definitely-missing-marp-bin"])
+        .arg("--json")
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "deck command unexpectedly required Marp CLI\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(report["source_kind"], "status");
+    assert_eq!(report["render_status"], "not_requested");
+    assert!(deck.exists());
     Ok(())
 }
 
@@ -6049,6 +6409,131 @@ fn offdesk_tick_launches_briefed_task_and_completes_from_sidecar() -> Result<()>
 
 #[test]
 #[serial]
+fn offdesk_tick_project_task_filter_dispatches_only_matching_task() -> Result<()> {
+    let temp = tempdir()?;
+    let brief_path = temp.path().join("target-brief.json");
+    let target_result_path = temp.path().join("target-result.txt");
+    let other_result_path = temp.path().join("other-result.txt");
+    let now = Utc::now();
+    fs::write(
+        &brief_path,
+        serde_json::to_string_pretty(&json!({
+            "request_id": "target-request",
+            "task_id": "target-task",
+            "project_key": "project",
+            "approved": true,
+            "allowed_runtime_mutations": ["dispatch.runtime"],
+            "allowed_canonical_mutations": [],
+            "fresh_until": now + Duration::minutes(10)
+        }))?,
+    )?;
+    let target_command = format!("printf target > {}", target_result_path.display());
+    let other_command = format!("printf other > {}", other_result_path.display());
+
+    let target_enqueue = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "enqueue",
+            "dispatch.runtime",
+            "--runner",
+            "local-background",
+            "--project-key",
+            "project",
+            "--request-id",
+            "target-request",
+            "--task-id",
+            "target-task",
+            "--brief",
+            brief_path.to_str().expect("utf-8 path"),
+            "--cmd",
+            target_command.as_str(),
+            "--workdir",
+            temp.path().to_str().expect("utf-8 path"),
+            "--result-artifact",
+            target_result_path.to_str().expect("utf-8 path"),
+            "--json",
+        ])
+        .output()?;
+    assert!(target_enqueue.status.success());
+
+    let other_enqueue = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "enqueue",
+            "dispatch.runtime",
+            "--runner",
+            "local-background",
+            "--project-key",
+            "project",
+            "--request-id",
+            "other-request",
+            "--task-id",
+            "other-task",
+            "--cmd",
+            other_command.as_str(),
+            "--workdir",
+            temp.path().to_str().expect("utf-8 path"),
+            "--result-artifact",
+            other_result_path.to_str().expect("utf-8 path"),
+            "--json",
+        ])
+        .output()?;
+    assert!(other_enqueue.status.success());
+
+    let tick_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "tick",
+            "--project-key",
+            "project",
+            "--task-id",
+            "target-task",
+            "--limit",
+            "1",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        tick_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&tick_output.stdout),
+        String::from_utf8_lossy(&tick_output.stderr)
+    );
+    let tick: serde_json::Value = serde_json::from_slice(&tick_output.stdout)?;
+    assert_eq!(tick["launched"], 1);
+    assert_eq!(tick["pending_approval"], 0);
+    assert_eq!(tick["updated_task_ids"], json!(["target-task"]));
+
+    let tasks: serde_json::Value = serde_json::from_str(&fs::read_to_string(
+        profile_dir(temp.path()).join("offdesk_tasks.json"),
+    )?)?;
+    let target = tasks
+        .as_array()
+        .expect("tasks")
+        .iter()
+        .find(|task| task["task_id"] == "target-task")
+        .expect("target task");
+    let other = tasks
+        .as_array()
+        .expect("tasks")
+        .iter()
+        .find(|task| task["task_id"] == "other-task")
+        .expect("other task");
+    assert_eq!(target["status"], "launched");
+    assert_eq!(other["status"], "queued");
+    assert!(target["background_ticket_id"].is_string());
+    assert!(other["background_ticket_id"].is_null());
+    assert!(
+        !profile_dir(temp.path())
+            .join("pending_action_approvals.json")
+            .exists(),
+        "scoped tick must not create approval for the non-target task"
+    );
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn offdesk_tick_emits_runner_work_slice_receipts_for_packet() -> Result<()> {
     let temp = tempdir()?;
     write_implementation_packet_fixture(temp.path(), "project", "packet-runner-receipts")?;
@@ -8836,6 +9321,888 @@ fn offdesk_harness_prompt_warns_and_strict_fails_on_budget() -> Result<()> {
 
 #[test]
 #[serial]
+fn offdesk_plan_registers_multiturn_plan_without_runtime_authority() -> Result<()> {
+    let temp = tempdir()?;
+    let input_path = temp.path().join("OVERNIGHT_PLAN.json");
+    let plan = json!({
+        "schema": "offdesk_multiturn_plan.v1",
+        "profile_key": "generic",
+        "profile_name": "Generic Offdesk Planning",
+        "decision": {
+            "ready_for_operator_review": true,
+            "ready_for_launch_preparation": false,
+            "ready_for_enqueue": false,
+            "reason": "Operator review is required before any launch preparation."
+        },
+        "execution_sequence": [
+            {
+                "id": "phase_1",
+                "objective": "Review evidence before any runtime work.",
+                "stop_condition": "Stop at a human-readable plan artifact."
+            }
+        ],
+        "authority": {
+            "read_only_plan": true,
+            "does_not_authorize": [
+                "enqueue",
+                "launch",
+                "approval",
+                "file movement",
+                "archive",
+                "delete",
+                "wiki promotion",
+                "accepted truth"
+            ]
+        }
+    });
+    let input_bytes = serde_json::to_vec_pretty(&plan)?;
+    fs::write(&input_path, &input_bytes)?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plan",
+            input_path.to_str().expect("utf-8 plan path"),
+            "--project-key",
+            "project",
+            "--request-id",
+            "request",
+            "--task-id",
+            "task",
+            "--json",
+        ])
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let registration: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(registration["schema"], "offdesk_plan_registration.v1");
+    assert_eq!(registration["artifact_kind"], "offdesk_multiturn_plan");
+    assert_eq!(registration["plan_schema"], "offdesk_multiturn_plan.v1");
+    assert_eq!(registration["profile_key"], "generic");
+    assert_eq!(registration["project_key"], "project");
+    assert_eq!(registration["request_id"], "request");
+    assert_eq!(registration["task_id"], "task");
+    assert_eq!(registration["ready_for_operator_review"], true);
+    assert_eq!(registration["ready_for_launch_preparation"], false);
+    assert_eq!(registration["ready_for_enqueue"], false);
+    assert_eq!(registration["source_sha256"], sha256_hex(&input_bytes));
+    assert!(registration["does_not_authorize"]
+        .as_array()
+        .expect("denials array")
+        .iter()
+        .any(|item| item == "enqueue"));
+
+    let registration_path = registration["artifacts"]["registration_json"]
+        .as_str()
+        .expect("registration path");
+    let copied_source_path = registration["artifacts"]["copied_source_json"]
+        .as_str()
+        .expect("source copy path");
+    let saved_registration: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(registration_path)?)?;
+    assert_eq!(
+        saved_registration["source_sha256"],
+        registration["source_sha256"]
+    );
+    let copied_source: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(copied_source_path)?)?;
+    assert_eq!(copied_source["schema"], "offdesk_multiturn_plan.v1");
+    assert!(profile_dir(temp.path()).join("offdesk_plans").exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_plan_rejects_enqueue_ready_multiturn_plan() -> Result<()> {
+    let temp = tempdir()?;
+    let input_path = temp.path().join("OVERNIGHT_PLAN.json");
+    fs::write(
+        &input_path,
+        serde_json::to_vec_pretty(&json!({
+            "schema": "offdesk_multiturn_plan.v1",
+            "profile_key": "generic",
+            "decision": {
+                "ready_for_operator_review": true,
+                "ready_for_launch_preparation": false,
+                "ready_for_enqueue": true
+            },
+            "execution_sequence": [
+                {
+                    "id": "phase_1",
+                    "objective": "This should remain a plan only."
+                }
+            ],
+            "authority": {
+                "read_only_plan": true,
+                "does_not_authorize": [
+                    "enqueue",
+                    "launch",
+                    "approval",
+                    "file movement",
+                    "archive",
+                    "delete",
+                    "wiki promotion",
+                    "accepted truth"
+                ]
+            }
+        }))?,
+    )?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plan",
+            input_path.to_str().expect("utf-8 plan path"),
+            "--json",
+        ])
+        .output()?;
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("decision.ready_for_enqueue_must_be_false"));
+    assert!(!profile_dir(temp.path()).join("offdesk_plans").exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_plan_dry_run_accepts_planner_council_without_writing() -> Result<()> {
+    let temp = tempdir()?;
+    let input_path = temp.path().join("planner_council_result.json");
+    fs::write(
+        &input_path,
+        serde_json::to_vec_pretty(&json!({
+            "schema": "offdesk_planner_council.v1",
+            "profile_key": "generic",
+            "profile_name": "Generic Offdesk Planning",
+            "consensus": {
+                "decision": "ready_for_operator_review",
+                "agreement": true,
+                "ready_for_operator_review": true,
+                "ready_for_launch_preparation": false,
+                "ready_for_enqueue": false,
+                "selected_planner": "planner_a"
+            },
+            "validation_failures": [],
+            "synthesized_plan_path": temp.path().join("SYNTHESIZED_PLAN.json").display().to_string()
+        }))?,
+    )?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plan",
+            input_path.to_str().expect("utf-8 council path"),
+            "--dry-run",
+            "--json",
+        ])
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let registration: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(registration["artifact_kind"], "offdesk_planner_council");
+    assert_eq!(registration["plan_schema"], "offdesk_planner_council.v1");
+    assert_eq!(registration["dry_run"], true);
+    assert_eq!(registration["ready_for_operator_review"], true);
+    assert_eq!(registration["ready_for_launch_preparation"], false);
+    assert_eq!(registration["ready_for_enqueue"], false);
+    assert_eq!(registration["consensus"]["selected_planner"], "planner_a");
+    assert!(registration["selected_plan_path"]
+        .as_str()
+        .expect("selected plan path")
+        .ends_with("SYNTHESIZED_PLAN.json"));
+    assert!(registration["artifacts"]["registration_json"].is_null());
+    assert!(!profile_dir(temp.path()).join("offdesk_plans").exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_plans_list_and_plan_show_registered_artifact() -> Result<()> {
+    let temp = tempdir()?;
+    let input_path = temp.path().join("OVERNIGHT_PLAN.json");
+    let plan = json!({
+        "schema": "offdesk_multiturn_plan.v1",
+        "profile_key": "generic",
+        "decision": {
+            "ready_for_operator_review": true,
+            "ready_for_launch_preparation": false,
+            "ready_for_enqueue": false
+        },
+        "execution_sequence": [
+            {
+                "id": "phase_1",
+                "objective": "Register and inspect this plan."
+            }
+        ],
+        "authority": {
+            "read_only_plan": true,
+            "does_not_authorize": [
+                "enqueue",
+                "launch",
+                "approval",
+                "file movement",
+                "archive",
+                "delete",
+                "wiki promotion",
+                "accepted truth"
+            ]
+        }
+    });
+    let input_bytes = serde_json::to_vec_pretty(&plan)?;
+    fs::write(&input_path, &input_bytes)?;
+
+    let register_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plan",
+            input_path.to_str().expect("utf-8 plan path"),
+            "--project-key",
+            "project",
+            "--task-id",
+            "task",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        register_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&register_output.stderr)
+    );
+
+    let list_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plans",
+            "--project-key",
+            "project",
+            "--latest",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        list_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&list_output.stderr)
+    );
+    let plans: serde_json::Value = serde_json::from_slice(&list_output.stdout)?;
+    let plans = plans.as_array().expect("plans array");
+    assert_eq!(plans.len(), 1);
+    let plan_id = plans[0]["plan_id"].as_str().expect("plan id");
+    assert_eq!(plans[0]["registration"]["project_key"], "project");
+    assert_eq!(plans[0]["registration"]["task_id"], "task");
+    assert_eq!(
+        plans[0]["registration"]["source_sha256"],
+        sha256_hex(&input_bytes)
+    );
+    assert_eq!(plans[0]["registration"]["ready_for_enqueue"], false);
+
+    let show_output = forager_command(temp.path())
+        .args(["offdesk", "plan-show", plan_id, "--json"])
+        .output()?;
+    assert!(
+        show_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&show_output.stderr)
+    );
+    let shown: serde_json::Value = serde_json::from_slice(&show_output.stdout)?;
+    assert_eq!(shown["plan_id"], plan_id);
+    assert_eq!(
+        shown["registration"]["artifact_kind"],
+        "offdesk_multiturn_plan"
+    );
+    assert_eq!(
+        shown["registration"]["source_sha256"],
+        sha256_hex(&input_bytes)
+    );
+    assert!(shown["registration"]["does_not_authorize"]
+        .as_array()
+        .expect("denials array")
+        .iter()
+        .any(|item| item == "launch"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_plan_review_records_decision_without_runtime_authority() -> Result<()> {
+    let temp = tempdir()?;
+    let input_path = temp.path().join("OVERNIGHT_PLAN.json");
+    let plan = json!({
+        "schema": "offdesk_multiturn_plan.v1",
+        "profile_key": "generic",
+        "decision": {
+            "ready_for_operator_review": true,
+            "ready_for_launch_preparation": false,
+            "ready_for_enqueue": false
+        },
+        "execution_sequence": [
+            {
+                "id": "phase_1",
+                "objective": "Record an operator review."
+            }
+        ],
+        "authority": {
+            "read_only_plan": true,
+            "does_not_authorize": [
+                "enqueue",
+                "launch",
+                "approval",
+                "file movement",
+                "archive",
+                "delete",
+                "wiki promotion",
+                "accepted truth"
+            ]
+        }
+    });
+    fs::write(&input_path, serde_json::to_vec_pretty(&plan)?)?;
+
+    let register_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plan",
+            input_path.to_str().expect("utf-8 plan path"),
+            "--project-key",
+            "project",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        register_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&register_output.stderr)
+    );
+    let registration: serde_json::Value = serde_json::from_slice(&register_output.stdout)?;
+    let registry_dir = registration["artifacts"]["registry_dir"]
+        .as_str()
+        .expect("registry dir");
+    let plan_id = Path::new(registry_dir)
+        .file_name()
+        .expect("registry dir name")
+        .to_string_lossy()
+        .to_string();
+
+    let review_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plan-review",
+            &plan_id,
+            "--decision",
+            "approved",
+            "--reviewer",
+            "operator",
+            "--reason",
+            "The plan is ready for a separate launch-preparation packet.",
+            "--follow-up",
+            "Prepare launch packet in a separate command.",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        review_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&review_output.stderr)
+    );
+    let review: serde_json::Value = serde_json::from_slice(&review_output.stdout)?;
+    assert_eq!(review["schema"], "offdesk_plan_review.v1");
+    assert_eq!(review["plan_id"], plan_id);
+    assert_eq!(review["decision"], "approved");
+    assert_eq!(review["ready_for_launch_preparation_candidate"], true);
+    assert_eq!(review["ready_for_enqueue"], false);
+    assert_eq!(review["applies_file_operations"], false);
+    assert!(review["does_not_authorize"]
+        .as_array()
+        .expect("review denials")
+        .iter()
+        .any(|item| item == "launch"));
+    let review_record_path = review["artifacts"]["review_record_json"]
+        .as_str()
+        .expect("review record path");
+    assert!(Path::new(review_record_path).exists());
+
+    let list_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plans",
+            "--project-key",
+            "project",
+            "--latest",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        list_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&list_output.stderr)
+    );
+    let plans: serde_json::Value = serde_json::from_slice(&list_output.stdout)?;
+    assert_eq!(plans[0]["review_state"]["status"], "approved");
+    assert_eq!(
+        plans[0]["review_state"]["ready_for_launch_preparation_candidate"],
+        true
+    );
+    assert_eq!(
+        plans[0]["review_state"]["next_safe_action"],
+        "prepare_launch_packet"
+    );
+    assert_eq!(plans[0]["review_count"], 1);
+    assert_eq!(plans[0]["latest_review"]["review_id"], review["review_id"]);
+
+    let show_output = forager_command(temp.path())
+        .args(["offdesk", "plan-show", &plan_id, "--json"])
+        .output()?;
+    assert!(
+        show_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&show_output.stderr)
+    );
+    let shown: serde_json::Value = serde_json::from_slice(&show_output.stdout)?;
+    assert_eq!(shown["reviews"].as_array().expect("reviews").len(), 1);
+    assert_eq!(shown["reviews"][0]["review_id"], review["review_id"]);
+    assert_eq!(shown["registration"]["ready_for_enqueue"], false);
+
+    let blocked_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plan-review",
+            &plan_id,
+            "--decision",
+            "approved",
+            "--reviewer",
+            "operator",
+            "--reason",
+            "This should fail because approved reviews cannot carry blockers.",
+            "--blocker",
+            "missing launch packet",
+            "--json",
+        ])
+        .output()?;
+    assert!(!blocked_output.status.success());
+    assert!(String::from_utf8_lossy(&blocked_output.stderr)
+        .contains("approved Offdesk plan review cannot include blockers"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_plan_launch_prep_requires_approved_review_and_stays_read_only() -> Result<()> {
+    let temp = tempdir()?;
+    let input_path = temp.path().join("OVERNIGHT_PLAN.json");
+    let plan = json!({
+        "schema": "offdesk_multiturn_plan.v1",
+        "profile_key": "generic",
+        "decision": {
+            "ready_for_operator_review": true,
+            "ready_for_launch_preparation": false,
+            "ready_for_enqueue": false
+        },
+        "execution_sequence": [
+            {
+                "id": "phase_1",
+                "objective": "Prepare a launch-prep packet only."
+            }
+        ],
+        "authority": {
+            "read_only_plan": true,
+            "does_not_authorize": [
+                "enqueue",
+                "launch",
+                "approval",
+                "file movement",
+                "archive",
+                "delete",
+                "wiki promotion",
+                "accepted truth"
+            ]
+        }
+    });
+    let input_bytes = serde_json::to_vec_pretty(&plan)?;
+    fs::write(&input_path, &input_bytes)?;
+
+    let register_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plan",
+            input_path.to_str().expect("utf-8 plan path"),
+            "--project-key",
+            "project",
+            "--request-id",
+            "request",
+            "--task-id",
+            "task",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        register_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&register_output.stderr)
+    );
+    let registration: serde_json::Value = serde_json::from_slice(&register_output.stdout)?;
+    let registry_dir = registration["artifacts"]["registry_dir"]
+        .as_str()
+        .expect("registry dir");
+    let plan_id = Path::new(registry_dir)
+        .file_name()
+        .expect("registry dir name")
+        .to_string_lossy()
+        .to_string();
+
+    let blocked_output = forager_command(temp.path())
+        .args(["offdesk", "plan-launch-prep", &plan_id, "--json"])
+        .output()?;
+    assert!(!blocked_output.status.success());
+    assert!(String::from_utf8_lossy(&blocked_output.stderr)
+        .contains("launch-prep requires an approved review"));
+
+    let review_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plan-review",
+            &plan_id,
+            "--decision",
+            "approved",
+            "--reason",
+            "Approved only for a separate launch-preparation packet.",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        review_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&review_output.stderr)
+    );
+    let review: serde_json::Value = serde_json::from_slice(&review_output.stdout)?;
+
+    let prep_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plan-launch-prep",
+            &plan_id,
+            "--prepared-by",
+            "operator",
+            "--notes",
+            "Prepare execution brief next; do not dispatch here.",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        prep_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&prep_output.stderr)
+    );
+    let prep: serde_json::Value = serde_json::from_slice(&prep_output.stdout)?;
+    assert_eq!(prep["schema"], "offdesk_plan_launch_prep.v1");
+    assert_eq!(prep["plan_id"], plan_id);
+    assert_eq!(prep["source_sha256"], sha256_hex(&input_bytes));
+    assert_eq!(prep["review_id"], review["review_id"]);
+    assert_eq!(prep["launch_preparation_candidate"], true);
+    assert_eq!(prep["ready_for_launch"], false);
+    assert_eq!(prep["ready_for_enqueue"], false);
+    assert_eq!(prep["applies_file_operations"], false);
+    assert_eq!(prep["project_key"], "project");
+    assert_eq!(prep["request_id"], "request");
+    assert_eq!(prep["task_id"], "task");
+    assert!(prep["required_first_reads"]
+        .as_array()
+        .expect("first reads")
+        .iter()
+        .any(|item| item.as_str() == review["artifacts"]["review_record_json"].as_str()));
+    assert!(prep["does_not_authorize"]
+        .as_array()
+        .expect("prep denials")
+        .iter()
+        .any(|item| item == "dispatch"));
+    let prep_path = prep["artifacts"]["launch_prep_json"]
+        .as_str()
+        .expect("prep path");
+    assert!(Path::new(prep_path).exists());
+
+    let list_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plans",
+            "--project-key",
+            "project",
+            "--latest",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        list_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&list_output.stderr)
+    );
+    let plans: serde_json::Value = serde_json::from_slice(&list_output.stdout)?;
+    assert_eq!(plans[0]["launch_prep_count"], 1);
+    assert_eq!(plans[0]["latest_launch_prep"]["prep_id"], prep["prep_id"]);
+
+    let show_output = forager_command(temp.path())
+        .args(["offdesk", "plan-show", &plan_id, "--json"])
+        .output()?;
+    assert!(
+        show_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&show_output.stderr)
+    );
+    let shown: serde_json::Value = serde_json::from_slice(&show_output.stdout)?;
+    assert_eq!(
+        shown["launch_preps"]
+            .as_array()
+            .expect("launch preps")
+            .len(),
+        1
+    );
+    assert_eq!(shown["latest_launch_prep"]["prep_id"], prep["prep_id"]);
+    assert_eq!(shown["registration"]["ready_for_enqueue"], false);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_remote_operator_plans_and_show_are_read_only() -> Result<()> {
+    let temp = tempdir()?;
+    let input_path = temp.path().join("OVERNIGHT_PLAN.json");
+    fs::write(
+        &input_path,
+        serde_json::to_vec_pretty(&json!({
+            "schema": "offdesk_multiturn_plan.v1",
+            "profile_key": "generic",
+            "decision": {
+                "ready_for_operator_review": true,
+                "ready_for_launch_preparation": false,
+                "ready_for_enqueue": false
+            },
+            "execution_sequence": [
+                {
+                    "id": "phase_1",
+                    "objective": "Expose this plan to a read-only remote operator surface."
+                }
+            ],
+            "authority": {
+                "read_only_plan": true,
+                "does_not_authorize": [
+                    "enqueue",
+                    "launch",
+                    "approval",
+                    "file movement",
+                    "archive",
+                    "delete",
+                    "wiki promotion",
+                    "accepted truth"
+                ]
+            }
+        }))?,
+    )?;
+
+    let register_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plan",
+            input_path.to_str().expect("utf-8 plan path"),
+            "--project-key",
+            "project",
+            "--request-id",
+            "request",
+            "--task-id",
+            "task",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        register_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&register_output.stderr)
+    );
+    let registration: serde_json::Value = serde_json::from_slice(&register_output.stdout)?;
+    let registry_dir = registration["artifacts"]["registry_dir"]
+        .as_str()
+        .expect("registry dir");
+    let plan_id = Path::new(registry_dir)
+        .file_name()
+        .expect("registry dir name")
+        .to_string_lossy()
+        .to_string();
+
+    let review_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "plan-review",
+            &plan_id,
+            "--decision",
+            "approved",
+            "--reason",
+            "Ready for read-only remote inspection.",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        review_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&review_output.stderr)
+    );
+
+    let plans_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "remote-operator",
+            "plans",
+            "--project-key",
+            "project",
+            "--latest",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        plans_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&plans_output.stderr)
+    );
+    let plans: serde_json::Value = serde_json::from_slice(&plans_output.stdout)?;
+    assert_eq!(plans["schema"], "remote_operator_readonly_projection.v1");
+    assert_eq!(plans["command"], "plans");
+    assert_eq!(plans["transport"], "telegram");
+    assert_eq!(plans["read_only"], true);
+    assert_eq!(plans["mutation_authorized"], false);
+    assert_eq!(plans["approval_authorized"], false);
+    assert!(plans["forbidden_remote_intents"]
+        .as_array()
+        .expect("forbidden intents")
+        .iter()
+        .any(|item| item == "approve_plan"));
+    assert_eq!(plans["payload"]["plan_count"], 1);
+    assert_eq!(plans["payload"]["plans"][0]["plan_id"], plan_id);
+    assert_eq!(plans["payload"]["plans"][0]["review_status"], "approved");
+    assert_eq!(plans["payload"]["plans"][0]["ready_for_enqueue"], false);
+    assert!(plans["payload"]["plans"][0]["observed_hash"]
+        .as_str()
+        .expect("plan observed hash")
+        .starts_with("sha256:"));
+    assert!(plans["payload"]["plans"][0]["remote_actions"]
+        .as_array()
+        .expect("remote actions")
+        .iter()
+        .any(|item| item == "inspect_plan"));
+
+    let show_output = forager_command(temp.path())
+        .args(["offdesk", "remote-operator", "show", &plan_id, "--json"])
+        .output()?;
+    assert!(
+        show_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&show_output.stderr)
+    );
+    let shown: serde_json::Value = serde_json::from_slice(&show_output.stdout)?;
+    assert_eq!(shown["schema"], "remote_operator_readonly_projection.v1");
+    assert_eq!(shown["command"], "show");
+    assert_eq!(shown["payload"]["plan"]["plan_id"], plan_id);
+    assert_eq!(
+        shown["payload"]["reviews"]
+            .as_array()
+            .expect("review summaries")
+            .len(),
+        1
+    );
+    assert_eq!(
+        shown["payload"]["launch_preps"].as_array().unwrap().len(),
+        0
+    );
+    assert!(shown["payload"]["does_not_authorize"]
+        .as_array()
+        .expect("denials")
+        .iter()
+        .any(|item| item == "launch"));
+    assert!(shown["card"]["disabled_remote_actions"]
+        .as_array()
+        .expect("disabled actions")
+        .iter()
+        .any(|item| item == "dispatch"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_remote_operator_pending_is_read_only_and_does_not_expire() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    fs::write(
+        profile_dir.join("pending_action_approvals.json"),
+        serde_json::to_string_pretty(&json!([
+            {
+                "approval_id": "approval_stale",
+                "status": "pending",
+                "scope": "once",
+                "project_key": "project",
+                "request_id": "request",
+                "task_id": "task",
+                "action": "dispatch.runtime",
+                "risk_level": "runtime_mutation",
+                "approval_mode": "operator_required",
+                "preview": "safe preview",
+                "reason": "outside envelope",
+                "created_at": now - Duration::minutes(20),
+                "expires_at": now - Duration::minutes(10),
+                "source_surface": "test"
+            }
+        ]))?,
+    )?;
+
+    let pending_output = forager_command(temp.path())
+        .args(["offdesk", "remote-operator", "pending", "--json"])
+        .output()?;
+    assert!(
+        pending_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&pending_output.stderr)
+    );
+    let pending: serde_json::Value = serde_json::from_slice(&pending_output.stdout)?;
+    assert_eq!(pending["schema"], "remote_operator_readonly_projection.v1");
+    assert_eq!(pending["command"], "pending");
+    assert_eq!(pending["read_only"], true);
+    assert_eq!(pending["mutation_authorized"], false);
+    assert_eq!(pending["approval_authorized"], false);
+    assert_eq!(pending["payload"]["approval_count"], 1);
+    assert_eq!(
+        pending["payload"]["approvals"][0]["approval_id"],
+        "approval_stale"
+    );
+    assert_eq!(pending["payload"]["approvals"][0]["status"], "pending");
+    assert_eq!(pending["payload"]["approvals"][0]["expired"], true);
+    assert_eq!(
+        pending["payload"]["approvals"][0]["next_safe_action"]["kind"],
+        "approval_expired"
+    );
+    assert!(pending["payload"]["approvals"][0]["remote_actions"]
+        .as_array()
+        .expect("remote actions")
+        .iter()
+        .any(|item| item == "inspect_approval"));
+    assert!(pending["forbidden_remote_intents"]
+        .as_array()
+        .expect("forbidden intents")
+        .iter()
+        .any(|item| item == "approve_launch"));
+
+    let stored: serde_json::Value = serde_json::from_str(&fs::read_to_string(
+        profile_dir.join("pending_action_approvals.json"),
+    )?)?;
+    assert_eq!(stored[0]["status"], "pending");
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn status_json_reports_legacy_profile_dir_when_compat_storage_is_active() -> Result<()> {
     let temp = tempdir()?;
     fs::create_dir_all(legacy_app_dir(temp.path()).join("profiles").join("default"))?;
@@ -9312,6 +10679,249 @@ fn workload_review_allows_wiki_candidate_queue_exception() -> Result<()> {
     assert_eq!(
         review["results"][0]["review_stage_decision"],
         "needs_approval"
+    );
+    Ok(())
+}
+
+#[test]
+fn generic_prepare_offdesk_workload_writes_reviewed_launch_packet() -> Result<()> {
+    let temp = tempdir()?;
+    let repo_dir = temp.path().join("repo");
+    let out_root = temp.path().join("prepared");
+    fs::create_dir_all(&repo_dir)?;
+    fs::write(repo_dir.join("README.md"), "# Generic Project\n")?;
+
+    let script_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("scripts")
+        .join("prepare_offdesk_workload.py");
+    let output = Command::new("python3")
+        .env("HOME", temp.path())
+        .env("XDG_CONFIG_HOME", temp.path().join(".config"))
+        .arg(script_path)
+        .arg("--profile")
+        .arg("generic-profile")
+        .arg("--project-key")
+        .arg("generic-project")
+        .arg("--repo")
+        .arg(&repo_dir)
+        .arg("--out-root")
+        .arg(&out_root)
+        .arg("--duration-minutes")
+        .arg("0.1")
+        .arg("--max-iterations")
+        .arg("1")
+        .arg("--workload-command")
+        .arg("printf 'ok\\n'")
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "prepare generic workload failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let prepared: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(prepared["ready_for_enqueue"], true);
+    assert_eq!(prepared["blocking_reasons"], json!([]));
+    let manifest_path = PathBuf::from(prepared["manifest"].as_str().expect("manifest path"));
+    let preflight_path = PathBuf::from(prepared["preflight"].as_str().expect("preflight path"));
+    let launch_path = PathBuf::from(
+        prepared["launch_dry_run_report"]
+            .as_str()
+            .expect("launch packet path"),
+    );
+    let validation_path = PathBuf::from(
+        prepared["long_run_validation_packet"]
+            .as_str()
+            .expect("validation packet path"),
+    );
+    assert!(manifest_path.exists());
+    assert!(preflight_path.exists());
+    assert!(launch_path.exists());
+    assert!(validation_path.exists());
+    assert!(manifest_path.with_file_name("preflight_ready").exists());
+
+    let manifest: serde_json::Value = serde_json::from_slice(&fs::read(&manifest_path)?)?;
+    assert_eq!(manifest["kind"], "forager_offdesk_prepared_workload");
+    assert_eq!(manifest["project_key"], "generic-project");
+    assert_eq!(manifest["preflight"]["ready_for_enqueue"], true);
+    assert_eq!(
+        manifest["review_contract"]["schema"],
+        "forager_workload_review_contract.v1"
+    );
+    assert!(manifest["artifacts"]["review_artifact"]
+        .as_str()
+        .map(PathBuf::from)
+        .filter(|path| path.exists())
+        .is_some());
+    let launch = fs::read_to_string(&launch_path)?;
+    let validation = fs::read_to_string(&validation_path)?;
+    let manifest_text = fs::read_to_string(&manifest_path)?;
+    assert!(launch.contains("Offdesk Launch Dry Run"));
+    assert!(validation.contains("Offdesk Long-Run Validation Packet"));
+    assert!(!launch.contains("TwinPaper"));
+    assert!(!validation.contains("TwinPaper"));
+    assert!(!manifest_text.contains("TwinPaper"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_pause_unpause_round_trips_and_tick_holds_dispatch() -> Result<()> {
+    let temp = tempdir()?;
+    let profile = profile_dir(temp.path());
+    fs::create_dir_all(&profile)?;
+
+    // Not paused by default.
+    let status = forager_command(temp.path())
+        .args(["offdesk", "pause-status", "--json"])
+        .output()?;
+    assert!(status.status.success());
+    let status: serde_json::Value = serde_json::from_slice(&status.stdout)?;
+    assert_eq!(status["paused"], false);
+
+    // Pause records the reason and flips the state.
+    let pause = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "pause",
+            "--reason",
+            "emergency stop",
+            "--by",
+            "test",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        pause.status.success(),
+        "{}",
+        String::from_utf8_lossy(&pause.stderr)
+    );
+    let pause: serde_json::Value = serde_json::from_slice(&pause.stdout)?;
+    assert_eq!(pause["paused"], true);
+    assert_eq!(pause["reason"], "emergency stop");
+    assert!(profile.join("offdesk_operator_pause.json").exists());
+
+    // A tick while paused holds new dispatch instead of launching.
+    let tick = forager_command(temp.path())
+        .args(["offdesk", "tick", "--limit", "5", "--json"])
+        .output()?;
+    assert!(tick.status.success());
+    let tick: serde_json::Value = serde_json::from_slice(&tick.stdout)?;
+    assert_eq!(tick["dispatch_paused"], true);
+    assert_eq!(tick["launched"], 0);
+
+    // Unpause clears it.
+    let unpause = forager_command(temp.path())
+        .args(["offdesk", "unpause", "--by", "test", "--json"])
+        .output()?;
+    assert!(unpause.status.success());
+    let unpause: serde_json::Value = serde_json::from_slice(&unpause.stdout)?;
+    assert_eq!(unpause["paused"], false);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_learning_scan_emits_candidates_once_and_tick_auto_scans() -> Result<()> {
+    use forager::offdesk::{
+        AdaptiveWikiKind, AdaptiveWikiStore, BackgroundRunnerKind, OffdeskTask, OffdeskTaskInput,
+        OffdeskTaskStatus, OffdeskTaskStore,
+    };
+
+    let temp = tempdir()?;
+    let profile = profile_dir(temp.path());
+    fs::create_dir_all(&profile)?;
+    let now = Utc::now();
+
+    let failed_task = |task_id: &str, last_error: &str| -> OffdeskTask {
+        let mut task = OffdeskTask::new(
+            OffdeskTaskInput {
+                task_id: Some(task_id.to_string()),
+                request_id: "req-1".to_string(),
+                project_key: "proj-a".to_string(),
+                capability_id: "dispatch.runtime".to_string(),
+                runner_kind: BackgroundRunnerKind::LocalBackground,
+                command: "cargo build".to_string(),
+                workdir: "/tmp".to_string(),
+                execution_brief: None,
+                not_before: None,
+                mutation_class: None,
+                artifact_refs: Vec::new(),
+                implementation_packet: None,
+                artifact_kind: None,
+                agent_mode: None,
+                provider_id: None,
+                model: None,
+                preview: String::new(),
+                reason: String::new(),
+                log_artifact_path: None,
+                result_artifact_path: None,
+            },
+            now,
+        );
+        task.status = OffdeskTaskStatus::Failed;
+        task.last_error = Some(last_error.to_string());
+        task
+    };
+
+    // Seed one failed task, then run the CLI scan.
+    let store = OffdeskTaskStore::new(&profile);
+    store.save(&[failed_task("task-1", "compile error: token=sk-secret")])?;
+
+    let scan = forager_command(temp.path())
+        .args(["offdesk", "learning-scan", "--json"])
+        .output()?;
+    assert!(
+        scan.status.success(),
+        "{}",
+        String::from_utf8_lossy(&scan.stderr)
+    );
+    let scan: serde_json::Value = serde_json::from_slice(&scan.stdout)?;
+    assert_eq!(scan["emitted"].as_array().unwrap().len(), 1);
+    assert_eq!(scan["emitted"][0]["source"], "task_failed");
+
+    // Re-running is idempotent: the durable cursor skips the processed event.
+    let rescan = forager_command(temp.path())
+        .args(["offdesk", "learning-scan", "--json"])
+        .output()?;
+    assert!(rescan.status.success());
+    let rescan: serde_json::Value = serde_json::from_slice(&rescan.stdout)?;
+    assert_eq!(rescan["emitted"].as_array().unwrap().len(), 0);
+    assert_eq!(rescan["skipped_already_processed"], 1);
+
+    // A second failed task of the same shape is a new event; a tick auto-scans it.
+    store.save(&[
+        failed_task("task-1", "compile error: token=sk-secret"),
+        failed_task("task-2", "another failure"),
+    ])?;
+    let tick = forager_command(temp.path())
+        .args(["offdesk", "tick", "--limit", "5", "--json"])
+        .output()?;
+    assert!(
+        tick.status.success(),
+        "{}",
+        String::from_utf8_lossy(&tick.stderr)
+    );
+    let tick: serde_json::Value = serde_json::from_slice(&tick.stdout)?;
+    assert_eq!(tick["learning_signals_emitted"], 1);
+
+    // Both failures share a runner/project, so they merge into one candidate whose
+    // occurrence_count reflects the repeated pattern, and no secret leaks.
+    let candidates = AdaptiveWikiStore::new(&profile)
+        .load_candidates()?
+        .candidates;
+    assert_eq!(
+        candidates.len(),
+        1,
+        "same-shape failures should merge into one candidate"
+    );
+    assert_eq!(candidates[0].kind, AdaptiveWikiKind::FailurePattern);
+    assert_eq!(candidates[0].occurrence_count, 2);
+    assert!(
+        !candidates[0].human_summary.contains("sk-secret"),
+        "secret leaked into candidate: {}",
+        candidates[0].human_summary
     );
     Ok(())
 }

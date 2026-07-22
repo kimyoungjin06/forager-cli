@@ -1,0 +1,115 @@
+{
+  "schema": "workstation_surface.v1",
+  "generated_at": "2026-06-18T03:20:00Z",
+  "workstation_id": "workstation-default",
+  "profile": "default",
+  "source_label": "Fixture active run",
+  "workspace_roots": ["/workspace/atlas", "/workspace/harness"],
+  "health": [
+    {
+      "id": "telegram",
+      "label": "Telegram operator",
+      "status": "ok",
+      "summary": "Listener status is polling; stale=false."
+    },
+    {
+      "id": "runtime_store",
+      "label": "Runtime store",
+      "status": "ok",
+      "summary": "Profile store is readable; active work is being monitored."
+    },
+    {
+      "id": "closeout",
+      "label": "Closeout state",
+      "status": "ok",
+      "summary": "0 required, 0 accepted, 0 approved with follow-ups."
+    },
+    {
+      "id": "local_llm",
+      "label": "Local LLM",
+      "status": "ok",
+      "summary": "Configured local coding model is reachable."
+    }
+  ],
+  "capacity": {
+    "active_runners": 2,
+    "queued_tasks": 1,
+    "provider_deferred": 0,
+    "budget_warnings": 0
+  },
+  "attention_counts": {
+    "pending_approvals": 0,
+    "pending_decisions": 0,
+    "blocked_tasks": 0,
+    "failed_tasks": 0,
+    "closeout_required": 0,
+    "accepted_truth_missing": 0,
+    "followup_decisions_required": 0
+  },
+  "top_attention": {
+    "kind": "active_work",
+    "title": "Work is active",
+    "severity": "info",
+    "summary": "Forager has active work, with no blocking operator decision visible.",
+    "action_label": "Inspect active work"
+  },
+  "next_safe_actions": [
+    {
+      "kind": "runtime_monitoring",
+      "label": "Runtime monitoring",
+      "reason": "Let the active tasks continue and check task-scoped monitoring before intervening.",
+      "command": "forager offdesk tick --limit 0 --json",
+      "requires_operator_review": false
+    }
+  ],
+  "projects": [
+    {
+      "project_key": "Atlas",
+      "display_name": "Science Atlas",
+      "severity": "info",
+      "plan": "in_flight",
+      "runtime": "running",
+      "decisions": 0,
+      "closeout": "not_ready",
+      "truth": "not_applicable",
+      "last_activity": "2026-06-18T03:19:30Z"
+    },
+    {
+      "project_key": "Harness",
+      "display_name": "Forager Harness",
+      "severity": "info",
+      "plan": "in_flight",
+      "runtime": "queued",
+      "decisions": 0,
+      "closeout": "not_ready",
+      "truth": "not_applicable",
+      "last_activity": "2026-06-18T03:18:00Z"
+    }
+  ],
+  "decisions": [],
+  "graph_focus": {
+    "title": "Selected provenance path",
+    "nodes": [
+      { "id": "status", "label": "Status", "kind": "source" },
+      { "id": "attention", "label": "Attention", "kind": "summary" },
+      { "id": "decision", "label": "Decision", "kind": "decision" },
+      { "id": "action", "label": "Next safe action", "kind": "action" },
+      { "id": "receipt", "label": "Receipt", "kind": "receipt" }
+    ],
+    "edges": [
+      { "from": "status", "to": "attention", "label": "projects" },
+      { "from": "attention", "to": "decision", "label": "prioritizes" },
+      { "from": "decision", "to": "action", "label": "permits" },
+      { "from": "action", "to": "receipt", "label": "must produce" }
+    ]
+  },
+  "stale_state": {
+    "status": "fresh",
+    "last_seen_at": "2026-06-18T03:20:00Z",
+    "summary": "Surface was generated from current local Forager state."
+  },
+  "redaction": {
+    "operator_safe": true,
+    "path_policy": "summary_first"
+  }
+}

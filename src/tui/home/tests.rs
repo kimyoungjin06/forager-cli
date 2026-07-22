@@ -421,7 +421,7 @@ fn status_json_and_home_view_agree_on_resume_store_next_safe_action() {
 
     let rendered = render_home_text(&mut view, 200, 32);
     assert!(
-        rendered.contains("Next:  Recover: forager offdesk resume"),
+        rendered.contains("Next action: Recover: forager offdesk resume"),
         "home view should render the same resume next action as status json:\n{}",
         rendered
     );
@@ -484,7 +484,7 @@ fn status_json_and_home_view_agree_on_mixed_next_safe_action_priority() {
 
     let rendered = render_home_text(&mut view, 200, 32);
     assert!(
-        rendered.contains("Next:  Review: forager offdesk pending"),
+        rendered.contains("Next action: Review: forager offdesk pending"),
         "home view should render the highest-priority mixed next action:\n{}",
         rendered
     );
@@ -575,8 +575,8 @@ fn offdesk_morning_review_visual_smoke_renders_next_safe_actions() {
                 ..OffdeskResumeSummary::default()
             },
             expected_focus: "approvals waiting",
-            expected_close: "Close: 0 tasks require closeout",
-            expected_next: "Next:  Review: forager offdesk pending",
+            expected_close: "Closeout: 0 tasks require closeout",
+            expected_next: "Next action: Review: forager offdesk pending",
             expected_action: "Action forager offdesk pending",
         },
         Case {
@@ -592,8 +592,8 @@ fn offdesk_morning_review_visual_smoke_renders_next_safe_actions() {
                 ..OffdeskResumeSummary::default()
             },
             expected_focus: "failed work needs review",
-            expected_close: "Close: 0 tasks require closeout",
-            expected_next: "Next:  Recover: forager offdesk resume",
+            expected_close: "Closeout: 0 tasks require closeout",
+            expected_next: "Next action: Recover: forager offdesk resume",
             expected_action: "Action forager offdesk resume",
         },
         Case {
@@ -613,8 +613,8 @@ fn offdesk_morning_review_visual_smoke_renders_next_safe_actions() {
                 ..OffdeskResumeSummary::default()
             },
             expected_focus: "closeout review pending",
-            expected_close: "Close: 1 review pending",
-            expected_next: "Next:  Review: forager offdesk closeout",
+            expected_close: "Closeout: 1 review pending",
+            expected_next: "Next action: Review: forager offdesk closeout",
             expected_action: "Action forager offdesk closeout",
         },
         Case {
@@ -634,8 +634,8 @@ fn offdesk_morning_review_visual_smoke_renders_next_safe_actions() {
                 ..OffdeskResumeSummary::default()
             },
             expected_focus: "closeout follow-ups pending",
-            expected_close: "Close: 1 follow-up receipt pending",
-            expected_next: "Next:  Review: forager ondesk prompt-package",
+            expected_close: "Closeout: 1 follow-up receipt pending",
+            expected_next: "Next action: Review: forager ondesk prompt-package",
             expected_action: "Action forager ondesk prompt-package",
         },
         Case {
@@ -651,8 +651,8 @@ fn offdesk_morning_review_visual_smoke_renders_next_safe_actions() {
                 ..OffdeskResumeSummary::default()
             },
             expected_focus: "active offdesk work",
-            expected_close: "Close: 0 tasks require closeout",
-            expected_next: "Next:  Monitor: forager offdesk poll",
+            expected_close: "Closeout: 0 tasks require closeout",
+            expected_next: "Next action: Monitor: forager offdesk poll",
             expected_action: "Action forager offdesk poll",
         },
     ];
@@ -698,6 +698,57 @@ fn offdesk_morning_review_visual_smoke_renders_next_safe_actions() {
             rendered
         );
     }
+}
+
+#[test]
+#[serial]
+fn offdesk_morning_review_uses_semantic_labels_at_80_columns() {
+    let mut env = create_test_env_empty();
+    env.view.offdesk_resume = OffdeskResumeSummary {
+        pending_approvals: 1,
+        queued_tasks: 1,
+        active_tasks: 1,
+        resume_pending_tasks: 1,
+        failed_tasks: 1,
+        closeout_required: 1,
+        next_safe_actions: vec![OffdeskNextSafeAction::new(
+            "approval_pending",
+            "Review approval before launch.",
+            vec!["forager offdesk pending".to_string()],
+            true,
+        )],
+        ..OffdeskResumeSummary::default()
+    };
+
+    let rendered = render_home_text(&mut env.view, 80, 32);
+
+    assert!(
+        rendered.contains("Work:"),
+        "narrow card should expose a semantic work row:\n{}",
+        rendered
+    );
+    for label in ["approval", "queued", "active", "resume", "failed"] {
+        assert!(
+            rendered.contains(label),
+            "narrow card should render semantic label `{label}`:\n{}",
+            rendered
+        );
+    }
+    assert!(
+        rendered.contains("Closeout:"),
+        "narrow card should label closeout state:\n{}",
+        rendered
+    );
+    assert!(
+        rendered.contains("Next action:"),
+        "narrow card should label the next safe action:\n{}",
+        rendered
+    );
+    assert!(
+        !rendered.contains("p/q/a"),
+        "narrow card should not require abbreviated counter decoding:\n{}",
+        rendered
+    );
 }
 
 #[test]
@@ -764,7 +815,8 @@ fn home_view_loads_offdesk_summary_fixture_and_renders_next_safe_action() {
         rendered
     );
     assert!(
-        rendered.contains("p/q/a/r/f/c 0/0/1/0/0/0"),
+        rendered.contains("approval 0  queued 0  active 1")
+            && rendered.contains("resume 0  failed 0  cancelled 0"),
         "fixture-backed home view should render task counts:\n{}",
         rendered
     );
@@ -774,7 +826,7 @@ fn home_view_loads_offdesk_summary_fixture_and_renders_next_safe_action() {
         rendered
     );
     assert!(
-        rendered.contains("Next:  Review: forager offdesk closeout"),
+        rendered.contains("Next action: Review: forager offdesk closeout"),
         "fixture-backed home view should render loaded next action:\n{}",
         rendered
     );
@@ -842,12 +894,13 @@ fn home_view_loads_pending_approval_fixture_and_renders_review_action() {
         rendered
     );
     assert!(
-        rendered.contains("p/q/a/r/f/c 1/0/0/0/0/0"),
+        rendered.contains("approval 1  queued 0  active 0")
+            && rendered.contains("resume 0  failed 0  cancelled 0"),
         "approval-backed home view should render approval count:\n{}",
         rendered
     );
     assert!(
-        rendered.contains("Next:  Review: forager offdesk pending"),
+        rendered.contains("Next action: Review: forager offdesk pending"),
         "approval-backed home view should render approval next action:\n{}",
         rendered
     );
@@ -2154,4 +2207,52 @@ fn test_uppercase_l_grows_list() {
     assert_eq!(env.view.list_width, 35);
     env.view.handle_key(key(KeyCode::Char('L')));
     assert_eq!(env.view.list_width, 40);
+}
+
+#[test]
+#[serial]
+fn orchestration_summary_reads_armed_state_and_registry() {
+    let temp = TempDir::new().unwrap();
+    setup_test_home(&temp);
+    // The registry lives under XDG config on every platform, but the profile
+    // dir (armed file) is platform-specific (~/.forager on macOS), so both
+    // paths must come from the real resolvers.
+    let registry_file = crate::session::project_registry::registry_path();
+    std::fs::create_dir_all(registry_file.parent().unwrap()).unwrap();
+    let profile_dir = crate::session::get_profile_dir("test").unwrap();
+    std::fs::create_dir_all(&profile_dir).unwrap();
+    let armed_file = profile_dir.join("offdesk_autonomy_armed.json");
+
+    // No registry, no armed file: everything quiet.
+    let summary = super::load_orchestration_summary("test");
+    assert!(!summary.autonomy_armed);
+    assert_eq!(summary.registered_projects, 0);
+
+    std::fs::write(
+        &registry_file,
+        "schema = \"forager_project_registry.v1\"\n\n[projects.demo]\nworkspace_patterns = [\"Demo\"]\n",
+    )
+    .unwrap();
+    let future = chrono::Utc::now() + chrono::Duration::hours(8);
+    std::fs::write(
+        &armed_file,
+        format!(
+            "{{\"armed\": true, \"until\": \"{}\"}}",
+            future.to_rfc3339()
+        ),
+    )
+    .unwrap();
+
+    let summary = super::load_orchestration_summary("test");
+    assert!(summary.autonomy_armed);
+    assert_eq!(summary.registered_projects, 1);
+
+    // An expired window must not read as armed.
+    let past = chrono::Utc::now() - chrono::Duration::hours(1);
+    std::fs::write(
+        &armed_file,
+        format!("{{\"armed\": true, \"until\": \"{}\"}}", past.to_rfc3339()),
+    )
+    .unwrap();
+    assert!(!super::load_orchestration_summary("test").autonomy_armed);
 }

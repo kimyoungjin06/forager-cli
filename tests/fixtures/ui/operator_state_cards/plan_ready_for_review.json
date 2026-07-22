@@ -1,0 +1,30 @@
+{
+  "schema": "operator_state_card.v1",
+  "id": "plan_ready_for_review",
+  "title": "계획 검토 준비",
+  "severity": "info",
+  "state_summary": "계획 초안이 검증되어 등록 전 리뷰를 기다립니다.",
+  "primary_blocker_or_decision": {
+    "label": "계획 리뷰",
+    "summary": "범위, 중단 조건, 증거 산출물이 충분한지 확인해야 합니다."
+  },
+  "next_safe_action": {
+    "label": "계획 상세 보기",
+    "reason": "계획 승인과 실행 승인은 분리되어야 합니다.",
+    "command": "forager offdesk plans --json"
+  },
+  "detail_ref": {
+    "kind": "plan",
+    "label": "계획 상세",
+    "plan_id": "plan_ui_contract"
+  },
+  "authorization_boundary": "계획 검토만. 실행 승인 아님.",
+  "counts": {
+    "pending_approvals": 0,
+    "failed": 0,
+    "closeout_required": 0,
+    "active": 0,
+    "queued": 0,
+    "plans_waiting_review": 1
+  }
+}

@@ -11,8 +11,11 @@ pub mod capability;
 pub mod control_loop;
 pub mod decision;
 pub mod implementation_packet;
+pub mod learning_signals;
 pub mod mode_contract;
 pub mod mutation;
+pub mod operator_pause;
+pub mod orchestration;
 pub mod provider;
 pub mod redaction;
 pub mod resume;
@@ -97,6 +100,10 @@ pub use implementation_packet::{
     RECURSIVE_ALIGNMENT_REVIEW_SCHEMA, WORK_SLICE_EXECUTION_RECEIPTS_FILE,
     WORK_SLICE_EXECUTION_RECEIPT_SCHEMA,
 };
+pub use learning_signals::{
+    scan_and_emit_learning_signals, EmittedLearningSignal, LearningScanReport,
+    LearningSignalSource, LearningSignalStore, LEARNING_SIGNALS_FILE, LEARNING_SIGNALS_SCHEMA,
+};
 pub use mode_contract::{
     assess_offdesk_mode, mode_requires_separate_review, OffdeskModeAssessment,
     OffdeskModeLifecycle, OffdeskModeRisk, OffdeskModeVerdict,
@@ -105,6 +112,10 @@ pub use mutation::{
     MutationRestoreOperation, MutationRestorePlan, MutationSnapshot, MutationSnapshotRequest,
     MutationSnapshotStore, MutationSnapshotVerification, SnapshotPolicy,
 };
+pub use operator_pause::{
+    OperatorPauseState, OperatorPauseStore, OPERATOR_PAUSE_FILE, OPERATOR_PAUSE_SCHEMA,
+};
+pub use orchestration::{load_orchestration_signals, OrchestrationSignals};
 pub use provider::{
     classify_provider_error, classify_provider_error_with_context, default_provider_profile,
     default_provider_profiles, recommend_provider_fallback, ProviderCapacityState,

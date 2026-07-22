@@ -1,0 +1,339 @@
+---
+import Base from '../layouts/Base.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import SourceStatus from '../components/SourceStatus.astro';
+import { sitePath } from '../lib/paths';
+import {
+  formatCountLabel,
+  inactiveQueueClasses,
+  severityClasses,
+  severityLabels,
+  viewFromOperatorCards,
+  type OperatorStateCard,
+} from '../lib/reviewSurface';
+
+import approvalPending from '../../../tests/fixtures/ui/operator_state_cards/approval_pending.json';
+import agentOutage from '../../../tests/fixtures/ui/operator_state_cards/agent_outage.json';
+import closeoutRequired from '../../../tests/fixtures/ui/operator_state_cards/closeout_required.json';
+import failedOffdeskTask from '../../../tests/fixtures/ui/operator_state_cards/failed_offdesk_task.json';
+import noWorkPending from '../../../tests/fixtures/ui/operator_state_cards/no_work_pending.json';
+import planReadyForReview from '../../../tests/fixtures/ui/operator_state_cards/plan_ready_for_review.json';
+
+const cards = [
+  closeoutRequired,
+  approvalPending,
+  failedOffdeskTask,
+  agentOutage,
+  planReadyForReview,
+  noWorkPending,
+] as OperatorStateCard[];
+const reviewView = viewFromOperatorCards(cards, closeoutRequired.id);
+---
+
+<Base
+  title="Forager Review Surface"
+  description="Read-only Forager operator review surface for current state, next safe action, evidence, and authorization boundary."
+>
+  <Nav />
+
+  <main
+    id="review-app"
+    class="min-h-screen bg-[#09111c] pt-24 text-slate-100"
+    data-live-surface-url={sitePath('/review-surface.json')}
+  >
+    <section class="border-y border-slate-700/70 bg-[#101925] px-6 py-5">
+      <div class="mx-auto flex max-w-7xl flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-[0.16em] text-brand-300">Forager Review</p>
+          <h1 class="mt-2 text-3xl font-semibold tracking-tight text-white md:text-4xl">Morning operator state</h1>
+          <p class="mt-2 text-sm text-slate-400">
+            Source: <span class="font-medium text-slate-200" data-review-source>{reviewView.sourceLabel}</span>
+          </p>
+        </div>
+        <div class="grid gap-3 text-sm sm:grid-cols-3">
+          <div class="border border-slate-700 bg-slate-950/50 px-4 py-3">
+            <p class="text-slate-400">Profile</p>
+            <p class="mt-1 font-mono text-slate-100" data-review-profile>{reviewView.profile}</p>
+          </div>
+          <div class="border border-slate-700 bg-slate-950/50 px-4 py-3">
+            <p class="text-slate-400">Open items</p>
+            <p class="mt-1 font-mono text-slate-100" data-review-open-items>{reviewView.openItems}</p>
+          </div>
+          <div
+            class={`border px-4 py-3 ${severityClasses[reviewView.currentSeverity]}`}
+            data-review-current-card
+            data-base-class="border px-4 py-3"
+          >
+            <p class="opacity-75">Current state</p>
+            <p class="mt-1 font-semibold" data-review-current-state>{reviewView.currentStateLabel}</p>
+          </div>
+        </div>
+      </div>
+    </section>
+    <SourceStatus
+      detail="Static fixture data is visible until review-surface.json is loaded from the local export."
+      command="npm run export:review-surface"
+    />
+
+    <section class="mx-auto grid max-w-7xl gap-6 px-6 py-8 lg:grid-cols-[22rem_1fr]">
+      <aside class="min-w-0 space-y-3">
+        <div class="flex items-center justify-between">
+          <h2 class="text-sm font-semibold uppercase tracking-[0.16em] text-slate-400">Attention Queue</h2>
+          <a href={sitePath('/guides/offdesk-morning-review/')} class="text-sm font-medium text-brand-200 hover:text-white">Runbook</a>
+        </div>
+        <div class="space-y-3" data-review-queue>
+          {reviewView.queue.map((card) => (
+            <article class={`min-w-0 border p-4 ${card.selected ? severityClasses[card.severity] : inactiveQueueClasses}`}>
+              <div class="flex items-start justify-between gap-3">
+                <h3 class="text-base font-semibold">{card.title}</h3>
+                <span class="whitespace-nowrap text-xs font-semibold uppercase tracking-[0.12em] opacity-75">{severityLabels[card.severity]}</span>
+              </div>
+              <p class="mt-2 text-sm leading-relaxed opacity-85">{card.stateSummary}</p>
+            </article>
+          ))}
+        </div>
+      </aside>
+
+      <section class="min-w-0 space-y-6">
+        <div
+          class={`min-w-0 border p-6 ${severityClasses[reviewView.currentSeverity]}`}
+          data-review-hero
+          data-base-class="min-w-0 border p-6"
+        >
+          <div class="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+            <div class="max-w-3xl">
+              <p class="text-sm font-semibold uppercase tracking-[0.14em] opacity-75" data-review-hero-label>{reviewView.currentStateLabel}</p>
+              <h2 class="mt-3 text-3xl font-semibold tracking-tight text-white" data-review-title>{reviewView.selected.title}</h2>
+              <p class="mt-4 text-lg leading-relaxed text-slate-100" data-review-summary>{reviewView.selected.state_summary}</p>
+            </div>
+            <a href={sitePath('/docs/guides/ondesk-handoff.html')} class="inline-flex justify-center border border-white/20 bg-slate-950/35 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-950/55">
+              Open handoff guide
+            </a>
+          </div>
+        </div>
+
+        <div class="grid min-w-0 gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+          <section class="min-w-0 border border-slate-700 bg-slate-950/55 p-6">
+            <p class="text-sm font-semibold uppercase tracking-[0.16em] text-brand-200">Decision</p>
+            <h3 class="mt-3 text-2xl font-semibold text-white" data-review-decision-label>{reviewView.selected.primary_blocker_or_decision.label}</h3>
+            <p class="mt-3 leading-relaxed text-slate-300" data-review-decision-summary>{reviewView.selected.primary_blocker_or_decision.summary}</p>
+
+            <div class="mt-6 border-t border-slate-700 pt-5">
+              <p class="text-sm font-semibold uppercase tracking-[0.16em] text-slate-400">Next Safe Action</p>
+              <p class="mt-3 text-xl font-semibold text-white" data-review-action-label>{reviewView.selected.next_safe_action.label}</p>
+              <p class="mt-2 leading-relaxed text-slate-300" data-review-action-reason>{reviewView.selected.next_safe_action.reason}</p>
+              <code
+                class="mt-4 block overflow-x-auto whitespace-nowrap border border-slate-700 bg-[#060b12] px-4 py-3 font-mono text-[10px] text-slate-200 sm:text-sm"
+                data-review-action-command
+                hidden={!reviewView.selected.next_safe_action.command}
+              >
+                {reviewView.selected.next_safe_action.command}
+              </code>
+            </div>
+          </section>
+
+          <section class="min-w-0 border border-slate-700 bg-[#111b27] p-6">
+            <p class="text-sm font-semibold uppercase tracking-[0.16em] text-slate-400">Authorization Boundary</p>
+            <p class="mt-3 text-lg leading-relaxed text-white" data-review-boundary>{reviewView.selected.authorization_boundary}</p>
+
+            <div class="mt-6 border-t border-slate-700 pt-5">
+              <p class="text-sm font-semibold uppercase tracking-[0.16em] text-slate-400">Detail Reference</p>
+              <p class="mt-3 text-base font-semibold text-white" data-review-detail-label>{reviewView.selected.detail_ref.label}</p>
+              <p class="mt-2 overflow-x-auto whitespace-nowrap font-mono text-[10px] text-slate-300 sm:text-sm" data-review-detail-value>{reviewView.detailValue}</p>
+            </div>
+          </section>
+        </div>
+
+        <section class="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-3" data-review-counts>
+          {reviewView.countEntries.map(({ label, value }) => (
+            <div class="min-w-0 border border-slate-700 bg-slate-900/70 p-5">
+              <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{formatCountLabel(label)}</p>
+              <p class="mt-3 font-mono text-3xl text-white">{value}</p>
+            </div>
+          ))}
+        </section>
+      </section>
+    </section>
+  </main>
+
+  <script id="review-fallback-data" type="application/json" set:html={JSON.stringify(reviewView)}></script>
+  <script>
+    import {
+      formatCountLabel,
+      inactiveQueueClasses,
+      projectReviewSurface,
+      severityClasses,
+      severityLabels,
+    } from '../lib/reviewSurface';
+    import {
+      sourceStatusClasses,
+      sourceStatusLabels,
+    } from '../lib/sourceStatus';
+
+    const REVIEW_REFRESH_COMMAND = 'npm run export:review-surface';
+
+    const app = document.getElementById('review-app');
+    const fallbackDataElement = document.getElementById('review-fallback-data');
+    const fallbackView = fallbackDataElement?.textContent
+      ? JSON.parse(fallbackDataElement.textContent)
+      : null;
+
+    if (app && fallbackView) {
+      fetchLiveSurface(app, fallbackView);
+    }
+
+    async function fetchLiveSurface(root, fallback) {
+      const liveSurfaceUrl = root.dataset.liveSurfaceUrl;
+      if (!liveSurfaceUrl) {
+        renderReviewView(root, fallback);
+        setSourceStatus(
+          root,
+          'missing_surface_url',
+          'No live review-surface URL is configured; showing static fixture fallback.',
+          REVIEW_REFRESH_COMMAND,
+        );
+        return;
+      }
+
+      try {
+        const response = await fetch(liveSurfaceUrl, { cache: 'no-store' });
+        if (!response.ok) {
+          throw new Error(`review surface unavailable: ${response.status}`);
+        }
+
+        const surface = await response.json();
+        renderReviewView(root, projectReviewSurface(surface));
+        setSourceStatus(
+          root,
+          'live',
+          `Loaded review_surface.v1 from ${liveSurfaceUrl}.`,
+          REVIEW_REFRESH_COMMAND,
+        );
+      } catch {
+        renderReviewView(root, fallback);
+        setSourceStatus(
+          root,
+          'live_fetch_failed',
+          `Could not load ${liveSurfaceUrl}; showing static fixture fallback.`,
+          REVIEW_REFRESH_COMMAND,
+        );
+      }
+    }
+
+    function renderReviewView(root, view) {
+      setText(root, '[data-review-source]', view.sourceLabel);
+      setText(root, '[data-review-profile]', view.profile);
+      setText(root, '[data-review-open-items]', view.openItems);
+      setText(root, '[data-review-current-state]', view.currentStateLabel);
+      setText(root, '[data-review-hero-label]', view.currentStateLabel);
+      setText(root, '[data-review-title]', view.selected.title);
+      setText(root, '[data-review-summary]', view.selected.state_summary);
+      setText(root, '[data-review-decision-label]', view.selected.primary_blocker_or_decision.label);
+      setText(root, '[data-review-decision-summary]', view.selected.primary_blocker_or_decision.summary);
+      setText(root, '[data-review-action-label]', view.selected.next_safe_action.label);
+      setText(root, '[data-review-action-reason]', view.selected.next_safe_action.reason);
+      setText(root, '[data-review-boundary]', view.selected.authorization_boundary);
+      setText(root, '[data-review-detail-label]', view.selected.detail_ref.label);
+      setText(root, '[data-review-detail-value]', view.detailValue);
+      setSeverity(root, '[data-review-current-card]', view.currentSeverity);
+      setSeverity(root, '[data-review-hero]', view.currentSeverity);
+      setCommand(root, view.selected.next_safe_action.command);
+      setHtml(root, '[data-review-queue]', view.queue.map(queueCardHtml).join(''));
+      setHtml(root, '[data-review-counts]', view.countEntries.map(countHtml).join(''));
+    }
+
+    function setText(root, selector, value) {
+      const element = root.querySelector(selector);
+      if (element) {
+        element.textContent = String(value ?? '');
+      }
+    }
+
+    function setHtml(root, selector, value) {
+      const element = root.querySelector(selector);
+      if (element) {
+        element.innerHTML = value;
+      }
+    }
+
+    function setSeverity(root, selector, severity) {
+      const element = root.querySelector(selector);
+      if (!element) {
+        return;
+      }
+
+      element.className = `${element.dataset.baseClass} ${severityClasses[severity]}`;
+    }
+
+    function setCommand(root, command) {
+      const element = root.querySelector('[data-review-action-command]');
+      if (!element) {
+        return;
+      }
+
+      element.textContent = command ?? '';
+      element.toggleAttribute('hidden', !command);
+    }
+
+    function setSourceStatus(root, status, detail, command) {
+      const element = root.querySelector('[data-source-status]');
+      if (!element) {
+        return;
+      }
+
+      element.className = `${element.dataset.baseClass} ${sourceStatusClasses[status]}`;
+      setText(root, '[data-source-status-label]', sourceStatusLabels[status]);
+      setText(root, '[data-source-status-detail]', detail);
+      const commandElement = root.querySelector('[data-source-status-command]');
+      if (commandElement) {
+        commandElement.textContent = command ?? '';
+        commandElement.toggleAttribute('hidden', !command);
+      }
+    }
+
+    function queueCardHtml(card) {
+      const classes = card.selected ? severityClasses[card.severity] : inactiveQueueClasses;
+
+      return `
+        <article class="min-w-0 border p-4 ${classes}">
+          <div class="flex items-start justify-between gap-3">
+            <h3 class="text-base font-semibold">${escapeHtml(card.title)}</h3>
+            <span class="whitespace-nowrap text-xs font-semibold uppercase tracking-[0.12em] opacity-75">${escapeHtml(severityLabels[card.severity])}</span>
+          </div>
+          <p class="mt-2 text-sm leading-relaxed opacity-85">${escapeHtml(card.stateSummary)}</p>
+        </article>
+      `;
+    }
+
+    function countHtml(count) {
+      return `
+        <div class="min-w-0 border border-slate-700 bg-slate-900/70 p-5">
+          <p class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">${escapeHtml(formatCountLabel(count.label))}</p>
+          <p class="mt-3 font-mono text-3xl text-white">${escapeHtml(String(count.value))}</p>
+        </div>
+      `;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (char) => {
+        switch (char) {
+          case '&':
+            return '&amp;';
+          case '<':
+            return '&lt;';
+          case '>':
+            return '&gt;';
+          case '"':
+            return '&quot;';
+          case "'":
+            return '&#39;';
+          default:
+            return char;
+        }
+      });
+    }
+  </script>
+
+  <Footer />
+</Base>

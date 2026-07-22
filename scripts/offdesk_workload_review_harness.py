@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Review a prepared TwinPaper Offdesk workload manifest.
+"""Review a prepared Offdesk workload manifest.
 
 This is a deterministic, read-only review artifact generator. It inspects the
 exact `prepared_task.json` that would be enqueued, checks the role-gate summary
-and workload safety contract, and emits a review artifact that
-`prepare_twinpaper_offdesk_task.py` can use as preflight evidence.
+and workload safety contract, and emits a review artifact that workload
+producers can use as preflight evidence.
 """
 
 from __future__ import annotations
@@ -17,9 +17,9 @@ import re
 from typing import Any
 
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 CASE_NAME = "workload_manifest_review"
 ALLOWED_LONG_RUNNER = "local-tmux"
+DEFAULT_REQUIRED_ARTIFACTS = ("prepared_task", "preflight", "runner_log", "result", "report")
 SYSTEM_CRITICAL_SAFETY_KEYS = (
     "model_responses_not_executed",
     "no_file_deletion_or_cleanup",
@@ -72,6 +72,12 @@ def contains_secret_like_text(value: Any) -> bool:
     return any(marker in text for marker in markers) or re.search(r"\bsk-[a-z0-9]{12,}", text) is not None
 
 
+def list_of_strings(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item)]
+
+
 def evaluate_manifest(manifest_path: pathlib.Path, manifest: dict[str, Any]) -> dict[str, Any]:
     blockers: list[str] = []
     warnings: list[str] = []
@@ -97,10 +103,18 @@ def evaluate_manifest(manifest_path: pathlib.Path, manifest: dict[str, Any]) -> 
         blockers.append("capability_not_dispatch_runtime")
     if not as_bool(safety.get("approval_required_before_dispatch")):
         blockers.append("dispatch_approval_not_required")
-    if not as_bool(safety.get("clean_role_gate_required")):
-        blockers.append("clean_role_gate_not_required")
     if not as_bool(safety.get("separate_review_artifact_required")):
         blockers.append("separate_review_not_required")
+
+    review_contract = manifest.get("review_contract", {})
+    if not isinstance(review_contract, dict):
+        review_contract = {}
+    role_gate_required = as_bool(safety.get("clean_role_gate_required")) or as_bool(
+        review_contract.get("role_gate_required")
+    )
+    evidence_review_required = as_bool(safety.get("deterministic_evidence_review_required")) or as_bool(
+        review_contract.get("evidence_review_required")
+    )
 
     runner = safety.get("runner")
     duration_minutes = float(manifest.get("duration_minutes") or 0)
@@ -129,18 +143,19 @@ def evaluate_manifest(manifest_path: pathlib.Path, manifest: dict[str, Any]) -> 
             blockers.append("episode_council_command_not_ready")
 
     role_gate = manifest.get("preflight", {}).get("role_gate", {})
-    if not isinstance(role_gate, dict):
-        blockers.append("missing_role_gate_summary")
-        role_gate = {}
-    if not as_bool(role_gate.get("ready")):
-        blockers.append("role_gate_not_ready")
-    quality_gate = role_gate.get("quality_gate", {})
-    if not isinstance(quality_gate, dict) or not as_bool(quality_gate.get("ready_for_long_workload")):
-        blockers.append("role_gate_not_ready_for_long_workload")
-    if role_gate.get("failed") not in (0, None):
-        blockers.append("role_gate_has_failures")
-    if role_gate.get("failure_category_counts"):
-        blockers.append("role_gate_failure_categories_present")
+    if role_gate_required:
+        if not isinstance(role_gate, dict):
+            blockers.append("missing_role_gate_summary")
+            role_gate = {}
+        if not as_bool(role_gate.get("ready")):
+            blockers.append("role_gate_not_ready")
+        quality_gate = role_gate.get("quality_gate", {})
+        if not isinstance(quality_gate, dict) or not as_bool(quality_gate.get("ready_for_long_workload")):
+            blockers.append("role_gate_not_ready_for_long_workload")
+        if role_gate.get("failed") not in (0, None):
+            blockers.append("role_gate_has_failures")
+        if role_gate.get("failure_category_counts"):
+            blockers.append("role_gate_failure_categories_present")
 
     repo = pathlib.Path(str(manifest.get("repo", "")))
     if not repo.exists():
@@ -154,14 +169,19 @@ def evaluate_manifest(manifest_path: pathlib.Path, manifest: dict[str, Any]) -> 
         blockers.append("workload_command_not_list")
         workload_command = []
     command_text = " ".join(str(item) for item in workload_command)
-    if "offdesk_twinpaper_autonomy_workload.py" not in command_text:
-        blockers.append("workload_command_missing_twinpaper_script")
-    if "--out-dir" not in workload_command or str(out_dir) not in workload_command:
+    if not command_text.strip():
+        blockers.append("workload_command_empty")
+    required_command_args = list_of_strings(review_contract.get("required_command_args"))
+    for required_arg in required_command_args:
+        if required_arg not in workload_command:
+            blockers.append(f"workload_command_missing_required_arg:{required_arg}")
+    if "--out-dir" in workload_command and str(out_dir) not in workload_command:
         blockers.append("workload_command_out_dir_mismatch")
-    if "--evidence-bundle" not in workload_command:
-        blockers.append("workload_command_missing_evidence_bundle")
-    if "--evidence-review" not in workload_command:
-        blockers.append("workload_command_missing_evidence_review")
+    if evidence_review_required:
+        if "--evidence-bundle" not in workload_command:
+            blockers.append("workload_command_missing_evidence_bundle")
+        if "--evidence-review" not in workload_command:
+            blockers.append("workload_command_missing_evidence_review")
 
     wrapper_path = pathlib.Path(str(manifest.get("workload_wrapper", "")))
     if not wrapper_path.exists():
@@ -173,19 +193,28 @@ def evaluate_manifest(manifest_path: pathlib.Path, manifest: dict[str, Any]) -> 
     if not isinstance(artifacts, dict):
         blockers.append("artifacts_block_missing")
         artifacts = {}
-    for key in ("prepared_task", "preflight", "runner_log", "result", "report", "evidence_bundle", "evidence_review"):
+    required_artifacts = list(DEFAULT_REQUIRED_ARTIFACTS)
+    for key in list_of_strings(review_contract.get("required_artifacts")):
+        if key not in required_artifacts:
+            required_artifacts.append(key)
+    if evidence_review_required:
+        for key in ("evidence_bundle", "evidence_review"):
+            if key not in required_artifacts:
+                required_artifacts.append(key)
+    for key in required_artifacts:
         artifact_path = artifacts.get(key)
         if not artifact_path:
             missing_evidence.append(f"artifact_path_missing:{key}")
+            blockers.append(f"artifact_path_missing:{key}")
             continue
         normalized_artifact_path = pathlib.Path(str(artifact_path))
         if not path_under(normalized_artifact_path, out_dir):
             blockers.append(f"artifact_outside_out_dir:{key}")
-        if key in {"evidence_bundle", "evidence_review"} and not normalized_artifact_path.exists():
+        if key in {"evidence_bundle", "evidence_review"} and evidence_review_required and not normalized_artifact_path.exists():
             blockers.append(f"artifact_missing:{key}")
 
     evidence_review_path = artifacts.get("evidence_review")
-    if evidence_review_path:
+    if evidence_review_required and evidence_review_path:
         try:
             evidence_review = load_json(pathlib.Path(str(evidence_review_path)))
         except (OSError, json.JSONDecodeError) as error:
@@ -210,8 +239,9 @@ def evaluate_manifest(manifest_path: pathlib.Path, manifest: dict[str, Any]) -> 
         blockers.append("enqueue_missing_dispatch_runtime")
     if "--agent-mode" not in enqueue_args:
         blockers.append("enqueue_missing_agent_mode")
-    if "--provider-id" not in enqueue_args or "ollama" not in enqueue_args:
-        blockers.append("enqueue_missing_ollama_provider")
+    provider_id = str(manifest.get("provider") or review_contract.get("provider_id") or "")
+    if provider_id and ("--provider-id" not in enqueue_args or provider_id not in enqueue_args):
+        blockers.append(f"enqueue_missing_provider:{provider_id}")
 
     if contains_secret_like_text(manifest):
         blockers.append("manifest_contains_secret_like_text")
@@ -224,13 +254,13 @@ def evaluate_manifest(manifest_path: pathlib.Path, manifest: dict[str, Any]) -> 
         blockers.append("model_missing")
 
     counterarguments.append(
-        "The role gate only tests prompt behavior on fixture episodes; the workload can still fail on real TwinPaper context."
+        "The role gate only tests prompt behavior on fixture episodes; the workload can still fail on real project context."
     )
     counterarguments.append(
         "The review confirms enqueue readiness, not approval to execute; dispatch.runtime approval remains separate."
     )
     counterarguments.append(
-        "The evidence bundle confirms available artifacts and current status only; the workload must still preserve full model responses for quality review."
+        "Evidence review confirms available artifacts and current status only; the workload must still preserve full model responses or equivalent outputs for quality review."
     )
     counterarguments.append(
         "System-critical constraints must remain hard gates: no file cleanup, reboot/shutdown, service restart, storage/NVMe/RAID mutation, package install, permission change, process termination, runner interruption, network/firewall/SSH change, kernel/driver/firmware change, or BIOS change without explicit operator approval."
@@ -254,9 +284,9 @@ def evaluate_manifest(manifest_path: pathlib.Path, manifest: dict[str, Any]) -> 
             "repo_read_only",
             "writes_only_under_out_dir",
             "writes_only_under_out_dir_except_adaptive_wiki_candidate_queue",
-            "clean_role_gate",
+            "clean_role_gate_when_required",
             "separate_manifest_review",
-            "deterministic_evidence_bundle_review",
+            "deterministic_evidence_bundle_review_when_required",
             "local_tmux_for_long_workload",
             "runtime_schedule_until_target_when_configured",
             "system_critical_no_file_deletion_or_cleanup",
@@ -283,7 +313,7 @@ def default_out_path(manifest_path: pathlib.Path) -> pathlib.Path:
 
 def write_markdown(path: pathlib.Path, result: dict[str, Any]) -> None:
     lines = [
-        "# TwinPaper Workload Review",
+        "# Offdesk Workload Review",
         "",
         f"- reviewed_artifact: `{result['reviewed_artifact']}`",
         f"- decision: `{result['review_stage_decision']}`",

@@ -1,5 +1,40 @@
+@import "tailwindcss";
+
+@source "../**/*.{astro,html,js,jsx,md,mdx,svelte,ts,tsx,vue}";
+
+@theme {
+  --font-sans: 'Inter', 'Inter Fallback', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --color-brand-50: #eef9ff;
+  --color-brand-100: #d9f1ff;
+  --color-brand-200: #b8e5ff;
+  --color-brand-300: #7dd3fc;
+  --color-brand-400: #38bdf8;
+  --color-brand-500: #0075ba;
+  --color-brand-600: #00639d;
+  --color-brand-700: #00507f;
+  --color-brand-800: #063f63;
+  --color-brand-900: #0a324f;
+
+  --color-kisti-blue: #0075ba;
+  --color-kisti-red: #da2128;
+  --color-kisti-cyan: #38bdf8;
+
+  --color-surface-50: #f8fafc;
+  --color-surface-100: #f1f5f9;
+  --color-surface-200: #e2e8f0;
+  --color-surface-700: #334155;
+  --color-surface-800: #1e293b;
+  --color-surface-850: #162032;
+  --color-surface-900: #0f172a;
+  --color-surface-950: #020617;
+}
+
 html {
   font-size: 17px;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 @font-face {
@@ -13,6 +48,7 @@ html {
 
 body {
   font-family: 'Inter', 'Inter Fallback', system-ui, sans-serif;
+  max-width: 100%;
   overflow-x: hidden;
 }
 

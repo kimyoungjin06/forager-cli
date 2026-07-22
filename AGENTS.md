@@ -4,6 +4,13 @@
 
 ## Project Structure & Module Organization
 
+- `.wiki-brief.md` (generated, if present): distilled operating lessons from
+  the adaptive wiki. Read it at session start, but treat it as advisory:
+  lines marked STALE or with old age/low confidence must be verified against
+  current state before being applied, and observed conflicts should be
+  recorded (`wiki add-counterexample` / `deprecate`) rather than silently
+  obeyed or ignored. Regenerate with `forager -p forager-ops offdesk wiki
+  brief --project-key forager --out .wiki-brief.md`.
 - `PROJECT_STATE.md`: current development focus and next documentation/harness
   work surface. Read this before deep status documents.
 - `src/bin/forager.rs`: primary binary entrypoint.

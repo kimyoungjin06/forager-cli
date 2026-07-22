@@ -71,6 +71,45 @@ fn write_synthetic_project(repo: &Path) -> Result<()> {
     Ok(())
 }
 
+fn write_module_profile_spec(path: &Path) -> Result<()> {
+    write_file(
+        path,
+        r#"{
+  "profile_kind": "demo_module01_operation_profile",
+  "project_key": "demo-project",
+  "module_path": "modules/01_research",
+  "profile_artifact": "module01_operation_profile.json",
+  "commands": [
+    {
+      "purpose": "build_evidence_bundle",
+      "command_template": "scripts/build_demo_evidence_bundle.py --repo {repo} --out {evidence_bundle}",
+      "writes_target_project_state": false,
+      "requires_runtime_approval": false
+    },
+    {
+      "purpose": "review_evidence_bundle",
+      "command_template": "scripts/review_demo_evidence_bundle.py --bundle {evidence_bundle} --out {evidence_review}",
+      "writes_target_project_state": false,
+      "requires_runtime_approval": false
+    },
+    {
+      "purpose": "build_module_operation_profile",
+      "command_template": "scripts/build_demo_module_profile.py --repo {repo} --scope {scope_ref} --out {module_profile}",
+      "writes_target_project_state": false,
+      "requires_runtime_approval": false
+    },
+    {
+      "purpose": "prepare_offdesk_task_after_review",
+      "command_template": "scripts/prepare_demo_offdesk_task.py --repo {repo} --project-key {project_key} --module-path {module_path}",
+      "writes_target_project_state": false,
+      "requires_runtime_approval": true
+    }
+  ]
+}
+"#,
+    )
+}
+
 #[test]
 #[serial]
 fn project_init_writes_read_only_initialization_packet() -> Result<()> {
@@ -649,29 +688,12 @@ fn project_apply_governance_hints_reviewed_never_overwrites_existing_surface() -
 
 #[test]
 #[serial]
-fn project_init_preflight_recognizes_twinpaper_module03() -> Result<()> {
+fn project_init_preflight_uses_explicit_module_profile_spec() -> Result<()> {
     let temp = tempdir()?;
-    let repo = temp.path().join("twinpaper");
-    write_file(repo.join("AGENTS.md").as_path(), "TwinPaper instructions\n")?;
-    write_file(repo.join("README.md").as_path(), "# TwinPaper\n")?;
-    write_file(
-        repo.join("docs/operations/RunLog.md").as_path(),
-        "# RunLog\n",
-    )?;
-    write_file(
-        repo.join("modules/03_regspec_machine/README.md").as_path(),
-        "# RegSpec Machine\n",
-    )?;
-    write_file(
-        repo.join("modules/03_regspec_machine/contract.yaml")
-            .as_path(),
-        "name: regspec\n",
-    )?;
-    write_file(
-        repo.join("modules/03_regspec_machine/pyproject.toml")
-            .as_path(),
-        "[project]\nname='regspec'\n",
-    )?;
+    let repo = temp.path().join("project");
+    write_synthetic_project(&repo)?;
+    let spec_path = temp.path().join("module_profile_spec.json");
+    write_module_profile_spec(&spec_path)?;
     let out_dir = temp.path().join("init-packet");
 
     let output = forager_command(temp.path())
@@ -680,9 +702,11 @@ fn project_init_preflight_recognizes_twinpaper_module03() -> Result<()> {
             "init",
             repo.to_str().expect("utf-8 repo path"),
             "--project-key",
-            "twinpaper",
+            "demo-project",
             "--operation-target",
-            "modules/03_regspec_machine",
+            "modules/01_research",
+            "--module-profile-spec",
+            spec_path.to_str().expect("utf-8 spec path"),
             "--out",
             out_dir.to_str().expect("utf-8 out path"),
             "--json",
@@ -703,10 +727,10 @@ fn project_init_preflight_recognizes_twinpaper_module03() -> Result<()> {
     );
     let preflight: Value = serde_json::from_str(&fs::read_to_string(preflight_path)?)?;
     let target = &preflight["operation_targets"][0];
-    assert_eq!(target["scope_ref"], "module03_regspec_machine");
+    assert_eq!(target["scope_ref"], "module01_research");
     assert_eq!(
         target["recognized_profile_kind"],
-        "twinpaper_module03_regspec_machine"
+        "demo_module01_operation_profile"
     );
     assert_eq!(target["profile_builder_available"], true);
     assert_eq!(target["evidence_bundle_builder_available"], true);
@@ -718,7 +742,7 @@ fn project_init_preflight_recognizes_twinpaper_module03() -> Result<()> {
             && command["command"]
                 .as_str()
                 .unwrap()
-                .contains("build_twinpaper_evidence_bundle.py")));
+                .contains("build_demo_evidence_bundle.py")));
     assert!(target["recommended_commands"]
         .as_array()
         .unwrap()
@@ -727,6 +751,62 @@ fn project_init_preflight_recognizes_twinpaper_module03() -> Result<()> {
             |command| command["purpose"] == "prepare_offdesk_task_after_review"
                 && command["requires_runtime_approval"] == true
         ));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn project_init_preflight_does_not_auto_recognize_domain_modules() -> Result<()> {
+    let temp = tempdir()?;
+    let repo = temp.path().join("project");
+    write_synthetic_project(&repo)?;
+    let out_dir = temp.path().join("init-packet");
+
+    let output = forager_command(temp.path())
+        .args([
+            "project",
+            "init",
+            repo.to_str().expect("utf-8 repo path"),
+            "--project-key",
+            "demo-project",
+            "--operation-target",
+            "modules/01_research",
+            "--out",
+            out_dir.to_str().expect("utf-8 out path"),
+            "--json",
+        ])
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: Value = serde_json::from_slice(&output.stdout)?;
+    let preflight_path = PathBuf::from(
+        json["artifacts"]["module_operation_preflight_json"]
+            .as_str()
+            .expect("preflight path"),
+    );
+    let preflight: Value = serde_json::from_str(&fs::read_to_string(preflight_path)?)?;
+    let target = &preflight["operation_targets"][0];
+    assert!(target["recognized_profile_kind"].is_null());
+    assert_eq!(target["profile_builder_available"], false);
+    assert_eq!(target["evidence_bundle_builder_available"], false);
+    assert!(target["blockers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|blocker| blocker == "no_known_module_profile_builder"));
+    assert!(target["recommended_commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|command| command["purpose"] == "author_module_operation_profile"));
+    let text = serde_json::to_string(&preflight)?;
+    assert!(!text.contains("twinpaper"));
+    assert!(!text.contains("module03"));
     Ok(())
 }
 

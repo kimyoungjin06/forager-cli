@@ -3,7 +3,7 @@
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use clap::{Args, Subcommand, ValueEnum};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fs;
 use std::io::Write;
@@ -72,6 +72,24 @@ pub enum ProjectCommands {
     /// Draft a design-first implementation packet before delegated execution
     #[command(name = "implementation-packet")]
     ImplementationPacket(Box<ProjectImplementationPacketArgs>),
+
+    /// Scan workspace roots and bulk-register unmatched projects into the registry
+    Sync(ProjectSyncArgs),
+}
+
+#[derive(Args)]
+pub struct ProjectSyncArgs {
+    /// Workspace root directories to scan (immediate children only)
+    #[arg(required = true)]
+    roots: Vec<PathBuf>,
+
+    /// Write the new entries to the registry (default: dry-run report only)
+    #[arg(long)]
+    apply: bool,
+
+    /// Do not assign a wiki plane to auto-registered projects
+    #[arg(long = "no-wiki")]
+    no_wiki: bool,
 }
 
 #[derive(Args)]
@@ -86,6 +104,10 @@ pub struct ProjectInitArgs {
     /// Module path/id to mark as a prioritized operation target
     #[arg(long, value_name = "MODULE_PATH_OR_ID")]
     operation_target: Vec<String>,
+
+    /// Project-specific module operation profile spec. Repeat to register multiple specs.
+    #[arg(long = "module-profile-spec", value_name = "PATH")]
+    module_profile_spec: Vec<PathBuf>,
 
     /// Write the initialization packet to this directory
     #[arg(long)]
@@ -586,6 +608,31 @@ struct ModuleOperationPreflightCommand {
     requires_runtime_approval: bool,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct ModuleProfileSpec {
+    profile_kind: String,
+    #[serde(default)]
+    project_key: Option<String>,
+    #[serde(default)]
+    scope_ref: Option<String>,
+    #[serde(default, alias = "path")]
+    module_path: Option<String>,
+    #[serde(default)]
+    profile_artifact: Option<String>,
+    #[serde(default)]
+    commands: Vec<ModuleProfileSpecCommand>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ModuleProfileSpecCommand {
+    purpose: String,
+    command_template: String,
+    #[serde(default)]
+    writes_target_project_state: bool,
+    #[serde(default)]
+    requires_runtime_approval: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 struct WikiSeedCandidateReport {
     kind: String,
@@ -649,7 +696,84 @@ pub async fn run(profile: &str, command: ProjectCommands) -> Result<()> {
             artifact_index::run_retention_promote(profile, args).await
         }
         ProjectCommands::ImplementationPacket(args) => run_implementation_packet(profile, *args),
+        ProjectCommands::Sync(args) => run_sync(args),
     }
+}
+
+/// Bulk onboarding for a workspace full of projects: scan each root's
+/// immediate children for project markers, skip anything the registry
+/// already matches, and report (or, with --apply, append) the rest.
+fn run_sync(args: ProjectSyncArgs) -> Result<()> {
+    use crate::session::project_registry as registry;
+
+    let mut current = registry::load_registry();
+    let registry_file = registry::registry_path();
+    let mut planned: Vec<registry::ProjectRegistryEntry> = Vec::new();
+    let mut skipped_registered = 0usize;
+
+    for root in &args.roots {
+        let root = root
+            .canonicalize()
+            .with_context(|| format!("resolve workspace root {}", root.display()))?;
+        let candidates = registry::scan_workspace_projects(&root);
+        if candidates.is_empty() {
+            println!("{}: no project-marker directories found", root.display());
+            continue;
+        }
+        for path in candidates {
+            if registry::resolve_project_for_path(&path, &current).is_some() {
+                skipped_registered += 1;
+                continue;
+            }
+            let mut entry = registry::default_entry_for_path(&path, None);
+            entry.key = registry::unique_key(&current, &entry.key);
+            entry.wiki_profile = if args.no_wiki {
+                None
+            } else {
+                Some(entry.key.clone())
+            };
+            // Track the planned entry locally so later candidates in the same
+            // run cannot claim the same key or re-match the same pattern.
+            current.push(entry.clone());
+            planned.push(entry);
+        }
+    }
+
+    if planned.is_empty() {
+        println!("Nothing to register ({skipped_registered} already covered by the registry).");
+        return Ok(());
+    }
+
+    println!(
+        "{} new project(s) ({} already registered):",
+        planned.len(),
+        skipped_registered
+    );
+    for entry in &planned {
+        println!(
+            "  {:32} <- {}  (wiki: {})",
+            entry.key,
+            entry.display_name,
+            entry.wiki_profile.as_deref().unwrap_or("-")
+        );
+    }
+
+    if !args.apply {
+        println!(
+            "\nDry run. Re-run with --apply to append these to {}",
+            registry_file.display()
+        );
+        return Ok(());
+    }
+    for entry in &planned {
+        registry::append_project(&registry_file, entry)?;
+    }
+    println!(
+        "\nRegistered {} project(s) in {}",
+        planned.len(),
+        registry_file.display()
+    );
+    Ok(())
 }
 
 async fn run_init(profile: &str, args: ProjectInitArgs) -> Result<()> {
@@ -675,6 +799,7 @@ async fn run_init(profile: &str, args: ProjectInitArgs) -> Result<()> {
     let id = format!("project-init-{}", short_uuid());
     let artifact_dir = resolve_artifact_dir(profile_name, &project_key, generated_at, &args)?;
     let artifacts = artifact_paths(&artifact_dir);
+    let module_profile_specs = load_module_profile_specs(&args.module_profile_spec)?;
 
     let root_markers = collect_root_markers(&project_root);
     let documentation_sources = collect_documentation_sources(&project_root);
@@ -716,6 +841,7 @@ async fn run_init(profile: &str, args: ProjectInitArgs) -> Result<()> {
         &project_root,
         &artifact_dir,
         &module_report,
+        &module_profile_specs,
     );
     let wiki_report = WikiSeedCandidateReport {
         kind: "forager_wiki_seed_candidates".to_string(),
@@ -1497,7 +1623,6 @@ fn collect_entrypoints(root: &Path, base: &Path) -> Vec<EntryPointCandidate> {
         "Makefile",
         "justfile",
         "scripts/run.sh",
-        "scripts/run_module_03.sh",
         "scripts/test.sh",
     ] {
         let path = base.join(rel);
@@ -1736,13 +1861,20 @@ fn module_operation_preflight(
     project_root: &Path,
     artifact_dir: &Path,
     modules: &ModuleCandidateReport,
+    module_profile_specs: &[ModuleProfileSpec],
 ) -> ModuleOperationPreflightReport {
     let operation_targets = modules
         .candidates
         .iter()
         .filter(|candidate| candidate.selected_operation_target)
         .map(|candidate| {
-            module_operation_preflight_target(project_key, project_root, artifact_dir, candidate)
+            module_operation_preflight_target(
+                project_key,
+                project_root,
+                artifact_dir,
+                candidate,
+                module_profile_specs,
+            )
         })
         .collect::<Vec<_>>();
     let mut blockers = operation_targets
@@ -1778,6 +1910,7 @@ fn module_operation_preflight_target(
     project_root: &Path,
     artifact_dir: &Path,
     candidate: &ModuleCandidate,
+    module_profile_specs: &[ModuleProfileSpec],
 ) -> ModuleOperationPreflightTarget {
     let module_contract_exists = project_root
         .join(&candidate.path)
@@ -1787,7 +1920,8 @@ fn module_operation_preflight_target(
         .documentation_sources
         .iter()
         .any(|source| source.exists);
-    let recognized_profile_kind = recognized_module_profile_kind(project_key, candidate);
+    let profile_spec = matching_module_profile_spec(module_profile_specs, project_key, candidate);
+    let recognized_profile_kind = profile_spec.map(|spec| operator_safe_text(&spec.profile_kind));
     let mut blockers = vec![
         "operator_review_required_before_runtime_enqueue".to_string(),
         "module_operation_profile_requires_review".to_string(),
@@ -1830,32 +1964,77 @@ fn module_operation_preflight_target(
             project_root,
             artifact_dir,
             candidate,
-            recognized,
+            project_key,
+            profile_spec,
         ),
         required_operator_decisions,
     }
 }
 
-fn recognized_module_profile_kind(
+fn load_module_profile_specs(paths: &[PathBuf]) -> Result<Vec<ModuleProfileSpec>> {
+    paths
+        .iter()
+        .map(|path| {
+            let text = fs::read_to_string(path)
+                .with_context(|| format!("read module profile spec {}", path.display()))?;
+            let spec: ModuleProfileSpec = serde_json::from_str(&text)
+                .with_context(|| format!("parse module profile spec {}", path.display()))?;
+            if spec.profile_kind.trim().is_empty() {
+                bail!(
+                    "module profile spec {} has empty profile_kind",
+                    path.display()
+                );
+            }
+            if spec.scope_ref.is_none() && spec.module_path.is_none() {
+                bail!(
+                    "module profile spec {} must include scope_ref or module_path",
+                    path.display()
+                );
+            }
+            if spec.commands.is_empty() {
+                bail!(
+                    "module profile spec {} must include at least one command",
+                    path.display()
+                );
+            }
+            Ok(spec)
+        })
+        .collect()
+}
+
+fn matching_module_profile_spec<'a>(
+    specs: &'a [ModuleProfileSpec],
     project_key: &str,
     candidate: &ModuleCandidate,
-) -> Option<String> {
-    if project_key == "twinpaper"
-        && (candidate.scope_ref == "module03_regspec_machine"
-            || candidate.path == "modules/03_regspec_machine")
-    {
-        return Some("twinpaper_module03_regspec_machine".to_string());
-    }
-    None
+) -> Option<&'a ModuleProfileSpec> {
+    specs.iter().find(|spec| {
+        let project_matches = spec
+            .project_key
+            .as_deref()
+            .map(|key| key == project_key)
+            .unwrap_or(true);
+        let scope_matches = spec
+            .scope_ref
+            .as_deref()
+            .map(|scope| scope == candidate.scope_ref)
+            .unwrap_or(false);
+        let path_matches = spec
+            .module_path
+            .as_deref()
+            .map(|path| path == candidate.path)
+            .unwrap_or(false);
+        project_matches && (scope_matches || path_matches)
+    })
 }
 
 fn module_operation_preflight_commands(
     project_root: &Path,
     artifact_dir: &Path,
     candidate: &ModuleCandidate,
-    recognized: bool,
+    project_key: &str,
+    profile_spec: Option<&ModuleProfileSpec>,
 ) -> Vec<ModuleOperationPreflightCommand> {
-    if !recognized {
+    let Some(profile_spec) = profile_spec else {
         return vec![ModuleOperationPreflightCommand {
             purpose: "author_module_operation_profile".to_string(),
             command: format!(
@@ -1865,48 +2044,51 @@ fn module_operation_preflight_commands(
             writes_target_project_state: false,
             requires_runtime_approval: false,
         }];
-    }
+    };
 
     let repo = shell_arg(&safe_path(project_root));
+    let artifact_dir_arg = shell_arg(&safe_path(artifact_dir));
     let evidence_bundle = shell_arg(&safe_path(&artifact_dir.join("evidence_bundle.json")));
     let evidence_review = shell_arg(&safe_path(&artifact_dir.join("evidence_review.json")));
-    let module_profile = shell_arg(&safe_path(
-        &artifact_dir.join("module03_operation_profile.json"),
-    ));
-    vec![
-        ModuleOperationPreflightCommand {
-            purpose: "build_evidence_bundle".to_string(),
-            command: format!(
-                "scripts/build_twinpaper_evidence_bundle.py --repo {repo} --out {evidence_bundle}"
+    let profile_artifact = profile_spec
+        .profile_artifact
+        .as_deref()
+        .unwrap_or("module_operation_profile.json");
+    let module_profile = shell_arg(&safe_path(&artifact_dir.join(profile_artifact)));
+    let module_path = shell_arg(&candidate.path);
+    let scope_ref = shell_arg(&candidate.scope_ref);
+    let project_key_arg = shell_arg(project_key);
+
+    profile_spec
+        .commands
+        .iter()
+        .map(|command| ModuleOperationPreflightCommand {
+            purpose: operator_safe_text(command.purpose.trim()),
+            command: render_module_profile_command_template(
+                &command.command_template,
+                &[
+                    ("repo", repo.as_str()),
+                    ("artifact_dir", artifact_dir_arg.as_str()),
+                    ("evidence_bundle", evidence_bundle.as_str()),
+                    ("evidence_review", evidence_review.as_str()),
+                    ("module_profile", module_profile.as_str()),
+                    ("project_key", project_key_arg.as_str()),
+                    ("scope_ref", scope_ref.as_str()),
+                    ("module_path", module_path.as_str()),
+                ],
             ),
-            writes_target_project_state: false,
-            requires_runtime_approval: false,
-        },
-        ModuleOperationPreflightCommand {
-            purpose: "review_evidence_bundle".to_string(),
-            command: format!(
-                "scripts/review_evidence_bundle.py --bundle {evidence_bundle} --out {evidence_review}"
-            ),
-            writes_target_project_state: false,
-            requires_runtime_approval: false,
-        },
-        ModuleOperationPreflightCommand {
-            purpose: "build_module_operation_profile".to_string(),
-            command: format!(
-                "scripts/build_twinpaper_module03_operation_profile.py --repo {repo} --evidence-bundle {evidence_bundle} --include-git --out {module_profile}"
-            ),
-            writes_target_project_state: false,
-            requires_runtime_approval: false,
-        },
-        ModuleOperationPreflightCommand {
-            purpose: "prepare_offdesk_task_after_review".to_string(),
-            command: format!(
-                "scripts/prepare_twinpaper_offdesk_task.py --repo {repo} --project-key twinpaper --role-gate-result latest --review-artifact latest"
-            ),
-            writes_target_project_state: false,
-            requires_runtime_approval: true,
-        },
-    ]
+            writes_target_project_state: command.writes_target_project_state,
+            requires_runtime_approval: command.requires_runtime_approval,
+        })
+        .collect()
+}
+
+fn render_module_profile_command_template(template: &str, replacements: &[(&str, &str)]) -> String {
+    let mut rendered = template.to_string();
+    for (key, value) in replacements {
+        rendered = rendered.replace(&format!("{{{key}}}"), value);
+    }
+    operator_safe_text(rendered.trim())
 }
 
 fn module_docs(root: &Path, module_path: &Path) -> Vec<PathSignal> {

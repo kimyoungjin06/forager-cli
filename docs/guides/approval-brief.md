@@ -223,7 +223,7 @@ Before emitting an approval brief, check:
 ```json
 {
   "schema": "approval_brief.v1",
-  "source": "offdesk_twinpaper_autonomy_workload",
+  "source": "offdesk_autonomy_workload",
   "recommendation": "revise",
   "subject": "reportability status check",
   "summary_lines": [

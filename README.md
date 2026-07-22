@@ -125,7 +125,6 @@ In the TUI: `n` to create a session, `Enter` to attach, `t` to toggle terminal v
 - **[Quick Start](https://kimyoungjin06.github.io/forager-cli/docs/quick-start.html)** -- first steps and basic usage
 - **[Workflow Guide](https://kimyoungjin06.github.io/forager-cli/docs/guides/workflow.html)** -- recommended setup with bare repos and worktrees
 - **[Operation Cycle](https://kimyoungjin06.github.io/forager-cli/docs/guides/operation-cycle.html)** -- Ondesk to Offdesk to Ondesk lifecycle, approvals, evidence, and wiki boundaries
-- **[TwinPaper Offdesk Runtime Smoke](https://kimyoungjin06.github.io/forager-cli/docs/guides/twinpaper-offdesk-runtime-smoke.html)** -- validated short-run procedure for the approval-gated Offdesk launch path
 - **[Repo Config & Hooks](https://kimyoungjin06.github.io/forager-cli/docs/guides/repo-config.html)** -- per-project settings and automation
 - **[Configuration Reference](https://kimyoungjin06.github.io/forager-cli/docs/guides/configuration.html)** -- all config options
 - **[CLI Reference](https://kimyoungjin06.github.io/forager-cli/docs/cli/reference.html)** -- complete command documentation

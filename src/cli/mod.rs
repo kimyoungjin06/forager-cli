@@ -4,6 +4,7 @@ pub mod add;
 pub mod artifact_index;
 pub mod definition;
 pub mod doctor;
+pub mod go;
 pub mod group;
 pub mod init;
 pub mod list;
@@ -20,6 +21,7 @@ pub mod sounds;
 pub mod status;
 pub mod tmux;
 pub mod uninstall;
+pub mod workstation_surface;
 pub mod worktree;
 
 pub use definition::{Cli, Commands};

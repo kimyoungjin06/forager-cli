@@ -45,6 +45,8 @@ pub struct OffdeskTickOptions {
     pub now: DateTime<Utc>,
     pub notification_cooldown: Option<Duration>,
     pub lock_stale_after: Duration,
+    pub project_key: Option<String>,
+    pub task_id: Option<String>,
 }
 
 impl OffdeskTickOptions {
@@ -54,6 +56,8 @@ impl OffdeskTickOptions {
             now,
             notification_cooldown: None,
             lock_stale_after: Duration::minutes(30),
+            project_key: None,
+            task_id: None,
         }
     }
 }
@@ -71,6 +75,18 @@ pub struct OffdeskTickReport {
     pub provider_retargeted: usize,
     pub skipped: usize,
     pub stale_lock_replaced: bool,
+    /// True when a global operator pause held back new dispatch this tick.
+    #[serde(default)]
+    pub dispatch_paused: bool,
+    /// Number of dispatch-ready tasks held back by the operator pause.
+    #[serde(default)]
+    pub held: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pause_reason: Option<String>,
+    /// Adaptive-wiki learning candidates emitted from this tick's observed
+    /// denials, failures, and resume-recovery rows (recommendation-only).
+    #[serde(default)]
+    pub learning_signals_emitted: usize,
     pub updated_task_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub next_safe_actions: Vec<OffdeskNextSafeAction>,
@@ -108,26 +124,44 @@ pub fn run_offdesk_tick(
     )
     .with_adaptive_wiki(adaptive_wiki_store.clone());
     let (mut approval_session, expired) = approval_ledger.begin_session(options.now)?;
-    let background_outcomes = poll_background_runs(
-        &background_store,
-        None,
-        options.now,
-        options.notification_cooldown,
-    )?;
+    let mut tasks = task_store.load()?;
+    let scoped_ticket_id = task_scoped_background_ticket_id(&tasks, &options);
+    let background_outcomes = match scoped_ticket_id {
+        ScopedBackgroundTicket::All => poll_background_runs(
+            &background_store,
+            None,
+            options.now,
+            options.notification_cooldown,
+        )?,
+        ScopedBackgroundTicket::One(ticket_id) => poll_background_runs(
+            &background_store,
+            Some(&ticket_id),
+            options.now,
+            options.notification_cooldown,
+        )?,
+        ScopedBackgroundTicket::None => Vec::new(),
+    };
     let background_by_ticket = background_outcomes
         .iter()
         .map(|outcome| (outcome.probe.ticket_id.clone(), outcome))
         .collect::<HashMap<_, _>>();
 
+    let operator_pause =
+        crate::offdesk::operator_pause::OperatorPauseStore::new(profile_dir).load()?;
+
     let mut report = OffdeskTickReport {
         expired_approvals: expired.len(),
         polled_background: background_outcomes.len(),
         stale_lock_replaced: tick_lock.stale_metadata_replaced(),
+        dispatch_paused: operator_pause.paused,
+        pause_reason: operator_pause.reason.clone(),
         ..OffdeskTickReport::default()
     };
 
-    let mut tasks = task_store.load()?;
     for task in tasks.iter_mut() {
+        if !task_matches_tick_filter(task, &options) {
+            continue;
+        }
         apply_background_outcome(
             task,
             &background_by_ticket,
@@ -142,10 +176,24 @@ pub fn run_offdesk_tick(
         &provider_capacity_store,
         options.now,
         &mut report,
+        options.project_key.as_deref(),
+        options.task_id.as_deref(),
     )?;
 
     let mut dispatched = 0usize;
     for task in tasks.iter_mut() {
+        if !task_matches_tick_filter(task, &options) {
+            continue;
+        }
+        // A global operator pause halts all new dispatch: dispatch-ready tasks
+        // stay queued and are reported as held. Background polling above still
+        // runs, so existing work keeps being monitored.
+        if operator_pause.paused {
+            if task.can_dispatch_at(options.now) {
+                report.held += 1;
+            }
+            continue;
+        }
         if dispatched >= options.limit {
             if task.can_dispatch_at(options.now) {
                 report.skipped += 1;
@@ -177,7 +225,56 @@ pub fn run_offdesk_tick(
     approval_session.flush()?;
     refresh_tick_next_safe_actions(&mut report);
     task_store.save(&tasks)?;
+
+    // Event-driven learning: translate this tick's observed denials, failures,
+    // and resume-recovery rows into adaptive-wiki candidates (recommendation-only;
+    // never auto-applied). A durable cursor emits each event once. This must never
+    // fail the tick, so its error is logged and swallowed.
+    match crate::offdesk::learning_signals::scan_and_emit_learning_signals(profile_dir, options.now)
+    {
+        Ok(scan) => report.learning_signals_emitted = scan.emitted_count(),
+        Err(error) => tracing::warn!(error = %error, "learning signal scan failed"),
+    }
+
     Ok(report)
+}
+
+enum ScopedBackgroundTicket {
+    All,
+    One(String),
+    None,
+}
+
+fn task_matches_tick_filter(task: &OffdeskTask, options: &OffdeskTickOptions) -> bool {
+    if let Some(project_key) = options.project_key.as_deref() {
+        if task.project_key != project_key {
+            return false;
+        }
+    }
+    if let Some(task_id) = options.task_id.as_deref() {
+        if task.task_id != task_id {
+            return false;
+        }
+    }
+    true
+}
+
+fn task_scoped_background_ticket_id(
+    tasks: &[OffdeskTask],
+    options: &OffdeskTickOptions,
+) -> ScopedBackgroundTicket {
+    if options.project_key.is_none() && options.task_id.is_none() {
+        return ScopedBackgroundTicket::All;
+    }
+    let Some(task_id) = options.task_id.as_deref() else {
+        return ScopedBackgroundTicket::All;
+    };
+    tasks
+        .iter()
+        .find(|task| task.task_id == task_id && task_matches_tick_filter(task, options))
+        .and_then(|task| task.background_ticket_id.clone())
+        .map(ScopedBackgroundTicket::One)
+        .unwrap_or(ScopedBackgroundTicket::None)
 }
 
 pub fn reconcile_tasks_with_background_outcomes(
@@ -520,6 +617,8 @@ fn apply_approved_provider_fallbacks(
     provider_capacity_store: &ProviderCapacityStore,
     now: DateTime<Utc>,
     report: &mut OffdeskTickReport,
+    project_key: Option<&str>,
+    task_id: Option<&str>,
 ) -> Result<()> {
     for approval in approvals.approved_provider_fallbacks(now) {
         if approval.action != PROVIDER_FALLBACK_ACTION {
@@ -547,10 +646,11 @@ fn apply_approved_provider_fallbacks(
         };
 
         let mut applied = 0usize;
-        for task in tasks
-            .iter_mut()
-            .filter(|task| provider_fallback_task_matches_scope(task, &approval, metadata))
-        {
+        for task in tasks.iter_mut().filter(|task| {
+            project_key.map_or(true, |expected| task.project_key == expected)
+                && task_id.map_or(true, |expected| task.task_id == expected)
+                && provider_fallback_task_matches_scope(task, &approval, metadata)
+        }) {
             task.provider_id = Some(candidate.provider_id.clone());
             task.model = candidate.model.clone();
             task.not_before = None;
@@ -1187,6 +1287,35 @@ mod tests {
         assert_eq!(fallback.current_model.as_deref(), Some("gpt-4.1"));
         assert_eq!(ApprovalLedger::new(temp.path()).load()?.len(), 0);
         assert!(BackgroundRunStore::new(temp.path()).load()?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    #[serial]
+    fn tick_operator_pause_holds_new_dispatch_then_resumes() -> Result<()> {
+        let temp = tempdir()?;
+        let now = Utc::now();
+        let store = OffdeskTaskStore::new(temp.path());
+        store.enqueue(OffdeskTask::new(task_input(now, "true"), now))?;
+
+        // A global operator pause holds new dispatch: the task stays queued.
+        let pause = crate::offdesk::operator_pause::OperatorPauseStore::new(temp.path());
+        pause.pause(Some("emergency"), Some("test"), now)?;
+        let report = run_offdesk_tick(temp.path(), OffdeskTickOptions::new(now))?;
+        assert!(report.dispatch_paused);
+        assert_eq!(report.held, 1);
+        assert_eq!(report.launched, 0);
+        assert_eq!(report.pause_reason.as_deref(), Some("emergency"));
+        assert_eq!(store.load()?.remove(0).status, OffdeskTaskStatus::Queued);
+        assert!(BackgroundRunStore::new(temp.path()).load()?.is_empty());
+
+        // Resuming releases dispatch; the task launches on the next tick.
+        pause.resume(Some("test"), now)?;
+        let report = run_offdesk_tick(temp.path(), OffdeskTickOptions::new(now))?;
+        assert!(!report.dispatch_paused);
+        assert_eq!(report.held, 0);
+        assert_eq!(report.launched, 1);
+        assert_eq!(store.load()?.remove(0).status, OffdeskTaskStatus::Launched);
         Ok(())
     }
 

@@ -1,0 +1,41 @@
+---
+import {
+  sourceStatusClasses,
+  sourceStatusLabels,
+  type SourceStatusKind,
+} from '../lib/sourceStatus';
+
+interface Props {
+  status?: SourceStatusKind;
+  detail: string;
+  command?: string;
+}
+
+const {
+  status = 'fixture_fallback',
+  detail,
+  command = '',
+} = Astro.props;
+
+const baseClass = 'mx-auto mt-4 max-w-7xl border px-4 py-3 text-sm';
+---
+
+<div
+  class={`${baseClass} ${sourceStatusClasses[status]}`}
+  data-source-status
+  data-base-class={baseClass}
+>
+  <div class="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+    <div class="min-w-0">
+      <p class="font-semibold" data-source-status-label>{sourceStatusLabels[status]}</p>
+      <p class="mt-1 leading-relaxed opacity-90" data-source-status-detail>{detail}</p>
+    </div>
+    <code
+      class="block break-all border border-white/15 bg-slate-950/35 px-3 py-2 font-mono text-[11px] opacity-90"
+      data-source-status-command
+      hidden={!command}
+    >
+      {command}
+    </code>
+  </div>
+</div>

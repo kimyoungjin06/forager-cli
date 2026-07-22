@@ -1,0 +1,572 @@
+---
+import Base from '../layouts/Base.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import { sitePath } from '../lib/paths';
+import wikiGraph from '../data/wiki-graph.sample.json';
+
+const summary = wikiGraph.summary ?? {};
+const records = summary.records ?? 0;
+const tagNodes = summary.tag_nodes ?? 0;
+const reviewIssues = summary.review_issues ?? 0;
+const generatedAt = (wikiGraph.generated_at ?? '').replace('T', ' ').slice(0, 19);
+
+const statusCounts = wikiGraph.nodes
+  .filter((node) => node.type !== 'tag')
+  .reduce((acc, node) => {
+    acc[node.status] = (acc[node.status] ?? 0) + 1;
+    return acc;
+  }, {});
+---
+
+<Base
+  title="Forager Knowledge Graph"
+  description="Composed view of the adaptive-wiki tag graph: promoted entries, candidates, and typed tags clustered into regions. Read-only and advisory."
+>
+  <Nav />
+
+  <main
+    id="knowledge-app"
+    class="min-h-screen bg-[#08111d] pt-24 text-slate-100"
+    data-live-surface-url={sitePath('/wiki-graph.json')}
+    data-index-url={sitePath('/wiki-graph/index.json')}
+  >
+    <section class="border-y border-slate-700/70 bg-[#101a27] px-6 py-5">
+      <div class="mx-auto grid max-w-7xl gap-5 xl:grid-cols-[1fr_auto] xl:items-center">
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-[0.16em] text-brand-300">
+            Adaptive Wiki &middot; offdesk wiki graph
+          </p>
+          <h1 class="mt-2 text-3xl font-semibold tracking-tight text-white md:text-4xl">Knowledge graph</h1>
+          <p class="mt-2 max-w-3xl text-sm leading-relaxed text-slate-400">
+            Promoted entries, unpromoted candidates, and typed tags, clustered into regions by tag prefix.
+            Source: <span class="font-medium text-slate-200" data-graph-source>sample fixture</span>.
+            <span class="text-slate-500"> Read-only and advisory &mdash; this view never changes runtime behavior, approvals, or wiki state.</span>
+          </p>
+        </div>
+        <dl class="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-2">
+          <div class="rounded-lg border border-slate-700/70 bg-[#0c1622] px-4 py-3">
+            <dt class="text-[11px] uppercase tracking-wider text-slate-500">Records</dt>
+            <dd class="mt-1 font-mono text-2xl tabular-nums text-white" data-metric-records>{records}</dd>
+          </div>
+          <div class="rounded-lg border border-slate-700/70 bg-[#0c1622] px-4 py-3">
+            <dt class="text-[11px] uppercase tracking-wider text-slate-500">Tags</dt>
+            <dd class="mt-1 font-mono text-2xl tabular-nums text-white" data-metric-tags>{tagNodes}</dd>
+          </div>
+          <div class="rounded-lg border border-slate-700/70 bg-[#0c1622] px-4 py-3">
+            <dt class="text-[11px] uppercase tracking-wider text-slate-500">Promoted</dt>
+            <dd class="mt-1 font-mono text-2xl tabular-nums text-emerald-300" data-metric-promoted>{statusCounts.promoted ?? 0}</dd>
+          </div>
+          <div class="rounded-lg border border-slate-700/70 bg-[#0c1622] px-4 py-3">
+            <dt class="text-[11px] uppercase tracking-wider text-slate-500">Review issues</dt>
+            <dd class="mt-1 font-mono text-2xl tabular-nums text-amber-300" data-metric-issues>{reviewIssues}</dd>
+          </div>
+        </dl>
+      </div>
+    </section>
+
+    <section class="mx-auto max-w-7xl px-6 py-6">
+      <div class="mb-3 flex flex-wrap items-center gap-x-6 gap-y-3">
+        <label class="flex items-center gap-2" data-profile-wrap hidden>
+          <span class="text-xs font-semibold uppercase tracking-wider text-slate-500">Profile</span>
+          <select
+            id="profile-select"
+            class="rounded-md border border-slate-700 bg-[#0c1622] px-3 py-1.5 font-mono text-sm text-slate-100 focus:border-brand-400 focus:outline-none"
+          ></select>
+        </label>
+        <div class="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter by knowledge facet">
+          <span class="mr-1 text-xs font-semibold uppercase tracking-wider text-slate-500">Facet</span>
+          <div id="facet-buttons" class="flex flex-wrap items-center gap-1.5"></div>
+        </div>
+      </div>
+      <div class="relative rounded-xl border border-slate-700/70 bg-[#0b141f] p-2 sm:p-3">
+        <div id="wiki-graph-plot" class="h-[72vh] min-h-[480px] w-full"></div>
+        <div
+          id="wiki-graph-empty"
+          class="pointer-events-none absolute inset-0 hidden items-center justify-center text-center"
+        >
+          <p class="max-w-sm text-sm text-slate-500">
+            No knowledge in this facet for the selected profile yet.<br />
+            <span class="text-slate-400">research</span> is the substantive science;
+            <span class="text-slate-400">ops</span> is how to run the machinery.
+          </p>
+        </div>
+      </div>
+      <div class="mt-6">
+        <div class="mb-3 flex flex-wrap items-center gap-3">
+          <h2 class="text-lg font-semibold tracking-tight text-white">Entries</h2>
+          <input
+            id="entry-search"
+            type="search"
+            placeholder="검색: 한국어 / English / tag / id"
+            autocomplete="off"
+            class="w-72 max-w-full rounded-md border border-slate-700 bg-[#0c1622] px-3 py-1.5 text-sm text-slate-100 placeholder:text-slate-600 focus:border-brand-400 focus:outline-none"
+          />
+          <span id="entry-count" class="text-xs tabular-nums text-slate-500"></span>
+        </div>
+        <div
+          id="entry-list"
+          class="divide-y divide-slate-800/70 overflow-hidden rounded-xl border border-slate-700/70 bg-[#0b141f]"
+        ></div>
+      </div>
+      <p class="mt-3 text-xs leading-relaxed text-slate-500">
+        Drag to pan &middot; scroll to zoom &middot; hover a node for detail &middot; click a legend entry to toggle a series.
+        Derived structural tags (kind/scope/status/&hellip;) are hidden by default &mdash; enable
+        <span class="text-slate-300">derived edges</span> in the legend to see the full structure.
+        Regenerate the data with <code class="rounded bg-[#101a27] px-1.5 py-0.5 font-mono text-slate-300">npm run export:wiki-graph</code>.
+      </p>
+    </section>
+  </main>
+
+  <Footer />
+
+  <script type="application/json" id="wiki-graph-data" set:html={JSON.stringify(wikiGraph)}></script>
+
+  <script>
+    import Plotly from 'plotly.js-dist-min';
+
+    const STATUS_COLOR = { promoted: '#46c98b', candidate: '#e2a63c', deprecated: '#6b7688' };
+    const EDGE_COLOR = {
+      has_core_tag: 'rgba(148,163,184,0.38)',
+      has_derived_core_tag: 'rgba(100,116,139,0.16)',
+      has_proposed_tag: 'rgba(124,140,255,0.6)',
+    };
+    const EDGE_META = {
+      has_core_tag: { name: 'core tag', dash: 'solid', width: 1.4, visible: true },
+      has_derived_core_tag: { name: 'derived', dash: 'dot', width: 0.8, visible: 'legendonly' },
+      has_proposed_tag: { name: 'proposed', dash: 'dash', width: 1.3, visible: true },
+    };
+    const PREFIX_COLOR = {
+      project: '#6f8cff', agent: '#b28cff', risk: '#e5686f', artifact: '#38b2ac',
+      capability: '#39b0d6', evidence: '#57b894', kind: '#5fbf7a', scope: '#d99a3c',
+      status: '#8a93a6', confidence: '#7d88a0', signal: '#e07ab0', method: '#9bc34a', mode: '#6c8cff',
+    };
+    const prefixColor = (p) => PREFIX_COLOR[p] || '#94a3b8';
+
+    const plotEl = document.getElementById('wiki-graph-plot');
+    const app = document.getElementById('knowledge-app');
+    const embedded = JSON.parse(document.getElementById('wiki-graph-data').textContent);
+
+    // ---- clustered layout: each tag prefix owns a region on a ring ----
+    function layout(view) {
+      const nodes = view.nodes.map((n) => ({ ...n }));
+      const byId = new Map(nodes.map((n) => [n.id, n]));
+      const edges = view.edges.filter((e) => byId.has(e.source) && byId.has(e.target));
+      const degree = new Map();
+      const adj = new Map(nodes.map((n) => [n.id, []]));
+      for (const e of edges) {
+        degree.set(e.source, (degree.get(e.source) ?? 0) + 1);
+        degree.set(e.target, (degree.get(e.target) ?? 0) + 1);
+        adj.get(e.source).push(e.target);
+        adj.get(e.target).push(e.source);
+      }
+      const prefixes = [...new Set(nodes.filter((n) => n.type === 'tag').map((n) => n.prefix))].sort();
+      const R = 420;
+      const anchor = new Map();
+      prefixes.forEach((p, i) => {
+        const a = (i / prefixes.length) * Math.PI * 2 - Math.PI / 2;
+        anchor.set(p, { x: Math.cos(a) * R, y: Math.sin(a) * R });
+      });
+      const target = (n) => {
+        if (n.type === 'tag') return anchor.get(n.prefix) ?? { x: 0, y: 0 };
+        const prefs = adj.get(n.id).map((id) => byId.get(id)).filter((t) => t && t.type === 'tag').map((t) => t.prefix);
+        if (!prefs.length) return { x: 0, y: 0 };
+        let x = 0, y = 0;
+        for (const p of prefs) { const a = anchor.get(p); x += a.x; y += a.y; }
+        return { x: (x / prefs.length) * 0.62, y: (y / prefs.length) * 0.62 };
+      };
+      // deterministic init near targets (golden-angle jitter, no RNG so builds are stable)
+      nodes.forEach((n, i) => {
+        const t = target(n);
+        const a = i * 2.399963, r = 14 + (i % 7) * 3;
+        n.x = t.x + Math.cos(a) * r;
+        n.y = t.y + Math.sin(a) * r;
+        n.vx = 0; n.vy = 0;
+      });
+      let alpha = 1;
+      for (let step = 0; step < 260; step += 1) {
+        for (let i = 0; i < nodes.length; i += 1) {
+          for (let j = i + 1; j < nodes.length; j += 1) {
+            const A = nodes[i], B = nodes[j];
+            let dx = A.x - B.x, dy = A.y - B.y;
+            let d2 = dx * dx + dy * dy || 0.01;
+            const rep = 2200 / d2, d = Math.sqrt(d2);
+            const fx = (dx / d) * rep * alpha, fy = (dy / d) * rep * alpha;
+            A.vx += fx; A.vy += fy; B.vx -= fx; B.vy -= fy;
+          }
+        }
+        for (const e of edges) {
+          const s = byId.get(e.source), t = byId.get(e.target);
+          const desired = s.type === 'tag' || t.type === 'tag' ? 58 : 78;
+          let dx = t.x - s.x, dy = t.y - s.y;
+          const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
+          const f = ((d - desired) / d) * 0.05 * alpha;
+          s.vx += dx * f; s.vy += dy * f; t.vx -= dx * f; t.vy -= dy * f;
+        }
+        for (const n of nodes) {
+          const tt = target(n);
+          n.vx += (tt.x - n.x) * 0.03 * alpha;
+          n.vy += (tt.y - n.y) * 0.03 * alpha;
+          n.vx *= 0.85; n.vy *= 0.85;
+          n.x += n.vx; n.y += n.vy;
+        }
+        alpha *= 0.985;
+      }
+      nodes.forEach((n) => { n.degree = degree.get(n.id) ?? 0; });
+      return { nodes, byId, edges, anchor };
+    }
+
+    function traces(model) {
+      const { nodes, byId, edges } = model;
+      const out = [];
+
+      // edge line traces grouped by relationship class
+      for (const rel of ['has_derived_core_tag', 'has_core_tag', 'has_proposed_tag']) {
+        const meta = EDGE_META[rel];
+        const xs = [], ys = [];
+        for (const e of edges) {
+          if (e.relationship !== rel) continue;
+          const s = byId.get(e.source), t = byId.get(e.target);
+          xs.push(s.x, t.x, null);
+          ys.push(s.y, t.y, null);
+        }
+        if (!xs.length) continue;
+        out.push({
+          x: xs, y: ys, mode: 'lines', type: 'scatter', name: meta.name,
+          line: { color: EDGE_COLOR[rel], width: meta.width, dash: meta.dash },
+          hoverinfo: 'skip', visible: meta.visible, legendgroup: 'edges',
+        });
+      }
+
+      // record node traces, one per status (so the legend toggles them)
+      for (const status of ['promoted', 'candidate', 'deprecated']) {
+        const group = nodes.filter((n) => n.type !== 'tag' && n.status === status);
+        if (!group.length) continue;
+        out.push({
+          x: group.map((n) => n.x), y: group.map((n) => n.y),
+          mode: 'markers', type: 'scatter', name: status,
+          marker: {
+            size: group.map((n) => Math.min(30, 13 + Math.sqrt(n.weight || 1) * 5)),
+            color: status === 'candidate' ? '#0b141f' : STATUS_COLOR[status],
+            opacity: status === 'deprecated' ? 0.5 : 0.95,
+            line: { color: STATUS_COLOR[status], width: status === 'candidate' ? 2.4 : 1.2, dash: status === 'candidate' ? 'dot' : 'solid' },
+            symbol: 'circle',
+          },
+          text: group.map((n) => truncate(n.label, 34)),
+          textposition: 'top center',
+          textfont: { size: 10, color: '#cbd5e1', family: 'ui-monospace, monospace' },
+          customdata: group.map((n) => [recordHover(n), n.id]),
+          hovertemplate: '%{customdata[0]}<extra></extra>',
+          legendgroup: 'records',
+        });
+      }
+
+      // tag nodes (secondary tier): diamonds colored by prefix
+      const tags = nodes.filter((n) => n.type === 'tag');
+      out.push({
+        x: tags.map((n) => n.x), y: tags.map((n) => n.y),
+        mode: 'markers', type: 'scatter', name: 'tags',
+        marker: {
+          size: tags.map((n) => Math.min(15, 8 + Math.sqrt(n.degree) * 1.6)),
+          color: tags.map((n) => prefixColor(n.prefix)),
+          opacity: tags.map((n) => (n.tag_class === 'proposed' ? 0.5 : 0.85)),
+          symbol: 'diamond',
+          line: { color: '#0b141f', width: 0.6 },
+        },
+        customdata: tags.map((n) => [`<b>${n.label}</b><br>${n.tag_class} tag &middot; ${n.degree} links`, n.id]),
+        hovertemplate: '%{customdata[0]}<extra></extra>',
+        legendgroup: 'tags',
+      });
+
+      if (selectedId) {
+        const sel = nodes.find((n) => n.id === selectedId);
+        if (sel) {
+          out.push({
+            x: [sel.x], y: [sel.y], mode: 'markers', type: 'scatter', name: 'selected',
+            marker: { size: 34, symbol: 'circle-open', color: '#7c8cff', line: { width: 3, color: '#7c8cff' } },
+            hoverinfo: 'skip', showlegend: false,
+          });
+        }
+      }
+      return out;
+    }
+
+    function recordHover(n) {
+      const rows = [
+        `<b>${escapeHtml(truncate(n.label, 60))}</b>`,
+        `${n.type} &middot; ${n.kind ?? '—'} &middot; ${n.status}`,
+        `scope: ${n.scope ?? '—'}${n.scope_ref && n.scope_ref !== '*' ? ':' + n.scope_ref : ''}`,
+        `confidence: ${n.confidence ?? '—'}`,
+      ];
+      if (n.occurrence != null) rows.push(`occurrence: ${n.occurrence}`);
+      if (n.signal_kind) rows.push(`signal: ${n.signal_kind}`);
+      if (n.agent_modes && n.agent_modes.length) rows.push(`modes: ${n.agent_modes.join(', ')}`);
+      rows.push(`<span style="color:#64748b">${n.wiki_id ?? ''}</span>`);
+      return rows.join('<br>');
+    }
+
+    function plotLayout(model) {
+      const annotations = [...model.anchor.entries()].map(([prefix, pos]) => ({
+        x: pos.x * 1.12, y: pos.y * 1.12, text: prefix, showarrow: false,
+        font: { size: 11, color: 'rgba(148,163,184,0.55)', family: 'ui-monospace, monospace' },
+      }));
+      return {
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        showlegend: true,
+        legend: {
+          orientation: 'h', x: 0.5, xanchor: 'center', y: 1.04, yanchor: 'bottom',
+          font: { color: '#cbd5e1', size: 11 }, bgcolor: 'rgba(0,0,0,0)',
+        },
+        hovermode: 'closest',
+        hoverlabel: { bgcolor: '#101a27', bordercolor: '#334155', font: { color: '#e2e8f0', family: 'ui-monospace, monospace', size: 11 }, align: 'left' },
+        margin: { l: 8, r: 8, t: 8, b: 8 },
+        xaxis: { visible: false, showgrid: false, zeroline: false },
+        yaxis: { visible: false, showgrid: false, zeroline: false, scaleanchor: 'x', scaleratio: 1 },
+        dragmode: 'pan',
+        font: { family: 'ui-monospace, monospace', color: '#cbd5e1' },
+        annotations,
+      };
+    }
+
+    const CONFIG = {
+      responsive: true, scrollZoom: true, displaylogo: false,
+      modeBarButtonsToRemove: ['select2d', 'lasso2d', 'autoScale2d', 'toggleSpikelines'],
+    };
+
+    function render(view) {
+      const model = layout(view);
+      Plotly.react(plotEl, traces(model), plotLayout(model), CONFIG);
+      if (!render._bound) {
+        render._bound = true;
+        plotEl.on('plotly_click', (ev) => {
+          const pt = ev.points && ev.points[0];
+          const id = pt && Array.isArray(pt.customdata) ? pt.customdata[1] : null;
+          if (!id) return;
+          if (id.startsWith('tag:')) {
+            const search = document.getElementById('entry-search');
+            search.value = id.slice(4);
+            entryQuery = search.value.toLowerCase();
+            applyAndRender();
+          } else {
+            selectNode(id, 'graph');
+          }
+        });
+      }
+    }
+
+    function selectNode(id, origin) {
+      selectedId = selectedId === id ? null : id;
+      applyAndRender();
+      if (!selectedId) return;
+      if (origin === 'graph') {
+        const row = document.querySelector(`.entry-row[data-node-id="${CSS.escape(selectedId)}"]`);
+        if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } else {
+        plotEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+
+    function truncate(s, n) { s = s == null ? '' : String(s); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+    function escapeHtml(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+
+    // ---- multi-view state: one store per profile, sliced by knowledge facet ----
+    let fullView = embedded;
+    let currentFacet = 'all';
+    let entryQuery = '';
+
+    // Facets are data-driven: each profile declares its own (research/ops for a
+    // research project, product/ops for a software one, ops for forager-ops).
+    function distinctFacets(view) {
+      return [...new Set(view.nodes.filter((n) => n.type !== 'tag' && n.facet).map((n) => n.facet))].sort();
+    }
+    function renderFacetButtons(facets) {
+      const host = document.getElementById('facet-buttons');
+      const values = ['all', ...facets];
+      if (!values.includes(currentFacet)) currentFacet = 'all';
+      host.innerHTML = values
+        .map(
+          (v) =>
+            `<button type="button" data-facet="${v}" class="facet-btn rounded-md border border-slate-700 bg-[#0c1622] px-3 py-1.5 text-sm text-slate-400 transition-colors hover:text-white aria-pressed:border-brand-400 aria-pressed:bg-brand-500/15 aria-pressed:text-white" aria-pressed="${v === currentFacet}">${v}</button>`,
+        )
+        .join('');
+      host.querySelectorAll('.facet-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          setActiveFacet(btn.dataset.facet);
+          updateUrl();
+          applyAndRender();
+        });
+      });
+    }
+
+    let selectedId = null;
+
+    function recordMatchesQuery(view, n) {
+      if (!entryQuery) return true;
+      const tagText = (view.edges || []).filter((e) => e.source === n.id).map((e) => e.target).join(' ');
+      return `${n.label ?? ''} ${n.claim_ko ?? ''} ${n.kind ?? ''} ${n.wiki_id ?? ''} ${tagText}`
+        .toLowerCase().includes(entryQuery);
+    }
+
+    function filterView(view, facet) {
+      const keep = new Set(
+        view.nodes
+          .filter((n) => n.type !== 'tag' && (!facet || facet === 'all' || n.facet === facet) && recordMatchesQuery(view, n))
+          .map((n) => n.id),
+      );
+      const edges = view.edges.filter((e) => keep.has(e.source));
+      const keptTags = new Set(edges.map((e) => e.target));
+      const nodes = view.nodes.filter((n) => (n.type !== 'tag' ? keep.has(n.id) : keptTags.has(n.id)));
+      return { ...view, nodes, edges };
+    }
+
+    function updateMetrics(view, sourceLabel) {
+      const recs = view.nodes.filter((n) => n.type !== 'tag');
+      const set = (sel, val) => { const el = document.querySelector(sel); if (el != null && val != null) el.textContent = val; };
+      set('[data-metric-records]', view.summary?.records ?? recs.length);
+      set('[data-metric-tags]', view.summary?.tag_nodes ?? view.nodes.filter((n) => n.type === 'tag').length);
+      set('[data-metric-promoted]', recs.filter((n) => n.status === 'promoted').length);
+      set('[data-metric-issues]', view.summary?.review_issues ?? (view.review_issues || []).length);
+      const src = document.querySelector('[data-graph-source]');
+      if (src && sourceLabel) src.textContent = sourceLabel;
+    }
+
+    // ---- bilingual entries browser ----
+    const KIND_BADGE = {
+      policy_rule: ['policy', 'bg-rose-500/15 text-rose-300'],
+      failure_pattern: ['failure', 'bg-amber-500/15 text-amber-300'],
+      procedure: ['procedure', 'bg-sky-500/15 text-sky-300'],
+      preference: ['preference', 'bg-violet-500/15 text-violet-300'],
+      fact: ['fact', 'bg-emerald-500/15 text-emerald-300'],
+    };
+    const STATUS_DOT = { promoted: '#46c98b', candidate: '#e2a63c', deprecated: '#6b7688' };
+    document.getElementById('entry-search').addEventListener('input', (e) => {
+      entryQuery = e.target.value.trim().toLowerCase();
+      applyAndRender();
+    });
+
+    function renderEntries() {
+      const view = filterView(fullView, currentFacet);
+      const recs = view.nodes.filter((n) => n.type !== 'tag');
+      const rank = { promoted: 0, candidate: 1, deprecated: 2 };
+      recs.sort((a, b) => (rank[a.status] ?? 3) - (rank[b.status] ?? 3) || (b.occurrence ?? 0) - (a.occurrence ?? 0) || (b.evidence_count ?? 0) - (a.evidence_count ?? 0));
+      const host = document.getElementById('entry-list');
+      const count = document.getElementById('entry-count');
+      if (count) count.textContent = `${recs.length}건`;
+      if (!recs.length) {
+        host.innerHTML = '<p class="px-4 py-6 text-sm text-slate-500">일치하는 엔트리가 없습니다.</p>';
+        return;
+      }
+      host.innerHTML = recs
+        .map((n) => {
+          const [kindLabel, kindCls] = KIND_BADGE[n.kind] ?? [n.kind ?? '?', 'bg-slate-600/20 text-slate-300'];
+          const dot = STATUS_DOT[n.status] ?? '#94a3b8';
+          const tags = (view.edges || [])
+            .filter((e) => e.source === n.id && /^tag:(tool|risk|method|domain)\//.test(e.target))
+            .map((e) => `<span class="rounded bg-slate-800/80 px-1.5 py-0.5 font-mono text-[10px] text-slate-400">${esc(e.target.slice(4))}</span>`)
+            .join(' ');
+          const ko = n.claim_ko ? `<p class="text-sm leading-snug text-slate-100">${esc(n.claim_ko)}</p>` : '';
+          const en = `<p class="${n.claim_ko ? 'mt-0.5 text-xs leading-snug text-slate-500' : 'text-sm leading-snug text-slate-100'}">${esc(n.label ?? '')}</p>`;
+          const meta = [n.scope_ref && n.scope_ref !== '*' ? n.scope_ref : n.scope, n.occurrence ? `x${n.occurrence}` : '', n.evidence_count ? `evidence ${n.evidence_count}` : '']
+            .filter(Boolean).join(' · ');
+          const selCls = n.id === selectedId ? ' bg-brand-500/10 ring-1 ring-inset ring-brand-400/40' : '';
+          return `<div class="entry-row flex cursor-pointer items-start gap-3 px-4 py-3 transition-colors hover:bg-slate-800/40${selCls}" data-node-id="${esc(n.id)}">
+            <span class="mt-1.5 h-2 w-2 flex-none rounded-full" style="background:${dot}" title="${esc(n.status ?? '')}"></span>
+            <div class="min-w-0 flex-1">${ko}${en}
+              <div class="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+                <span class="rounded px-1.5 py-0.5 text-[10px] font-medium ${kindCls}">${esc(kindLabel)}</span>
+                <span class="font-mono">${esc(meta)}</span> ${tags}
+              </div>
+            </div>
+          </div>`;
+        })
+        .join('');
+      host.querySelectorAll('.entry-row').forEach((row) => {
+        row.addEventListener('click', () => selectNode(row.getAttribute('data-node-id'), 'list'));
+      });
+    }
+    function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+
+    function applyAndRender() {
+      const filtered = filterView(fullView, currentFacet);
+      const recordCount = filtered.nodes.filter((n) => n.type !== 'tag').length;
+      const empty = document.getElementById('wiki-graph-empty');
+      if (empty) empty.style.display = recordCount === 0 ? 'flex' : 'none';
+      render(filtered);
+      renderEntries();
+    }
+
+    function setFullView(view, sourceLabel) {
+      fullView = view;
+      renderFacetButtons(distinctFacets(view));
+      updateMetrics(view, sourceLabel);
+      applyAndRender();
+    }
+
+    function setActiveFacet(facet) {
+      currentFacet = facet;
+      document.querySelectorAll('.facet-btn').forEach((b) =>
+        b.setAttribute('aria-pressed', String(b.dataset.facet === facet)),
+      );
+    }
+
+    function updateUrl(profile) {
+      const params = new URLSearchParams(location.search);
+      if (profile) params.set('profile', profile);
+      if (currentFacet && currentFacet !== 'all') params.set('facet', currentFacet);
+      else params.delete('facet');
+      const qs = params.toString();
+      history.replaceState(null, '', qs ? `${location.pathname}?${qs}` : location.pathname);
+    }
+
+    const params = new URLSearchParams(location.search);
+    const urlFacet = params.get('facet');
+    if (urlFacet) currentFacet = urlFacet; // renderFacetButtons validates and resets if absent
+    setFullView(embedded, 'sample fixture');
+    initProfiles(params.get('profile'));
+
+    async function initProfiles(wantedProfile) {
+      const indexUrl = app?.dataset.indexUrl;
+      if (indexUrl) {
+        try {
+          const res = await fetch(indexUrl);
+          if (res.ok) {
+            const manifest = await res.json();
+            if (Array.isArray(manifest.profiles) && manifest.profiles.length) {
+              const sel = document.getElementById('profile-select');
+              sel.innerHTML = manifest.profiles
+                .map((p) => `<option value="${p.key}">${p.key} · ${p.records} records</option>`)
+                .join('');
+              document.querySelector('[data-profile-wrap]').hidden = false;
+              const initial = manifest.profiles.some((p) => p.key === wantedProfile) ? wantedProfile : manifest.default;
+              sel.value = initial;
+              sel.addEventListener('change', () => loadProfile(indexUrl, sel.value));
+              await loadProfile(indexUrl, initial);
+              return;
+            }
+          }
+        } catch {
+          /* fall through to single-file hydration */
+        }
+      }
+      const liveUrl = app?.dataset.liveSurfaceUrl;
+      if (liveUrl) {
+        fetch(liveUrl)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((live) => { if (live && Array.isArray(live.nodes)) setFullView(live, 'live export'); })
+          .catch(() => {});
+      }
+    }
+
+    async function loadProfile(indexUrl, key) {
+      updateUrl(key);
+      try {
+        const res = await fetch(indexUrl.replace(/index\.json$/, `${encodeURIComponent(key)}.json`));
+        if (!res.ok) throw new Error('profile view not found');
+        setFullView(await res.json(), key);
+      } catch {
+        setFullView(embedded, 'sample fixture');
+      }
+    }
+  </script>
+</Base>

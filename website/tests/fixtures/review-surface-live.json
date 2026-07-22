@@ -1,0 +1,78 @@
+{
+  "schema": "review_surface.v1",
+  "generated_at": "2026-06-17T00:00:00Z",
+  "profile": "night-drive",
+  "project_key": "remote-ops",
+  "status": {
+    "label": "Live approvals waiting",
+    "summary": "승인 요청 2건이 먼저입니다.",
+    "severity": "attention"
+  },
+  "next_safe_actions": [
+    {
+      "kind": "approval_pending",
+      "label": "Review pending approvals",
+      "detail": "Approve, reject, or defer the two pending remote-operator decisions.",
+      "command": "forager offdesk pending --json"
+    }
+  ],
+  "accepted_truth": {
+    "status": "pending",
+    "source": "closeout_receipt.v1",
+    "reason": "Accepted truth가 아직 기록되지 않았습니다."
+  },
+  "closeout": {
+    "execution_status": "completed",
+    "review_status": "pending",
+    "receipt_open_decisions": 1,
+    "unresolved_risks": ["Telegram response quality still needs review."],
+    "summary": {}
+  },
+  "runtime": {
+    "active": true,
+    "progress_summary": "1 active / 2 queued",
+    "sessions": {},
+    "offdesk": {}
+  },
+  "decisions": {
+    "open_count": 2,
+    "recent": []
+  },
+  "adaptive_wiki": {
+    "candidate_count": 3,
+    "entry_count": 8,
+    "review_due_count": 1,
+    "promotion_required": true
+  },
+  "implementation_packet": {
+    "packet_id": "packet-ui-review",
+    "safe_to_delegate": false,
+    "required_revisions": ["Confirm mobile copy density."]
+  },
+  "artifacts": {
+    "index": {
+      "schema": "artifact_index.v1"
+    },
+    "retention_review": {
+      "schema": "artifact_retention_review.v1"
+    },
+    "summary": [
+      {
+        "label": "Return package",
+        "why_it_matters": "Resume from reviewed evidence.",
+        "retention_class": "keep"
+      }
+    ],
+    "refs": []
+  },
+  "redaction": {
+    "operator_safe": true,
+    "path_policy": "summary_first"
+  },
+  "sources": {
+    "status_json": "forager status --json",
+    "offdesk_status_summary": "load_offdesk_status_summary",
+    "decision_ledger": "DecisionLedger::load",
+    "adaptive_wiki": "AdaptiveWikiStore::load"
+  }
+}

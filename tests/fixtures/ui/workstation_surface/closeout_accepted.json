@@ -1,0 +1,105 @@
+{
+  "schema": "workstation_surface.v1",
+  "generated_at": "2026-06-18T03:30:00Z",
+  "workstation_id": "workstation-default",
+  "profile": "default",
+  "source_label": "Fixture closeout accepted",
+  "workspace_roots": ["/workspace/nano"],
+  "health": [
+    {
+      "id": "telegram",
+      "label": "Telegram operator",
+      "status": "ok",
+      "summary": "Listener status is polling; stale=false."
+    },
+    {
+      "id": "runtime_store",
+      "label": "Runtime store",
+      "status": "ok",
+      "summary": "Profile store is readable; completed task has accepted truth."
+    },
+    {
+      "id": "closeout",
+      "label": "Closeout state",
+      "status": "ok",
+      "summary": "0 required, 1 accepted, 0 approved with follow-ups."
+    },
+    {
+      "id": "local_llm",
+      "label": "Local LLM",
+      "status": "ok",
+      "summary": "Configured local coding model is reachable."
+    }
+  ],
+  "capacity": {
+    "active_runners": 0,
+    "queued_tasks": 0,
+    "provider_deferred": 0,
+    "budget_warnings": 0
+  },
+  "attention_counts": {
+    "pending_approvals": 0,
+    "pending_decisions": 0,
+    "blocked_tasks": 0,
+    "failed_tasks": 0,
+    "closeout_required": 0,
+    "accepted_truth_missing": 0,
+    "followup_decisions_required": 0
+  },
+  "top_attention": {
+    "kind": "accepted_truth",
+    "title": "Closeout accepted",
+    "severity": "ok",
+    "project_key": "NanoClustering",
+    "summary": "The latest closeout receipt accepted the executed scope as accepted truth.",
+    "action_label": "Open review"
+  },
+  "next_safe_actions": [
+    {
+      "kind": "review_dashboard",
+      "label": "Review dashboard",
+      "reason": "Accepted truth is present; inspect the review surface before starting dependent work.",
+      "command": "forager ondesk review-surface --project-key NanoClustering --json",
+      "requires_operator_review": false
+    }
+  ],
+  "projects": [
+    {
+      "project_key": "NanoClustering",
+      "display_name": "NanoClustering",
+      "severity": "ok",
+      "plan": "observed",
+      "runtime": "completed",
+      "decisions": 0,
+      "closeout": "accepted",
+      "truth": "accepted",
+      "last_activity": "2026-06-18T03:28:00Z"
+    }
+  ],
+  "decisions": [],
+  "graph_focus": {
+    "title": "Selected provenance path",
+    "nodes": [
+      { "id": "plan", "label": "Plan", "kind": "plan" },
+      { "id": "task", "label": "Task", "kind": "task" },
+      { "id": "closeout", "label": "Closeout", "kind": "closeout" },
+      { "id": "receipt", "label": "Receipt", "kind": "receipt" },
+      { "id": "truth", "label": "Accepted truth", "kind": "truth" }
+    ],
+    "edges": [
+      { "from": "plan", "to": "task", "label": "queued" },
+      { "from": "task", "to": "closeout", "label": "closed" },
+      { "from": "closeout", "to": "receipt", "label": "reviewed" },
+      { "from": "receipt", "to": "truth", "label": "accepted" }
+    ]
+  },
+  "stale_state": {
+    "status": "fresh",
+    "last_seen_at": "2026-06-18T03:30:00Z",
+    "summary": "Surface was generated from current local Forager state."
+  },
+  "redaction": {
+    "operator_safe": true,
+    "path_policy": "summary_first"
+  }
+}

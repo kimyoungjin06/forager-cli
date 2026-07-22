@@ -26,8 +26,14 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+from operator_state_card import mobile_card_contract
+
+
+REPO_ROOT = SCRIPT_DIR.parents[0]
 DEFAULT_TELEGRAM_ENV_FILE = pathlib.Path(
     os.environ.get(
         "OFFDESK_TELEGRAM_ENV",
@@ -141,13 +147,6 @@ FIELD_PRIORITY = (
     "status",
     "episode",
 )
-CARD_TEMPLATE = """<b>{headline}</b>
-{status_section}{approval_summary}
-{choices_section}
-<b>질문</b>: {question}
-{reply_hint}
-{input_policy}{input_prompt_section}
-<b>범위</b>: {scope}"""
 DETAIL_TEMPLATE = """<b>{headline}</b>
 {why_recommendation_section}{judgment_route_section}{evidence_sufficiency_section}{review_surface_section}{failure_section}{evidence_section}{council_section}{next_action_section}{decision_impact_section}{reply_example_section}"""
 SECTION_TEMPLATE = """
@@ -1622,6 +1621,93 @@ def render_status_section(
     return f"<b>상태</b>: <code>{html.escape(status_line)}</code>\n"
 
 
+def compact_card_text(value: Any, max_chars: int) -> str:
+    text = str(value or "").replace("\n", " ")
+    text = " ".join(text.split())
+    if len(text) <= max_chars:
+        return text
+    return text[: max(1, max_chars - 3)].rstrip() + "..."
+
+
+def compact_status_text(status: str, decision: str | None, reason: str) -> str:
+    if status == "pending" and not decision and not reason:
+        return ""
+    status_line = STATUS_LABELS.get(status, status)
+    if decision:
+        status_line = f"{status_line}: {display_decision(decision)}"
+    if reason:
+        reason_label = "버튼" if reason == "button" else compact_card_text(reason, 80)
+        status_line = f"{status_line} ({reason_label})"
+    return status_line
+
+
+def compact_choices_line(request: dict[str, Any]) -> str:
+    options = direction_options(request)
+    if options:
+        labels = [f"{option['index']}. {option['label']}" for option in options[:2]]
+        if allow_custom_direction(request):
+            labels.append("기타")
+        elif len(options) > 2:
+            labels.append(f"외 {len(options) - 2}개")
+        return "선택: " + " / ".join(compact_card_text(label, 24) for label in labels)
+    return ""
+
+
+def compact_scope_text(scope: str) -> str:
+    replacements = {
+        "runtime dispatch": "실행 시작",
+        "dispatch": "실행",
+        "shell": "명령 실행",
+        "cleanup": "정리",
+        "provider": "모델",
+        "wiki promotion": "wiki 승격",
+    }
+    text = scope
+    for raw, replacement in replacements.items():
+        text = text.replace(raw, replacement)
+    return compact_card_text(text, 92)
+
+
+def compact_next_action_text(request: dict[str, Any], input_prompt: str) -> str:
+    if input_prompt:
+        return compact_card_text(input_prompt, 92)
+    question = approval_question(request)
+    if natural_input_decisions(request):
+        question = f"{question} 버튼 또는 직접 답장 가능"
+    return compact_card_text(question, 92)
+
+
+def render_compact_decision_card(
+    request: dict[str, Any],
+    *,
+    status: str,
+    decision: str | None,
+    reason: str,
+    input_prompt: str,
+) -> str:
+    lines = [f"<b>{html.escape(compact_card_text(recommendation_headline(request), 80))}</b>"]
+    status_line = compact_status_text(status, decision, reason)
+    if status_line:
+        lines.append(html.escape(status_line))
+
+    summary_lines = approval_summary_lines(request)
+    choices_line = compact_choices_line(request)
+    middle_candidates: list[str] = []
+    if choices_line and is_direction_choice(request):
+        middle_candidates.append(choices_line)
+    middle_candidates.extend(summary_lines[:2])
+    if choices_line and not is_direction_choice(request):
+        middle_candidates.append(choices_line)
+    for item in middle_candidates:
+        if len(lines) >= 3:
+            break
+        lines.append(html.escape(compact_card_text(item, 118)))
+
+    lines.append(f"다음 조치: {html.escape(compact_next_action_text(request, input_prompt))}")
+    lines.append(f"권한: {html.escape(compact_scope_text(approval_scope(request)))}")
+    return "\n".join(lines[:5])
+
+
 def approval_question(request: dict[str, Any]) -> str:
     brief = brief_for(request)
     if str(brief.get("question") or "").strip():
@@ -1953,16 +2039,12 @@ def render_decision_card(
     reason: str = "",
     input_prompt: str = "",
 ) -> str:
-    return CARD_TEMPLATE.format(
-        headline=html.escape(recommendation_headline(request)),
-        status_section=render_status_section(request, status=status, decision=decision, reason=reason),
-        approval_summary=render_approval_summary(request),
-        choices_section=render_choices_section(request),
-        question=html.escape(approval_question(request)),
-        reply_hint=render_reply_hint(request) if direction_options(request) else "",
-        input_policy=render_input_policy(request),
-        input_prompt_section=render_input_prompt(input_prompt),
-        scope=html.escape(approval_scope(request)),
+    return render_compact_decision_card(
+        request,
+        status=status,
+        decision=decision,
+        reason=reason,
+        input_prompt=input_prompt,
     )
 
 
@@ -2814,6 +2896,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "owner_configured": config["owner_configured"],
         "allow_list_configured": config["allow_list_configured"],
         "message_preview": compact(message, 1800),
+        "mobile_card_contract": mobile_card_contract(message),
         "state_path": state["state_path"],
         "approval_brief_schema": brief_for(request).get("schema"),
         "approval_brief_validation": approval_brief_validation,

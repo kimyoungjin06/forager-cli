@@ -10,7 +10,8 @@ use crate::offdesk::{
     OffdeskCloseoutStateSummary, OffdeskNextSafeAction, OffdeskStatusSummary, ResumeStatus,
     TaskResumeStore,
 };
-use crate::session::{app_dir_resolution, get_profile_dir, Status, Storage};
+use crate::offdesk::{load_orchestration_signals, OrchestrationSignals};
+use crate::session::{app_dir_resolution, get_profile_dir, project_registry, Status, Storage};
 
 #[derive(Args)]
 pub struct StatusArgs {
@@ -35,6 +36,50 @@ struct StatusCounts {
     stopped: usize,
     error: usize,
     total: usize,
+}
+
+#[derive(Serialize)]
+struct SessionStatusJson {
+    id: String,
+    title: String,
+    tool: String,
+    path: String,
+    status: String,
+    /// Registry project key resolved from the session path, if any
+    project: Option<String>,
+}
+
+fn status_label(status: Status) -> &'static str {
+    match status {
+        Status::Running => "running",
+        Status::Waiting => "waiting",
+        Status::Idle => "idle",
+        Status::Stopped => "stopped",
+        Status::Error => "error",
+        Status::Starting => "starting",
+        Status::Deleting => "deleting",
+    }
+}
+
+fn session_status_rows(
+    instances: &[crate::session::Instance],
+    registry: &[project_registry::ProjectRegistryEntry],
+) -> Vec<SessionStatusJson> {
+    instances
+        .iter()
+        .map(|inst| SessionStatusJson {
+            id: inst.id.clone(),
+            title: inst.title.clone(),
+            tool: inst.tool.clone(),
+            path: inst.project_path.clone(),
+            status: status_label(inst.status).to_string(),
+            project: project_registry::resolve_project_for_path(
+                std::path::Path::new(&inst.project_path),
+                registry,
+            )
+            .map(|entry| entry.key),
+        })
+        .collect()
 }
 
 #[derive(Serialize)]
@@ -66,6 +111,10 @@ struct StatusJson {
     closeout_required_offdesk_tasks: usize,
     closeout_state: OffdeskCloseoutStateSummary,
     offdesk_next_safe_actions: Vec<OffdeskNextSafeAction>,
+    autonomy_armed: bool,
+    registered_projects: usize,
+    wiki_candidates: usize,
+    sessions: Vec<SessionStatusJson>,
 }
 
 #[derive(Default)]
@@ -79,10 +128,12 @@ fn build_status_json(
     counts: StatusCounts,
     resume_counts: ResumeCounts,
     offdesk_summary: OffdeskStatusSummary,
+    sessions: Vec<SessionStatusJson>,
 ) -> StatusJson {
     let offdesk_next_safe_actions =
         offdesk_next_safe_actions_for_status(&resume_counts, &offdesk_summary);
     let storage = status_storage_paths(profile);
+    let signals = load_orchestration_signals(profile);
     StatusJson {
         profile: profile.to_string(),
         profile_dir: storage.profile_dir,
@@ -111,6 +162,10 @@ fn build_status_json(
         closeout_required_offdesk_tasks: offdesk_summary.closeout_required,
         closeout_state: offdesk_summary.closeout_state,
         offdesk_next_safe_actions,
+        autonomy_armed: signals.autonomy_armed,
+        registered_projects: signals.registered_projects,
+        wiki_candidates: signals.wiki_candidates,
+        sessions,
     }
 }
 
@@ -169,6 +224,7 @@ pub(crate) fn status_json_value_for_test(profile: &str) -> serde_json::Value {
         StatusCounts::default(),
         resume_counts,
         offdesk_summary,
+        Vec::new(),
     ))
     .expect("status json should serialize")
 }
@@ -185,11 +241,14 @@ pub(crate) fn current_status_json_value(profile: &str) -> Result<Value> {
     let counts = count_by_status(&instances);
     let resume_counts = count_resume_state(storage.profile());
     let offdesk_summary = count_offdesk_state(storage.profile());
+    let registry = project_registry::load_registry();
+    let sessions = session_status_rows(&instances, &registry);
     Ok(serde_json::to_value(build_status_json(
         storage.profile(),
         counts,
         resume_counts,
         offdesk_summary,
+        sessions,
     ))?)
 }
 
@@ -206,6 +265,7 @@ pub async fn run(profile: &str, args: StatusArgs) -> Result<()> {
                 StatusCounts::default(),
                 resume_counts,
                 offdesk_summary,
+                Vec::new(),
             );
             println!("{}", serde_json::to_string(&status_json)?);
         } else if args.quiet {
@@ -241,8 +301,15 @@ pub async fn run(profile: &str, args: StatusArgs) -> Result<()> {
     let offdesk_summary = count_offdesk_state(storage.profile());
 
     if args.json {
-        let status_json =
-            build_status_json(storage.profile(), counts, resume_counts, offdesk_summary);
+        let registry = project_registry::load_registry();
+        let sessions = session_status_rows(&instances, &registry);
+        let status_json = build_status_json(
+            storage.profile(),
+            counts,
+            resume_counts,
+            offdesk_summary,
+            sessions,
+        );
         println!("{}", serde_json::to_string(&status_json)?);
     } else if args.quiet {
         println!("{}", counts.waiting);
@@ -260,6 +327,8 @@ pub async fn run(profile: &str, args: StatusArgs) -> Result<()> {
         print_profile_storage_hint(storage.profile());
     } else {
         print_session_summary(&counts);
+        print_project_rollup(&instances);
+        print_harness_signals(storage.profile());
         print_profile_storage_hint(storage.profile());
         if counts.error > 0 {
             println!(
@@ -294,6 +363,80 @@ fn print_profile_storage_hint(profile: &str) {
         );
         println!("Storage hint: legacy AoE data is active; run `forager doctor` before migration.");
     }
+}
+
+/// One line per registered project that has sessions, with status icons,
+/// plus an unregistered bucket. Silent when no registry is configured.
+fn print_project_rollup(instances: &[crate::session::Instance]) {
+    let registry = project_registry::load_registry();
+    if registry.is_empty() || instances.is_empty() {
+        return;
+    }
+    let mut rollup: std::collections::BTreeMap<String, StatusCounts> =
+        std::collections::BTreeMap::new();
+    let mut unregistered = 0usize;
+    for inst in instances {
+        let Some(entry) = project_registry::resolve_project_for_path(
+            std::path::Path::new(&inst.project_path),
+            &registry,
+        ) else {
+            unregistered += 1;
+            continue;
+        };
+        let counts = rollup.entry(entry.key).or_default();
+        match inst.status {
+            Status::Running => counts.running += 1,
+            Status::Waiting => counts.waiting += 1,
+            Status::Error => counts.error += 1,
+            _ => counts.idle += 1,
+        }
+    }
+    if rollup.is_empty() {
+        return;
+    }
+    let parts: Vec<String> = rollup
+        .iter()
+        .map(|(key, counts)| {
+            let mut icons = String::new();
+            if counts.waiting > 0 {
+                icons.push_str(&format!(" ◐{}", counts.waiting));
+            }
+            if counts.running > 0 {
+                icons.push_str(&format!(" ●{}", counts.running));
+            }
+            if counts.error > 0 {
+                icons.push_str(&format!(" ✕{}", counts.error));
+            }
+            if counts.idle > 0 {
+                icons.push_str(&format!(" ○{}", counts.idle));
+            }
+            format!("{key}{icons}")
+        })
+        .collect();
+    let mut line = parts.join("  ·  ");
+    if unregistered > 0 {
+        line.push_str(&format!("  ·  (unregistered {unregistered})"));
+    }
+    println!("{line}");
+}
+
+/// Harness-wide signals: autonomy window state and the wiki candidate queue
+/// across registered planes. Silent without a project registry.
+fn print_harness_signals(profile: &str) {
+    let signals: OrchestrationSignals = load_orchestration_signals(profile);
+    if signals.registered_projects == 0 {
+        return;
+    }
+    println!(
+        "harness: autonomy {} · wiki candidates {} · projects {}",
+        if signals.autonomy_armed {
+            "ARMED"
+        } else {
+            "off"
+        },
+        signals.wiki_candidates,
+        signals.registered_projects
+    );
 }
 
 fn print_session_summary(counts: &StatusCounts) {

@@ -59,8 +59,8 @@ fn shortcuts() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
         (
             "Offdesk",
             vec![
-                ("p/q/a", "approval, queued, active task counts"),
-                ("r/f", "resume_pending and failed task counts"),
+                ("approval", "pending operator approval count"),
+                ("active/failed", "running and failed offdesk work counts"),
                 ("Action", "status bar shows the next safe offdesk command"),
             ],
         ),
@@ -152,10 +152,9 @@ mod tests {
         assert!(offdesk_section.is_some(), "Offdesk section should exist");
         let (_, keys) = offdesk_section.unwrap();
         assert!(
-            keys.iter().any(|(k, desc)| {
-                *k == "r/f" && desc.contains("resume_pending") && desc.contains("failed")
-            }),
-            "Offdesk section should describe r/f counts"
+            keys.iter()
+                .any(|(k, desc)| { *k == "active/failed" && desc.contains("failed offdesk work") }),
+            "Offdesk section should describe failed work counts"
         );
         assert!(
             keys.iter()

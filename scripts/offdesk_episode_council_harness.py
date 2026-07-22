@@ -449,8 +449,24 @@ def command_review(reviewer: str, prompt: str, command: str | None, out_dir: pat
             "rationale": f"No command configured for {reviewer}.",
         }
 
+    prompt_path = out_dir / f"{reviewer}_prompt.txt"
+    response_path = out_dir / f"{reviewer}_response.txt"
+    write_text(prompt_path, prompt)
+    formatted_command = command.format(
+        prompt_path=str(prompt_path),
+        response_path=str(response_path),
+        reviewer=reviewer,
+    )
+    env = dict(os.environ)
+    env.update(
+        {
+            "OFFDESK_COUNCIL_PROMPT_PATH": str(prompt_path),
+            "OFFDESK_COUNCIL_RESPONSE_PATH": str(response_path),
+            "OFFDESK_COUNCIL_REVIEWER": reviewer,
+        }
+    )
     completed = subprocess.run(
-        shlex.split(command),
+        shlex.split(formatted_command),
         cwd=REPO_ROOT,
         input=prompt,
         text=True,
@@ -458,13 +474,17 @@ def command_review(reviewer: str, prompt: str, command: str | None, out_dir: pat
         stderr=subprocess.PIPE,
         check=False,
         timeout=300,
+        env=env,
     )
+    response_text = response_path.read_text(encoding="utf-8") if response_path.exists() else completed.stdout
     invocation_path = out_dir / f"{reviewer}_invocation.json"
     write_json(
         invocation_path,
         {
-            "command": command,
+            "command": formatted_command,
             "returncode": completed.returncode,
+            "prompt_path": str(prompt_path),
+            "response_path": str(response_path) if response_path.exists() else None,
             "stdout": completed.stdout,
             "stderr": completed.stderr,
         },
@@ -491,7 +511,7 @@ def command_review(reviewer: str, prompt: str, command: str | None, out_dir: pat
         }
 
     try:
-        parsed = parse_json_response(completed.stdout)
+        parsed = parse_json_response(response_text)
     except (json.JSONDecodeError, CouncilFailure) as error:
         return {
             "reviewer": reviewer,

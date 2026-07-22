@@ -1,0 +1,1766 @@
+{
+  "schema": "wiki_knowledge_graph_view.v1",
+  "generated_at": "2026-07-21T09:46:45.203863370Z",
+  "profile": "forager-ops",
+  "summary": {
+    "entries": 17,
+    "candidates": 0,
+    "tag_nodes": 27,
+    "core_tag_edges": 39,
+    "proposed_tag_edges": 0,
+    "derived_core_tag_edges": 92,
+    "review_issues": 42,
+    "records": 17
+  },
+  "registry": [
+    {
+      "prefix": "project/",
+      "description": "Project or repository key.",
+      "lifecycle": "core"
+    },
+    {
+      "prefix": "agent/",
+      "description": "Agent mode or role lens.",
+      "lifecycle": "core"
+    },
+    {
+      "prefix": "mode/",
+      "description": "Execution mode such as offdesk.",
+      "lifecycle": "core"
+    },
+    {
+      "prefix": "artifact/",
+      "description": "Artifact class such as report or evidence.",
+      "lifecycle": "core"
+    },
+    {
+      "prefix": "evidence/",
+      "description": "Evidence class or gate name.",
+      "lifecycle": "core"
+    },
+    {
+      "prefix": "risk/",
+      "description": "Operator or runtime risk class.",
+      "lifecycle": "core"
+    },
+    {
+      "prefix": "status/",
+      "description": "Lifecycle or reportability status.",
+      "lifecycle": "core"
+    },
+    {
+      "prefix": "capability/",
+      "description": "Capability id used by Offdesk rails.",
+      "lifecycle": "core"
+    },
+    {
+      "prefix": "kind/",
+      "description": "Adaptive wiki entry kind.",
+      "lifecycle": "derived_core"
+    },
+    {
+      "prefix": "scope/",
+      "description": "Adaptive wiki scope kind.",
+      "lifecycle": "derived_core"
+    },
+    {
+      "prefix": "confidence/",
+      "description": "Adaptive wiki confidence class.",
+      "lifecycle": "derived_core"
+    },
+    {
+      "prefix": "signal/",
+      "description": "Candidate signal kind.",
+      "lifecycle": "derived_core"
+    }
+  ],
+  "review_issues": [
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_0b715ca8-ae2e-420e-8cab-fce7aade5e61",
+      "tag": "domain/forager",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_0b715ca8-ae2e-420e-8cab-fce7aade5e61",
+      "tag": "facet/ops",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_0b715ca8-ae2e-420e-8cab-fce7aade5e61",
+      "tag": "source/chat",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_1900ee70-22bb-4e2f-84a3-916177ab11e7",
+      "tag": "agent/review",
+      "code": "overbroad_tag",
+      "message": "Tag is likely too broad to improve retrieval, routing, or review."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_1900ee70-22bb-4e2f-84a3-916177ab11e7",
+      "tag": "domain/forager",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_1900ee70-22bb-4e2f-84a3-916177ab11e7",
+      "tag": "facet/ops",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_1900ee70-22bb-4e2f-84a3-916177ab11e7",
+      "tag": "source/chat",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_4d962e51-fb1d-49e9-8bdc-b852788f2170",
+      "tag": "facet/ops",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_4d962e51-fb1d-49e9-8bdc-b852788f2170",
+      "tag": "harness/wiki",
+      "code": "overbroad_tag",
+      "message": "Tag is likely too broad to improve retrieval, routing, or review."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_4d962e51-fb1d-49e9-8bdc-b852788f2170",
+      "tag": "harness/wiki",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_52dcbe4b-60d1-4722-aa27-641beae1bea4",
+      "tag": "facet/ops",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_52dcbe4b-60d1-4722-aa27-641beae1bea4",
+      "tag": "harness/offdesk",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_55979e74-5050-44da-9e6c-3e23e1c10513",
+      "tag": "facet/ops",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_55979e74-5050-44da-9e6c-3e23e1c10513",
+      "tag": "harness/telegram",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_5a2ce6c9-8a2f-422b-b946-926ee0c896e0",
+      "tag": "facet/ops",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_5a2ce6c9-8a2f-422b-b946-926ee0c896e0",
+      "tag": "harness/wiki",
+      "code": "overbroad_tag",
+      "message": "Tag is likely too broad to improve retrieval, routing, or review."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_5a2ce6c9-8a2f-422b-b946-926ee0c896e0",
+      "tag": "harness/wiki",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_5a422997-892d-4ddc-81ec-c8b971a3cf8f",
+      "tag": "facet/ops",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_5a422997-892d-4ddc-81ec-c8b971a3cf8f",
+      "tag": "harness/dev",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_6d504a06-0215-4f70-af94-7d3eee76d3a7",
+      "tag": "facet/ops",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_6d504a06-0215-4f70-af94-7d3eee76d3a7",
+      "tag": "harness/provider",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_791af2f7-2157-4d67-ab45-b2c9f0953495",
+      "tag": "domain/forager",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_791af2f7-2157-4d67-ab45-b2c9f0953495",
+      "tag": "facet/ops",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_791af2f7-2157-4d67-ab45-b2c9f0953495",
+      "tag": "source/chat",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_83131577-56ae-4f26-8713-75ac144013b7",
+      "tag": "facet/ops",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_83131577-56ae-4f26-8713-75ac144013b7",
+      "tag": "harness/dev",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_9c3b3639-efc1-43a2-8725-26fd1efbe977",
+      "tag": "facet/ops",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_9c3b3639-efc1-43a2-8725-26fd1efbe977",
+      "tag": "harness/approval",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_b6a5b323-6f22-4410-a9b7-c4e4a3f42787",
+      "tag": "facet/ops",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_b6a5b323-6f22-4410-a9b7-c4e4a3f42787",
+      "tag": "harness/offdesk",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_d926122e-b4b0-45c6-8cc4-b8ad41947517",
+      "tag": "facet/ops",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_d926122e-b4b0-45c6-8cc4-b8ad41947517",
+      "tag": "harness/dispatch",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_e1b06f7e-eba5-4efe-b2be-c99b570f2025",
+      "tag": "domain/forager",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_e1b06f7e-eba5-4efe-b2be-c99b570f2025",
+      "tag": "facet/ops",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_e1b06f7e-eba5-4efe-b2be-c99b570f2025",
+      "tag": "source/chat",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_e289d464-fa86-4f5c-a9c2-c6d8a7b9812a",
+      "tag": "domain/forager",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_e289d464-fa86-4f5c-a9c2-c6d8a7b9812a",
+      "tag": "facet/ops",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_e289d464-fa86-4f5c-a9c2-c6d8a7b9812a",
+      "tag": "source/chat",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_e4859f1a-4e2d-4635-823f-902693cdbfdd",
+      "tag": "facet/ops",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_e4859f1a-4e2d-4635-823f-902693cdbfdd",
+      "tag": "harness/dev",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_f0b42ad0-88e4-461f-b3ef-eb8daec29760",
+      "tag": "facet/ops",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    },
+    {
+      "severity": "warning",
+      "subject_kind": "entry",
+      "subject_id": "wiki_entry_f0b42ad0-88e4-461f-b3ef-eb8daec29760",
+      "tag": "harness/redaction",
+      "code": "unknown_core_tag_prefix",
+      "message": "Core tag does not match the controlled registry prefixes."
+    }
+  ],
+  "nodes": [
+    {
+      "id": "entry:wiki_entry_0b715ca8-ae2e-420e-8cab-fce7aade5e61",
+      "type": "entry",
+      "wiki_id": "wiki_entry_0b715ca8-ae2e-420e-8cab-fce7aade5e61",
+      "label": "When a security limitation is accepted, document it explicitly instead of adding mechanism.",
+      "kind": "policy_rule",
+      "scope": "user_global",
+      "scope_ref": "*",
+      "status": "promoted",
+      "confidence": "inferred",
+      "activation_mode": "context_only",
+      "agent_modes": [],
+      "evidence_count": 1,
+      "degree": 8,
+      "weight": 1,
+      "facet": "ops",
+      "claim_ko": "보안 제한이 허용될 경우, 메커니즘 추가보다는 명시적으로 문서화하라."
+    },
+    {
+      "id": "entry:wiki_entry_1900ee70-22bb-4e2f-84a3-916177ab11e7",
+      "type": "entry",
+      "wiki_id": "wiki_entry_1900ee70-22bb-4e2f-84a3-916177ab11e7",
+      "label": "Direction reviews first check goal completion, then survey Hermes/other harness trends before picking features.",
+      "kind": "procedure",
+      "scope": "project",
+      "scope_ref": "forager",
+      "status": "promoted",
+      "confidence": "inferred",
+      "activation_mode": "context_only",
+      "agent_modes": [
+        "planning",
+        "review"
+      ],
+      "evidence_count": 1,
+      "degree": 10,
+      "weight": 1,
+      "facet": "ops",
+      "claim_ko": "방향 검토는 먼저 목표 완료 여부를 확인하고, Hermes/기타 허니스 추세를 조사한 후 기능을 선택하라."
+    },
+    {
+      "id": "entry:wiki_entry_4d962e51-fb1d-49e9-8bdc-b852788f2170",
+      "type": "entry",
+      "wiki_id": "wiki_entry_4d962e51-fb1d-49e9-8bdc-b852788f2170",
+      "label": "Learning signals: denied approvals, failed tasks, and resume-pending rows emit adaptive-wiki candidates via offdesk tick and learning-scan; recommendation-only, deduped by a durable cursor, never auto-applied.",
+      "kind": "fact",
+      "scope": "user_global",
+      "scope_ref": "*",
+      "status": "promoted",
+      "confidence": "explicit",
+      "activation_mode": "context_only",
+      "agent_modes": [],
+      "evidence_count": 1,
+      "degree": 7,
+      "weight": 1,
+      "facet": "ops",
+      "claim_ko": "학습 신호: 거부된 승인, 실패한 작업, 재개 대기 행은 offdesk tick 및 learning-scan을 통해 적응형 위키 후보를 방출; 추천 전용, 지속적 커서로 중복 제거, 자동 적용되지 않음."
+    },
+    {
+      "id": "entry:wiki_entry_52dcbe4b-60d1-4722-aa27-641beae1bea4",
+      "type": "entry",
+      "wiki_id": "wiki_entry_52dcbe4b-60d1-4722-aa27-641beae1bea4",
+      "label": "Completed execution is not accepted truth: a finished process stays pending until evidence, risks, and next actions are reviewable; accepted truth is recorded only through explicit review.",
+      "kind": "policy_rule",
+      "scope": "user_global",
+      "scope_ref": "*",
+      "status": "promoted",
+      "confidence": "explicit",
+      "activation_mode": "context_only",
+      "agent_modes": [],
+      "evidence_count": 1,
+      "degree": 7,
+      "weight": 1,
+      "facet": "ops",
+      "claim_ko": "완료된 실행은 인정된 진실이 아니다: 완료된 프로세스는 증거, 위험, 다음 행동이 검토 가능할 때까지 대기 상태에 머무름; 인정된 진실은 명시적 검토를 통해만 기록됨."
+    },
+    {
+      "id": "entry:wiki_entry_55979e74-5050-44da-9e6c-3e23e1c10513",
+      "type": "entry",
+      "wiki_id": "wiki_entry_55979e74-5050-44da-9e6c-3e23e1c10513",
+      "label": "Telegram guarded execution: /decision, /recover, /dispatch require a /confirm token (nonce/TTL/observed-hash); /run dispatches only curated allowlist templates; free-form /dispatch needs --enable-runtime-dispatch; /pause is an immediate emergency stop.",
+      "kind": "procedure",
+      "scope": "user_global",
+      "scope_ref": "*",
+      "status": "promoted",
+      "confidence": "explicit",
+      "activation_mode": "context_only",
+      "agent_modes": [],
+      "evidence_count": 1,
+      "degree": 7,
+      "weight": 1,
+      "facet": "ops",
+      "claim_ko": "텔레그램 보호 실행: /decision, /recover, /dispatch는 /confirm 토큰(nonce/TTL/관찰된 해시) 필요; /run은 큐리된 허용 목록 템플릿만 디스패치; 자유형 /dispatch는 --enable-runtime-dispatch 필요; /pause는 즉각적인 비상 정지."
+    },
+    {
+      "id": "entry:wiki_entry_5a2ce6c9-8a2f-422b-b946-926ee0c896e0",
+      "type": "entry",
+      "wiki_id": "wiki_entry_5a2ce6c9-8a2f-422b-b946-926ee0c896e0",
+      "label": "Adaptive wiki promotion is operator-gated: candidates never auto-promote, the AI projection includes only promoted in-scope entries, and auto_apply is not wired to runtime mutation.",
+      "kind": "policy_rule",
+      "scope": "user_global",
+      "scope_ref": "*",
+      "status": "promoted",
+      "confidence": "explicit",
+      "activation_mode": "context_only",
+      "agent_modes": [],
+      "evidence_count": 1,
+      "degree": 7,
+      "weight": 1,
+      "facet": "ops",
+      "claim_ko": "적응형 위키 승격은 운영자 제어: 후보는 자동 승격되지 않으며, AI 프로젝션은 승격된 범위 내 항목만 포함하고, auto_apply는 런타임 변이에 연결되지 않음."
+    },
+    {
+      "id": "entry:wiki_entry_5a422997-892d-4ddc-81ec-c8b971a3cf8f",
+      "type": "entry",
+      "wiki_id": "wiki_entry_5a422997-892d-4ddc-81ec-c8b971a3cf8f",
+      "label": "Breaking changes to stored data use the migration system in src/migrations/ (idempotent, version-bumped) instead of fallback/compatibility logic in main code.",
+      "kind": "procedure",
+      "scope": "project",
+      "scope_ref": "forager",
+      "status": "promoted",
+      "confidence": "explicit",
+      "activation_mode": "context_only",
+      "agent_modes": [
+        "development",
+        "maintenance"
+      ],
+      "evidence_count": 1,
+      "degree": 9,
+      "weight": 1,
+      "facet": "ops",
+      "claim_ko": "저장된 데이터 변경 시 메이그레이션 시스템(src/migrations/)을 사용하라 (멱등성, 버전 증가); 메인 코드 내 대체/호환 로직은 사용하지 않음."
+    },
+    {
+      "id": "entry:wiki_entry_6d504a06-0215-4f70-af94-7d3eee76d3a7",
+      "type": "entry",
+      "wiki_id": "wiki_entry_6d504a06-0215-4f70-af94-7d3eee76d3a7",
+      "label": "Provider fallback is approval-gated: provider-capacity cooldowns defer dispatch and record retry_at; fallback creates a dispatch.provider_fallback approval candidate and never auto-routes before approval.",
+      "kind": "policy_rule",
+      "scope": "user_global",
+      "scope_ref": "*",
+      "status": "deprecated",
+      "confidence": "explicit",
+      "activation_mode": "context_only",
+      "agent_modes": [],
+      "evidence_count": 1,
+      "degree": 7,
+      "weight": 1,
+      "facet": "ops",
+      "claim_ko": "제공자 대체는 승인 제어: 제공자 용량 쿨다운은 디스패치 지연 및 retry_at 기록; 대체는 dispatch.provider_fallback 승인 후보 생성, 승인 전 자동 라우팅은 하지 않음."
+    },
+    {
+      "id": "entry:wiki_entry_791af2f7-2157-4d67-ab45-b2c9f0953495",
+      "type": "entry",
+      "wiki_id": "wiki_entry_791af2f7-2157-4d67-ab45-b2c9f0953495",
+      "label": "Telegram is the primary surface for urgent handling; the web dashboard is secondary.",
+      "kind": "preference",
+      "scope": "user_global",
+      "scope_ref": "*",
+      "status": "promoted",
+      "confidence": "inferred",
+      "activation_mode": "context_only",
+      "agent_modes": [],
+      "evidence_count": 1,
+      "degree": 8,
+      "weight": 1,
+      "facet": "ops",
+      "claim_ko": "텔레그램은 긴급 처리의 주 표면이며, 웹 대시보드는 보조 표면이다."
+    },
+    {
+      "id": "entry:wiki_entry_83131577-56ae-4f26-8713-75ac144013b7",
+      "type": "entry",
+      "wiki_id": "wiki_entry_83131577-56ae-4f26-8713-75ac144013b7",
+      "label": "Before finishing a change run cargo fmt, cargo clippy, and cargo test; never use emdashes in docs or comments; keep OS-specific logic in src/process/{macos,linux}.rs.",
+      "kind": "procedure",
+      "scope": "project",
+      "scope_ref": "forager",
+      "status": "deprecated",
+      "confidence": "explicit",
+      "activation_mode": "context_only",
+      "agent_modes": [
+        "development"
+      ],
+      "evidence_count": 1,
+      "degree": 8,
+      "weight": 1,
+      "facet": "ops",
+      "claim_ko": "변경사항 실행 전 cargo fmt, cargo clippy, cargo test 실행하라; 문서나 주석에 emdashes 사용 금지; OS별 로직은 src/process/{macos,linux}.rs에 유지."
+    },
+    {
+      "id": "entry:wiki_entry_9c3b3639-efc1-43a2-8725-26fd1efbe977",
+      "type": "entry",
+      "wiki_id": "wiki_entry_9c3b3639-efc1-43a2-8725-26fd1efbe977",
+      "label": "Approval before runtime mutation: runtime execution, provider retargeting, cleanup, and canonical promotion pass through explicit approval/review; dispatch.runtime waits for operator approval before offdesk tick launches it.",
+      "kind": "policy_rule",
+      "scope": "user_global",
+      "scope_ref": "*",
+      "status": "promoted",
+      "confidence": "explicit",
+      "activation_mode": "context_only",
+      "agent_modes": [],
+      "evidence_count": 1,
+      "degree": 7,
+      "weight": 1,
+      "facet": "ops",
+      "claim_ko": "런타임 변이 전 승인: 런타임 실행, 제공자 재지정, 정리, 표준 승인은 명시적 승인/검토를 통과해야 함; dispatch.runtime은 offdesk tick 시작 전 운영자 승인 대기."
+    },
+    {
+      "id": "entry:wiki_entry_b6a5b323-6f22-4410-a9b7-c4e4a3f42787",
+      "type": "entry",
+      "wiki_id": "wiki_entry_b6a5b323-6f22-4410-a9b7-c4e4a3f42787",
+      "label": "State over scrollback: canonical state lives in Forager artifacts, not Telegram, chat history, or terminal scrollback; important transitions must create durable artifacts.",
+      "kind": "policy_rule",
+      "scope": "user_global",
+      "scope_ref": "*",
+      "status": "deprecated",
+      "confidence": "explicit",
+      "activation_mode": "context_only",
+      "agent_modes": [],
+      "evidence_count": 1,
+      "degree": 7,
+      "weight": 1,
+      "facet": "ops",
+      "claim_ko": "스크롤백 상태: 표준 상태는 텔레그램, 채팅 기록, 터미널 스크롤백이 아닌 Forager 아티팩트에 존재해야 함; 중요한 전환은 지속적 아티팩트 생성 필요."
+    },
+    {
+      "id": "entry:wiki_entry_d926122e-b4b0-45c6-8cc4-b8ad41947517",
+      "type": "entry",
+      "wiki_id": "wiki_entry_d926122e-b4b0-45c6-8cc4-b8ad41947517",
+      "label": "offdesk tick is the only launcher: runtime-dispatch queues a durable OffdeskTask but does not start a process; execution runs only through forager offdesk tick and the scheduler gate.",
+      "kind": "procedure",
+      "scope": "user_global",
+      "scope_ref": "*",
+      "status": "promoted",
+      "confidence": "explicit",
+      "activation_mode": "context_only",
+      "agent_modes": [
+        "maintenance"
+      ],
+      "evidence_count": 1,
+      "degree": 7,
+      "weight": 1,
+      "facet": "ops",
+      "claim_ko": "offdesk tick은 유일한 실행기: runtime-dispatch는 지속적 OffdeskTask를 큐에 넣지만 프로세스 시작은 하지 않음; 실행은 forager offdesk tick과 스케줄러 게이트를 통해만 실행."
+    },
+    {
+      "id": "entry:wiki_entry_e1b06f7e-eba5-4efe-b2be-c99b570f2025",
+      "type": "entry",
+      "wiki_id": "wiki_entry_e1b06f7e-eba5-4efe-b2be-c99b570f2025",
+      "label": "Keep research-facet and harness/ops wiki knowledge in separate graphs/profiles; never mix them.",
+      "kind": "policy_rule",
+      "scope": "project",
+      "scope_ref": "forager",
+      "status": "promoted",
+      "confidence": "inferred",
+      "activation_mode": "context_only",
+      "agent_modes": [],
+      "evidence_count": 1,
+      "degree": 9,
+      "weight": 1,
+      "facet": "ops",
+      "claim_ko": "연구-면과 허니스/운영 위키 지식은 별도 그래프/프로필에 유지하라; 절대 혼합하지 말 것."
+    },
+    {
+      "id": "entry:wiki_entry_e289d464-fa86-4f5c-a9c2-c6d8a7b9812a",
+      "type": "entry",
+      "wiki_id": "wiki_entry_e289d464-fa86-4f5c-a9c2-c6d8a7b9812a",
+      "label": "Build visualizations self-hosted with embedded data, remotely reachable; not Claude artifacts, not localhost-bound.",
+      "kind": "preference",
+      "scope": "user_global",
+      "scope_ref": "*",
+      "status": "promoted",
+      "confidence": "inferred",
+      "activation_mode": "context_only",
+      "agent_modes": [],
+      "evidence_count": 1,
+      "degree": 8,
+      "weight": 1,
+      "facet": "ops",
+      "claim_ko": "시각화는 내장 데이터로 자체 호스팅, 원격 접근 가능해야 함; Claude 아티팩트나 localhost 제한은 사용하지 않음."
+    },
+    {
+      "id": "entry:wiki_entry_e4859f1a-4e2d-4635-823f-902693cdbfdd",
+      "type": "entry",
+      "wiki_id": "wiki_entry_e4859f1a-4e2d-4635-823f-902693cdbfdd",
+      "label": "Settings TUI parity: every active user-facing config field must be editable in the settings TUI (FieldKey + build_*_fields + apply_field_to_global/profile + profile-override merge).",
+      "kind": "policy_rule",
+      "scope": "project",
+      "scope_ref": "forager",
+      "status": "promoted",
+      "confidence": "explicit",
+      "activation_mode": "context_only",
+      "agent_modes": [
+        "development"
+      ],
+      "evidence_count": 1,
+      "degree": 8,
+      "weight": 1,
+      "facet": "ops",
+      "claim_ko": "설정 TUI 일치: 모든 활성 사용자-facing 구성 필드는 설정 TUI에서 편집 가능해야 함 (FieldKey + build_*_fields + apply_field_to_global/profile + profile-override 병합)."
+    },
+    {
+      "id": "entry:wiki_entry_f0b42ad0-88e4-461f-b3ef-eb8daec29760",
+      "type": "entry",
+      "wiki_id": "wiki_entry_f0b42ad0-88e4-461f-b3ef-eb8daec29760",
+      "label": "Redaction boundary: operator-safe surfaces strip runner-only context and secrets at every upload/share boundary; debug-bundle output is sanitized before export.",
+      "kind": "policy_rule",
+      "scope": "user_global",
+      "scope_ref": "*",
+      "status": "promoted",
+      "confidence": "explicit",
+      "activation_mode": "context_only",
+      "agent_modes": [],
+      "evidence_count": 1,
+      "degree": 7,
+      "weight": 1,
+      "facet": "ops",
+      "claim_ko": "삭제 경계: 운영자 안전 표면은 업로드/공유 시 실행자 전용 컨텍스트와 시크릿 제거; 디버그 번들 출력은 내보내기 전 정화됨."
+    },
+    {
+      "id": "tag:agent/development",
+      "type": "tag",
+      "label": "#agent/development",
+      "tag": "agent/development",
+      "tag_class": "derived_core",
+      "prefix": "agent",
+      "degree": 3
+    },
+    {
+      "id": "tag:agent/maintenance",
+      "type": "tag",
+      "label": "#agent/maintenance",
+      "tag": "agent/maintenance",
+      "tag_class": "derived_core",
+      "prefix": "agent",
+      "degree": 2
+    },
+    {
+      "id": "tag:agent/planning",
+      "type": "tag",
+      "label": "#agent/planning",
+      "tag": "agent/planning",
+      "tag_class": "derived_core",
+      "prefix": "agent",
+      "degree": 1
+    },
+    {
+      "id": "tag:agent/review",
+      "type": "tag",
+      "label": "#agent/review",
+      "tag": "agent/review",
+      "tag_class": "derived_core",
+      "prefix": "agent",
+      "degree": 1
+    },
+    {
+      "id": "tag:agent/shared",
+      "type": "tag",
+      "label": "#agent/shared",
+      "tag": "agent/shared",
+      "tag_class": "derived_core",
+      "prefix": "agent",
+      "degree": 12
+    },
+    {
+      "id": "tag:confidence/explicit",
+      "type": "tag",
+      "label": "#confidence/explicit",
+      "tag": "confidence/explicit",
+      "tag_class": "derived_core",
+      "prefix": "confidence",
+      "degree": 12
+    },
+    {
+      "id": "tag:confidence/inferred",
+      "type": "tag",
+      "label": "#confidence/inferred",
+      "tag": "confidence/inferred",
+      "tag_class": "derived_core",
+      "prefix": "confidence",
+      "degree": 5
+    },
+    {
+      "id": "tag:domain/forager",
+      "type": "tag",
+      "label": "#domain/forager",
+      "tag": "domain/forager",
+      "tag_class": "core",
+      "prefix": "domain",
+      "degree": 5
+    },
+    {
+      "id": "tag:facet/ops",
+      "type": "tag",
+      "label": "#facet/ops",
+      "tag": "facet/ops",
+      "tag_class": "core",
+      "prefix": "facet",
+      "degree": 17
+    },
+    {
+      "id": "tag:harness/approval",
+      "type": "tag",
+      "label": "#harness/approval",
+      "tag": "harness/approval",
+      "tag_class": "core",
+      "prefix": "harness",
+      "degree": 1
+    },
+    {
+      "id": "tag:harness/dev",
+      "type": "tag",
+      "label": "#harness/dev",
+      "tag": "harness/dev",
+      "tag_class": "core",
+      "prefix": "harness",
+      "degree": 3
+    },
+    {
+      "id": "tag:harness/dispatch",
+      "type": "tag",
+      "label": "#harness/dispatch",
+      "tag": "harness/dispatch",
+      "tag_class": "core",
+      "prefix": "harness",
+      "degree": 1
+    },
+    {
+      "id": "tag:harness/offdesk",
+      "type": "tag",
+      "label": "#harness/offdesk",
+      "tag": "harness/offdesk",
+      "tag_class": "core",
+      "prefix": "harness",
+      "degree": 2
+    },
+    {
+      "id": "tag:harness/provider",
+      "type": "tag",
+      "label": "#harness/provider",
+      "tag": "harness/provider",
+      "tag_class": "core",
+      "prefix": "harness",
+      "degree": 1
+    },
+    {
+      "id": "tag:harness/redaction",
+      "type": "tag",
+      "label": "#harness/redaction",
+      "tag": "harness/redaction",
+      "tag_class": "core",
+      "prefix": "harness",
+      "degree": 1
+    },
+    {
+      "id": "tag:harness/telegram",
+      "type": "tag",
+      "label": "#harness/telegram",
+      "tag": "harness/telegram",
+      "tag_class": "core",
+      "prefix": "harness",
+      "degree": 1
+    },
+    {
+      "id": "tag:harness/wiki",
+      "type": "tag",
+      "label": "#harness/wiki",
+      "tag": "harness/wiki",
+      "tag_class": "core",
+      "prefix": "harness",
+      "degree": 2
+    },
+    {
+      "id": "tag:kind/fact",
+      "type": "tag",
+      "label": "#kind/fact",
+      "tag": "kind/fact",
+      "tag_class": "derived_core",
+      "prefix": "kind",
+      "degree": 1
+    },
+    {
+      "id": "tag:kind/policy_rule",
+      "type": "tag",
+      "label": "#kind/policy_rule",
+      "tag": "kind/policy_rule",
+      "tag_class": "derived_core",
+      "prefix": "kind",
+      "degree": 9
+    },
+    {
+      "id": "tag:kind/preference",
+      "type": "tag",
+      "label": "#kind/preference",
+      "tag": "kind/preference",
+      "tag_class": "derived_core",
+      "prefix": "kind",
+      "degree": 2
+    },
+    {
+      "id": "tag:kind/procedure",
+      "type": "tag",
+      "label": "#kind/procedure",
+      "tag": "kind/procedure",
+      "tag_class": "derived_core",
+      "prefix": "kind",
+      "degree": 5
+    },
+    {
+      "id": "tag:project/forager",
+      "type": "tag",
+      "label": "#project/forager",
+      "tag": "project/forager",
+      "tag_class": "derived_core",
+      "prefix": "project",
+      "degree": 5
+    },
+    {
+      "id": "tag:scope/project",
+      "type": "tag",
+      "label": "#scope/project",
+      "tag": "scope/project",
+      "tag_class": "derived_core",
+      "prefix": "scope",
+      "degree": 5
+    },
+    {
+      "id": "tag:scope/user_global",
+      "type": "tag",
+      "label": "#scope/user_global",
+      "tag": "scope/user_global",
+      "tag_class": "derived_core",
+      "prefix": "scope",
+      "degree": 12
+    },
+    {
+      "id": "tag:source/chat",
+      "type": "tag",
+      "label": "#source/chat",
+      "tag": "source/chat",
+      "tag_class": "core",
+      "prefix": "source",
+      "degree": 5
+    },
+    {
+      "id": "tag:status/deprecated",
+      "type": "tag",
+      "label": "#status/deprecated",
+      "tag": "status/deprecated",
+      "tag_class": "derived_core",
+      "prefix": "status",
+      "degree": 3
+    },
+    {
+      "id": "tag:status/promoted",
+      "type": "tag",
+      "label": "#status/promoted",
+      "tag": "status/promoted",
+      "tag_class": "derived_core",
+      "prefix": "status",
+      "degree": 14
+    }
+  ],
+  "edges": [
+    {
+      "source": "entry:wiki_entry_0b715ca8-ae2e-420e-8cab-fce7aade5e61",
+      "target": "tag:domain/forager",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_0b715ca8-ae2e-420e-8cab-fce7aade5e61",
+      "target": "tag:facet/ops",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_0b715ca8-ae2e-420e-8cab-fce7aade5e61",
+      "target": "tag:source/chat",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_0b715ca8-ae2e-420e-8cab-fce7aade5e61",
+      "target": "tag:agent/shared",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_0b715ca8-ae2e-420e-8cab-fce7aade5e61",
+      "target": "tag:confidence/inferred",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_0b715ca8-ae2e-420e-8cab-fce7aade5e61",
+      "target": "tag:kind/policy_rule",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_0b715ca8-ae2e-420e-8cab-fce7aade5e61",
+      "target": "tag:scope/user_global",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_0b715ca8-ae2e-420e-8cab-fce7aade5e61",
+      "target": "tag:status/promoted",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_1900ee70-22bb-4e2f-84a3-916177ab11e7",
+      "target": "tag:domain/forager",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_1900ee70-22bb-4e2f-84a3-916177ab11e7",
+      "target": "tag:facet/ops",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_1900ee70-22bb-4e2f-84a3-916177ab11e7",
+      "target": "tag:source/chat",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_1900ee70-22bb-4e2f-84a3-916177ab11e7",
+      "target": "tag:agent/planning",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_1900ee70-22bb-4e2f-84a3-916177ab11e7",
+      "target": "tag:agent/review",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_1900ee70-22bb-4e2f-84a3-916177ab11e7",
+      "target": "tag:confidence/inferred",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_1900ee70-22bb-4e2f-84a3-916177ab11e7",
+      "target": "tag:kind/procedure",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_1900ee70-22bb-4e2f-84a3-916177ab11e7",
+      "target": "tag:project/forager",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_1900ee70-22bb-4e2f-84a3-916177ab11e7",
+      "target": "tag:scope/project",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_1900ee70-22bb-4e2f-84a3-916177ab11e7",
+      "target": "tag:status/promoted",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_4d962e51-fb1d-49e9-8bdc-b852788f2170",
+      "target": "tag:facet/ops",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_4d962e51-fb1d-49e9-8bdc-b852788f2170",
+      "target": "tag:harness/wiki",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_4d962e51-fb1d-49e9-8bdc-b852788f2170",
+      "target": "tag:agent/shared",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_4d962e51-fb1d-49e9-8bdc-b852788f2170",
+      "target": "tag:confidence/explicit",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_4d962e51-fb1d-49e9-8bdc-b852788f2170",
+      "target": "tag:kind/fact",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_4d962e51-fb1d-49e9-8bdc-b852788f2170",
+      "target": "tag:scope/user_global",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_4d962e51-fb1d-49e9-8bdc-b852788f2170",
+      "target": "tag:status/promoted",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_52dcbe4b-60d1-4722-aa27-641beae1bea4",
+      "target": "tag:facet/ops",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_52dcbe4b-60d1-4722-aa27-641beae1bea4",
+      "target": "tag:harness/offdesk",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_52dcbe4b-60d1-4722-aa27-641beae1bea4",
+      "target": "tag:agent/shared",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_52dcbe4b-60d1-4722-aa27-641beae1bea4",
+      "target": "tag:confidence/explicit",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_52dcbe4b-60d1-4722-aa27-641beae1bea4",
+      "target": "tag:kind/policy_rule",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_52dcbe4b-60d1-4722-aa27-641beae1bea4",
+      "target": "tag:scope/user_global",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_52dcbe4b-60d1-4722-aa27-641beae1bea4",
+      "target": "tag:status/promoted",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_55979e74-5050-44da-9e6c-3e23e1c10513",
+      "target": "tag:facet/ops",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_55979e74-5050-44da-9e6c-3e23e1c10513",
+      "target": "tag:harness/telegram",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_55979e74-5050-44da-9e6c-3e23e1c10513",
+      "target": "tag:agent/shared",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_55979e74-5050-44da-9e6c-3e23e1c10513",
+      "target": "tag:confidence/explicit",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_55979e74-5050-44da-9e6c-3e23e1c10513",
+      "target": "tag:kind/procedure",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_55979e74-5050-44da-9e6c-3e23e1c10513",
+      "target": "tag:scope/user_global",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_55979e74-5050-44da-9e6c-3e23e1c10513",
+      "target": "tag:status/promoted",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_5a2ce6c9-8a2f-422b-b946-926ee0c896e0",
+      "target": "tag:facet/ops",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_5a2ce6c9-8a2f-422b-b946-926ee0c896e0",
+      "target": "tag:harness/wiki",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_5a2ce6c9-8a2f-422b-b946-926ee0c896e0",
+      "target": "tag:agent/shared",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_5a2ce6c9-8a2f-422b-b946-926ee0c896e0",
+      "target": "tag:confidence/explicit",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_5a2ce6c9-8a2f-422b-b946-926ee0c896e0",
+      "target": "tag:kind/policy_rule",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_5a2ce6c9-8a2f-422b-b946-926ee0c896e0",
+      "target": "tag:scope/user_global",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_5a2ce6c9-8a2f-422b-b946-926ee0c896e0",
+      "target": "tag:status/promoted",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_5a422997-892d-4ddc-81ec-c8b971a3cf8f",
+      "target": "tag:facet/ops",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_5a422997-892d-4ddc-81ec-c8b971a3cf8f",
+      "target": "tag:harness/dev",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_5a422997-892d-4ddc-81ec-c8b971a3cf8f",
+      "target": "tag:agent/development",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_5a422997-892d-4ddc-81ec-c8b971a3cf8f",
+      "target": "tag:agent/maintenance",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_5a422997-892d-4ddc-81ec-c8b971a3cf8f",
+      "target": "tag:confidence/explicit",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_5a422997-892d-4ddc-81ec-c8b971a3cf8f",
+      "target": "tag:kind/procedure",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_5a422997-892d-4ddc-81ec-c8b971a3cf8f",
+      "target": "tag:project/forager",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_5a422997-892d-4ddc-81ec-c8b971a3cf8f",
+      "target": "tag:scope/project",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_5a422997-892d-4ddc-81ec-c8b971a3cf8f",
+      "target": "tag:status/promoted",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_6d504a06-0215-4f70-af94-7d3eee76d3a7",
+      "target": "tag:facet/ops",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_6d504a06-0215-4f70-af94-7d3eee76d3a7",
+      "target": "tag:harness/provider",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_6d504a06-0215-4f70-af94-7d3eee76d3a7",
+      "target": "tag:agent/shared",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_6d504a06-0215-4f70-af94-7d3eee76d3a7",
+      "target": "tag:confidence/explicit",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_6d504a06-0215-4f70-af94-7d3eee76d3a7",
+      "target": "tag:kind/policy_rule",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_6d504a06-0215-4f70-af94-7d3eee76d3a7",
+      "target": "tag:scope/user_global",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_6d504a06-0215-4f70-af94-7d3eee76d3a7",
+      "target": "tag:status/deprecated",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_791af2f7-2157-4d67-ab45-b2c9f0953495",
+      "target": "tag:domain/forager",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_791af2f7-2157-4d67-ab45-b2c9f0953495",
+      "target": "tag:facet/ops",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_791af2f7-2157-4d67-ab45-b2c9f0953495",
+      "target": "tag:source/chat",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_791af2f7-2157-4d67-ab45-b2c9f0953495",
+      "target": "tag:agent/shared",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_791af2f7-2157-4d67-ab45-b2c9f0953495",
+      "target": "tag:confidence/inferred",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_791af2f7-2157-4d67-ab45-b2c9f0953495",
+      "target": "tag:kind/preference",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_791af2f7-2157-4d67-ab45-b2c9f0953495",
+      "target": "tag:scope/user_global",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_791af2f7-2157-4d67-ab45-b2c9f0953495",
+      "target": "tag:status/promoted",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_83131577-56ae-4f26-8713-75ac144013b7",
+      "target": "tag:facet/ops",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_83131577-56ae-4f26-8713-75ac144013b7",
+      "target": "tag:harness/dev",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_83131577-56ae-4f26-8713-75ac144013b7",
+      "target": "tag:agent/development",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_83131577-56ae-4f26-8713-75ac144013b7",
+      "target": "tag:confidence/explicit",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_83131577-56ae-4f26-8713-75ac144013b7",
+      "target": "tag:kind/procedure",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_83131577-56ae-4f26-8713-75ac144013b7",
+      "target": "tag:project/forager",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_83131577-56ae-4f26-8713-75ac144013b7",
+      "target": "tag:scope/project",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_83131577-56ae-4f26-8713-75ac144013b7",
+      "target": "tag:status/deprecated",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_9c3b3639-efc1-43a2-8725-26fd1efbe977",
+      "target": "tag:facet/ops",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_9c3b3639-efc1-43a2-8725-26fd1efbe977",
+      "target": "tag:harness/approval",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_9c3b3639-efc1-43a2-8725-26fd1efbe977",
+      "target": "tag:agent/shared",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_9c3b3639-efc1-43a2-8725-26fd1efbe977",
+      "target": "tag:confidence/explicit",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_9c3b3639-efc1-43a2-8725-26fd1efbe977",
+      "target": "tag:kind/policy_rule",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_9c3b3639-efc1-43a2-8725-26fd1efbe977",
+      "target": "tag:scope/user_global",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_9c3b3639-efc1-43a2-8725-26fd1efbe977",
+      "target": "tag:status/promoted",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_b6a5b323-6f22-4410-a9b7-c4e4a3f42787",
+      "target": "tag:facet/ops",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_b6a5b323-6f22-4410-a9b7-c4e4a3f42787",
+      "target": "tag:harness/offdesk",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_b6a5b323-6f22-4410-a9b7-c4e4a3f42787",
+      "target": "tag:agent/shared",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_b6a5b323-6f22-4410-a9b7-c4e4a3f42787",
+      "target": "tag:confidence/explicit",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_b6a5b323-6f22-4410-a9b7-c4e4a3f42787",
+      "target": "tag:kind/policy_rule",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_b6a5b323-6f22-4410-a9b7-c4e4a3f42787",
+      "target": "tag:scope/user_global",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_b6a5b323-6f22-4410-a9b7-c4e4a3f42787",
+      "target": "tag:status/deprecated",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_d926122e-b4b0-45c6-8cc4-b8ad41947517",
+      "target": "tag:facet/ops",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_d926122e-b4b0-45c6-8cc4-b8ad41947517",
+      "target": "tag:harness/dispatch",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_d926122e-b4b0-45c6-8cc4-b8ad41947517",
+      "target": "tag:agent/maintenance",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_d926122e-b4b0-45c6-8cc4-b8ad41947517",
+      "target": "tag:confidence/explicit",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_d926122e-b4b0-45c6-8cc4-b8ad41947517",
+      "target": "tag:kind/procedure",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_d926122e-b4b0-45c6-8cc4-b8ad41947517",
+      "target": "tag:scope/user_global",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_d926122e-b4b0-45c6-8cc4-b8ad41947517",
+      "target": "tag:status/promoted",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_e1b06f7e-eba5-4efe-b2be-c99b570f2025",
+      "target": "tag:domain/forager",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_e1b06f7e-eba5-4efe-b2be-c99b570f2025",
+      "target": "tag:facet/ops",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_e1b06f7e-eba5-4efe-b2be-c99b570f2025",
+      "target": "tag:source/chat",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_e1b06f7e-eba5-4efe-b2be-c99b570f2025",
+      "target": "tag:agent/shared",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_e1b06f7e-eba5-4efe-b2be-c99b570f2025",
+      "target": "tag:confidence/inferred",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_e1b06f7e-eba5-4efe-b2be-c99b570f2025",
+      "target": "tag:kind/policy_rule",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_e1b06f7e-eba5-4efe-b2be-c99b570f2025",
+      "target": "tag:project/forager",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_e1b06f7e-eba5-4efe-b2be-c99b570f2025",
+      "target": "tag:scope/project",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_e1b06f7e-eba5-4efe-b2be-c99b570f2025",
+      "target": "tag:status/promoted",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_e289d464-fa86-4f5c-a9c2-c6d8a7b9812a",
+      "target": "tag:domain/forager",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_e289d464-fa86-4f5c-a9c2-c6d8a7b9812a",
+      "target": "tag:facet/ops",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_e289d464-fa86-4f5c-a9c2-c6d8a7b9812a",
+      "target": "tag:source/chat",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_e289d464-fa86-4f5c-a9c2-c6d8a7b9812a",
+      "target": "tag:agent/shared",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_e289d464-fa86-4f5c-a9c2-c6d8a7b9812a",
+      "target": "tag:confidence/inferred",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_e289d464-fa86-4f5c-a9c2-c6d8a7b9812a",
+      "target": "tag:kind/preference",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_e289d464-fa86-4f5c-a9c2-c6d8a7b9812a",
+      "target": "tag:scope/user_global",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_e289d464-fa86-4f5c-a9c2-c6d8a7b9812a",
+      "target": "tag:status/promoted",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_e4859f1a-4e2d-4635-823f-902693cdbfdd",
+      "target": "tag:facet/ops",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_e4859f1a-4e2d-4635-823f-902693cdbfdd",
+      "target": "tag:harness/dev",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_e4859f1a-4e2d-4635-823f-902693cdbfdd",
+      "target": "tag:agent/development",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_e4859f1a-4e2d-4635-823f-902693cdbfdd",
+      "target": "tag:confidence/explicit",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_e4859f1a-4e2d-4635-823f-902693cdbfdd",
+      "target": "tag:kind/policy_rule",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_e4859f1a-4e2d-4635-823f-902693cdbfdd",
+      "target": "tag:project/forager",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_e4859f1a-4e2d-4635-823f-902693cdbfdd",
+      "target": "tag:scope/project",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_e4859f1a-4e2d-4635-823f-902693cdbfdd",
+      "target": "tag:status/promoted",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_f0b42ad0-88e4-461f-b3ef-eb8daec29760",
+      "target": "tag:facet/ops",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_f0b42ad0-88e4-461f-b3ef-eb8daec29760",
+      "target": "tag:harness/redaction",
+      "relationship": "has_core_tag",
+      "tag_class": "core"
+    },
+    {
+      "source": "entry:wiki_entry_f0b42ad0-88e4-461f-b3ef-eb8daec29760",
+      "target": "tag:agent/shared",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_f0b42ad0-88e4-461f-b3ef-eb8daec29760",
+      "target": "tag:confidence/explicit",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_f0b42ad0-88e4-461f-b3ef-eb8daec29760",
+      "target": "tag:kind/policy_rule",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_f0b42ad0-88e4-461f-b3ef-eb8daec29760",
+      "target": "tag:scope/user_global",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    },
+    {
+      "source": "entry:wiki_entry_f0b42ad0-88e4-461f-b3ef-eb8daec29760",
+      "target": "tag:status/promoted",
+      "relationship": "has_derived_core_tag",
+      "tag_class": "derived_core"
+    }
+  ]
+}

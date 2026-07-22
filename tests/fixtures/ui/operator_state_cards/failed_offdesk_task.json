@@ -1,0 +1,29 @@
+{
+  "schema": "operator_state_card.v1",
+  "id": "failed_offdesk_task",
+  "title": "자율주행 실패",
+  "severity": "attention",
+  "state_summary": "Offdesk 작업 1건이 실패했고 재시작 전 원인 검토가 필요합니다.",
+  "primary_blocker_or_decision": {
+    "label": "실패 항목",
+    "summary": "같은 실패를 반복하지 않도록 복구 조건을 확인해야 합니다."
+  },
+  "next_safe_action": {
+    "label": "실패/마무리 항목 점검",
+    "reason": "재시작보다 실패 원인과 남은 증거 확인이 우선입니다.",
+    "command": "forager offdesk maintenance-report --json"
+  },
+  "detail_ref": {
+    "kind": "command",
+    "label": "유지보수 리포트",
+    "command": "forager offdesk maintenance-report --json"
+  },
+  "authorization_boundary": "자동 재시작 아님. 복구 검토만.",
+  "counts": {
+    "pending_approvals": 0,
+    "failed": 1,
+    "closeout_required": 0,
+    "active": 0,
+    "queued": 0
+  }
+}

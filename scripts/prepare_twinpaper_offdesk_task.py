@@ -13,10 +13,12 @@ import subprocess
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from offdesk_llm_endpoint import default_ollama_base_url
+
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEFAULT_TWINPAPER_REPO = pathlib.Path("/home/kimyoungjin06/Desktop/Workspace/1.2.8.TwinPaper")
-DEFAULT_BASE_URL = os.environ.get("OFFDESK_LLM_BASE_URL", "http://172.16.0.37:11434")
+DEFAULT_BASE_URL = default_ollama_base_url()
 DEFAULT_MODEL = os.environ.get("OFFDESK_LLM_MODEL", "qwen3-coder-next:latest")
 DEFAULT_PROFILE = os.environ.get("OFFDESK_PROFILE", "twinpaper-adaptive-debug")
 DEFAULT_TELEGRAM_ENV_FILE = pathlib.Path(

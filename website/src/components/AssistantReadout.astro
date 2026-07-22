@@ -1,0 +1,10 @@
+---
+import {
+  assistantReadoutHtml,
+  type AssistantReadoutOptions,
+} from '../lib/assistantReadout';
+
+const props = Astro.props as AssistantReadoutOptions;
+---
+
+<Fragment set:html={assistantReadoutHtml(props)} />

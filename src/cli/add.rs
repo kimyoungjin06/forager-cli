@@ -314,7 +314,7 @@ pub fn is_duplicate_session(instances: &[Instance], title: &str, path: &str) -> 
     })
 }
 
-fn trust_and_run_on_create(
+pub(crate) fn trust_and_run_on_create(
     project_path: &Path,
     hooks_hash: &str,
     hooks: &crate::session::HooksConfig,
@@ -329,7 +329,7 @@ fn trust_and_run_on_create(
     Ok(())
 }
 
-fn detect_tool(cmd: &str) -> Result<String> {
+pub(crate) fn detect_tool(cmd: &str) -> Result<String> {
     crate::agents::resolve_tool_name(cmd)
         .map(|name| name.to_string())
         .ok_or_else(|| {

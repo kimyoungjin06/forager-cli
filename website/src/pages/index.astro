@@ -231,6 +231,23 @@ const promises = [
               </div>
             ))}
           </div>
+          <div class="mt-8 flex flex-col gap-3 sm:flex-row">
+            <a href={sitePath('/dashboard/')} class="bg-brand-700 px-6 py-3 text-center text-base font-semibold text-white transition-colors hover:bg-brand-600">
+              Open dashboard
+            </a>
+            <a href={sitePath('/graph/')} class="border border-slate-300 bg-white px-6 py-3 text-center text-base font-semibold text-slate-950 transition-colors hover:border-brand-500 hover:text-brand-800">
+              Open graph
+            </a>
+            <a href={sitePath('/settings/')} class="border border-slate-300 bg-white px-6 py-3 text-center text-base font-semibold text-slate-950 transition-colors hover:border-brand-500 hover:text-brand-800">
+              Open settings
+            </a>
+            <a href={sitePath('/review/')} class="border border-slate-300 bg-white px-6 py-3 text-center text-base font-semibold text-slate-950 transition-colors hover:border-brand-500 hover:text-brand-800">
+              Open review surface
+            </a>
+            <a href={sitePath('/guides/offdesk-morning-review/')} class="border border-slate-300 bg-white px-6 py-3 text-center text-base font-semibold text-slate-950 transition-colors hover:border-brand-500 hover:text-brand-800">
+              Morning review guide
+            </a>
+          </div>
         </div>
       </div>
     </section>

@@ -1,0 +1,29 @@
+{
+  "schema": "operator_state_card.v1",
+  "id": "approval_pending",
+  "title": "승인 필요",
+  "severity": "attention",
+  "state_summary": "계획 승인 1건이 대기 중입니다.",
+  "primary_blocker_or_decision": {
+    "label": "계획 승인",
+    "summary": "등록된 UI 계약 계획을 승인할지 판단해야 합니다."
+  },
+  "next_safe_action": {
+    "label": "승인 내용 보기",
+    "reason": "승인 전에는 실행 준비를 만들 수 없습니다.",
+    "command": "forager offdesk remote-operator pending --json"
+  },
+  "detail_ref": {
+    "kind": "local_artifact",
+    "label": "승인 상세",
+    "path": "/tmp/forager-fixture/approval_pending.json"
+  },
+  "authorization_boundary": "검토 표면. 승인/실행은 별도 기록 필요.",
+  "counts": {
+    "pending_approvals": 1,
+    "failed": 0,
+    "closeout_required": 0,
+    "active": 0,
+    "queued": 0
+  }
+}

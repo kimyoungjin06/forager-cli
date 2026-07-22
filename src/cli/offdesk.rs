@@ -3,10 +3,10 @@
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Duration, Utc};
 use clap::{Args, Subcommand, ValueEnum};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -20,9 +20,9 @@ use crate::offdesk::{
     assess_offdesk_mode, build_graph_export_files, build_usage_records_with_policy,
     default_capability_registry, implementation_packet_from_path,
     implementation_packet_record_from_path, latest_implementation_packet_for_project,
-    launch_background_command, launch_background_run, operator_safe_report,
+    launch_background_command, launch_background_run, operator_safe_report, operator_safe_text,
     pending_approval_operator_views, poll_background_runs, recommend_provider_fallback,
-    reconcile_tasks_with_background_outcomes, run_offdesk_tick,
+    reconcile_tasks_with_background_outcomes, run_offdesk_tick, scan_and_emit_learning_signals,
     work_slice_execution_receipts_from_path, ActionApprovalRequest, AdaptiveWikiActivationMode,
     AdaptiveWikiAgentMode, AdaptiveWikiAgentModeFilter, AdaptiveWikiAuditAction,
     AdaptiveWikiAuditRecord, AdaptiveWikiCandidate, AdaptiveWikiCandidateInput,
@@ -40,21 +40,25 @@ use crate::offdesk::{
     AdaptiveWikiRuntimePolicyAckScopeMode, AdaptiveWikiRuntimePolicyAcknowledgement,
     AdaptiveWikiRuntimePolicyDecision, AdaptiveWikiRuntimePolicyDecisionStatus, AdaptiveWikiScope,
     AdaptiveWikiScopeSuggestion, AdaptiveWikiSignalKind, AdaptiveWikiStore,
-    AdaptiveWikiUsageContext, ApprovalLedger, ApprovalStatus, BackgroundLaunchOutcome,
-    BackgroundLaunchRequest, BackgroundProbe, BackgroundRecoveryAcknowledgement,
-    BackgroundRecoveryDecision, BackgroundRunStore, BackgroundRunnerKind, BackgroundRunnerPhase,
-    CapabilityArtifactRef, CapabilityDescriptor, DecisionLedger, DecisionReceipt, DecisionRecord,
-    DecisionRecordView, DecisionStatus, DecisionTraceRef, DecisionValidationIssue, ExecutionBrief,
-    ExecutionHandoff, ImplementationPacket, ImplementationPacketSummary,
-    LatestImplementationPacket, LocalCommandLaunchSpec, MutationRestoreOperation,
-    MutationRestorePlan, MutationSnapshot, MutationSnapshotStore, MutationSnapshotVerification,
-    OffdeskModeAssessment, OffdeskModeLifecycle, OffdeskNextSafeAction, OffdeskPendingApprovalView,
-    OffdeskTask, OffdeskTaskInput, OffdeskTaskLifecycleReport, OffdeskTaskStatus, OffdeskTaskStore,
-    OffdeskTaskView, OffdeskTickOptions, PendingActionApproval, ProviderCapacityState,
-    ProviderCapacityStore, ProviderFallbackRecommendation, ResumeStatus, RiskLevel, SchedulerGate,
-    SchedulerGateRequest, SchedulerGateStatus, TaskResumeState, TaskResumeStore,
-    WorkSliceExecutionReceipt, WorkSliceExecutionStatus, WorkSliceReceiptProducerRole,
-    WorkSliceVerificationStatus, WORK_SLICE_EXECUTION_RECEIPTS_FILE,
+    AdaptiveWikiUsageContext, ApprovalBrief, ApprovalBriefOption, ApprovalLedger, ApprovalStatus,
+    BackgroundLaunchOutcome, BackgroundLaunchRequest, BackgroundProbe,
+    BackgroundRecoveryAcknowledgement, BackgroundRecoveryDecision, BackgroundRunStore,
+    BackgroundRunnerKind, BackgroundRunnerPhase, CapabilityArtifactRef, CapabilityDescriptor,
+    DecisionLedger, DecisionMateriality, DecisionOption, DecisionRaisedBy, DecisionReceipt,
+    DecisionRecord, DecisionRecordView, DecisionRequest, DecisionRoute, DecisionRouteTarget,
+    DecisionStatus, DecisionTraceRef, DecisionValidationIssue, ExecutionBrief, ExecutionHandoff,
+    ImplementationPacket, ImplementationPacketSummary, JudgmentEvaluator, JudgmentRoute,
+    LatestImplementationPacket, LearningScanReport, LocalCommandLaunchSpec,
+    MutationRestoreOperation, MutationRestorePlan, MutationSnapshot, MutationSnapshotStore,
+    MutationSnapshotVerification, OffdeskModeAssessment, OffdeskModeLifecycle,
+    OffdeskNextSafeAction, OffdeskPendingApprovalView, OffdeskTask, OffdeskTaskInput,
+    OffdeskTaskLifecycleReport, OffdeskTaskStatus, OffdeskTaskStore, OffdeskTaskView,
+    OffdeskTickOptions, OperatorPauseState, OperatorPauseStore, PendingActionApproval,
+    ProviderCapacityState, ProviderCapacityStore, ProviderFallbackRecommendation, ResumeStatus,
+    RiskLevel, SchedulerGate, SchedulerGateRequest, SchedulerGateStatus, TaskResumeState,
+    TaskResumeStore, WorkSliceExecutionReceipt, WorkSliceExecutionStatus,
+    WorkSliceReceiptProducerRole, WorkSliceVerificationStatus, DECISION_RECORD_SCHEMA,
+    JUDGMENT_ROUTE_SCHEMA, WORK_SLICE_EXECUTION_RECEIPTS_FILE,
 };
 use crate::session::{get_profile_dir, resolved_app_dir_path, DEFAULT_PROFILE};
 
@@ -65,6 +69,27 @@ pub enum OffdeskCommands {
 
     /// Build a compact hosted harness start prompt from first-read artifacts
     HarnessPrompt(HarnessPromptArgs),
+
+    /// Validate and register a read-only Offdesk planning artifact
+    Plan(PlanArgs),
+
+    /// List registered read-only Offdesk planning artifacts
+    Plans(PlansArgs),
+
+    /// Show one registered read-only Offdesk planning artifact
+    PlanShow(PlanShowArgs),
+
+    /// Record an operator review for a registered Offdesk planning artifact
+    PlanReview(PlanReviewArgs),
+
+    /// Build a read-only launch-preparation packet from an approved plan review
+    PlanLaunchPrep(PlanLaunchPrepArgs),
+
+    /// Render read-only Remote Operator projections for mobile/chat transports
+    RemoteOperator {
+        #[command(subcommand)]
+        command: RemoteOperatorCommands,
+    },
 
     /// List pending action approvals
     Pending(PendingArgs),
@@ -98,6 +123,21 @@ pub enum OffdeskCommands {
 
     /// Mark a durable task cancelled without stopping its background runner
     CancelTask(CancelTaskArgs),
+
+    /// Halt all new offdesk dispatch until resumed (existing runs keep polling)
+    Pause(PauseArgs),
+
+    /// Clear the global operator pause so new dispatch can proceed again
+    Unpause(UnpauseArgs),
+
+    /// Show the current global operator pause state
+    #[command(name = "pause-status")]
+    PauseStatus(JsonArgs),
+
+    /// Emit adaptive-wiki learning candidates from observed denials, failures,
+    /// and resume-recovery rows (recommendation-only; runs each event once)
+    #[command(name = "learning-scan")]
+    LearningScan(JsonArgs),
 
     /// Requeue a failed, resume-pending, or cancelled durable task
     RetryTask(RetryTaskArgs),
@@ -148,6 +188,9 @@ pub enum OffdeskCommands {
 
     /// Create or reuse an approval request for a maintenance action
     MaintenanceRequest(MaintenanceRequestArgs),
+
+    /// Generate a Marp-compatible review deck from a read-only Offdesk artifact
+    Deck(DeckArgs),
 
     /// Generate a mandatory closeout plan and commercial review packet
     Closeout(CloseoutArgs),
@@ -444,6 +487,14 @@ pub struct TickArgs {
     #[arg(long, default_value_t = 10)]
     limit: usize,
 
+    /// Restrict this tick to one project key
+    #[arg(long)]
+    project_key: Option<String>,
+
+    /// Restrict this tick to one task ID
+    #[arg(long)]
+    task_id: Option<String>,
+
     /// Treat previous free lock metadata as stale after this many minutes
     #[arg(long, default_value_t = 30)]
     lock_stale_minutes: i64,
@@ -709,6 +760,233 @@ pub struct HarnessPromptArgs {
     json: bool,
 }
 
+#[derive(Args)]
+pub struct PlanArgs {
+    /// `offdesk_multiturn_plan.v1` or `offdesk_planner_council.v1` JSON to register
+    input: PathBuf,
+
+    /// Optional project key for correlation
+    #[arg(long)]
+    project_key: Option<String>,
+
+    /// Optional request ID for correlation
+    #[arg(long)]
+    request_id: Option<String>,
+
+    /// Optional task ID for correlation
+    #[arg(long)]
+    task_id: Option<String>,
+
+    /// Validate without writing profile-local registry artifacts
+    #[arg(long)]
+    dry_run: bool,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct PlansArgs {
+    /// Filter by project key
+    #[arg(long)]
+    project_key: Option<String>,
+
+    /// Filter by task ID
+    #[arg(long)]
+    task_id: Option<String>,
+
+    /// Filter by planning profile key
+    #[arg(long)]
+    profile_key: Option<String>,
+
+    /// Filter by artifact kind, such as offdesk_multiturn_plan or offdesk_planner_council
+    #[arg(long)]
+    artifact_kind: Option<String>,
+
+    /// Return only the newest matching registration
+    #[arg(long)]
+    latest: bool,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct PlanShowArgs {
+    /// Plan ID from `forager offdesk plans`, or a registration/source path
+    plan_ref: String,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct PlanReviewArgs {
+    /// Plan ID from `forager offdesk plans`, or a registration/source path
+    plan_ref: String,
+
+    /// Operator review decision. This command never enqueues or launches work.
+    #[arg(long, value_enum)]
+    decision: OffdeskPlanReviewDecision,
+
+    /// Reviewer or reviewing model label
+    #[arg(long, default_value = "operator")]
+    reviewer: String,
+
+    /// Model/provider label used for review
+    #[arg(long)]
+    review_provider: Option<String>,
+
+    /// Optional path to the raw review output
+    #[arg(long)]
+    review_file: Option<PathBuf>,
+
+    /// Required review rationale. Secrets are redacted before persistence.
+    #[arg(long)]
+    reason: String,
+
+    /// Blocking issue reported by review; may be passed multiple times
+    #[arg(long = "blocker")]
+    blockers: Vec<String>,
+
+    /// Follow-up requested by review; may be passed multiple times
+    #[arg(long = "follow-up")]
+    followups: Vec<String>,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct PlanLaunchPrepArgs {
+    /// Plan ID from `forager offdesk plans`, or a registration/source path
+    plan_ref: String,
+
+    /// Use a specific approved review ID instead of the latest review
+    #[arg(long)]
+    review_id: Option<String>,
+
+    /// Operator or surface preparing the packet
+    #[arg(long, default_value = "operator")]
+    prepared_by: String,
+
+    /// Optional preparation note. Secrets are redacted before persistence.
+    #[arg(long)]
+    notes: Option<String>,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Subcommand)]
+pub enum RemoteOperatorCommands {
+    /// Render a read-only status projection for a remote operator surface
+    Status(RemoteOperatorStatusArgs),
+
+    /// Render read-only pending approval summaries without resolving or expiring them
+    Pending(RemoteOperatorPendingArgs),
+
+    /// Render read-only Offdesk plan summaries for a remote operator surface
+    Plans(RemoteOperatorPlansArgs),
+
+    /// Render one read-only Offdesk plan detail projection
+    Show(RemoteOperatorShowArgs),
+}
+
+#[derive(Args)]
+pub struct RemoteOperatorStatusArgs {
+    /// Remote transport label used for projection metadata
+    #[arg(long, default_value = "telegram")]
+    transport: String,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct RemoteOperatorPendingArgs {
+    /// Remote transport label used for projection metadata
+    #[arg(long, default_value = "telegram")]
+    transport: String,
+
+    /// Include resolved approvals in addition to pending approval rows
+    #[arg(long)]
+    all: bool,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct RemoteOperatorPlansArgs {
+    /// Remote transport label used for projection metadata
+    #[arg(long, default_value = "telegram")]
+    transport: String,
+
+    /// Filter by project key
+    #[arg(long)]
+    project_key: Option<String>,
+
+    /// Filter by task ID
+    #[arg(long)]
+    task_id: Option<String>,
+
+    /// Filter by planning profile key
+    #[arg(long)]
+    profile_key: Option<String>,
+
+    /// Filter by artifact kind, such as offdesk_multiturn_plan or offdesk_planner_council
+    #[arg(long)]
+    artifact_kind: Option<String>,
+
+    /// Return only the newest matching registration
+    #[arg(long)]
+    latest: bool,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct RemoteOperatorShowArgs {
+    /// Remote transport label used for projection metadata
+    #[arg(long, default_value = "telegram")]
+    transport: String,
+
+    /// Plan ID from `forager offdesk plans`, or a registration/source path
+    plan_ref: String,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ValueEnum)]
+#[serde(rename_all = "snake_case")]
+enum OffdeskPlanReviewDecision {
+    Approved,
+    RevisionRequired,
+    Rejected,
+}
+
+impl OffdeskPlanReviewDecision {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Approved => "approved",
+            Self::RevisionRequired => "revision_required",
+            Self::Rejected => "rejected",
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct HostedHarnessPromptPacket {
     harness_id: String,
@@ -736,6 +1014,333 @@ struct HostedHarnessFirstRead {
     present: bool,
     size_bytes: Option<u64>,
     over_file_budget: bool,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct OffdeskPlanRegistration {
+    schema: String,
+    registered_at: DateTime<Utc>,
+    forager_profile: String,
+    source_path: String,
+    source_sha256: String,
+    artifact_kind: String,
+    plan_schema: String,
+    profile_key: Option<String>,
+    profile_name: Option<String>,
+    project_key: Option<String>,
+    request_id: Option<String>,
+    task_id: Option<String>,
+    ready_for_operator_review: bool,
+    ready_for_launch_preparation: bool,
+    ready_for_enqueue: bool,
+    validation_failures: Vec<String>,
+    decision: Option<Value>,
+    consensus: Option<Value>,
+    selected_plan_path: Option<String>,
+    dry_run: bool,
+    artifacts: OffdeskPlanRegistrationArtifacts,
+    does_not_authorize: Vec<String>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct OffdeskPlanRegistrationArtifacts {
+    registry_dir: Option<String>,
+    registration_json: Option<String>,
+    copied_source_json: Option<String>,
+}
+
+#[derive(Serialize)]
+struct OffdeskPlanRegistryItem {
+    plan_id: String,
+    registration_path: String,
+    registration: OffdeskPlanRegistration,
+    review_state: OffdeskPlanReviewState,
+    review_count: usize,
+    latest_review: Option<OffdeskPlanReviewRecord>,
+    launch_prep_count: usize,
+    latest_launch_prep: Option<OffdeskPlanLaunchPrepPacket>,
+}
+
+#[derive(Serialize)]
+struct OffdeskPlanRegistryDetail {
+    plan_id: String,
+    registration_path: String,
+    registration: OffdeskPlanRegistration,
+    review_state: OffdeskPlanReviewState,
+    review_count: usize,
+    latest_review: Option<OffdeskPlanReviewRecord>,
+    reviews: Vec<OffdeskPlanReviewRecord>,
+    launch_prep_count: usize,
+    latest_launch_prep: Option<OffdeskPlanLaunchPrepPacket>,
+    launch_preps: Vec<OffdeskPlanLaunchPrepPacket>,
+}
+
+#[derive(Clone, Serialize)]
+struct OffdeskPlanReviewState {
+    status: String,
+    ready_for_launch_preparation_candidate: bool,
+    next_safe_action: String,
+    latest_review_id: Option<String>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct OffdeskPlanReviewRecord {
+    schema: String,
+    reviewed_at: DateTime<Utc>,
+    review_id: String,
+    plan_id: String,
+    forager_profile: String,
+    registration_path: String,
+    source_sha256: String,
+    decision: OffdeskPlanReviewDecision,
+    reviewer: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    review_provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    review_file: Option<String>,
+    reason: String,
+    blockers: Vec<String>,
+    followups: Vec<String>,
+    ready_for_launch_preparation_candidate: bool,
+    ready_for_enqueue: bool,
+    read_only_project_state: bool,
+    applies_file_operations: bool,
+    artifacts: OffdeskPlanReviewArtifacts,
+    does_not_authorize: Vec<String>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct OffdeskPlanReviewArtifacts {
+    registration_json: String,
+    copied_source_json: Option<String>,
+    review_record_json: String,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct OffdeskPlanLaunchPrepPacket {
+    schema: String,
+    prepared_at: DateTime<Utc>,
+    prep_id: String,
+    plan_id: String,
+    forager_profile: String,
+    prepared_by: String,
+    registration_path: String,
+    source_path: String,
+    source_sha256: String,
+    review_id: String,
+    review_decision: OffdeskPlanReviewDecision,
+    review_record_json: String,
+    artifact_kind: String,
+    plan_schema: String,
+    profile_key: Option<String>,
+    project_key: Option<String>,
+    request_id: Option<String>,
+    task_id: Option<String>,
+    selected_plan_path: Option<String>,
+    required_first_reads: Vec<String>,
+    launch_preparation_candidate: bool,
+    ready_for_launch: bool,
+    ready_for_enqueue: bool,
+    next_safe_action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    notes: Option<String>,
+    read_only_project_state: bool,
+    applies_file_operations: bool,
+    artifacts: OffdeskPlanLaunchPrepArtifacts,
+    does_not_authorize: Vec<String>,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct OffdeskPlanLaunchPrepArtifacts {
+    registration_json: String,
+    copied_source_json: Option<String>,
+    review_record_json: String,
+    launch_prep_json: String,
+}
+
+#[derive(Serialize)]
+struct RemoteOperatorProjection<T>
+where
+    T: Serialize,
+{
+    schema: String,
+    generated_at: DateTime<Utc>,
+    forager_profile: String,
+    transport: String,
+    source_surface: String,
+    command: String,
+    phase: String,
+    read_only: bool,
+    mutation_authorized: bool,
+    approval_authorized: bool,
+    allowed_remote_intents: Vec<String>,
+    forbidden_remote_intents: Vec<String>,
+    card: RemoteOperatorCard,
+    payload: T,
+}
+
+#[derive(Clone, Serialize)]
+struct RemoteOperatorCard {
+    title: String,
+    summary_lines: Vec<String>,
+    detail_lines: Vec<String>,
+    observed_hash: String,
+    remote_actions: Vec<String>,
+    disabled_remote_actions: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct RemoteOperatorStatusPayload {
+    profile: String,
+    waiting: usize,
+    running: usize,
+    idle: usize,
+    stopped: usize,
+    error: usize,
+    total: usize,
+    resume_pending_fresh: usize,
+    resume_pending_stale: usize,
+    pending_approvals: usize,
+    queued_offdesk_tasks: usize,
+    active_offdesk_tasks: usize,
+    offdesk_tasks_pending_approval: usize,
+    failed_offdesk_tasks: usize,
+    resume_pending_offdesk_tasks: usize,
+    cancelled_offdesk_tasks: usize,
+    stale_background_runs: usize,
+    failed_background_runs: usize,
+    closeout_required_offdesk_tasks: usize,
+    next_safe_actions: Vec<RemoteOperatorNextSafeActionSummary>,
+}
+
+#[derive(Clone, Serialize)]
+struct RemoteOperatorNextSafeActionSummary {
+    kind: String,
+    detail: String,
+    requires_operator_review: bool,
+}
+
+#[derive(Serialize)]
+struct RemoteOperatorPendingPayload {
+    include_all: bool,
+    approval_count: usize,
+    approvals: Vec<RemoteOperatorApprovalSummary>,
+}
+
+#[derive(Clone, Serialize)]
+struct RemoteOperatorApprovalSummaryCore {
+    approval_id: String,
+    action_id: String,
+    status: ApprovalStatus,
+    expired: bool,
+    action: String,
+    project_key: String,
+    request_id: String,
+    task_id: String,
+    risk_level: RiskLevel,
+    preview: String,
+    reason: String,
+    created_at: DateTime<Utc>,
+    expires_at: DateTime<Utc>,
+    next_safe_action: RemoteOperatorNextSafeActionSummary,
+    remote_actions: Vec<String>,
+}
+
+#[derive(Clone, Serialize)]
+struct RemoteOperatorApprovalSummary {
+    #[serde(flatten)]
+    core: RemoteOperatorApprovalSummaryCore,
+    observed_hash: String,
+}
+
+#[derive(Serialize)]
+struct RemoteOperatorPlansPayload {
+    filters: RemoteOperatorPlanFilters,
+    plan_count: usize,
+    plans: Vec<RemoteOperatorPlanSummary>,
+}
+
+#[derive(Clone, Serialize)]
+struct RemoteOperatorPlanFilters {
+    project_key: Option<String>,
+    task_id: Option<String>,
+    profile_key: Option<String>,
+    artifact_kind: Option<String>,
+    latest: bool,
+}
+
+#[derive(Clone, Serialize)]
+struct RemoteOperatorPlanSummaryCore {
+    plan_id: String,
+    artifact_kind: String,
+    plan_schema: String,
+    profile_key: Option<String>,
+    project_key: Option<String>,
+    request_id: Option<String>,
+    task_id: Option<String>,
+    registered_at: DateTime<Utc>,
+    source_sha256: String,
+    review_status: String,
+    review_count: usize,
+    latest_review_id: Option<String>,
+    launch_prep_count: usize,
+    latest_launch_prep_id: Option<String>,
+    ready_for_operator_review: bool,
+    launch_preparation_candidate: bool,
+    ready_for_enqueue: bool,
+    next_safe_action: String,
+    remote_actions: Vec<String>,
+}
+
+#[derive(Clone, Serialize)]
+struct RemoteOperatorPlanSummary {
+    #[serde(flatten)]
+    core: RemoteOperatorPlanSummaryCore,
+    observed_hash: String,
+}
+
+#[derive(Serialize)]
+struct RemoteOperatorPlanDetailPayload {
+    plan: RemoteOperatorPlanSummary,
+    reviews: Vec<RemoteOperatorPlanReviewSummary>,
+    launch_preps: Vec<RemoteOperatorLaunchPrepSummary>,
+    does_not_authorize: Vec<String>,
+}
+
+#[derive(Clone, Serialize)]
+struct RemoteOperatorPlanReviewSummary {
+    review_id: String,
+    reviewed_at: DateTime<Utc>,
+    decision: OffdeskPlanReviewDecision,
+    reviewer: String,
+    ready_for_launch_preparation_candidate: bool,
+    ready_for_enqueue: bool,
+    blockers: Vec<String>,
+    followups: Vec<String>,
+}
+
+#[derive(Clone, Serialize)]
+struct RemoteOperatorLaunchPrepSummary {
+    prep_id: String,
+    prepared_at: DateTime<Utc>,
+    review_id: String,
+    launch_preparation_candidate: bool,
+    ready_for_launch: bool,
+    ready_for_enqueue: bool,
+    next_safe_action: String,
+}
+
+struct OffdeskPlanInputSummary {
+    artifact_kind: &'static str,
+    plan_schema: String,
+    profile_key: Option<String>,
+    profile_name: Option<String>,
+    ready_for_operator_review: bool,
+    ready_for_launch_preparation: bool,
+    ready_for_enqueue: bool,
+    decision: Option<Value>,
+    consensus: Option<Value>,
+    selected_plan_path: Option<String>,
 }
 
 #[derive(Args)]
@@ -992,6 +1597,83 @@ pub struct MaintenanceRequestArgs {
     /// Output as JSON
     #[arg(long)]
     json: bool,
+}
+
+#[derive(Args)]
+pub struct DeckArgs {
+    /// Source Offdesk JSON artifact to summarize into a Marp deck
+    #[arg(long = "from")]
+    source: PathBuf,
+
+    /// Artifact shape. Use auto unless the source is ambiguous.
+    #[arg(long, value_enum, default_value = "auto")]
+    kind: OffdeskDeckKind,
+
+    /// Markdown deck output path. Defaults to `<source-stem>.marp.md`.
+    #[arg(long)]
+    out: Option<PathBuf>,
+
+    /// Overwrite the Markdown deck or rendered artifact if it already exists
+    #[arg(long)]
+    force: bool,
+
+    /// Optional deck title
+    #[arg(long)]
+    title: Option<String>,
+
+    /// Render the deck with Marp CLI after writing Markdown
+    #[arg(long, value_enum)]
+    render: Option<OffdeskDeckRenderFormat>,
+
+    /// Marp CLI binary to use with --render
+    #[arg(long, default_value = "marp")]
+    marp_bin: String,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ValueEnum)]
+#[serde(rename_all = "snake_case")]
+enum OffdeskDeckKind {
+    Auto,
+    Closeout,
+    Plan,
+    Status,
+}
+
+impl OffdeskDeckKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Closeout => "closeout",
+            Self::Plan => "plan",
+            Self::Status => "status",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ValueEnum)]
+#[serde(rename_all = "snake_case")]
+enum OffdeskDeckRenderFormat {
+    Html,
+    Pdf,
+    Pptx,
+}
+
+impl OffdeskDeckRenderFormat {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Html => "html",
+            Self::Pdf => "pdf",
+            Self::Pptx => "pptx",
+        }
+    }
+
+    fn extension(self) -> &'static str {
+        self.as_str()
+    }
 }
 
 #[derive(Args)]
@@ -1252,6 +1934,32 @@ pub struct CancelTaskArgs {
 }
 
 #[derive(Args)]
+pub struct PauseArgs {
+    /// Reason to record for the pause
+    #[arg(long)]
+    reason: Option<String>,
+
+    /// Actor engaging the pause
+    #[arg(long, default_value = "cli")]
+    by: String,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct UnpauseArgs {
+    /// Actor clearing the pause
+    #[arg(long, default_value = "cli")]
+    by: String,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
 pub struct TaskLifecycleArgs {
     /// Offdesk task ID to update
     task_id: String,
@@ -1299,6 +2007,9 @@ pub enum DecisionCommands {
 
     /// Ingest a Telegram relay result into the canonical decision ledger
     IngestTelegram(DecisionIngestTelegramArgs),
+
+    /// Promote Telegram freeform feedback into the canonical decision inbox
+    IngestTelegramFeedback(DecisionIngestTelegramFeedbackArgs),
 }
 
 #[derive(Args)]
@@ -1403,6 +2114,25 @@ pub struct DecisionIngestTelegramArgs {
 }
 
 #[derive(Args)]
+pub struct DecisionIngestTelegramFeedbackArgs {
+    /// Telegram feedback JSON or JSONL file
+    #[arg(long)]
+    feedback: PathBuf,
+
+    /// Override canonical profile directory for producer integrations
+    #[arg(long = "profile-dir")]
+    profile_dir: Option<PathBuf>,
+
+    /// Actor recording the inbox item
+    #[arg(long, default_value = "telegram")]
+    by: String,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
 pub struct RetryTaskArgs {
     /// Offdesk task ID to retry
     task_id: String,
@@ -1470,6 +2200,9 @@ pub enum WikiCommands {
     /// Show the AI projection for a scope
     Projection(WikiProjectionArgs),
 
+    /// Render a compact, skepticism-aware knowledge brief for session start
+    Brief(WikiBriefArgs),
+
     /// List strict runtime projection policy acknowledgements
     RuntimePolicyAcks(JsonArgs),
 
@@ -1506,6 +2239,10 @@ pub enum WikiCommands {
     /// Reconstruct the evidence chain captured at promotion time
     PromotionChain(WikiPromotionChainArgs),
 
+    /// Record an operator-authored learning candidate (e.g. from a doc review)
+    #[command(name = "record-candidate")]
+    RecordCandidate(WikiRecordCandidateArgs),
+
     /// Promote a candidate into a scoped wiki entry
     Promote(WikiPromoteArgs),
 
@@ -1514,6 +2251,13 @@ pub enum WikiCommands {
 
     /// Change an entry scope
     Rescope(WikiRescopeArgs),
+
+    /// Edit an entry's claim, instruction, summary, or evidence refs in place
+    Edit(WikiEditArgs),
+
+    /// Add controlled/proposed tags to an entry (e.g. facet/* or domain/*)
+    #[command(name = "add-tag")]
+    AddTag(WikiAddTagArgs),
 
     /// Deprecate an entry so it no longer appears in AI projection
     Deprecate(WikiDeprecateArgs),
@@ -1545,6 +2289,33 @@ pub struct WikiListArgs {
     /// Agent work mode scope to match
     #[arg(long, value_parser = parse_adaptive_wiki_agent_mode)]
     agent_mode: Option<AdaptiveWikiAgentMode>,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct WikiBriefArgs {
+    /// Project key scope to match
+    #[arg(long)]
+    project_key: Option<String>,
+
+    /// Artifact kind scope to match
+    #[arg(long)]
+    artifact_kind: Option<String>,
+
+    /// Agent work mode to project for (omit for shared/universal entries)
+    #[arg(long, value_parser = parse_adaptive_wiki_agent_mode)]
+    agent_mode: Option<AdaptiveWikiAgentMode>,
+
+    /// Maximum entries in the brief
+    #[arg(long, default_value_t = 12)]
+    max_entries: usize,
+
+    /// Write the brief to this path instead of stdout
+    #[arg(long)]
+    out: Option<std::path::PathBuf>,
 
     /// Output as JSON
     #[arg(long)]
@@ -1884,6 +2655,70 @@ pub struct WikiPromotionChainArgs {
 }
 
 #[derive(Args)]
+pub struct WikiRecordCandidateArgs {
+    /// Knowledge kind
+    #[arg(long, value_parser = parse_adaptive_wiki_kind)]
+    kind: AdaptiveWikiKind,
+
+    /// Applicability scope
+    #[arg(long, value_parser = parse_adaptive_wiki_scope)]
+    scope: AdaptiveWikiScope,
+
+    /// Scope reference (e.g. project key). Required unless scope is user_global.
+    #[arg(long)]
+    scope_ref: Option<String>,
+
+    /// One-line durable claim
+    #[arg(long)]
+    claim: String,
+
+    /// Compact instruction for the AI projection
+    #[arg(long, default_value = "")]
+    ai_instruction: String,
+
+    /// Operator-facing governance summary
+    #[arg(long, default_value = "")]
+    human_summary: String,
+
+    /// Evidence reference (repeatable), e.g. doc:/path/AGENTS.md#section
+    #[arg(long = "evidence-ref")]
+    evidence_refs: Vec<String>,
+
+    /// Agent work mode this candidate applies to (repeatable; omit for universal)
+    #[arg(long = "agent-mode", value_parser = parse_adaptive_wiki_agent_mode)]
+    agent_modes: Vec<AdaptiveWikiAgentMode>,
+
+    /// Controlled core tag (repeatable), e.g. domain/twinpaper or harness/dispatch
+    #[arg(long = "core-tag")]
+    core_tags: Vec<String>,
+
+    /// Proposed (reviewable) tag (repeatable)
+    #[arg(long = "proposed-tag")]
+    proposed_tags: Vec<String>,
+
+    /// Confidence level
+    #[arg(long, default_value = "explicit", value_parser = parse_adaptive_wiki_confidence)]
+    confidence: AdaptiveWikiConfidence,
+
+    /// Provenance of this candidate: who observed it
+    #[arg(long, default_value = "operator_explicit", value_parser = parse_adaptive_wiki_origin)]
+    origin: AdaptiveWikiOrigin,
+
+    /// What kind of signal produced this candidate. operator_correction also
+    /// appends a first-class correction record for recurrence evaluation.
+    #[arg(long, default_value = "imported_doc", value_parser = parse_adaptive_wiki_signal_kind)]
+    signal_kind: AdaptiveWikiSignalKind,
+
+    /// Why this is worth reviewing/promoting
+    #[arg(long, default_value = "")]
+    review_reason: String,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
 pub struct WikiPromoteArgs {
     /// Adaptive wiki candidate id
     candidate_id: String,
@@ -1911,6 +2746,11 @@ pub struct WikiPromoteArgs {
     /// Optional promotion reason for audit
     #[arg(long, default_value = "")]
     reason: String,
+
+    /// Review window in days: entries must be re-reviewed after this horizon
+    /// (skepticism-by-default; 0 disables)
+    #[arg(long, default_value_t = 90)]
+    review_after_days: i64,
 
     /// Output as JSON
     #[arg(long)]
@@ -1953,6 +2793,66 @@ pub struct WikiRescopeArgs {
     by: String,
 
     /// Optional rescope reason for audit
+    #[arg(long, default_value = "")]
+    reason: String,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct WikiEditArgs {
+    /// Adaptive wiki entry id
+    entry_id: String,
+
+    /// Replace the durable claim
+    #[arg(long)]
+    claim: Option<String>,
+
+    /// Replace the compact AI instruction
+    #[arg(long)]
+    ai_instruction: Option<String>,
+
+    /// Replace the operator-facing summary
+    #[arg(long)]
+    human_summary: Option<String>,
+
+    /// Add an evidence reference (repeatable)
+    #[arg(long = "evidence-ref")]
+    evidence_refs: Vec<String>,
+
+    /// Operator or surface performing the edit
+    #[arg(long, default_value = "cli")]
+    by: String,
+
+    /// Optional edit reason for audit
+    #[arg(long, default_value = "")]
+    reason: String,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct WikiAddTagArgs {
+    /// Adaptive wiki entry id
+    entry_id: String,
+
+    /// Controlled core tag (repeatable), e.g. facet/research or domain/twinpaper
+    #[arg(long = "core-tag")]
+    core_tags: Vec<String>,
+
+    /// Proposed (reviewable) tag (repeatable)
+    #[arg(long = "proposed-tag")]
+    proposed_tags: Vec<String>,
+
+    /// Operator or surface performing the retag
+    #[arg(long, default_value = "cli")]
+    by: String,
+
+    /// Optional retag reason for audit
     #[arg(long, default_value = "")]
     reason: String,
 
@@ -2188,6 +3088,14 @@ enum WikiMutationResult {
         audit: AdaptiveWikiAuditRecord,
     },
     Rescope {
+        entry: AdaptiveWikiHumanEntry,
+        audit: AdaptiveWikiAuditRecord,
+    },
+    Edit {
+        entry: AdaptiveWikiHumanEntry,
+        audit: AdaptiveWikiAuditRecord,
+    },
+    Retag {
         entry: AdaptiveWikiHumanEntry,
         audit: AdaptiveWikiAuditRecord,
     },
@@ -2444,6 +3352,16 @@ struct DecisionIngestTelegramReport {
     validation_issues: Vec<DecisionValidationIssue>,
 }
 
+#[derive(Debug, Serialize)]
+struct DecisionIngestTelegramFeedbackReport {
+    feedback_path: String,
+    ledger_path: String,
+    decision_id: String,
+    appended: bool,
+    record: DecisionRecord,
+    validation_issues: Vec<DecisionValidationIssue>,
+}
+
 #[derive(Serialize)]
 struct OffdeskCloseoutReport {
     generated_at: DateTime<Utc>,
@@ -2471,6 +3389,23 @@ struct OffdeskCloseoutReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     git_snapshot: Option<CloseoutGitSnapshot>,
     artifacts: CloseoutArtifactPaths,
+}
+
+#[derive(Serialize)]
+struct OffdeskDeckReport {
+    schema: &'static str,
+    generated_at: DateTime<Utc>,
+    source_path: String,
+    source_kind: String,
+    marp_markdown_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rendered_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    render_format: Option<String>,
+    render_status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    render_error: Option<String>,
+    source_of_truth: &'static str,
 }
 
 #[derive(Default, Serialize)]
@@ -2926,6 +3861,12 @@ pub async fn run(profile: &str, command: OffdeskCommands) -> Result<()> {
     match command {
         OffdeskCommands::Harnesses(args) => harnesses(args).await,
         OffdeskCommands::HarnessPrompt(args) => harness_prompt(args).await,
+        OffdeskCommands::Plan(args) => plan(profile, args).await,
+        OffdeskCommands::Plans(args) => plans(profile, args).await,
+        OffdeskCommands::PlanShow(args) => plan_show(profile, args).await,
+        OffdeskCommands::PlanReview(args) => plan_review(profile, args).await,
+        OffdeskCommands::PlanLaunchPrep(args) => plan_launch_prep(profile, args).await,
+        OffdeskCommands::RemoteOperator { command } => remote_operator(profile, command).await,
         OffdeskCommands::Pending(args) => pending(profile, args).await,
         OffdeskCommands::Gate(args) => gate(profile, args).await,
         OffdeskCommands::Launch(args) => launch(profile, args).await,
@@ -2937,6 +3878,10 @@ pub async fn run(profile: &str, command: OffdeskCommands) -> Result<()> {
         OffdeskCommands::ProviderCapacity(args) => provider_capacity(profile, args).await,
         OffdeskCommands::ProviderFallback(args) => provider_fallback(profile, args).await,
         OffdeskCommands::CancelTask(args) => cancel_task(profile, args).await,
+        OffdeskCommands::Pause(args) => pause_dispatch(profile, args).await,
+        OffdeskCommands::Unpause(args) => unpause_dispatch(profile, args).await,
+        OffdeskCommands::PauseStatus(args) => pause_status(profile, args).await,
+        OffdeskCommands::LearningScan(args) => learning_scan(profile, args).await,
         OffdeskCommands::RetryTask(args) => retry_task(profile, args).await,
         OffdeskCommands::ResumeTask(args) => resume_task(profile, args).await,
         OffdeskCommands::AbandonTask(args) => abandon_task(profile, args).await,
@@ -2953,6 +3898,7 @@ pub async fn run(profile: &str, command: OffdeskCommands) -> Result<()> {
         OffdeskCommands::DebugBundle(args) => debug_bundle(profile, args).await,
         OffdeskCommands::MaintenanceReport(args) => maintenance_report(profile, args).await,
         OffdeskCommands::MaintenanceRequest(args) => maintenance_request(profile, args).await,
+        OffdeskCommands::Deck(args) => deck(profile, args).await,
         OffdeskCommands::Closeout(args) => closeout(profile, args).await,
         OffdeskCommands::CloseoutReview(args) => closeout_review(profile, args).await,
         OffdeskCommands::CloseoutDecision(args) => closeout_decision(profile, args).await,
@@ -3027,6 +3973,8 @@ async fn enqueue(profile: &str, args: EnqueueArgs) -> Result<()> {
 async fn tick(profile: &str, args: TickArgs) -> Result<()> {
     let mut options = OffdeskTickOptions::new(Utc::now());
     options.limit = args.limit.max(1);
+    options.project_key = args.project_key;
+    options.task_id = args.task_id;
     options.lock_stale_after = Duration::minutes(args.lock_stale_minutes.max(1));
     options.notification_cooldown = args
         .notify_cooldown_minutes
@@ -3153,6 +4101,9 @@ async fn decision(profile: &str, args: DecisionArgs) -> Result<()> {
         DecisionCommands::Resolve(args) => decision_resolve(profile, args).await,
         DecisionCommands::Receipt(args) => decision_receipt(profile, args).await,
         DecisionCommands::IngestTelegram(args) => decision_ingest_telegram(profile, args).await,
+        DecisionCommands::IngestTelegramFeedback(args) => {
+            decision_ingest_telegram_feedback(profile, args).await
+        }
     }
 }
 
@@ -3316,6 +4267,44 @@ async fn decision_ingest_telegram(profile: &str, args: DecisionIngestTelegramArg
     }
 
     print_decision_ingest_telegram_report(&report);
+    Ok(())
+}
+
+async fn decision_ingest_telegram_feedback(
+    profile: &str,
+    args: DecisionIngestTelegramFeedbackArgs,
+) -> Result<()> {
+    let profile_dir = match args.profile_dir.as_ref() {
+        Some(path) => path.to_path_buf(),
+        None => get_profile_dir(profile)?,
+    };
+    let ledger = DecisionLedger::new(&profile_dir);
+    let feedback = read_json_or_latest_jsonl_file(&args.feedback)?;
+    let seed_record = decision_record_from_telegram_feedback(&feedback, &args.feedback, &args.by)?;
+    let decision_id = seed_record.decision_id.clone();
+
+    let (record, appended) = if let Some(existing) = ledger.find(&decision_id)? {
+        (existing, false)
+    } else {
+        ledger.append(&seed_record)?;
+        (seed_record, true)
+    };
+
+    let report = DecisionIngestTelegramFeedbackReport {
+        feedback_path: args.feedback.display().to_string(),
+        ledger_path: ledger.path().display().to_string(),
+        decision_id,
+        appended,
+        validation_issues: record.validation_issues(),
+        record,
+    };
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+
+    print_decision_ingest_telegram_feedback_report(&report);
     Ok(())
 }
 
@@ -3483,6 +4472,34 @@ fn read_json_file(path: &Path) -> Result<Value> {
     .with_context(|| format!("parse JSON {}", path.display()))
 }
 
+fn read_json_or_latest_jsonl_file(path: &Path) -> Result<Value> {
+    let content =
+        fs::read_to_string(path).with_context(|| format!("read JSON {}", path.display()))?;
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        bail!("JSON file is empty: {}", path.display());
+    }
+    match serde_json::from_str(trimmed) {
+        Ok(value) => Ok(value),
+        Err(full_error) => {
+            let Some(line) = content
+                .lines()
+                .rev()
+                .map(str::trim)
+                .find(|line| !line.is_empty())
+            else {
+                bail!("JSON file is empty: {}", path.display());
+            };
+            if line == trimmed {
+                Err(full_error).with_context(|| format!("parse JSON {}", path.display()))
+            } else {
+                serde_json::from_str(line)
+                    .with_context(|| format!("parse latest JSONL row {}", path.display()))
+            }
+        }
+    }
+}
+
 fn decision_record_from_request(request: &Value, request_path: &Path) -> Result<DecisionRecord> {
     let Some(record) = request.get("decision_record").cloned() else {
         bail!(
@@ -3498,6 +4515,410 @@ fn decision_record_from_request(request: &Value, request_path: &Path) -> Result<
     })
 }
 
+fn decision_record_from_telegram_feedback(
+    feedback: &Value,
+    feedback_path: &Path,
+    by: &str,
+) -> Result<DecisionRecord> {
+    let schema = json_string_field(feedback, "schema").unwrap_or_default();
+    if schema != "remote_operator_telegram_feedback.v1" {
+        bail!(
+            "Telegram feedback {} has unsupported schema `{}`",
+            feedback_path.display(),
+            if schema.is_empty() {
+                "missing"
+            } else {
+                schema.as_str()
+            }
+        );
+    }
+
+    let id_material = serde_json::json!({
+        "schema": feedback.get("schema"),
+        "profile": feedback.get("profile"),
+        "chat_id_hash": feedback.get("chat_id_hash"),
+        "user_id_hash": feedback.get("user_id_hash"),
+        "message_id": feedback.get("message_id"),
+        "feedback_text": feedback.get("feedback_text"),
+        "target_chat_id_hash": feedback.get("target_chat_id_hash"),
+        "feedback_context": feedback.get("feedback_context"),
+    });
+    let canonical_feedback =
+        serde_json::to_vec(&id_material).context("serialize Telegram feedback for decision id")?;
+    let feedback_hash = sha256_hex(&canonical_feedback);
+    let hash_prefix = &feedback_hash[..16];
+    let decision_id = format!("telegram-feedback-{hash_prefix}");
+    let received_at = json_string_field(feedback, "received_at")
+        .and_then(|value| DateTime::parse_from_rfc3339(&value).ok())
+        .map(|value| value.with_timezone(&Utc))
+        .unwrap_or_else(Utc::now);
+    let actor = safe_nonempty(by).unwrap_or_else(|| "telegram".to_string());
+    let feedback_text = safe_nonempty(
+        json_string_field(feedback, "feedback_text")
+            .as_deref()
+            .unwrap_or(""),
+    )
+    .unwrap_or_else(|| "(empty feedback)".to_string());
+    let feedback_kind = json_string_field(feedback, "feedback_kind")
+        .and_then(|value| safe_nonempty(&value))
+        .unwrap_or_else(|| classify_telegram_feedback_kind(&feedback_text).to_string());
+    let is_planning_request = feedback_kind == "planning_request";
+    let feedback_excerpt = truncate_chars(&feedback_text, 240);
+    let project_key = feedback_context_string(feedback, "project_key")
+        .or_else(|| json_string_field(feedback, "profile").and_then(|value| safe_nonempty(&value)))
+        .unwrap_or_else(|| "remote-operator-feedback".to_string());
+    let message_id = feedback_message_id(feedback);
+    let request_id = feedback_context_string(feedback, "request_id")
+        .or_else(|| {
+            message_id
+                .as_ref()
+                .map(|id| format!("telegram-message-{id}"))
+        })
+        .unwrap_or_else(|| format!("telegram-feedback-{hash_prefix}"));
+    let task_id = feedback_context_string(feedback, "task_id")
+        .or_else(|| feedback_context_string(feedback, "focus_ref"))
+        .unwrap_or_else(|| {
+            if is_planning_request {
+                "telegram-plan-request".to_string()
+            } else {
+                "telegram-feedback".to_string()
+            }
+        });
+    let focus_kind = feedback_context_string(feedback, "focus_kind");
+    let context_kind = feedback_context_string(feedback, "context_kind");
+    let focus_ref = feedback_context_string(feedback, "focus_ref");
+    let context_label = feedback_context_string(feedback, "focus_label")
+        .or_else(|| focus_ref.clone())
+        .or_else(|| context_kind.clone());
+    let materiality = if is_planning_request {
+        DecisionMateriality::Medium
+    } else {
+        feedback_materiality(context_kind.as_deref(), focus_kind.as_deref())
+    };
+
+    let mut evidence_refs = vec![DecisionTraceRef {
+        kind: "telegram_feedback".to_string(),
+        label: "feedback_file".to_string(),
+        reference: feedback_path.display().to_string(),
+    }];
+    if let Some(id) = message_id.as_deref() {
+        evidence_refs.push(DecisionTraceRef {
+            kind: "telegram_message".to_string(),
+            label: "message_id".to_string(),
+            reference: id.to_string(),
+        });
+    }
+    if let Some(focus) = focus_ref.as_deref() {
+        evidence_refs.push(DecisionTraceRef {
+            kind: "telegram_context".to_string(),
+            label: focus_kind.clone().unwrap_or_else(|| "focus".to_string()),
+            reference: focus.to_string(),
+        });
+    }
+
+    let mut why_now = vec![
+        if is_planning_request {
+            "The remote operator sent a Telegram planning request.".to_string()
+        } else {
+            "The remote operator sent freeform Telegram feedback.".to_string()
+        },
+        if is_planning_request {
+            "Telegram planning requests are captured for Plan Mode review; they do not start autonomous work by themselves.".to_string()
+        } else {
+            "Freeform feedback is review input only; it does not authorize runtime mutation or approval resolution.".to_string()
+        },
+    ];
+    if let Some(label) = context_label.as_deref() {
+        why_now.push(format!("Referenced context: {label}."));
+    }
+
+    let non_authorized_scope = vec![
+        "runtime mutation".to_string(),
+        "approval resolution".to_string(),
+        "background dispatch".to_string(),
+        "provider retargeting".to_string(),
+        "cleanup or deletion".to_string(),
+        "git commit or push".to_string(),
+    ];
+
+    let options = vec![
+        DecisionOption {
+            id: if is_planning_request {
+                "plan".to_string()
+            } else {
+                "revise".to_string()
+            },
+            label: if is_planning_request {
+                "Create plan candidate".to_string()
+            } else {
+                "Revise next step".to_string()
+            },
+            description: if is_planning_request {
+                "Turn this Telegram request into a bounded Offdesk planning candidate for local review."
+                    .to_string()
+            } else {
+                "Use this feedback to revise the referenced plan, approval review, or handoff direction."
+                    .to_string()
+            },
+            impact: Some(if is_planning_request {
+                "Creates a handoff-ready decision for plan drafting; execution still needs normal approval gates."
+                        .to_string()
+            } else {
+                "Creates a handoff-ready decision that still needs an explicit receipt after review."
+                        .to_string()
+            }),
+            natural_input_prompt: Some(if is_planning_request {
+                "Describe the project, goal, timebox, and constraints for the plan candidate."
+                    .to_string()
+            } else {
+                "Describe the bounded revision to make.".to_string()
+            }),
+        },
+        DecisionOption {
+            id: "defer".to_string(),
+            label: "Keep open".to_string(),
+            description: "Leave the feedback in the decision inbox for later review.".to_string(),
+            impact: Some("No runtime or plan state changes are authorized.".to_string()),
+            natural_input_prompt: Some("State what evidence or timing is missing.".to_string()),
+        },
+        DecisionOption {
+            id: "deny".to_string(),
+            label: "Not actionable".to_string(),
+            description: "Close the feedback as reviewed but not actionable.".to_string(),
+            impact: Some("The inbox item is denied without an execution handoff.".to_string()),
+            natural_input_prompt: Some(
+                "State why the feedback does not change the current direction.".to_string(),
+            ),
+        },
+    ];
+    let approval_options = options
+        .iter()
+        .map(|option| ApprovalBriefOption {
+            id: option.id.clone(),
+            label: option.label.clone(),
+            description: option.description.clone(),
+            natural_input_prompt: option.natural_input_prompt.clone(),
+        })
+        .collect::<Vec<_>>();
+    let mut decision_impacts = HashMap::new();
+    decision_impacts.insert(
+        if is_planning_request {
+            "plan".to_string()
+        } else {
+            "revise".to_string()
+        },
+        if is_planning_request {
+            "Reviewers may create a bounded plan candidate; execution still needs normal plan review, launch prep, and gate approval.".to_string()
+        } else {
+            "Reviewers may revise the bounded plan or handoff direction; execution still needs the normal handoff and receipt.".to_string()
+        },
+    );
+    decision_impacts.insert(
+        "defer".to_string(),
+        "The feedback remains visible in the decision inbox with no state mutation.".to_string(),
+    );
+    decision_impacts.insert(
+        "deny".to_string(),
+        "The feedback is marked reviewed and not actionable.".to_string(),
+    );
+    let mut approval_context = HashMap::new();
+    if let Some(value) = context_kind.as_deref() {
+        approval_context.insert("context_kind".to_string(), value.to_string());
+    }
+    if let Some(value) = focus_kind.as_deref() {
+        approval_context.insert("focus_kind".to_string(), value.to_string());
+    }
+    if let Some(value) = focus_ref.as_deref() {
+        approval_context.insert("focus_ref".to_string(), value.to_string());
+    }
+
+    let subject = if is_planning_request {
+        "Telegram planning request".to_string()
+    } else {
+        context_label
+            .as_deref()
+            .map(|label| format!("Telegram feedback: {label}"))
+            .unwrap_or_else(|| "Telegram feedback".to_string())
+    };
+    let current_scope = if is_planning_request {
+        "Review this Telegram planning request and, if appropriate, turn it into a bounded Offdesk plan candidate. This decision does not execute work by itself.".to_string()
+    } else {
+        "Review and classify this feedback for the referenced Offdesk context only. This decision does not execute work by itself.".to_string()
+    };
+    let source_surface = if is_planning_request {
+        "telegram.remote_operator.plan_request"
+    } else {
+        "telegram.remote_operator.feedback"
+    };
+
+    Ok(DecisionRecord {
+        schema: DECISION_RECORD_SCHEMA.to_string(),
+        decision_id,
+        project_key,
+        request_id,
+        task_id,
+        raised_by: DecisionRaisedBy::Operator,
+        source_surface: source_surface.to_string(),
+        materiality,
+        status: DecisionStatus::UserPending,
+        created_at: received_at,
+        updated_at: received_at,
+        decision_request: DecisionRequest {
+            kind: if is_planning_request {
+                "telegram_operator_plan_request".to_string()
+            } else {
+                "telegram_operator_feedback".to_string()
+            },
+            summary: if is_planning_request {
+                format!("Telegram planning request: {feedback_excerpt}")
+            } else {
+                format!("Telegram feedback: {feedback_excerpt}")
+            },
+            decision_needed: if is_planning_request {
+                "Decide whether to create a bounded Offdesk plan candidate from this Telegram request."
+                    .to_string()
+            } else {
+                "Decide whether the feedback changes the referenced plan, approval review, or next Offdesk handoff."
+                    .to_string()
+            },
+            why_now,
+            current_scope: current_scope.clone(),
+            non_authorized_scope: non_authorized_scope.clone(),
+            options,
+            evidence_refs: evidence_refs.clone(),
+            trace_refs: evidence_refs.clone(),
+        },
+        council_review: None,
+        judgment_route: Some(JudgmentRoute {
+            schema: JUDGMENT_ROUTE_SCHEMA.to_string(),
+            evaluator: JudgmentEvaluator::DeterministicGate,
+            reason:
+                if is_planning_request {
+                    "Telegram planning text is captured as a planning request, not as runtime authority."
+                } else {
+                    "Telegram freeform text is operator feedback, so the adapter may only promote it into a reviewable decision inbox item."
+                }
+                    .to_string(),
+            policy_basis: vec![
+                "Remote operator transport is read-only.".to_string(),
+                if is_planning_request {
+                    "Telegram planning requests require local Plan Mode review before any work starts."
+                        .to_string()
+                } else {
+                    "Freeform Telegram text is not an approval or execution command.".to_string()
+                },
+            ],
+            evidence_refs: evidence_refs.clone(),
+            selected_by: actor.clone(),
+            selected_at: received_at,
+            default_if_no_reply: Some("defer".to_string()),
+        }),
+        route: Some(DecisionRoute {
+            materiality,
+            target: DecisionRouteTarget::User,
+            reason:
+                if is_planning_request {
+                    "Human review is required before a Telegram planning request becomes a plan candidate."
+                } else {
+                    "Human review is required before feedback can change a plan, approval, or workload direction."
+                }
+                    .to_string(),
+            policy_basis: vec![
+                if is_planning_request {
+                    "Planning requests are captured as intent, not authority.".to_string()
+                } else {
+                    "Feedback is captured as input, not authority.".to_string()
+                },
+                "Existing decision resolve/receipt commands must close the loop.".to_string(),
+            ],
+            default_if_no_reply: Some("defer".to_string()),
+            expires_at: None,
+        }),
+        approval_brief: Some(ApprovalBrief {
+            schema: "approval_brief.v1".to_string(),
+            source: Some(source_surface.to_string()),
+            recommendation: if is_planning_request {
+                "plan".to_string()
+            } else {
+                "revise".to_string()
+            },
+            subject,
+            summary_lines: vec![
+                if is_planning_request {
+                    format!("Planning request: {feedback_excerpt}")
+                } else {
+                    format!("Feedback: {feedback_excerpt}")
+                },
+                if is_planning_request {
+                    "This request was captured for plan drafting only; no work has started."
+                        .to_string()
+                } else {
+                    "This message was promoted to the decision inbox for review only.".to_string()
+                },
+            ],
+            judgment_route_summary: Some(
+                if is_planning_request {
+                    "판단 경로: Telegram planning request - deterministic promotion to planning inbox, no runtime authority.".to_string()
+                } else {
+                    "판단 경로: Telegram freeform feedback - deterministic promotion to review inbox, no runtime authority.".to_string()
+                },
+            ),
+            evidence_sufficiency: Some(
+                if is_planning_request {
+                    "The request text is captured; plan creation and execution still need explicit local review."
+                        .to_string()
+                } else {
+                    "The feedback text and last Telegram interaction context are captured; further action needs explicit review."
+                        .to_string()
+                },
+            ),
+            default_if_no_reply: Some("defer".to_string()),
+            scope: current_scope,
+            question: if is_planning_request {
+                "Should this Telegram request become a bounded Offdesk plan candidate?".to_string()
+            } else {
+                "How should this Telegram feedback be handled?".to_string()
+            },
+            options: approval_options,
+            why_recommendation: vec![
+                if is_planning_request {
+                    "The message explicitly asks whether autonomous work can be planned."
+                        .to_string()
+                } else {
+                    "Freeform feedback often indicates a needed plan or review adjustment."
+                        .to_string()
+                },
+                if is_planning_request {
+                    "The safest next step is a bounded plan candidate, not immediate execution."
+                        .to_string()
+                } else {
+                    "The safest default is to revise only after a bounded review decision."
+                        .to_string()
+                },
+            ],
+            evidence: evidence_refs
+                .iter()
+                .map(|reference| format!("{}: {}", reference.label, reference.reference))
+                .collect(),
+            decision_impacts,
+            reply_examples: vec![
+                if is_planning_request {
+                    "plan: draft a bounded plan for the requested project and timebox".to_string()
+                } else {
+                    "revise: tighten the next plan around the missing mobile UX evidence"
+                        .to_string()
+                },
+                "defer: wait until the morning review".to_string(),
+                "deny: no change needed because this is already covered".to_string(),
+            ],
+            context: approval_context,
+        }),
+        execution_handoff: None,
+        decision_receipt: None,
+        trace_refs: evidence_refs,
+    })
+}
+
 fn json_string_field(value: &Value, field: &str) -> Option<String> {
     value
         .get(field)
@@ -3505,6 +4926,80 @@ fn json_string_field(value: &Value, field: &str) -> Option<String> {
         .map(str::trim)
         .filter(|text| !text.is_empty())
         .map(ToOwned::to_owned)
+}
+
+fn feedback_context_string(feedback: &Value, field: &str) -> Option<String> {
+    feedback
+        .get("feedback_context")
+        .and_then(Value::as_object)
+        .and_then(|context| context.get(field))
+        .and_then(Value::as_str)
+        .and_then(safe_nonempty)
+}
+
+fn feedback_message_id(feedback: &Value) -> Option<String> {
+    match feedback.get("message_id") {
+        Some(Value::Number(value)) => Some(value.to_string()),
+        Some(Value::String(value)) => safe_nonempty(value),
+        _ => None,
+    }
+}
+
+fn classify_telegram_feedback_kind(text: &str) -> &'static str {
+    let normalized = text.trim().to_lowercase();
+    if [
+        "자율주행",
+        "계획",
+        "plan",
+        "offdesk",
+        "진행",
+        "처리",
+        "검토해볼까",
+        "시작",
+        "맡기",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
+    {
+        "planning_request"
+    } else {
+        "freeform_feedback"
+    }
+}
+
+fn feedback_materiality(
+    context_kind: Option<&str>,
+    focus_kind: Option<&str>,
+) -> DecisionMateriality {
+    let context_kind = context_kind.unwrap_or_default();
+    let focus_kind = focus_kind.unwrap_or_default();
+    if matches!(focus_kind, "approval" | "plan" | "decision")
+        || context_kind.contains("attention")
+        || context_kind.contains("pending")
+    {
+        DecisionMateriality::Medium
+    } else {
+        DecisionMateriality::Low
+    }
+}
+
+fn safe_nonempty(value: &str) -> Option<String> {
+    let safe = operator_safe_text(value.trim());
+    if safe.trim().is_empty() {
+        None
+    } else {
+        Some(safe)
+    }
+}
+
+fn truncate_chars(value: &str, max_chars: usize) -> String {
+    let mut chars = value.chars();
+    let truncated = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_some() {
+        format!("{truncated}...<truncated>")
+    } else {
+        truncated
+    }
 }
 
 fn decision_record_has_matching_handoff(record: &DecisionRecord, decision: &str) -> bool {
@@ -3533,6 +5028,17 @@ fn print_decision_ingest_telegram_report(report: &DecisionIngestTelegramReport) 
     if let Some(reason) = report.skipped_reason.as_deref() {
         println!("Skipped: {}", reason);
     }
+    if !report.validation_issues.is_empty() {
+        println!("Validation issues: {}", report.validation_issues.len());
+    }
+}
+
+fn print_decision_ingest_telegram_feedback_report(report: &DecisionIngestTelegramFeedbackReport) {
+    println!("Decision: {}", report.decision_id);
+    println!("Feedback: {}", report.feedback_path);
+    println!("Ledger: {}", report.ledger_path);
+    println!("Appended: {}", if report.appended { "yes" } else { "no" });
+    println!("Status: {}", report.record.status.as_str());
     if !report.validation_issues.is_empty() {
         println!("Validation issues: {}", report.validation_issues.len());
     }
@@ -3602,6 +5108,7 @@ async fn wiki(profile: &str, args: WikiArgs) -> Result<()> {
         WikiCommands::Entries(args) => wiki_entries(profile, args).await,
         WikiCommands::Show(args) => wiki_show(profile, args).await,
         WikiCommands::Projection(args) => wiki_projection(profile, args).await,
+        WikiCommands::Brief(args) => wiki_brief(profile, args).await,
         WikiCommands::RuntimePolicyAcks(args) => wiki_runtime_policy_acks(profile, args).await,
         WikiCommands::RuntimePolicyAckReport(args) => {
             wiki_runtime_policy_ack_report(profile, args).await
@@ -3616,9 +5123,12 @@ async fn wiki(profile: &str, args: WikiArgs) -> Result<()> {
         WikiCommands::EpisodeTrace(args) => wiki_episode_trace(profile, args).await,
         WikiCommands::EvaluateRecurrence(args) => wiki_evaluate_recurrence(profile, args).await,
         WikiCommands::PromotionChain(args) => wiki_promotion_chain(profile, args).await,
+        WikiCommands::RecordCandidate(args) => wiki_record_candidate(profile, args).await,
         WikiCommands::Promote(args) => wiki_promote(profile, args).await,
         WikiCommands::Reject(args) => wiki_reject(profile, args).await,
         WikiCommands::Rescope(args) => wiki_rescope(profile, args).await,
+        WikiCommands::Edit(args) => wiki_edit(profile, args).await,
+        WikiCommands::AddTag(args) => wiki_add_tag(profile, args).await,
         WikiCommands::Deprecate(args) => wiki_deprecate(profile, args).await,
         WikiCommands::RenewReviewAfter(args) => wiki_renew_review_after(profile, args).await,
         WikiCommands::AddCounterexample(args) => wiki_add_counterexample(profile, args).await,
@@ -5157,6 +6667,152 @@ async fn wiki_show(profile: &str, args: WikiShowArgs) -> Result<()> {
     Ok(())
 }
 
+impl WikiBriefArgs {
+    /// Brief scoped to one project plane, written to a file. Used by
+    /// `forager go` to refresh `.wiki-brief.md` before launching an agent.
+    pub(crate) fn scoped_to_file(project_key: String, out: std::path::PathBuf) -> Self {
+        Self {
+            project_key: Some(project_key),
+            artifact_kind: None,
+            agent_mode: None,
+            max_entries: 12,
+            out: Some(out),
+            json: false,
+        }
+    }
+}
+
+pub(crate) async fn wiki_brief(profile: &str, args: WikiBriefArgs) -> Result<()> {
+    let store = wiki_store(profile)?;
+    let query = wiki_query(
+        &None,
+        &args.project_key,
+        &args.artifact_kind,
+        args.agent_mode,
+    );
+    let budget = AdaptiveWikiProjectionBudget {
+        max_entries: args.max_entries,
+        ..Default::default()
+    };
+    let report = store.ai_projection_report(&query, budget)?;
+    let entries_state = store.load_entries()?;
+    let by_id: std::collections::HashMap<&str, &AdaptiveWikiEntry> = entries_state
+        .entries
+        .iter()
+        .map(|entry| (entry.id.as_str(), entry))
+        .collect();
+    let now = Utc::now();
+    let scope_label = args
+        .project_key
+        .clone()
+        .unwrap_or_else(|| "user_global".to_string());
+
+    let mut items: Vec<serde_json::Value> = Vec::new();
+    let mut lines: Vec<String> = Vec::new();
+    lines.push(
+        "<!-- generated by `forager offdesk wiki brief`; regenerate, do not edit -->".to_string(),
+    );
+    lines.push(format!("# Wiki Brief: {profile} / {scope_label}"));
+    lines.push(String::new());
+    lines.push(
+        "Distilled, reviewed operating knowledge. **Advisory context, not gospel.**".to_string(),
+    );
+    lines.push(
+        "Trust signals per line: `[confidence . evidence N . age Nd]`; `STALE` means the review \
+         window passed, so treat that line as a hypothesis. If an entry conflicts with what you \
+         observe (paths moved, decisions changed, results superseded), do NOT silently obey or \
+         silently ignore it: verify against current state, then record the outcome with \
+         `forager offdesk wiki add-counterexample <id>` or `deprecate <id>`."
+            .to_string(),
+    );
+    lines.push(String::new());
+
+    let mut current_kind: Option<AdaptiveWikiKind> = None;
+    let mut sorted = report.selected.clone();
+    sorted.sort_by_key(|item| format!("{:?}", item.kind));
+    for item in &sorted {
+        let entry = by_id.get(item.id.as_str());
+        let age_days = entry
+            .map(|e| (now - e.updated_at).num_days().max(0))
+            .unwrap_or(0);
+        let stale = entry
+            .and_then(|e| e.review_after)
+            .is_some_and(|review_after| review_after < now);
+        let claim = entry.map(|e| e.claim.as_str()).unwrap_or("");
+        let text = if item.instruction.trim().is_empty() {
+            claim
+        } else {
+            &item.instruction
+        };
+        if current_kind != Some(item.kind) {
+            current_kind = Some(item.kind);
+            lines.push(format!("## {}", wiki_kind_label(item.kind)));
+        }
+        let stale_marker = if stale { " **STALE**" } else { "" };
+        lines.push(format!(
+            "- {}{} `[{:?} . ev {} . age {}d]` ({})",
+            operator_safe_text(text),
+            stale_marker,
+            item.confidence,
+            item.evidence_count,
+            age_days,
+            item.id
+        ));
+        items.push(serde_json::json!({
+            "id": item.id,
+            "kind": format!("{:?}", item.kind),
+            "text": operator_safe_text(text),
+            "confidence": format!("{:?}", item.confidence),
+            "evidence_count": item.evidence_count,
+            "age_days": age_days,
+            "stale": stale,
+        }));
+    }
+    if sorted.is_empty() {
+        lines.push("(no promoted in-scope entries yet)".to_string());
+    }
+    lines.push(String::new());
+    let body = lines.join("\n");
+
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "schema": "wiki_brief.v1",
+                "profile": profile,
+                "scope": scope_label,
+                "generated_at": now,
+                "entries": items,
+            }))?
+        );
+        return Ok(());
+    }
+    if let Some(out) = &args.out {
+        if let Some(parent) = out.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(out, format!("{body}\n"))?;
+        println!(
+            "Wrote wiki brief ({} entries) to {}",
+            sorted.len(),
+            out.display()
+        );
+    } else {
+        println!("{body}");
+    }
+    Ok(())
+}
+
+fn wiki_kind_label(kind: AdaptiveWikiKind) -> &'static str {
+    match kind {
+        AdaptiveWikiKind::Preference => "Preferences",
+        AdaptiveWikiKind::Procedure => "Procedures",
+        AdaptiveWikiKind::FailurePattern => "Failure patterns",
+        AdaptiveWikiKind::PolicyRule => "Policy rules",
+        AdaptiveWikiKind::Fact => "Facts",
+    }
+}
+
 async fn wiki_projection(profile: &str, args: WikiProjectionArgs) -> Result<()> {
     let mut query = wiki_query(
         &args.session_id,
@@ -6035,6 +7691,68 @@ async fn wiki_promotion_chain(profile: &str, args: WikiPromotionChainArgs) -> Re
     Ok(())
 }
 
+async fn wiki_record_candidate(profile: &str, args: WikiRecordCandidateArgs) -> Result<()> {
+    let scope_ref = args
+        .scope_ref
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if args.scope != AdaptiveWikiScope::UserGlobal && scope_ref.is_none() {
+        bail!("--scope-ref is required when --scope is not user_global");
+    }
+    if args.claim.trim().is_empty() {
+        bail!("--claim must not be empty");
+    }
+
+    let evidence_refs: Vec<String> = args
+        .evidence_refs
+        .iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect();
+
+    let input = AdaptiveWikiCandidateInput {
+        kind: args.kind,
+        scope: args.scope,
+        scope_ref: scope_ref.unwrap_or("*").to_string(),
+        claim: args.claim.trim().to_string(),
+        suggested_ai_instruction: args.ai_instruction.trim().to_string(),
+        human_summary: args.human_summary.trim().to_string(),
+        // Primary evidence lands in evidence_refs; the full doc list is kept as
+        // source provenance so nothing from the review is lost.
+        evidence_ref: evidence_refs.first().cloned(),
+        signal_kind: args.signal_kind,
+        origin: args.origin,
+        source_refs: evidence_refs.clone(),
+        source_hashes: Vec::new(),
+        suggested_scope: None,
+        agent_modes: args.agent_modes.clone(),
+        core_tags: args.core_tags.clone(),
+        proposed_tags: args.proposed_tags.clone(),
+        review_reason: args.review_reason.trim().to_string(),
+        confidence: args.confidence,
+    };
+
+    let store = writable_wiki_store(profile)?;
+    let candidate = store.record_candidate(input, Utc::now())?;
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&candidate)?);
+    } else {
+        println!("Recorded candidate {}", candidate.id);
+        println!(
+            "  {:?} · {:?}:{} · confidence {:?}",
+            candidate.kind, candidate.scope, candidate.scope_ref, candidate.confidence
+        );
+        println!("  claim: {}", candidate.claim);
+        println!("  occurrences: {}", candidate.occurrence_count);
+        println!(
+            "  promote: forager -p {profile} offdesk wiki promote {} --activation-mode context_only",
+            candidate.id
+        );
+    }
+    Ok(())
+}
+
 async fn wiki_promote(profile: &str, args: WikiPromoteArgs) -> Result<()> {
     if args.scope_ref.is_some() && args.scope.is_none() {
         bail!("--scope-ref requires --scope for wiki promote");
@@ -6074,6 +7792,19 @@ async fn wiki_promote(profile: &str, args: WikiPromoteArgs) -> Result<()> {
         .ok_or_else(|| {
             anyhow::anyhow!("Adaptive wiki candidate not found: {}", args.candidate_id)
         })?;
+    // Skepticism by default: every promotion carries a review horizon so stale
+    // knowledge surfaces as STALE in briefs/reports instead of aging silently.
+    let entry = if args.review_after_days > 0 {
+        store
+            .renew_review_after(
+                &entry.id,
+                now + chrono::Duration::days(args.review_after_days),
+                now,
+            )?
+            .unwrap_or(entry)
+    } else {
+        entry
+    };
     let candidate_snapshot = human_candidate(candidate.clone());
     let entry_snapshot = human_entry(entry.clone());
     let audit = wiki_audit_record(WikiAuditRecordInput {
@@ -6186,6 +7917,83 @@ async fn wiki_rescope(profile: &str, args: WikiRescopeArgs) -> Result<()> {
     });
     store.append_audit(&audit)?;
     let result = WikiMutationResult::Rescope {
+        entry: human_entry(entry),
+        audit,
+    };
+    print_wiki_mutation(&result, args.json)
+}
+
+async fn wiki_edit(profile: &str, args: WikiEditArgs) -> Result<()> {
+    if args.claim.is_none()
+        && args.ai_instruction.is_none()
+        && args.human_summary.is_none()
+        && args.evidence_refs.is_empty()
+    {
+        bail!(
+            "wiki edit needs at least one of --claim, --ai-instruction, --human-summary, or --evidence-ref"
+        );
+    }
+    let now = Utc::now();
+    let store = writable_wiki_store(profile)?;
+    let entry = store
+        .edit_entry(
+            &args.entry_id,
+            args.claim.as_deref(),
+            args.ai_instruction.as_deref(),
+            args.human_summary.as_deref(),
+            &args.evidence_refs,
+            now,
+        )?
+        .ok_or_else(|| anyhow::anyhow!("Adaptive wiki entry not found: {}", args.entry_id))?;
+    let audit = wiki_audit_record(WikiAuditRecordInput {
+        action: AdaptiveWikiAuditAction::Edit,
+        subject_id: &entry.id,
+        candidate_id: None,
+        entry_id: Some(&entry.id),
+        actor: &args.by,
+        reason: &args.reason,
+        evidence_ref: None,
+        before_scope: None,
+        after_scope: None,
+        activation_mode: None,
+        candidate_snapshot: None,
+        entry_snapshot: None,
+        now,
+    });
+    store.append_audit(&audit)?;
+    let result = WikiMutationResult::Edit {
+        entry: human_entry(entry),
+        audit,
+    };
+    print_wiki_mutation(&result, args.json)
+}
+
+async fn wiki_add_tag(profile: &str, args: WikiAddTagArgs) -> Result<()> {
+    if args.core_tags.is_empty() && args.proposed_tags.is_empty() {
+        bail!("wiki add-tag needs at least one --core-tag or --proposed-tag");
+    }
+    let now = Utc::now();
+    let store = writable_wiki_store(profile)?;
+    let entry = store
+        .add_entry_tags(&args.entry_id, &args.core_tags, &args.proposed_tags, now)?
+        .ok_or_else(|| anyhow::anyhow!("Adaptive wiki entry not found: {}", args.entry_id))?;
+    let audit = wiki_audit_record(WikiAuditRecordInput {
+        action: AdaptiveWikiAuditAction::Retag,
+        subject_id: &entry.id,
+        candidate_id: None,
+        entry_id: Some(&entry.id),
+        actor: &args.by,
+        reason: &args.reason,
+        evidence_ref: None,
+        before_scope: None,
+        after_scope: None,
+        activation_mode: None,
+        candidate_snapshot: None,
+        entry_snapshot: None,
+        now,
+    });
+    store.append_audit(&audit)?;
+    let result = WikiMutationResult::Retag {
         entry: human_entry(entry),
         audit,
     };
@@ -6352,6 +8160,71 @@ async fn cancel_task(profile: &str, args: CancelTaskArgs) -> Result<()> {
     let report =
         task_store(profile)?.cancel_task(&args.task_id, args.reason.as_deref(), Utc::now())?;
     print_lifecycle_report(&report, args.json)
+}
+
+async fn pause_dispatch(profile: &str, args: PauseArgs) -> Result<()> {
+    let state = OperatorPauseStore::new(get_profile_dir(profile)?).pause(
+        args.reason.as_deref(),
+        Some(&args.by),
+        Utc::now(),
+    )?;
+    print_operator_pause_state(&state, args.json)
+}
+
+async fn unpause_dispatch(profile: &str, args: UnpauseArgs) -> Result<()> {
+    let state =
+        OperatorPauseStore::new(get_profile_dir(profile)?).resume(Some(&args.by), Utc::now())?;
+    print_operator_pause_state(&state, args.json)
+}
+
+async fn pause_status(profile: &str, args: JsonArgs) -> Result<()> {
+    let state = OperatorPauseStore::new(get_profile_dir(profile)?).load()?;
+    print_operator_pause_state(&state, args.json)
+}
+
+async fn learning_scan(profile: &str, args: JsonArgs) -> Result<()> {
+    let report = scan_and_emit_learning_signals(get_profile_dir(profile)?, Utc::now())?;
+    print_learning_scan_report(&report, args.json)
+}
+
+fn print_learning_scan_report(report: &LearningScanReport, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(report)?);
+        return Ok(());
+    }
+    if report.emitted.is_empty() {
+        println!(
+            "No new learning signals ({} already recorded).",
+            report.skipped_already_processed
+        );
+        return Ok(());
+    }
+    println!(
+        "Emitted {} learning candidate(s) ({} already recorded):",
+        report.emitted.len(),
+        report.skipped_already_processed
+    );
+    for signal in &report.emitted {
+        println!("  [{}] {}", signal.source.as_str(), signal.claim);
+    }
+    println!("Candidates are recommendation-only; review with `forager offdesk wiki candidates`.");
+    Ok(())
+}
+
+fn print_operator_pause_state(state: &OperatorPauseState, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(state)?);
+        return Ok(());
+    }
+    if state.paused {
+        println!("Offdesk dispatch is PAUSED; new work is held until resume.");
+        if let Some(reason) = state.reason.as_deref() {
+            println!("  reason: {reason}");
+        }
+    } else {
+        println!("Offdesk dispatch is active.");
+    }
+    Ok(())
 }
 
 async fn retry_task(profile: &str, args: RetryTaskArgs) -> Result<()> {
@@ -7057,6 +8930,1634 @@ async fn harness_prompt(args: HarnessPromptArgs) -> Result<()> {
     Ok(())
 }
 
+const OFFDESK_PLAN_REGISTRATION_SCHEMA: &str = "offdesk_plan_registration.v1";
+const OFFDESK_PLAN_REQUIRED_DENIALS: [&str; 8] = [
+    "enqueue",
+    "launch",
+    "approval",
+    "file movement",
+    "archive",
+    "delete",
+    "wiki promotion",
+    "accepted truth",
+];
+
+async fn plan(profile: &str, args: PlanArgs) -> Result<()> {
+    let registration = build_offdesk_plan_registration(profile, &args)?;
+    print_offdesk_plan_registration(&registration, args.json)
+}
+
+async fn plans(profile: &str, args: PlansArgs) -> Result<()> {
+    let mut items = load_offdesk_plan_registry_items(profile)?;
+    items.retain(|item| offdesk_plan_matches_filter(item, &args));
+    items.sort_by_key(|item| item.registration.registered_at);
+    if args.latest {
+        if let Some(latest) = items.pop() {
+            items = vec![latest];
+        }
+    }
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&items)?);
+        return Ok(());
+    }
+
+    if items.is_empty() {
+        println!("No registered Offdesk plans found.");
+        return Ok(());
+    }
+
+    print_offdesk_plan_registry_items(&items);
+    Ok(())
+}
+
+async fn plan_show(profile: &str, args: PlanShowArgs) -> Result<()> {
+    let items = load_offdesk_plan_registry_items(profile)?;
+    let Some(item) = find_offdesk_plan_registry_item(items, &args.plan_ref) else {
+        bail!("Registered Offdesk plan not found: {}", args.plan_ref);
+    };
+    let detail = offdesk_plan_registry_detail(item)?;
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&detail)?);
+        return Ok(());
+    }
+
+    print_offdesk_plan_registry_detail(&detail);
+    Ok(())
+}
+
+async fn plan_review(profile: &str, args: PlanReviewArgs) -> Result<()> {
+    let items = load_offdesk_plan_registry_items(profile)?;
+    let Some(item) = find_offdesk_plan_registry_item(items, &args.plan_ref) else {
+        bail!("Registered Offdesk plan not found: {}", args.plan_ref);
+    };
+    let record = build_offdesk_plan_review_record(profile, &item, &args)?;
+    write_offdesk_plan_review_record(&record)?;
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&record)?);
+        return Ok(());
+    }
+
+    print_offdesk_plan_review_record(&record);
+    Ok(())
+}
+
+async fn plan_launch_prep(profile: &str, args: PlanLaunchPrepArgs) -> Result<()> {
+    let items = load_offdesk_plan_registry_items(profile)?;
+    let Some(item) = find_offdesk_plan_registry_item(items, &args.plan_ref) else {
+        bail!("Registered Offdesk plan not found: {}", args.plan_ref);
+    };
+    let packet = build_offdesk_plan_launch_prep_packet(profile, &item, &args)?;
+    write_offdesk_plan_launch_prep_packet(&packet)?;
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&packet)?);
+        return Ok(());
+    }
+
+    print_offdesk_plan_launch_prep_packet(&packet);
+    Ok(())
+}
+
+async fn remote_operator(profile: &str, command: RemoteOperatorCommands) -> Result<()> {
+    match command {
+        RemoteOperatorCommands::Status(args) => remote_operator_status(profile, args).await,
+        RemoteOperatorCommands::Pending(args) => remote_operator_pending(profile, args).await,
+        RemoteOperatorCommands::Plans(args) => remote_operator_plans(profile, args).await,
+        RemoteOperatorCommands::Show(args) => remote_operator_show(profile, args).await,
+    }
+}
+
+async fn remote_operator_status(profile: &str, args: RemoteOperatorStatusArgs) -> Result<()> {
+    let status = super::status::current_status_json_value(profile)?;
+    let payload = remote_operator_status_payload(status);
+    let observed_hash = observed_hash_for(&payload)?;
+    let card = remote_operator_status_card(&payload, observed_hash);
+    let projection = remote_operator_projection(profile, &args.transport, "status", card, payload);
+    print_remote_operator_projection(&projection, args.json)
+}
+
+async fn remote_operator_pending(profile: &str, args: RemoteOperatorPendingArgs) -> Result<()> {
+    let now = Utc::now();
+    let mut approvals = approval_ledger(profile)?.load()?;
+    if !args.all {
+        approvals.retain(|approval| approval.status == ApprovalStatus::Pending);
+    }
+    approvals.sort_by_key(|approval| approval.created_at);
+    let approval_views = pending_approval_operator_views(approvals, now);
+    let approvals = approval_views
+        .iter()
+        .map(remote_operator_approval_summary)
+        .collect::<Result<Vec<_>>>()?;
+    let payload = RemoteOperatorPendingPayload {
+        include_all: args.all,
+        approval_count: approvals.len(),
+        approvals,
+    };
+    let observed_hash = observed_hash_for(&payload)?;
+    let card = remote_operator_pending_card(&payload, observed_hash);
+    let projection = remote_operator_projection(profile, &args.transport, "pending", card, payload);
+    print_remote_operator_projection(&projection, args.json)
+}
+
+async fn remote_operator_plans(profile: &str, args: RemoteOperatorPlansArgs) -> Result<()> {
+    let filters = RemoteOperatorPlanFilters {
+        project_key: args
+            .project_key
+            .clone()
+            .map(|value| operator_safe_text(&value)),
+        task_id: args.task_id.clone().map(|value| operator_safe_text(&value)),
+        profile_key: args
+            .profile_key
+            .clone()
+            .map(|value| operator_safe_text(&value)),
+        artifact_kind: args
+            .artifact_kind
+            .clone()
+            .map(|value| operator_safe_text(&value)),
+        latest: args.latest,
+    };
+    let mut items = load_offdesk_plan_registry_items(profile)?;
+    items.retain(|item| remote_operator_plan_matches_filter(item, &args));
+    items.sort_by_key(|item| item.registration.registered_at);
+    if args.latest {
+        if let Some(latest) = items.pop() {
+            items = vec![latest];
+        }
+    }
+    let plans = items
+        .iter()
+        .map(remote_operator_plan_summary_from_item)
+        .collect::<Result<Vec<_>>>()?;
+    let payload = RemoteOperatorPlansPayload {
+        filters,
+        plan_count: plans.len(),
+        plans,
+    };
+    let observed_hash = observed_hash_for(&payload)?;
+    let card = remote_operator_plans_card(&payload, observed_hash);
+    let projection = remote_operator_projection(profile, &args.transport, "plans", card, payload);
+    print_remote_operator_projection(&projection, args.json)
+}
+
+async fn remote_operator_show(profile: &str, args: RemoteOperatorShowArgs) -> Result<()> {
+    let items = load_offdesk_plan_registry_items(profile)?;
+    let Some(item) = find_offdesk_plan_registry_item(items, &args.plan_ref) else {
+        bail!("Registered Offdesk plan not found: {}", args.plan_ref);
+    };
+    let detail = offdesk_plan_registry_detail(item)?;
+    let plan = remote_operator_plan_summary_from_detail(&detail)?;
+    let reviews = detail
+        .reviews
+        .iter()
+        .map(remote_operator_plan_review_summary)
+        .collect();
+    let launch_preps = detail
+        .launch_preps
+        .iter()
+        .map(remote_operator_launch_prep_summary)
+        .collect();
+    let payload = RemoteOperatorPlanDetailPayload {
+        plan,
+        reviews,
+        launch_preps,
+        does_not_authorize: detail
+            .registration
+            .does_not_authorize
+            .iter()
+            .map(|value| operator_safe_text(value))
+            .collect(),
+    };
+    let observed_hash = observed_hash_for(&payload)?;
+    let card = remote_operator_show_card(&payload, observed_hash);
+    let projection = remote_operator_projection(profile, &args.transport, "show", card, payload);
+    print_remote_operator_projection(&projection, args.json)
+}
+
+fn build_offdesk_plan_registration(
+    profile: &str,
+    args: &PlanArgs,
+) -> Result<OffdeskPlanRegistration> {
+    let source_bytes = fs::read(&args.input)
+        .with_context(|| format!("read Offdesk plan artifact {}", args.input.display()))?;
+    let source_value: Value = serde_json::from_slice(&source_bytes)
+        .with_context(|| format!("parse Offdesk plan artifact {}", args.input.display()))?;
+    let summary = validate_offdesk_plan_input(&source_value)?;
+    let source_path = fs::canonicalize(&args.input).unwrap_or_else(|_| args.input.clone());
+    let registered_at = Utc::now();
+    let source_sha256 = {
+        let mut hasher = Sha256::new();
+        hasher.update(&source_bytes);
+        format!("{:x}", hasher.finalize())
+    };
+
+    let artifacts = if args.dry_run {
+        OffdeskPlanRegistrationArtifacts {
+            registry_dir: None,
+            registration_json: None,
+            copied_source_json: None,
+        }
+    } else {
+        let profile_dir = get_profile_dir(profile)?;
+        let registry_dir =
+            allocate_offdesk_plan_registry_dir(&profile_dir, registered_at, summary.artifact_kind)?;
+        let copied_source = registry_dir.join("source.json");
+        write_new_file(&copied_source, &source_bytes).with_context(|| {
+            format!("write Offdesk plan source copy {}", copied_source.display())
+        })?;
+        OffdeskPlanRegistrationArtifacts {
+            registry_dir: Some(registry_dir.display().to_string()),
+            registration_json: Some(registry_dir.join("registration.json").display().to_string()),
+            copied_source_json: Some(copied_source.display().to_string()),
+        }
+    };
+
+    let registration = OffdeskPlanRegistration {
+        schema: OFFDESK_PLAN_REGISTRATION_SCHEMA.to_string(),
+        registered_at,
+        forager_profile: profile.to_string(),
+        source_path: source_path.display().to_string(),
+        source_sha256,
+        artifact_kind: summary.artifact_kind.to_string(),
+        plan_schema: summary.plan_schema,
+        profile_key: summary.profile_key,
+        profile_name: summary.profile_name,
+        project_key: args.project_key.clone(),
+        request_id: args.request_id.clone(),
+        task_id: args.task_id.clone(),
+        ready_for_operator_review: summary.ready_for_operator_review,
+        ready_for_launch_preparation: summary.ready_for_launch_preparation,
+        ready_for_enqueue: summary.ready_for_enqueue,
+        validation_failures: Vec::new(),
+        decision: summary.decision,
+        consensus: summary.consensus,
+        selected_plan_path: summary.selected_plan_path,
+        dry_run: args.dry_run,
+        artifacts,
+        does_not_authorize: offdesk_plan_registration_denials(),
+    };
+
+    if let Some(registration_path) = registration.artifacts.registration_json.as_deref() {
+        let bytes = serde_json::to_vec_pretty(&registration)?;
+        write_new_file(Path::new(registration_path), &bytes)
+            .with_context(|| format!("write Offdesk plan registration {}", registration_path))?;
+    }
+
+    Ok(registration)
+}
+
+fn build_offdesk_plan_review_record(
+    profile: &str,
+    item: &OffdeskPlanRegistryItem,
+    args: &PlanReviewArgs,
+) -> Result<OffdeskPlanReviewRecord> {
+    if args.reason.trim().is_empty() {
+        bail!("Offdesk plan review reason is required");
+    }
+    if args.decision == OffdeskPlanReviewDecision::Approved && !args.blockers.is_empty() {
+        bail!("approved Offdesk plan review cannot include blockers");
+    }
+
+    let reviewed_at = Utc::now();
+    let registry_dir = offdesk_plan_registry_dir(item)?;
+    let review_record_path = allocate_offdesk_plan_review_record_path(&registry_dir, reviewed_at)?;
+    let ready_for_launch_preparation_candidate = args.decision
+        == OffdeskPlanReviewDecision::Approved
+        && item.registration.ready_for_operator_review
+        && !item.registration.ready_for_launch_preparation
+        && !item.registration.ready_for_enqueue
+        && item.registration.validation_failures.is_empty();
+    let profile_name = if profile.is_empty() {
+        DEFAULT_PROFILE
+    } else {
+        profile
+    };
+
+    Ok(OffdeskPlanReviewRecord {
+        schema: "offdesk_plan_review.v1".to_string(),
+        reviewed_at,
+        review_id: format!("plan_review_{}", short_uuid()),
+        plan_id: item.plan_id.clone(),
+        forager_profile: crate::offdesk::operator_safe_text(profile_name),
+        registration_path: item.registration_path.clone(),
+        source_sha256: item.registration.source_sha256.clone(),
+        decision: args.decision,
+        reviewer: crate::offdesk::operator_safe_text(args.reviewer.trim()),
+        review_provider: args
+            .review_provider
+            .as_deref()
+            .map(|value| crate::offdesk::operator_safe_text(value.trim())),
+        review_file: args
+            .review_file
+            .as_ref()
+            .map(|path| crate::offdesk::operator_safe_text(path.to_string_lossy().as_ref())),
+        reason: truncate_closeout_text(
+            &crate::offdesk::operator_safe_text(args.reason.trim()),
+            2000,
+        ),
+        blockers: safe_text_list(&args.blockers),
+        followups: safe_text_list(&args.followups),
+        ready_for_launch_preparation_candidate,
+        ready_for_enqueue: false,
+        read_only_project_state: true,
+        applies_file_operations: false,
+        artifacts: OffdeskPlanReviewArtifacts {
+            registration_json: item.registration_path.clone(),
+            copied_source_json: item.registration.artifacts.copied_source_json.clone(),
+            review_record_json: review_record_path.display().to_string(),
+        },
+        does_not_authorize: offdesk_plan_review_denials(),
+    })
+}
+
+fn write_offdesk_plan_review_record(record: &OffdeskPlanReviewRecord) -> Result<()> {
+    let bytes = serde_json::to_vec_pretty(record)?;
+    write_new_file(Path::new(&record.artifacts.review_record_json), &bytes)
+        .with_context(|| format!("write {}", record.artifacts.review_record_json))?;
+    Ok(())
+}
+
+fn build_offdesk_plan_launch_prep_packet(
+    profile: &str,
+    item: &OffdeskPlanRegistryItem,
+    args: &PlanLaunchPrepArgs,
+) -> Result<OffdeskPlanLaunchPrepPacket> {
+    let registry_dir = offdesk_plan_registry_dir(item)?;
+    let reviews = load_offdesk_plan_reviews(&registry_dir)?;
+    let review = select_offdesk_plan_review(&reviews, args.review_id.as_deref())?;
+    if review.decision != OffdeskPlanReviewDecision::Approved {
+        bail!(
+            "Offdesk plan launch-prep requires an approved review; latest review {} is {}",
+            review.review_id,
+            review.decision.as_str()
+        );
+    }
+    if !review.ready_for_launch_preparation_candidate {
+        bail!(
+            "Offdesk plan review {} is not a launch-preparation candidate",
+            review.review_id
+        );
+    }
+    if review.source_sha256 != item.registration.source_sha256 {
+        bail!(
+            "Offdesk plan review {} source hash does not match registration",
+            review.review_id
+        );
+    }
+
+    let prepared_at = Utc::now();
+    let launch_prep_path = allocate_offdesk_plan_launch_prep_path(&registry_dir, prepared_at)?;
+    let mut required_first_reads = vec![
+        item.registration_path.clone(),
+        review.artifacts.review_record_json.clone(),
+    ];
+    if let Some(path) = item.registration.artifacts.copied_source_json.as_ref() {
+        required_first_reads.push(path.clone());
+    }
+    if let Some(path) = item.registration.selected_plan_path.as_ref() {
+        if !required_first_reads.contains(path) {
+            required_first_reads.push(path.clone());
+        }
+    }
+    let profile_name = if profile.is_empty() {
+        DEFAULT_PROFILE
+    } else {
+        profile
+    };
+
+    Ok(OffdeskPlanLaunchPrepPacket {
+        schema: "offdesk_plan_launch_prep.v1".to_string(),
+        prepared_at,
+        prep_id: format!("plan_launch_prep_{}", short_uuid()),
+        plan_id: item.plan_id.clone(),
+        forager_profile: crate::offdesk::operator_safe_text(profile_name),
+        prepared_by: crate::offdesk::operator_safe_text(args.prepared_by.trim()),
+        registration_path: item.registration_path.clone(),
+        source_path: item.registration.source_path.clone(),
+        source_sha256: item.registration.source_sha256.clone(),
+        review_id: review.review_id.clone(),
+        review_decision: review.decision,
+        review_record_json: review.artifacts.review_record_json.clone(),
+        artifact_kind: item.registration.artifact_kind.clone(),
+        plan_schema: item.registration.plan_schema.clone(),
+        profile_key: item.registration.profile_key.clone(),
+        project_key: item.registration.project_key.clone(),
+        request_id: item.registration.request_id.clone(),
+        task_id: item.registration.task_id.clone(),
+        selected_plan_path: item.registration.selected_plan_path.clone(),
+        required_first_reads,
+        launch_preparation_candidate: true,
+        ready_for_launch: false,
+        ready_for_enqueue: false,
+        next_safe_action: "build_execution_brief_then_use_existing_offdesk_gate".to_string(),
+        notes: args
+            .notes
+            .as_deref()
+            .map(|value| truncate_closeout_text(&crate::offdesk::operator_safe_text(value), 2000)),
+        read_only_project_state: true,
+        applies_file_operations: false,
+        artifacts: OffdeskPlanLaunchPrepArtifacts {
+            registration_json: item.registration_path.clone(),
+            copied_source_json: item.registration.artifacts.copied_source_json.clone(),
+            review_record_json: review.artifacts.review_record_json.clone(),
+            launch_prep_json: launch_prep_path.display().to_string(),
+        },
+        does_not_authorize: offdesk_plan_launch_prep_denials(),
+    })
+}
+
+fn write_offdesk_plan_launch_prep_packet(packet: &OffdeskPlanLaunchPrepPacket) -> Result<()> {
+    let bytes = serde_json::to_vec_pretty(packet)?;
+    write_new_file(Path::new(&packet.artifacts.launch_prep_json), &bytes)
+        .with_context(|| format!("write {}", packet.artifacts.launch_prep_json))?;
+    Ok(())
+}
+
+fn load_offdesk_plan_registry_items(profile: &str) -> Result<Vec<OffdeskPlanRegistryItem>> {
+    let registry_dir = read_only_profile_dir(profile)?.join("offdesk_plans");
+    if !registry_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut items = Vec::new();
+    for entry in fs::read_dir(&registry_dir)
+        .with_context(|| format!("read Offdesk plan registry {}", registry_dir.display()))?
+    {
+        let entry = entry.with_context(|| {
+            format!(
+                "read Offdesk plan registry entry {}",
+                registry_dir.display()
+            )
+        })?;
+        let file_type = entry.file_type().with_context(|| {
+            format!(
+                "read Offdesk plan registry entry type {}",
+                entry.path().display()
+            )
+        })?;
+        if !file_type.is_dir() {
+            continue;
+        }
+        let registration_path = entry.path().join("registration.json");
+        if !registration_path.exists() {
+            continue;
+        }
+        let registration_bytes = fs::read(&registration_path).with_context(|| {
+            format!(
+                "read Offdesk plan registration {}",
+                registration_path.display()
+            )
+        })?;
+        let registration: OffdeskPlanRegistration = serde_json::from_slice(&registration_bytes)
+            .with_context(|| {
+                format!(
+                    "parse Offdesk plan registration {}",
+                    registration_path.display()
+                )
+            })?;
+        let plan_id = entry.file_name().to_string_lossy().to_string();
+        let reviews = load_offdesk_plan_reviews(&entry.path())?;
+        let latest_review = reviews.last().cloned();
+        let review_state = offdesk_plan_review_state(latest_review.as_ref());
+        let launch_preps = load_offdesk_plan_launch_preps(&entry.path())?;
+        let latest_launch_prep = launch_preps.last().cloned();
+        items.push(OffdeskPlanRegistryItem {
+            plan_id,
+            registration_path: registration_path.display().to_string(),
+            registration,
+            review_state,
+            review_count: reviews.len(),
+            latest_review,
+            launch_prep_count: launch_preps.len(),
+            latest_launch_prep,
+        });
+    }
+
+    Ok(items)
+}
+
+fn offdesk_plan_registry_detail(
+    item: OffdeskPlanRegistryItem,
+) -> Result<OffdeskPlanRegistryDetail> {
+    let registry_dir = offdesk_plan_registry_dir(&item)?;
+    let reviews = load_offdesk_plan_reviews(&registry_dir)?;
+    let latest_review = reviews.last().cloned();
+    let review_state = offdesk_plan_review_state(latest_review.as_ref());
+    let launch_preps = load_offdesk_plan_launch_preps(&registry_dir)?;
+    let latest_launch_prep = launch_preps.last().cloned();
+    Ok(OffdeskPlanRegistryDetail {
+        plan_id: item.plan_id,
+        registration_path: item.registration_path,
+        registration: item.registration,
+        review_state,
+        review_count: reviews.len(),
+        latest_review,
+        reviews,
+        launch_prep_count: launch_preps.len(),
+        latest_launch_prep,
+        launch_preps,
+    })
+}
+
+fn load_offdesk_plan_reviews(registry_dir: &Path) -> Result<Vec<OffdeskPlanReviewRecord>> {
+    let mut reviews = Vec::new();
+    if !registry_dir.exists() {
+        return Ok(reviews);
+    }
+    for entry in fs::read_dir(registry_dir)
+        .with_context(|| format!("read Offdesk plan registry {}", registry_dir.display()))?
+    {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let filename = entry.file_name().to_string_lossy().to_string();
+        if !filename.starts_with("plan_review_") || !filename.ends_with(".json") {
+            continue;
+        }
+        let path = entry.path();
+        let review_bytes = fs::read(&path)
+            .with_context(|| format!("read Offdesk plan review {}", path.display()))?;
+        let review: OffdeskPlanReviewRecord = serde_json::from_slice(&review_bytes)
+            .with_context(|| format!("parse Offdesk plan review {}", path.display()))?;
+        reviews.push(review);
+    }
+    reviews.sort_by_key(|review| review.reviewed_at);
+    Ok(reviews)
+}
+
+fn load_offdesk_plan_launch_preps(registry_dir: &Path) -> Result<Vec<OffdeskPlanLaunchPrepPacket>> {
+    let mut packets = Vec::new();
+    if !registry_dir.exists() {
+        return Ok(packets);
+    }
+    for entry in fs::read_dir(registry_dir)
+        .with_context(|| format!("read Offdesk plan registry {}", registry_dir.display()))?
+    {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let filename = entry.file_name().to_string_lossy().to_string();
+        if !filename.starts_with("launch_prep_") || !filename.ends_with(".json") {
+            continue;
+        }
+        let path = entry.path();
+        let packet_bytes = fs::read(&path)
+            .with_context(|| format!("read Offdesk plan launch-prep {}", path.display()))?;
+        let packet: OffdeskPlanLaunchPrepPacket = serde_json::from_slice(&packet_bytes)
+            .with_context(|| format!("parse Offdesk plan launch-prep {}", path.display()))?;
+        packets.push(packet);
+    }
+    packets.sort_by_key(|packet| packet.prepared_at);
+    Ok(packets)
+}
+
+fn select_offdesk_plan_review<'a>(
+    reviews: &'a [OffdeskPlanReviewRecord],
+    review_id: Option<&str>,
+) -> Result<&'a OffdeskPlanReviewRecord> {
+    if let Some(review_id) = review_id {
+        return reviews
+            .iter()
+            .find(|review| review.review_id == review_id)
+            .ok_or_else(|| anyhow::anyhow!("Offdesk plan review not found: {}", review_id));
+    }
+    reviews
+        .last()
+        .ok_or_else(|| anyhow::anyhow!("Offdesk plan launch-prep requires an approved review"))
+}
+
+fn offdesk_plan_registry_dir(item: &OffdeskPlanRegistryItem) -> Result<PathBuf> {
+    if let Some(registry_dir) = item.registration.artifacts.registry_dir.as_deref() {
+        return Ok(PathBuf::from(registry_dir));
+    }
+    Path::new(&item.registration_path)
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| anyhow::anyhow!("registered Offdesk plan is missing registry directory"))
+}
+
+fn offdesk_plan_review_state(
+    latest_review: Option<&OffdeskPlanReviewRecord>,
+) -> OffdeskPlanReviewState {
+    let Some(review) = latest_review else {
+        return OffdeskPlanReviewState {
+            status: "unreviewed".to_string(),
+            ready_for_launch_preparation_candidate: false,
+            next_safe_action: "record_operator_review".to_string(),
+            latest_review_id: None,
+        };
+    };
+    let (status, next_safe_action) = match review.decision {
+        OffdeskPlanReviewDecision::Approved => (
+            "approved",
+            if review.ready_for_launch_preparation_candidate {
+                "prepare_launch_packet"
+            } else {
+                "inspect_review_blockers"
+            },
+        ),
+        OffdeskPlanReviewDecision::RevisionRequired => ("revision_required", "revise_plan"),
+        OffdeskPlanReviewDecision::Rejected => ("rejected", "discard_or_replace_plan"),
+    };
+    OffdeskPlanReviewState {
+        status: status.to_string(),
+        ready_for_launch_preparation_candidate: review.ready_for_launch_preparation_candidate,
+        next_safe_action: next_safe_action.to_string(),
+        latest_review_id: Some(review.review_id.clone()),
+    }
+}
+
+fn offdesk_plan_matches_filter(item: &OffdeskPlanRegistryItem, args: &PlansArgs) -> bool {
+    if let Some(project_key) = args.project_key.as_deref() {
+        if item.registration.project_key.as_deref() != Some(project_key) {
+            return false;
+        }
+    }
+    if let Some(task_id) = args.task_id.as_deref() {
+        if item.registration.task_id.as_deref() != Some(task_id) {
+            return false;
+        }
+    }
+    if let Some(profile_key) = args.profile_key.as_deref() {
+        if item.registration.profile_key.as_deref() != Some(profile_key) {
+            return false;
+        }
+    }
+    if let Some(artifact_kind) = args.artifact_kind.as_deref() {
+        if item.registration.artifact_kind != artifact_kind {
+            return false;
+        }
+    }
+    true
+}
+
+fn find_offdesk_plan_registry_item(
+    items: Vec<OffdeskPlanRegistryItem>,
+    plan_ref: &str,
+) -> Option<OffdeskPlanRegistryItem> {
+    let normalized_ref = normalize_offdesk_plan_ref_path(plan_ref);
+    items.into_iter().find(|item| {
+        if item.plan_id == plan_ref {
+            return true;
+        }
+        if normalize_offdesk_plan_ref_path(&item.registration_path) == normalized_ref {
+            return true;
+        }
+        for path in [
+            item.registration.artifacts.registry_dir.as_deref(),
+            item.registration.artifacts.registration_json.as_deref(),
+            item.registration.artifacts.copied_source_json.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if normalize_offdesk_plan_ref_path(path) == normalized_ref {
+                return true;
+            }
+        }
+        false
+    })
+}
+
+fn normalize_offdesk_plan_ref_path(path: &str) -> String {
+    #[cfg(target_os = "macos")]
+    {
+        path.strip_prefix("/private").unwrap_or(path).to_owned()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        path.to_owned()
+    }
+}
+
+fn allocate_offdesk_plan_review_record_path(
+    registry_dir: &Path,
+    reviewed_at: DateTime<Utc>,
+) -> Result<PathBuf> {
+    fs::create_dir_all(registry_dir)
+        .with_context(|| format!("create Offdesk plan registry {}", registry_dir.display()))?;
+    let timestamp = reviewed_at.format("%Y%m%dT%H%M%SZ");
+    for attempt in 0..1000 {
+        let filename = if attempt == 0 {
+            format!("plan_review_{timestamp}.json")
+        } else {
+            format!("plan_review_{timestamp}_{attempt:03}.json")
+        };
+        let path = registry_dir.join(filename);
+        if !path.exists() {
+            return Ok(path);
+        }
+    }
+
+    bail!(
+        "could not allocate Offdesk plan review path in {}",
+        registry_dir.display()
+    )
+}
+
+fn allocate_offdesk_plan_launch_prep_path(
+    registry_dir: &Path,
+    prepared_at: DateTime<Utc>,
+) -> Result<PathBuf> {
+    fs::create_dir_all(registry_dir)
+        .with_context(|| format!("create Offdesk plan registry {}", registry_dir.display()))?;
+    let timestamp = prepared_at.format("%Y%m%dT%H%M%SZ");
+    for attempt in 0..1000 {
+        let filename = if attempt == 0 {
+            format!("launch_prep_{timestamp}.json")
+        } else {
+            format!("launch_prep_{timestamp}_{attempt:03}.json")
+        };
+        let path = registry_dir.join(filename);
+        if !path.exists() {
+            return Ok(path);
+        }
+    }
+
+    bail!(
+        "could not allocate Offdesk plan launch-prep path in {}",
+        registry_dir.display()
+    )
+}
+
+fn allocate_offdesk_plan_registry_dir(
+    profile_dir: &Path,
+    registered_at: DateTime<Utc>,
+    artifact_kind: &str,
+) -> Result<PathBuf> {
+    let base_dir = profile_dir.join("offdesk_plans");
+    fs::create_dir_all(&base_dir)
+        .with_context(|| format!("create Offdesk plan registry {}", base_dir.display()))?;
+    let timestamp = registered_at.format("%Y%m%dT%H%M%SZ");
+    for attempt in 0..1000 {
+        let name = if attempt == 0 {
+            format!("{timestamp}_{artifact_kind}")
+        } else {
+            format!("{timestamp}_{artifact_kind}_{attempt:03}")
+        };
+        let path = base_dir.join(name);
+        match fs::create_dir(&path) {
+            Ok(()) => return Ok(path),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("create Offdesk plan registry {}", path.display()))
+            }
+        }
+    }
+
+    bail!(
+        "could not allocate Offdesk plan registry path in {}",
+        base_dir.display()
+    )
+}
+
+fn validate_offdesk_plan_input(value: &Value) -> Result<OffdeskPlanInputSummary> {
+    let plan_schema = value_string_field(value, "schema").unwrap_or_default();
+    match plan_schema.as_str() {
+        "offdesk_multiturn_plan.v1" => validate_multiturn_plan_input(value, plan_schema),
+        "offdesk_planner_council.v1" => validate_planner_council_input(value, plan_schema),
+        "" => bail!("Offdesk plan registration guard failed: schema_missing"),
+        other => bail!("Offdesk plan registration guard failed: unsupported_schema:{other}"),
+    }
+}
+
+fn validate_multiturn_plan_input(
+    value: &Value,
+    plan_schema: String,
+) -> Result<OffdeskPlanInputSummary> {
+    let mut failures = Vec::new();
+    let decision = value.get("decision").filter(|entry| entry.is_object());
+    if decision.is_none() {
+        failures.push("decision_missing".to_string());
+    }
+    let ready_for_operator_review = require_bool_field(
+        &mut failures,
+        decision,
+        "decision",
+        "ready_for_operator_review",
+        true,
+    );
+    let ready_for_launch_preparation = require_bool_field(
+        &mut failures,
+        decision,
+        "decision",
+        "ready_for_launch_preparation",
+        false,
+    );
+    let ready_for_enqueue = require_bool_field(
+        &mut failures,
+        decision,
+        "decision",
+        "ready_for_enqueue",
+        false,
+    );
+    match value.get("execution_sequence").and_then(Value::as_array) {
+        Some(items) if !items.is_empty() => {}
+        _ => failures.push("execution_sequence_missing".to_string()),
+    }
+    validate_plan_authority(value, &mut failures);
+    fail_plan_registration_if_needed(failures)?;
+
+    Ok(OffdeskPlanInputSummary {
+        artifact_kind: "offdesk_multiturn_plan",
+        plan_schema,
+        profile_key: value_string_field(value, "profile_key"),
+        profile_name: value_string_field(value, "profile_name"),
+        ready_for_operator_review,
+        ready_for_launch_preparation,
+        ready_for_enqueue,
+        decision: decision.cloned(),
+        consensus: None,
+        selected_plan_path: None,
+    })
+}
+
+fn validate_planner_council_input(
+    value: &Value,
+    plan_schema: String,
+) -> Result<OffdeskPlanInputSummary> {
+    let mut failures = Vec::new();
+    let consensus = value.get("consensus").filter(|entry| entry.is_object());
+    if consensus.is_none() {
+        failures.push("consensus_missing".to_string());
+    }
+    let ready_for_operator_review = require_bool_field(
+        &mut failures,
+        consensus,
+        "consensus",
+        "ready_for_operator_review",
+        true,
+    );
+    let ready_for_launch_preparation = require_bool_field(
+        &mut failures,
+        consensus,
+        "consensus",
+        "ready_for_launch_preparation",
+        false,
+    );
+    let ready_for_enqueue = require_bool_field(
+        &mut failures,
+        consensus,
+        "consensus",
+        "ready_for_enqueue",
+        false,
+    );
+    match value.get("validation_failures").and_then(Value::as_array) {
+        Some(items) if items.is_empty() => {}
+        Some(items) => failures.push(format!("validation_failures_present:{}", items.len())),
+        None => failures.push("validation_failures_missing".to_string()),
+    }
+    fail_plan_registration_if_needed(failures)?;
+
+    Ok(OffdeskPlanInputSummary {
+        artifact_kind: "offdesk_planner_council",
+        plan_schema,
+        profile_key: value_string_field(value, "profile_key"),
+        profile_name: value_string_field(value, "profile_name"),
+        ready_for_operator_review,
+        ready_for_launch_preparation,
+        ready_for_enqueue,
+        decision: None,
+        consensus: consensus.cloned(),
+        selected_plan_path: value_string_field(value, "synthesized_plan_path"),
+    })
+}
+
+fn validate_plan_authority(value: &Value, failures: &mut Vec<String>) {
+    let authority = value.get("authority").filter(|entry| entry.is_object());
+    if authority.is_none() {
+        failures.push("authority_missing".to_string());
+    }
+    require_bool_field(failures, authority, "authority", "read_only_plan", true);
+    let denials = authority
+        .and_then(|entry| entry.get("does_not_authorize"))
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToOwned::to_owned)
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default();
+    for required in OFFDESK_PLAN_REQUIRED_DENIALS {
+        if !denials.contains(required) {
+            failures.push(format!("authority_missing:{required}"));
+        }
+    }
+}
+
+fn require_bool_field(
+    failures: &mut Vec<String>,
+    parent: Option<&Value>,
+    parent_name: &str,
+    field: &str,
+    expected: bool,
+) -> bool {
+    match parent
+        .and_then(|entry| entry.get(field))
+        .and_then(Value::as_bool)
+    {
+        Some(actual) if actual == expected => actual,
+        Some(actual) => {
+            failures.push(format!("{parent_name}.{field}_must_be_{expected}"));
+            actual
+        }
+        None => {
+            failures.push(format!("{parent_name}.{field}_missing"));
+            false
+        }
+    }
+}
+
+fn fail_plan_registration_if_needed(failures: Vec<String>) -> Result<()> {
+    if !failures.is_empty() {
+        bail!(
+            "Offdesk plan registration guard failed: {}",
+            failures.join(", ")
+        );
+    }
+    Ok(())
+}
+
+fn value_string_field(value: &Value, field: &str) -> Option<String> {
+    value
+        .get(field)
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
+fn offdesk_plan_registration_denials() -> Vec<String> {
+    OFFDESK_PLAN_REQUIRED_DENIALS
+        .into_iter()
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn offdesk_plan_review_denials() -> Vec<String> {
+    let mut denials = offdesk_plan_registration_denials();
+    denials.push("launch preparation without a separate command".to_string());
+    denials
+}
+
+fn offdesk_plan_launch_prep_denials() -> Vec<String> {
+    let mut denials = offdesk_plan_review_denials();
+    denials.push("dispatch".to_string());
+    denials
+}
+
+fn remote_operator_projection<T>(
+    profile: &str,
+    transport: &str,
+    command: &str,
+    card: RemoteOperatorCard,
+    payload: T,
+) -> RemoteOperatorProjection<T>
+where
+    T: Serialize,
+{
+    RemoteOperatorProjection {
+        schema: "remote_operator_readonly_projection.v1".to_string(),
+        generated_at: Utc::now(),
+        forager_profile: operator_safe_text(profile),
+        transport: operator_safe_text(transport),
+        source_surface: format!("remote_operator.{}", operator_safe_text(transport)),
+        command: command.to_string(),
+        phase: "read_only_surface".to_string(),
+        read_only: true,
+        mutation_authorized: false,
+        approval_authorized: false,
+        allowed_remote_intents: vec![
+            "inspect_status".to_string(),
+            "inspect_pending".to_string(),
+            "inspect_plans".to_string(),
+            "inspect_plan".to_string(),
+        ],
+        forbidden_remote_intents: vec![
+            "approve_plan".to_string(),
+            "approve_launch".to_string(),
+            "deny_launch".to_string(),
+            "enqueue".to_string(),
+            "launch".to_string(),
+            "dispatch".to_string(),
+            "shell".to_string(),
+            "git_push".to_string(),
+            "delete".to_string(),
+            "provider_retarget".to_string(),
+        ],
+        card,
+        payload,
+    }
+}
+
+fn remote_operator_status_payload(status: Value) -> RemoteOperatorStatusPayload {
+    RemoteOperatorStatusPayload {
+        profile: json_string_field(&status, "profile").unwrap_or_else(|| "default".to_string()),
+        waiting: json_usize_field(&status, "waiting"),
+        running: json_usize_field(&status, "running"),
+        idle: json_usize_field(&status, "idle"),
+        stopped: json_usize_field(&status, "stopped"),
+        error: json_usize_field(&status, "error"),
+        total: json_usize_field(&status, "total"),
+        resume_pending_fresh: json_usize_field(&status, "resume_pending_fresh"),
+        resume_pending_stale: json_usize_field(&status, "resume_pending_stale"),
+        pending_approvals: json_usize_field(&status, "pending_approvals"),
+        queued_offdesk_tasks: json_usize_field(&status, "queued_offdesk_tasks"),
+        active_offdesk_tasks: json_usize_field(&status, "active_offdesk_tasks"),
+        offdesk_tasks_pending_approval: json_usize_field(&status, "offdesk_tasks_pending_approval"),
+        failed_offdesk_tasks: json_usize_field(&status, "failed_offdesk_tasks"),
+        resume_pending_offdesk_tasks: json_usize_field(&status, "resume_pending_offdesk_tasks"),
+        cancelled_offdesk_tasks: json_usize_field(&status, "cancelled_offdesk_tasks"),
+        stale_background_runs: json_usize_field(&status, "stale_background_runs"),
+        failed_background_runs: json_usize_field(&status, "failed_background_runs"),
+        closeout_required_offdesk_tasks: json_usize_field(
+            &status,
+            "closeout_required_offdesk_tasks",
+        ),
+        next_safe_actions: status
+            .get("offdesk_next_safe_actions")
+            .and_then(Value::as_array)
+            .map(|actions| {
+                actions
+                    .iter()
+                    .map(remote_operator_next_safe_action_from_value)
+                    .collect()
+            })
+            .unwrap_or_default(),
+    }
+}
+
+fn remote_operator_next_safe_action_from_value(
+    value: &Value,
+) -> RemoteOperatorNextSafeActionSummary {
+    RemoteOperatorNextSafeActionSummary {
+        kind: json_string_field(value, "kind").unwrap_or_else(|| "unknown".to_string()),
+        detail: json_string_field(value, "detail")
+            .map(|value| operator_safe_text(&value))
+            .unwrap_or_else(|| "No detail provided.".to_string()),
+        requires_operator_review: value
+            .get("requires_operator_review")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    }
+}
+
+fn remote_operator_approval_summary(
+    view: &OffdeskPendingApprovalView,
+) -> Result<RemoteOperatorApprovalSummary> {
+    let approval = &view.approval;
+    let core = RemoteOperatorApprovalSummaryCore {
+        approval_id: operator_safe_text(&approval.approval_id),
+        action_id: operator_safe_text(approval.action_id()),
+        status: approval.status,
+        expired: approval.status == ApprovalStatus::Pending && approval.expires_at < Utc::now(),
+        action: operator_safe_text(&approval.action),
+        project_key: operator_safe_text(&approval.project_key),
+        request_id: operator_safe_text(&approval.request_id),
+        task_id: operator_safe_text(&approval.task_id),
+        risk_level: approval.risk_level,
+        preview: operator_safe_text(&approval.preview),
+        reason: operator_safe_text(&approval.reason),
+        created_at: approval.created_at,
+        expires_at: approval.expires_at,
+        next_safe_action: remote_operator_next_safe_action_from_offdesk(&view.next_safe_action),
+        remote_actions: vec!["inspect_approval".to_string()],
+    };
+    let observed_hash = observed_hash_for(&core)?;
+    Ok(RemoteOperatorApprovalSummary {
+        core,
+        observed_hash,
+    })
+}
+
+fn remote_operator_next_safe_action_from_offdesk(
+    action: &OffdeskNextSafeAction,
+) -> RemoteOperatorNextSafeActionSummary {
+    RemoteOperatorNextSafeActionSummary {
+        kind: operator_safe_text(&action.kind),
+        detail: operator_safe_text(&action.detail),
+        requires_operator_review: action.requires_operator_review,
+    }
+}
+
+fn remote_operator_plan_matches_filter(
+    item: &OffdeskPlanRegistryItem,
+    args: &RemoteOperatorPlansArgs,
+) -> bool {
+    args.project_key.as_ref().map_or(true, |expected| {
+        item.registration.project_key.as_deref() == Some(expected.as_str())
+    }) && args.task_id.as_ref().map_or(true, |expected| {
+        item.registration.task_id.as_deref() == Some(expected.as_str())
+    }) && args.profile_key.as_ref().map_or(true, |expected| {
+        item.registration.profile_key.as_deref() == Some(expected.as_str())
+    }) && args.artifact_kind.as_ref().map_or(true, |expected| {
+        item.registration.artifact_kind == *expected
+    })
+}
+
+fn remote_operator_plan_summary_from_item(
+    item: &OffdeskPlanRegistryItem,
+) -> Result<RemoteOperatorPlanSummary> {
+    let core = remote_operator_plan_summary_core(
+        &item.plan_id,
+        &item.registration,
+        &item.review_state,
+        item.review_count,
+        item.latest_review.as_ref(),
+        item.launch_prep_count,
+        item.latest_launch_prep.as_ref(),
+    );
+    let observed_hash = observed_hash_for(&core)?;
+    Ok(RemoteOperatorPlanSummary {
+        core,
+        observed_hash,
+    })
+}
+
+fn remote_operator_plan_summary_from_detail(
+    detail: &OffdeskPlanRegistryDetail,
+) -> Result<RemoteOperatorPlanSummary> {
+    let core = remote_operator_plan_summary_core(
+        &detail.plan_id,
+        &detail.registration,
+        &detail.review_state,
+        detail.review_count,
+        detail.latest_review.as_ref(),
+        detail.launch_prep_count,
+        detail.latest_launch_prep.as_ref(),
+    );
+    let observed_hash = observed_hash_for(&core)?;
+    Ok(RemoteOperatorPlanSummary {
+        core,
+        observed_hash,
+    })
+}
+
+fn remote_operator_plan_summary_core(
+    plan_id: &str,
+    registration: &OffdeskPlanRegistration,
+    review_state: &OffdeskPlanReviewState,
+    review_count: usize,
+    latest_review: Option<&OffdeskPlanReviewRecord>,
+    launch_prep_count: usize,
+    latest_launch_prep: Option<&OffdeskPlanLaunchPrepPacket>,
+) -> RemoteOperatorPlanSummaryCore {
+    RemoteOperatorPlanSummaryCore {
+        plan_id: operator_safe_text(plan_id),
+        artifact_kind: operator_safe_text(&registration.artifact_kind),
+        plan_schema: operator_safe_text(&registration.plan_schema),
+        profile_key: registration.profile_key.as_deref().map(operator_safe_text),
+        project_key: registration.project_key.as_deref().map(operator_safe_text),
+        request_id: registration.request_id.as_deref().map(operator_safe_text),
+        task_id: registration.task_id.as_deref().map(operator_safe_text),
+        registered_at: registration.registered_at,
+        source_sha256: registration.source_sha256.clone(),
+        review_status: operator_safe_text(&review_state.status),
+        review_count,
+        latest_review_id: latest_review
+            .map(|review| operator_safe_text(&review.review_id))
+            .or_else(|| {
+                review_state
+                    .latest_review_id
+                    .as_deref()
+                    .map(operator_safe_text)
+            }),
+        launch_prep_count,
+        latest_launch_prep_id: latest_launch_prep.map(|packet| operator_safe_text(&packet.prep_id)),
+        ready_for_operator_review: registration.ready_for_operator_review,
+        launch_preparation_candidate: review_state.ready_for_launch_preparation_candidate,
+        ready_for_enqueue: registration.ready_for_enqueue,
+        next_safe_action: operator_safe_text(&review_state.next_safe_action),
+        remote_actions: vec!["inspect_plan".to_string()],
+    }
+}
+
+fn remote_operator_plan_review_summary(
+    review: &OffdeskPlanReviewRecord,
+) -> RemoteOperatorPlanReviewSummary {
+    RemoteOperatorPlanReviewSummary {
+        review_id: operator_safe_text(&review.review_id),
+        reviewed_at: review.reviewed_at,
+        decision: review.decision,
+        reviewer: operator_safe_text(&review.reviewer),
+        ready_for_launch_preparation_candidate: review.ready_for_launch_preparation_candidate,
+        ready_for_enqueue: review.ready_for_enqueue,
+        blockers: review
+            .blockers
+            .iter()
+            .map(|value| operator_safe_text(value))
+            .collect(),
+        followups: review
+            .followups
+            .iter()
+            .map(|value| operator_safe_text(value))
+            .collect(),
+    }
+}
+
+fn remote_operator_launch_prep_summary(
+    packet: &OffdeskPlanLaunchPrepPacket,
+) -> RemoteOperatorLaunchPrepSummary {
+    RemoteOperatorLaunchPrepSummary {
+        prep_id: operator_safe_text(&packet.prep_id),
+        prepared_at: packet.prepared_at,
+        review_id: operator_safe_text(&packet.review_id),
+        launch_preparation_candidate: packet.launch_preparation_candidate,
+        ready_for_launch: packet.ready_for_launch,
+        ready_for_enqueue: packet.ready_for_enqueue,
+        next_safe_action: operator_safe_text(&packet.next_safe_action),
+    }
+}
+
+fn remote_operator_status_card(
+    payload: &RemoteOperatorStatusPayload,
+    observed_hash: String,
+) -> RemoteOperatorCard {
+    let mut detail_lines = Vec::new();
+    for action in payload.next_safe_actions.iter().take(3) {
+        detail_lines.push(format!("next: {} ({})", action.detail, action.kind));
+    }
+    remote_operator_card(
+        "Forager Remote Status",
+        vec![
+            format!(
+                "sessions: {} waiting / {} running / {} total",
+                payload.waiting, payload.running, payload.total
+            ),
+            format!(
+                "offdesk: {} pending approvals / {} queued / {} active / {} failed",
+                payload.pending_approvals,
+                payload.queued_offdesk_tasks,
+                payload.active_offdesk_tasks + payload.offdesk_tasks_pending_approval,
+                payload.failed_offdesk_tasks
+            ),
+            format!(
+                "closeout required: {}",
+                payload.closeout_required_offdesk_tasks
+            ),
+        ],
+        detail_lines,
+        observed_hash,
+        vec!["inspect_status".to_string()],
+    )
+}
+
+fn remote_operator_pending_card(
+    payload: &RemoteOperatorPendingPayload,
+    observed_hash: String,
+) -> RemoteOperatorCard {
+    let expired = payload
+        .approvals
+        .iter()
+        .filter(|approval| approval.core.expired)
+        .count();
+    let mut detail_lines = Vec::new();
+    for approval in payload.approvals.iter().take(3) {
+        detail_lines.push(format!(
+            "{}: {} {}",
+            approval.core.approval_id,
+            approval.core.action,
+            approval_status_label(approval.core.status)
+        ));
+    }
+    remote_operator_card(
+        "Forager Remote Pending",
+        vec![
+            format!("approvals: {}", payload.approval_count),
+            format!("expired pending approvals: {expired}"),
+            "remote launch and mutation remain disabled".to_string(),
+        ],
+        detail_lines,
+        observed_hash,
+        vec!["inspect_pending".to_string()],
+    )
+}
+
+fn remote_operator_plans_card(
+    payload: &RemoteOperatorPlansPayload,
+    observed_hash: String,
+) -> RemoteOperatorCard {
+    let mut detail_lines = Vec::new();
+    for plan in payload.plans.iter().take(3) {
+        detail_lines.push(format!(
+            "{}: {} review={}",
+            plan.core.plan_id, plan.core.artifact_kind, plan.core.review_status
+        ));
+    }
+    remote_operator_card(
+        "Forager Remote Plans",
+        vec![
+            format!("plans: {}", payload.plan_count),
+            format!(
+                "filter project: {}",
+                payload.filters.project_key.as_deref().unwrap_or("any")
+            ),
+            "remote plan review requires a registered artifact".to_string(),
+        ],
+        detail_lines,
+        observed_hash,
+        vec!["inspect_plans".to_string()],
+    )
+}
+
+fn remote_operator_show_card(
+    payload: &RemoteOperatorPlanDetailPayload,
+    observed_hash: String,
+) -> RemoteOperatorCard {
+    remote_operator_card(
+        "Forager Remote Plan Detail",
+        vec![
+            format!("plan: {}", payload.plan.core.plan_id),
+            format!(
+                "review: {} / launch-preps: {}",
+                payload.plan.core.review_status,
+                payload.launch_preps.len()
+            ),
+            format!("next: {}", payload.plan.core.next_safe_action),
+        ],
+        vec![
+            format!("reviews: {}", payload.reviews.len()),
+            "remote launch and mutation remain disabled".to_string(),
+        ],
+        observed_hash,
+        vec!["inspect_plan".to_string()],
+    )
+}
+
+fn remote_operator_card(
+    title: impl Into<String>,
+    summary_lines: Vec<String>,
+    detail_lines: Vec<String>,
+    observed_hash: String,
+    remote_actions: Vec<String>,
+) -> RemoteOperatorCard {
+    RemoteOperatorCard {
+        title: title.into(),
+        summary_lines,
+        detail_lines,
+        observed_hash,
+        remote_actions,
+        disabled_remote_actions: vec![
+            "approve_plan".to_string(),
+            "approve_launch".to_string(),
+            "deny_launch".to_string(),
+            "enqueue".to_string(),
+            "launch".to_string(),
+            "dispatch".to_string(),
+            "shell".to_string(),
+        ],
+    }
+}
+
+fn print_remote_operator_projection<T>(
+    projection: &RemoteOperatorProjection<T>,
+    json: bool,
+) -> Result<()>
+where
+    T: Serialize,
+{
+    if json {
+        println!("{}", serde_json::to_string_pretty(projection)?);
+        return Ok(());
+    }
+
+    println!("{}", projection.card.title);
+    println!("  transport: {}", projection.transport);
+    println!("  surface:   {}", projection.source_surface);
+    println!("  mode:      read-only");
+    println!("  hash:      {}", projection.card.observed_hash);
+    for line in &projection.card.summary_lines {
+        println!("  - {line}");
+    }
+    if !projection.card.detail_lines.is_empty() {
+        println!("Details:");
+        for line in &projection.card.detail_lines {
+            println!("  - {line}");
+        }
+    }
+    println!("  note: remote launch, dispatch, shell execution, and mutation are disabled");
+    Ok(())
+}
+
+fn observed_hash_for<T>(value: &T) -> Result<String>
+where
+    T: Serialize,
+{
+    let bytes = serde_json::to_vec(value)?;
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    Ok(format!("sha256:{:x}", hasher.finalize()))
+}
+
+fn approval_status_label(status: ApprovalStatus) -> &'static str {
+    match status {
+        ApprovalStatus::Pending => "pending",
+        ApprovalStatus::Approved => "approved",
+        ApprovalStatus::Denied => "denied",
+        ApprovalStatus::Expired => "expired",
+        ApprovalStatus::Superseded => "superseded",
+    }
+}
+
+fn json_usize_field(value: &Value, field: &str) -> usize {
+    value
+        .get(field)
+        .and_then(Value::as_u64)
+        .map(|value| value as usize)
+        .unwrap_or_default()
+}
+
+fn print_offdesk_plan_registration(
+    registration: &OffdeskPlanRegistration,
+    json: bool,
+) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(registration)?);
+        return Ok(());
+    }
+
+    let verb = if registration.dry_run {
+        "Validated"
+    } else {
+        "Registered"
+    };
+    println!(
+        "{verb} Offdesk plan artifact: {} ({})",
+        registration.artifact_kind, registration.plan_schema
+    );
+    println!("  source: {}", registration.source_path);
+    println!(
+        "  ready_for_operator_review: {}",
+        registration.ready_for_operator_review
+    );
+    println!(
+        "  ready_for_launch_preparation: {}",
+        registration.ready_for_launch_preparation
+    );
+    println!("  ready_for_enqueue: {}", registration.ready_for_enqueue);
+    if let Some(path) = registration.artifacts.registration_json.as_deref() {
+        println!("  registration: {path}");
+    }
+    println!(
+        "  note: registration does not authorize enqueue, launch, approval, file movement, cleanup, or accepted truth"
+    );
+    Ok(())
+}
+
+fn print_offdesk_plan_registry_items(items: &[OffdeskPlanRegistryItem]) {
+    println!("Registered Offdesk plans");
+    for item in items {
+        let registration = &item.registration;
+        println!(
+            "- {} [{}] plan_review={} launch_candidate={} enqueue={}",
+            item.plan_id,
+            registration.artifact_kind,
+            item.review_state.status,
+            item.review_state.ready_for_launch_preparation_candidate,
+            registration.ready_for_enqueue
+        );
+        println!("  next:    {}", item.review_state.next_safe_action);
+        if let Some(packet) = item.latest_launch_prep.as_ref() {
+            println!("  prep:    {}", packet.prep_id);
+        }
+        if let Some(project_key) = registration.project_key.as_deref() {
+            println!("  project: {project_key}");
+        }
+        if let Some(task_id) = registration.task_id.as_deref() {
+            println!("  task:    {task_id}");
+        }
+        println!("  source:  {}", registration.source_path);
+    }
+}
+
+fn print_offdesk_plan_registry_detail(detail: &OffdeskPlanRegistryDetail) {
+    let registration = &detail.registration;
+    println!("Registered Offdesk plan: {}", detail.plan_id);
+    println!("  kind:       {}", registration.artifact_kind);
+    println!("  schema:     {}", registration.plan_schema);
+    println!("  registered: {}", registration.registered_at);
+    println!("  source:     {}", registration.source_path);
+    println!("  sha256:     {}", registration.source_sha256);
+    if let Some(profile_key) = registration.profile_key.as_deref() {
+        println!("  profile:    {profile_key}");
+    }
+    if let Some(project_key) = registration.project_key.as_deref() {
+        println!("  project:    {project_key}");
+    }
+    if let Some(request_id) = registration.request_id.as_deref() {
+        println!("  request:    {request_id}");
+    }
+    if let Some(task_id) = registration.task_id.as_deref() {
+        println!("  task:       {task_id}");
+    }
+    println!(
+        "  ready_for_operator_review: {}",
+        registration.ready_for_operator_review
+    );
+    println!(
+        "  ready_for_launch_preparation: {}",
+        registration.ready_for_launch_preparation
+    );
+    println!("  ready_for_enqueue: {}", registration.ready_for_enqueue);
+    if let Some(path) = registration.selected_plan_path.as_deref() {
+        println!("  selected_plan: {path}");
+    }
+    println!("  review_state: {}", detail.review_state.status);
+    println!(
+        "  launch_candidate: {}",
+        detail.review_state.ready_for_launch_preparation_candidate
+    );
+    println!("  next:       {}", detail.review_state.next_safe_action);
+    if let Some(review) = detail.latest_review.as_ref() {
+        println!("  latest_review: {}", review.review_id);
+        println!("  reviewer:   {}", review.reviewer);
+        println!("  reason:     {}", review.reason);
+    }
+    if let Some(packet) = detail.latest_launch_prep.as_ref() {
+        println!("  latest_launch_prep: {}", packet.prep_id);
+        println!(
+            "  launch_prep_file:   {}",
+            packet.artifacts.launch_prep_json
+        );
+    }
+    println!("  registration: {}", detail.registration_path);
+    println!(
+        "  does_not_authorize: {}",
+        registration.does_not_authorize.join(", ")
+    );
+}
+
+fn print_offdesk_plan_review_record(record: &OffdeskPlanReviewRecord) {
+    println!("Offdesk plan review");
+    println!("  reviewed_at:  {}", record.reviewed_at);
+    println!("  review_id:    {}", record.review_id);
+    println!("  plan_id:      {}", record.plan_id);
+    println!("  decision:     {}", record.decision.as_str());
+    println!("  reviewer:     {}", record.reviewer);
+    if let Some(provider) = record.review_provider.as_deref() {
+        println!("  provider:     {provider}");
+    }
+    println!("  reason:       {}", record.reason);
+    println!(
+        "  launch_candidate: {}",
+        record.ready_for_launch_preparation_candidate
+    );
+    println!("  ready_for_enqueue: {}", record.ready_for_enqueue);
+    println!("  project file mutations: none");
+    println!("Artifacts:");
+    println!("  registration: {}", record.artifacts.registration_json);
+    println!("  review:       {}", record.artifacts.review_record_json);
+    if !record.blockers.is_empty() {
+        println!("Blockers:");
+        for blocker in &record.blockers {
+            println!("  - {blocker}");
+        }
+    }
+    if !record.followups.is_empty() {
+        println!("Follow-ups:");
+        for followup in &record.followups {
+            println!("  - {followup}");
+        }
+    }
+    println!(
+        "  note: review does not authorize enqueue, launch, approval, file movement, cleanup, or accepted truth"
+    );
+}
+
+fn print_offdesk_plan_launch_prep_packet(packet: &OffdeskPlanLaunchPrepPacket) {
+    println!("Offdesk plan launch-prep packet");
+    println!("  prepared_at:  {}", packet.prepared_at);
+    println!("  prep_id:      {}", packet.prep_id);
+    println!("  plan_id:      {}", packet.plan_id);
+    println!("  review_id:    {}", packet.review_id);
+    println!("  prepared_by:  {}", packet.prepared_by);
+    println!(
+        "  launch_candidate: {}",
+        packet.launch_preparation_candidate
+    );
+    println!("  ready_for_launch: {}", packet.ready_for_launch);
+    println!("  ready_for_enqueue: {}", packet.ready_for_enqueue);
+    println!("  next:         {}", packet.next_safe_action);
+    println!("Artifacts:");
+    println!("  registration: {}", packet.artifacts.registration_json);
+    println!("  review:       {}", packet.artifacts.review_record_json);
+    println!("  launch_prep:  {}", packet.artifacts.launch_prep_json);
+    if !packet.required_first_reads.is_empty() {
+        println!("Required first reads:");
+        for path in &packet.required_first_reads {
+            println!("  - {path}");
+        }
+    }
+    println!(
+        "  note: launch-prep packet does not authorize enqueue, launch, approval, file movement, cleanup, or accepted truth"
+    );
+}
+
 fn hosted_harness_profile(id: &str) -> Option<&'static HostedHarnessProfileView> {
     HOSTED_HARNESS_PROFILES
         .iter()
@@ -7465,6 +10966,19 @@ async fn maintenance_request(profile: &str, args: MaintenanceRequestArgs) -> Res
     Ok(())
 }
 
+async fn deck(_profile: &str, args: DeckArgs) -> Result<()> {
+    let json = args.json;
+    let report = build_deck_report(&args)?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
+
+    print_deck_report(&report);
+    Ok(())
+}
+
 async fn closeout(profile: &str, args: CloseoutArgs) -> Result<()> {
     let json = args.json;
     let report = build_closeout_report(profile, &args)?;
@@ -7515,6 +11029,496 @@ async fn closeout_retire(profile: &str, args: CloseoutRetireArgs) -> Result<()> 
 
     print_closeout_review_record(&record);
     Ok(())
+}
+
+fn build_deck_report(args: &DeckArgs) -> Result<OffdeskDeckReport> {
+    let generated_at = Utc::now();
+    let source = read_json_file(&args.source)?;
+    let source_kind = detect_offdesk_deck_kind(&source, args.kind);
+    let title = args
+        .title
+        .as_deref()
+        .map(operator_safe_text)
+        .unwrap_or_else(|| default_offdesk_deck_title(&source, source_kind));
+    let markdown_path = args
+        .out
+        .clone()
+        .unwrap_or_else(|| default_offdesk_deck_path(&args.source));
+    let markdown =
+        render_offdesk_deck_markdown(&source, source_kind, &title, &args.source, generated_at);
+    write_deck_artifact(&markdown_path, markdown.as_bytes(), args.force)
+        .with_context(|| format!("write Marp deck {}", markdown_path.display()))?;
+
+    let mut rendered_path = None;
+    let mut render_format = None;
+    let render_status = if let Some(format) = args.render {
+        let output_path = offdesk_deck_render_path(&markdown_path, format);
+        render_offdesk_deck_with_marp(
+            &args.marp_bin,
+            &markdown_path,
+            &output_path,
+            format,
+            args.force,
+        )?;
+        rendered_path = Some(output_path.display().to_string());
+        render_format = Some(format.as_str().to_string());
+        "rendered".to_string()
+    } else {
+        "not_requested".to_string()
+    };
+
+    Ok(OffdeskDeckReport {
+        schema: "offdesk_marp_deck.v1",
+        generated_at,
+        source_path: args.source.display().to_string(),
+        source_kind: source_kind.as_str().to_string(),
+        marp_markdown_path: markdown_path.display().to_string(),
+        rendered_path,
+        render_format,
+        render_status,
+        render_error: None,
+        source_of_truth: "source JSON remains authoritative",
+    })
+}
+
+fn detect_offdesk_deck_kind(value: &Value, explicit: OffdeskDeckKind) -> OffdeskDeckKind {
+    if explicit != OffdeskDeckKind::Auto {
+        return explicit;
+    }
+    if value.get("closeout_id").is_some()
+        || value.get("closeout_receipt").is_some()
+        || value.pointer("/artifacts/closeout_plan_json").is_some()
+    {
+        return OffdeskDeckKind::Closeout;
+    }
+    if value.get("plan_id").is_some()
+        || value.get("ready_for_operator_review").is_some()
+        || value.get("does_not_authorize").is_some()
+        || value.get("launch_prep_id").is_some()
+    {
+        return OffdeskDeckKind::Plan;
+    }
+    OffdeskDeckKind::Status
+}
+
+fn default_offdesk_deck_title(value: &Value, kind: OffdeskDeckKind) -> String {
+    match kind {
+        OffdeskDeckKind::Closeout => deck_text_at(value, "/closeout_id")
+            .map(|id| format!("Offdesk Closeout {id}"))
+            .unwrap_or_else(|| "Offdesk Closeout Review".to_string()),
+        OffdeskDeckKind::Plan => deck_text_at(value, "/plan_id")
+            .or_else(|| deck_text_at(value, "/launch_prep_id"))
+            .map(|id| format!("Offdesk Plan {id}"))
+            .unwrap_or_else(|| "Offdesk Plan Review".to_string()),
+        OffdeskDeckKind::Status | OffdeskDeckKind::Auto => "Offdesk Status Review".to_string(),
+    }
+}
+
+fn default_offdesk_deck_path(source_path: &Path) -> PathBuf {
+    let parent = source_path.parent().unwrap_or_else(|| Path::new(""));
+    let stem = source_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("offdesk_artifact");
+    parent.join(format!("{stem}.marp.md"))
+}
+
+fn write_deck_artifact(path: &Path, bytes: &[u8], force: bool) -> io::Result<usize> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)?;
+    }
+    if force {
+        fs::write(path, bytes)?;
+        Ok(bytes.len())
+    } else {
+        write_new_file(path, bytes)
+    }
+}
+
+fn offdesk_deck_render_path(markdown_path: &Path, format: OffdeskDeckRenderFormat) -> PathBuf {
+    let extension = format.extension();
+    if let Some(file_name) = markdown_path.file_name().and_then(|value| value.to_str()) {
+        if let Some(stem) = file_name.strip_suffix(".marp.md") {
+            return markdown_path.with_file_name(format!("{stem}.{extension}"));
+        }
+    }
+    markdown_path.with_extension(extension)
+}
+
+fn render_offdesk_deck_with_marp(
+    marp_bin: &str,
+    markdown_path: &Path,
+    output_path: &Path,
+    format: OffdeskDeckRenderFormat,
+    force: bool,
+) -> Result<()> {
+    if output_path.exists() && !force {
+        bail!(
+            "render output already exists: {} (use --force to overwrite)",
+            output_path.display()
+        );
+    }
+    if let Some(parent) = output_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("create render output directory {}", parent.display()))?;
+    }
+    let output = Command::new(marp_bin)
+        .arg(markdown_path)
+        .arg("--output")
+        .arg(output_path)
+        .output()
+        .with_context(|| {
+            format!(
+                "run Marp CLI `{}` for {} output",
+                operator_safe_text(marp_bin),
+                format.as_str()
+            )
+        })?;
+    if !output.status.success() {
+        let stdout = operator_safe_text(String::from_utf8_lossy(&output.stdout).trim());
+        let stderr = operator_safe_text(String::from_utf8_lossy(&output.stderr).trim());
+        bail!(
+            "Marp CLI failed for {} output (status: {}, stdout: {}, stderr: {})",
+            format.as_str(),
+            output.status,
+            stdout,
+            stderr
+        );
+    }
+    Ok(())
+}
+
+fn render_offdesk_deck_markdown(
+    value: &Value,
+    kind: OffdeskDeckKind,
+    title: &str,
+    source_path: &Path,
+    generated_at: DateTime<Utc>,
+) -> String {
+    let mut output = String::new();
+    output.push_str("---\n");
+    output.push_str("marp: true\n");
+    output.push_str("theme: default\n");
+    output.push_str("paginate: true\n");
+    output.push_str("---\n\n");
+    output.push_str(&format!("# {}\n\n", deck_escape_markdown(title)));
+    output.push_str(&format!(
+        "- source_kind: `{}`\n",
+        deck_escape_markdown(kind.as_str())
+    ));
+    output.push_str(&format!(
+        "- source_file: `{}`\n",
+        deck_escape_markdown(&deck_file_name(source_path))
+    ));
+    output.push_str(&format!("- generated_at: `{generated_at}`\n"));
+    output.push_str("- source_of_truth: source JSON remains authoritative\n");
+    output.push_str("- boundary: review surface only; does not approve or execute work\n");
+
+    match kind {
+        OffdeskDeckKind::Closeout => render_closeout_deck_slides(&mut output, value),
+        OffdeskDeckKind::Plan => render_plan_deck_slides(&mut output, value),
+        OffdeskDeckKind::Status | OffdeskDeckKind::Auto => {
+            render_status_deck_slides(&mut output, value)
+        }
+    }
+
+    output
+}
+
+fn render_closeout_deck_slides(output: &mut String, value: &Value) {
+    output.push_str("\n---\n\n## Closeout State\n\n");
+    deck_push_optional(output, "closeout_id", deck_text_at(value, "/closeout_id"));
+    deck_push_optional(output, "profile", deck_text_at(value, "/profile"));
+    deck_push_optional(
+        output,
+        "completed_tasks",
+        deck_text_at(value, "/summary/completed_tasks"),
+    );
+    deck_push_optional(
+        output,
+        "active_or_blocked_tasks",
+        deck_text_at(value, "/summary/active_or_blocked_tasks"),
+    );
+    deck_push_optional(
+        output,
+        "missing_artifacts",
+        deck_text_at(value, "/summary/missing_artifacts"),
+    );
+    deck_push_optional(
+        output,
+        "return_package_required",
+        deck_text_at(value, "/summary/return_package_required"),
+    );
+    deck_push_empty_if_needed(output);
+
+    output.push_str("\n---\n\n## Review And Decisions\n\n");
+    deck_push_count(
+        output,
+        "open_decisions",
+        deck_array_len_at(value, "/open_decisions"),
+    );
+    deck_push_count(
+        output,
+        "verification_commands",
+        deck_array_len_at(value, "/verification_commands"),
+    );
+    deck_push_count(
+        output,
+        "required_first_reads",
+        deck_array_len_at(value, "/required_first_reads"),
+    );
+    deck_push_limited_items(
+        output,
+        "open decision",
+        deck_items_at(value, "/open_decisions", 5),
+    );
+    deck_push_limited_items(
+        output,
+        "verification",
+        deck_items_at(value, "/verification_commands", 4),
+    );
+    deck_push_empty_if_needed(output);
+
+    output.push_str("\n---\n\n## Evidence Surface\n\n");
+    deck_push_optional(
+        output,
+        "artifact_dir",
+        deck_text_at(value, "/artifact_dir").map(deck_file_name_from_text),
+    );
+    deck_push_limited_items(output, "artifact", deck_artifact_items(value, 8));
+    deck_push_limited_items(
+        output,
+        "first read",
+        deck_items_at(value, "/required_first_reads", 5),
+    );
+    deck_push_empty_if_needed(output);
+}
+
+fn render_plan_deck_slides(output: &mut String, value: &Value) {
+    output.push_str("\n---\n\n## Plan Identity\n\n");
+    for pointer in [
+        ("/plan_id", "plan_id"),
+        ("/launch_prep_id", "launch_prep_id"),
+        ("/project_key", "project_key"),
+        ("/request_id", "request_id"),
+        ("/task_id", "task_id"),
+        ("/review_status", "review_status"),
+        ("/ready_for_operator_review", "ready_for_operator_review"),
+    ] {
+        deck_push_optional(output, pointer.1, deck_text_at(value, pointer.0));
+    }
+    deck_push_empty_if_needed(output);
+
+    output.push_str("\n---\n\n## Operator Boundary\n\n");
+    deck_push_optional(
+        output,
+        "next_safe_action",
+        deck_text_at(value, "/next_safe_action"),
+    );
+    deck_push_limited_items(
+        output,
+        "does not authorize",
+        deck_items_at(value, "/does_not_authorize", 6),
+    );
+    deck_push_limited_items(
+        output,
+        "validation failure",
+        deck_items_at(value, "/validation_failures", 6),
+    );
+    deck_push_limited_items(output, "blocker", deck_items_at(value, "/blockers", 6));
+    deck_push_empty_if_needed(output);
+
+    output.push_str("\n---\n\n## Follow-Up\n\n");
+    deck_push_limited_items(output, "follow-up", deck_items_at(value, "/followups", 6));
+    deck_push_limited_items(output, "approval", deck_items_at(value, "/approvals", 6));
+    deck_push_limited_items(output, "artifact", deck_artifact_items(value, 8));
+    deck_push_empty_if_needed(output);
+}
+
+fn render_status_deck_slides(output: &mut String, value: &Value) {
+    output.push_str("\n---\n\n## Runtime Status\n\n");
+    for pointer in [
+        ("/status", "status"),
+        ("/state", "state"),
+        ("/remote_status", "remote_status"),
+        ("/agent_runtime_status", "agent_runtime_status"),
+        ("/listener_status", "listener_status"),
+        ("/model", "model"),
+        ("/endpoint", "endpoint"),
+    ] {
+        deck_push_optional(output, pointer.1, deck_text_at(value, pointer.0));
+    }
+    deck_push_empty_if_needed(output);
+
+    output.push_str("\n---\n\n## Queue And Attention\n\n");
+    for pointer in [
+        ("/pending_approvals", "pending_approvals"),
+        ("/queued_offdesk_tasks", "queued_offdesk_tasks"),
+        ("/active_offdesk_tasks", "active_offdesk_tasks"),
+        ("/failed_offdesk_tasks", "failed_offdesk_tasks"),
+        (
+            "/closeout_required_offdesk_tasks",
+            "closeout_required_offdesk_tasks",
+        ),
+    ] {
+        deck_push_count(output, pointer.1, deck_array_len_at(value, pointer.0));
+    }
+    deck_push_limited_items(
+        output,
+        "pending approval",
+        deck_items_at(value, "/pending_approvals", 5),
+    );
+    deck_push_limited_items(output, "task", deck_items_at(value, "/tasks", 5));
+    deck_push_empty_if_needed(output);
+
+    output.push_str("\n---\n\n## Source Keys\n\n");
+    deck_push_limited_items(output, "top-level key", deck_top_level_keys(value, 10));
+    deck_push_empty_if_needed(output);
+}
+
+fn deck_push_optional(output: &mut String, label: &str, value: Option<String>) {
+    if let Some(value) = value.filter(|value| !value.trim().is_empty()) {
+        output.push_str(&format!(
+            "- {}: {}\n",
+            deck_escape_markdown(label),
+            deck_escape_markdown(&value)
+        ));
+    }
+}
+
+fn deck_push_count(output: &mut String, label: &str, count: Option<usize>) {
+    if let Some(count) = count {
+        output.push_str(&format!("- {}: {}\n", deck_escape_markdown(label), count));
+    }
+}
+
+fn deck_push_limited_items(output: &mut String, label: &str, items: Vec<String>) {
+    for item in items {
+        output.push_str(&format!(
+            "- {}: {}\n",
+            deck_escape_markdown(label),
+            deck_escape_markdown(&item)
+        ));
+    }
+}
+
+fn deck_push_empty_if_needed(output: &mut String) {
+    let slide = output.rsplit("\n---\n\n").next().unwrap_or(output.as_str());
+    if !slide.lines().any(|line| line.starts_with("- ")) {
+        output.push_str("- No matching fields found in this artifact.\n");
+    }
+}
+
+fn deck_text_at(value: &Value, pointer: &str) -> Option<String> {
+    let value = value.pointer(pointer)?;
+    deck_value_text(value)
+}
+
+fn deck_value_text(value: &Value) -> Option<String> {
+    let text = match value {
+        Value::String(text) => text.clone(),
+        Value::Bool(value) => value.to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::Null | Value::Array(_) | Value::Object(_) => return None,
+    };
+    Some(operator_safe_text(text.trim()))
+}
+
+fn deck_array_len_at(value: &Value, pointer: &str) -> Option<usize> {
+    value.pointer(pointer)?.as_array().map(Vec::len)
+}
+
+fn deck_items_at(value: &Value, pointer: &str, limit: usize) -> Vec<String> {
+    value
+        .pointer(pointer)
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(deck_item_summary)
+                .take(limit)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn deck_item_summary(value: &Value) -> Option<String> {
+    if let Some(text) = deck_value_text(value) {
+        return Some(text);
+    }
+    let object = value.as_object()?;
+    for key in [
+        "kind",
+        "detail",
+        "summary",
+        "title",
+        "task_id",
+        "request_id",
+        "project_key",
+        "path",
+        "command",
+        "reason",
+        "status",
+        "action",
+    ] {
+        if let Some(text) = object.get(key).and_then(deck_value_text) {
+            return Some(format!("{key}: {text}"));
+        }
+    }
+    Some(format!("object with {} field(s)", object.len()))
+}
+
+fn deck_artifact_items(value: &Value, limit: usize) -> Vec<String> {
+    let mut items = Vec::new();
+    if let Some(artifacts) = value.get("artifacts").and_then(Value::as_object) {
+        for (key, value) in artifacts.iter().take(limit) {
+            if let Some(text) = deck_value_text(value) {
+                items.push(format!("{key}: {}", deck_file_name_from_text(text)));
+            }
+        }
+    }
+    items
+}
+
+fn deck_top_level_keys(value: &Value, limit: usize) -> Vec<String> {
+    value
+        .as_object()
+        .map(|object| {
+            object
+                .keys()
+                .take(limit)
+                .map(|key| operator_safe_text(key))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn deck_file_name(path: &Path) -> String {
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .map(operator_safe_text)
+        .unwrap_or_else(|| operator_safe_text(path.to_string_lossy().as_ref()))
+}
+
+fn deck_file_name_from_text(path: String) -> String {
+    Path::new(&path)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(operator_safe_text)
+        .unwrap_or(path)
+}
+
+fn deck_escape_markdown(text: &str) -> String {
+    operator_safe_text(text)
+        .replace(['\n', '\r'], " ")
+        .replace('|', "\\|")
 }
 
 fn build_closeout_decision_record(
@@ -12854,6 +16858,67 @@ fn parse_adaptive_wiki_scope(value: &str) -> std::result::Result<AdaptiveWikiSco
     }
 }
 
+fn parse_adaptive_wiki_kind(value: &str) -> std::result::Result<AdaptiveWikiKind, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "preference" | "pref" => Ok(AdaptiveWikiKind::Preference),
+        "procedure" | "proc" => Ok(AdaptiveWikiKind::Procedure),
+        "failure_pattern" | "failure-pattern" | "failure" | "fail" => {
+            Ok(AdaptiveWikiKind::FailurePattern)
+        }
+        "policy_rule" | "policy-rule" | "policy" => Ok(AdaptiveWikiKind::PolicyRule),
+        "fact" => Ok(AdaptiveWikiKind::Fact),
+        _ => Err(
+            "kind must be one of preference, procedure, failure_pattern, policy_rule, fact"
+                .to_string(),
+        ),
+    }
+}
+
+fn parse_adaptive_wiki_confidence(
+    value: &str,
+) -> std::result::Result<AdaptiveWikiConfidence, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "explicit" => Ok(AdaptiveWikiConfidence::Explicit),
+        "repeated" => Ok(AdaptiveWikiConfidence::Repeated),
+        "inferred" => Ok(AdaptiveWikiConfidence::Inferred),
+        _ => Err("confidence must be one of explicit, repeated, inferred".to_string()),
+    }
+}
+
+fn parse_adaptive_wiki_signal_kind(
+    value: &str,
+) -> std::result::Result<AdaptiveWikiSignalKind, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "operator_correction" | "operator-correction" | "correction" => {
+            Ok(AdaptiveWikiSignalKind::OperatorCorrection)
+        }
+        "explicit_preference" | "explicit-preference" | "preference" => {
+            Ok(AdaptiveWikiSignalKind::ExplicitPreference)
+        }
+        "imported_doc" | "imported-doc" | "doc" => Ok(AdaptiveWikiSignalKind::ImportedDoc),
+        "repeated_failure" | "repeated-failure" => Ok(AdaptiveWikiSignalKind::RepeatedFailure),
+        _ => Err(
+            "signal kind must be one of operator_correction, explicit_preference, imported_doc, repeated_failure"
+                .to_string(),
+        ),
+    }
+}
+
+fn parse_adaptive_wiki_origin(value: &str) -> std::result::Result<AdaptiveWikiOrigin, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "operator_explicit" | "operator-explicit" | "operator" => {
+            Ok(AdaptiveWikiOrigin::OperatorExplicit)
+        }
+        "background_review" | "background-review" | "background" => {
+            Ok(AdaptiveWikiOrigin::BackgroundReview)
+        }
+        "imported" => Ok(AdaptiveWikiOrigin::Imported),
+        _ => {
+            Err("origin must be one of operator_explicit, background_review, imported".to_string())
+        }
+    }
+}
+
 fn parse_adaptive_wiki_runtime_policy_ack_scope_mode(
     value: &str,
 ) -> std::result::Result<AdaptiveWikiRuntimePolicyAckScopeMode, String> {
@@ -13203,6 +17268,24 @@ fn print_wiki_mutation(result: &WikiMutationResult, json: bool) -> Result<()> {
                 "  scope: {}",
                 wiki_scope_label(entry.scope, &entry.scope_ref)
             );
+            println!("  audit: {}", audit.id);
+        }
+        WikiMutationResult::Edit { entry, audit } => {
+            println!("Edited adaptive wiki entry {}", entry.id);
+            println!("  claim: {}", entry.claim);
+            if !entry.evidence_refs.is_empty() {
+                println!("  evidence: {}", entry.evidence_refs.join(", "));
+            }
+            println!("  audit: {}", audit.id);
+        }
+        WikiMutationResult::Retag { entry, audit } => {
+            println!("Retagged adaptive wiki entry {}", entry.id);
+            if !entry.core_tags.is_empty() {
+                println!("  core tags: {}", entry.core_tags.join(", "));
+            }
+            if !entry.proposed_tags.is_empty() {
+                println!("  proposed tags: {}", entry.proposed_tags.join(", "));
+            }
             println!("  audit: {}", audit.id);
         }
         WikiMutationResult::Deprecate { entry, audit } => {
@@ -14023,6 +18106,25 @@ fn print_approval_views(approvals: &[OffdeskPendingApprovalView]) {
         }
         print_next_safe_action(&approval_view.next_safe_action);
     }
+}
+
+fn print_deck_report(report: &OffdeskDeckReport) {
+    println!("Offdesk Marp deck");
+    println!("  generated_at: {}", report.generated_at);
+    println!("  source_kind:  {}", report.source_kind);
+    println!(
+        "  source:       {}",
+        operator_safe_report(&report.source_path).text
+    );
+    println!(
+        "  markdown:     {}",
+        operator_safe_report(&report.marp_markdown_path).text
+    );
+    println!("  render:       {}", report.render_status);
+    if let Some(path) = report.rendered_path.as_deref() {
+        println!("  rendered:     {}", operator_safe_report(path).text);
+    }
+    println!("  authority:    {}", report.source_of_truth);
 }
 
 fn print_resume_states(states: &[TaskResumeState]) {

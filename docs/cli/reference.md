@@ -6,6 +6,7 @@ This document contains the help content for the `forager` command-line program.
 
 * [`forager`↴](#forager)
 * [`forager add`↴](#forager-add)
+* [`forager go`↴](#forager-go)
 * [`forager init`↴](#forager-init)
 * [`forager list`↴](#forager-list)
 * [`forager remove`↴](#forager-remove)
@@ -41,6 +42,7 @@ This document contains the help content for the `forager` command-line program.
 * [`forager project retention-apply`↴](#forager-project-retention-apply)
 * [`forager project retention-promote`↴](#forager-project-retention-promote)
 * [`forager project implementation-packet`↴](#forager-project-implementation-packet)
+* [`forager project sync`↴](#forager-project-sync)
 * [`forager worktree`↴](#forager-worktree)
 * [`forager worktree list`↴](#forager-worktree-list)
 * [`forager worktree info`↴](#forager-worktree-info)
@@ -48,6 +50,16 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk`↴](#forager-offdesk)
 * [`forager offdesk harnesses`↴](#forager-offdesk-harnesses)
 * [`forager offdesk harness-prompt`↴](#forager-offdesk-harness-prompt)
+* [`forager offdesk plan`↴](#forager-offdesk-plan)
+* [`forager offdesk plans`↴](#forager-offdesk-plans)
+* [`forager offdesk plan-show`↴](#forager-offdesk-plan-show)
+* [`forager offdesk plan-review`↴](#forager-offdesk-plan-review)
+* [`forager offdesk plan-launch-prep`↴](#forager-offdesk-plan-launch-prep)
+* [`forager offdesk remote-operator`↴](#forager-offdesk-remote-operator)
+* [`forager offdesk remote-operator status`↴](#forager-offdesk-remote-operator-status)
+* [`forager offdesk remote-operator pending`↴](#forager-offdesk-remote-operator-pending)
+* [`forager offdesk remote-operator plans`↴](#forager-offdesk-remote-operator-plans)
+* [`forager offdesk remote-operator show`↴](#forager-offdesk-remote-operator-show)
 * [`forager offdesk pending`↴](#forager-offdesk-pending)
 * [`forager offdesk gate`↴](#forager-offdesk-gate)
 * [`forager offdesk launch`↴](#forager-offdesk-launch)
@@ -60,9 +72,14 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk decision resolve`↴](#forager-offdesk-decision-resolve)
 * [`forager offdesk decision receipt`↴](#forager-offdesk-decision-receipt)
 * [`forager offdesk decision ingest-telegram`↴](#forager-offdesk-decision-ingest-telegram)
+* [`forager offdesk decision ingest-telegram-feedback`↴](#forager-offdesk-decision-ingest-telegram-feedback)
 * [`forager offdesk provider-capacity`↴](#forager-offdesk-provider-capacity)
 * [`forager offdesk provider-fallback`↴](#forager-offdesk-provider-fallback)
 * [`forager offdesk cancel-task`↴](#forager-offdesk-cancel-task)
+* [`forager offdesk pause`↴](#forager-offdesk-pause)
+* [`forager offdesk unpause`↴](#forager-offdesk-unpause)
+* [`forager offdesk pause-status`↴](#forager-offdesk-pause-status)
+* [`forager offdesk learning-scan`↴](#forager-offdesk-learning-scan)
 * [`forager offdesk retry-task`↴](#forager-offdesk-retry-task)
 * [`forager offdesk resume-task`↴](#forager-offdesk-resume-task)
 * [`forager offdesk abandon-task`↴](#forager-offdesk-abandon-task)
@@ -79,6 +96,7 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk debug-bundle`↴](#forager-offdesk-debug-bundle)
 * [`forager offdesk maintenance-report`↴](#forager-offdesk-maintenance-report)
 * [`forager offdesk maintenance-request`↴](#forager-offdesk-maintenance-request)
+* [`forager offdesk deck`↴](#forager-offdesk-deck)
 * [`forager offdesk closeout`↴](#forager-offdesk-closeout)
 * [`forager offdesk closeout-review`↴](#forager-offdesk-closeout-review)
 * [`forager offdesk closeout-decision`↴](#forager-offdesk-closeout-decision)
@@ -96,6 +114,7 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk wiki entries`↴](#forager-offdesk-wiki-entries)
 * [`forager offdesk wiki show`↴](#forager-offdesk-wiki-show)
 * [`forager offdesk wiki projection`↴](#forager-offdesk-wiki-projection)
+* [`forager offdesk wiki brief`↴](#forager-offdesk-wiki-brief)
 * [`forager offdesk wiki runtime-policy-acks`↴](#forager-offdesk-wiki-runtime-policy-acks)
 * [`forager offdesk wiki runtime-policy-ack-report`↴](#forager-offdesk-wiki-runtime-policy-ack-report)
 * [`forager offdesk wiki review-after-report`↴](#forager-offdesk-wiki-review-after-report)
@@ -108,9 +127,12 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk wiki episode-trace`↴](#forager-offdesk-wiki-episode-trace)
 * [`forager offdesk wiki evaluate-recurrence`↴](#forager-offdesk-wiki-evaluate-recurrence)
 * [`forager offdesk wiki promotion-chain`↴](#forager-offdesk-wiki-promotion-chain)
+* [`forager offdesk wiki record-candidate`↴](#forager-offdesk-wiki-record-candidate)
 * [`forager offdesk wiki promote`↴](#forager-offdesk-wiki-promote)
 * [`forager offdesk wiki reject`↴](#forager-offdesk-wiki-reject)
 * [`forager offdesk wiki rescope`↴](#forager-offdesk-wiki-rescope)
+* [`forager offdesk wiki edit`↴](#forager-offdesk-wiki-edit)
+* [`forager offdesk wiki add-tag`↴](#forager-offdesk-wiki-add-tag)
 * [`forager offdesk wiki deprecate`↴](#forager-offdesk-wiki-deprecate)
 * [`forager offdesk wiki renew-review-after`↴](#forager-offdesk-wiki-renew-review-after)
 * [`forager offdesk wiki add-counterexample`↴](#forager-offdesk-wiki-add-counterexample)
@@ -120,6 +142,14 @@ This document contains the help content for the `forager` command-line program.
 * [`forager ondesk capture`↴](#forager-ondesk-capture)
 * [`forager ondesk prompt-package`↴](#forager-ondesk-prompt-package)
 * [`forager ondesk review-surface`↴](#forager-ondesk-review-surface)
+* [`forager ondesk workstation-surface`↴](#forager-ondesk-workstation-surface)
+* [`forager ondesk action-envelope`↴](#forager-ondesk-action-envelope)
+* [`forager ondesk accepted-truth-recovery-envelope`↴](#forager-ondesk-accepted-truth-recovery-envelope)
+* [`forager ondesk action-preflight`↴](#forager-ondesk-action-preflight)
+* [`forager ondesk action-decision`↴](#forager-ondesk-action-decision)
+* [`forager ondesk action-closeout`↴](#forager-ondesk-action-closeout)
+* [`forager ondesk runtime-preflight`↴](#forager-ondesk-runtime-preflight)
+* [`forager ondesk runtime-dispatch`↴](#forager-ondesk-runtime-dispatch)
 * [`forager tmux`↴](#forager-tmux)
 * [`forager tmux status`↴](#forager-tmux-status)
 * [`forager sounds`↴](#forager-sounds)
@@ -140,6 +170,7 @@ Run without arguments to launch the TUI dashboard. The legacy `aoe` binary remai
 ###### **Subcommands:**
 
 * `add` — Add a new session
+* `go` — Find-or-create a session for this directory, refresh its wiki brief, and attach
 * `init` — Initialize .forager/config.toml in a repository
 * `list` — List all sessions
 * `remove` — Remove a session
@@ -187,6 +218,33 @@ Add a new session
 * `-b`, `--new-branch` — Create a new branch (use with --worktree)
 * `-y`, `--yolo` — Enable YOLO mode (skip permission prompts)
 * `--trust-hooks` — Automatically trust repository hooks without prompting
+
+
+
+## `forager go`
+
+Find-or-create a session for this directory, refresh its wiki brief, and attach
+
+**Usage:** `forager go [OPTIONS] [TOOL] [TOOL_ARGS]...`
+
+###### **Arguments:**
+
+* `<TOOL>` — Agent tool to run (e.g. 'claude', 'codex', 'gemini', 'opencode')
+
+  Default value: `claude`
+* `<TOOL_ARGS>` — Extra arguments appended to the tool command (after `--`), e.g. `forager go claude -- --continue`
+
+###### **Options:**
+
+* `--path <PATH>` — Project directory (defaults to current directory)
+
+  Default value: `.`
+* `-y`, `--yolo` — Enable YOLO mode when creating a new session
+* `--trust-hooks` — Automatically trust repository hooks without prompting
+* `--register` — Register this directory in the project registry before launching. The project key (see --key) doubles as the wiki profile, so a fresh knowledge plane comes up with the project
+* `--key <KEY>` — Project key for --register (default: slugified folder name)
+* `--no-brief` — Skip the wiki brief refresh
+* `--no-attach` — Create/start the session but do not attach (for scripts and tests)
 
 
 
@@ -552,6 +610,7 @@ Initialize and inspect project operation packets
 * `retention-apply` — Consume an approved artifact retention decision into a profile receipt
 * `retention-promote` — Promote a retained artifact into DELIVERABLES.md with snapshot evidence
 * `implementation-packet` — Draft a design-first implementation packet before delegated execution
+* `sync` — Scan workspace roots and bulk-register unmatched projects into the registry
 
 
 
@@ -569,6 +628,7 @@ Create a read-only project operation initialization packet
 
 * `--project-key <PROJECT_KEY>` — Stable project key used by Ondesk, Offdesk, and adaptive wiki records
 * `--operation-target <MODULE_PATH_OR_ID>` — Module path/id to mark as a prioritized operation target
+* `--module-profile-spec <PATH>` — Project-specific module operation profile spec. Repeat to register multiple specs
 * `--out <OUT>` — Write the initialization packet to this directory
 * `--include-git` — Include read-only git branch/status/diff-stat evidence
 * `--force` — Overwrite known initialization files when --out already contains files
@@ -786,6 +846,23 @@ Draft a design-first implementation packet before delegated execution
 
 
 
+## `forager project sync`
+
+Scan workspace roots and bulk-register unmatched projects into the registry
+
+**Usage:** `forager project sync [OPTIONS] <ROOTS>...`
+
+###### **Arguments:**
+
+* `<ROOTS>` — Workspace root directories to scan (immediate children only)
+
+###### **Options:**
+
+* `--apply` — Write the new entries to the registry (default: dry-run report only)
+* `--no-wiki` — Do not assign a wiki plane to auto-registered projects
+
+
+
 ## `forager worktree`
 
 Manage git worktrees for parallel development
@@ -842,6 +919,12 @@ Manage offdesk approvals and recovery artifacts
 
 * `harnesses` — List hosted harness agent profile contracts
 * `harness-prompt` — Build a compact hosted harness start prompt from first-read artifacts
+* `plan` — Validate and register a read-only Offdesk planning artifact
+* `plans` — List registered read-only Offdesk planning artifacts
+* `plan-show` — Show one registered read-only Offdesk planning artifact
+* `plan-review` — Record an operator review for a registered Offdesk planning artifact
+* `plan-launch-prep` — Build a read-only launch-preparation packet from an approved plan review
+* `remote-operator` — Render read-only Remote Operator projections for mobile/chat transports
 * `pending` — List pending action approvals
 * `gate` — Evaluate whether an offdesk capability may execute now
 * `launch` — Gate and record a background runner launch
@@ -853,6 +936,10 @@ Manage offdesk approvals and recovery artifacts
 * `provider-capacity` — Show provider capacity cooldown state
 * `provider-fallback` — Recommend provider/model fallbacks without retargeting tasks
 * `cancel-task` — Mark a durable task cancelled without stopping its background runner
+* `pause` — Halt all new offdesk dispatch until resumed (existing runs keep polling)
+* `unpause` — Clear the global operator pause so new dispatch can proceed again
+* `pause-status` — Show the current global operator pause state
+* `learning-scan` — Emit adaptive-wiki learning candidates from observed denials, failures, and resume-recovery rows (recommendation-only; runs each event once)
 * `retry-task` — Requeue a failed, resume-pending, or cancelled durable task
 * `resume-task` — Accept recovery for a resume-pending task and requeue it
 * `abandon-task` — Discard a failed or resume-pending task
@@ -861,6 +948,7 @@ Manage offdesk approvals and recovery artifacts
 * `cancel` — Deny the oldest or targeted pending action
 * `resume` — Show task resume artifacts
 * `background` — Show background runner recovery probes
+* `background-ack` — Acknowledge a stale or failed background probe after linked tasks are cancelled
 * `capabilities` — Show Task Team capability metadata
 * `snapshots` — List pre-mutation checkpoint snapshots
 * `snapshot` — Show and verify a pre-mutation checkpoint snapshot
@@ -868,6 +956,7 @@ Manage offdesk approvals and recovery artifacts
 * `debug-bundle` — Emit a sanitized read-only debug bundle
 * `maintenance-report` — Summarize read-only Offdesk maintenance risks
 * `maintenance-request` — Create or reuse an approval request for a maintenance action
+* `deck` — Generate a Marp-compatible review deck from a read-only Offdesk artifact
 * `closeout` — Generate a mandatory closeout plan and commercial review packet
 * `closeout-review` — Record a reviewed closeout verdict without applying file operations
 * `closeout-decision` — Resolve a closeout receipt open decision without applying file operations
@@ -908,6 +997,193 @@ Build a compact hosted harness start prompt from first-read artifacts
 * `--max-first-read-total-bytes <MAX_FIRST_READ_TOTAL_BYTES>` — Override the total first-read artifact budget in bytes
 * `--strict-first-read-budget` — Fail when first-read artifacts are missing or exceed the budget
 * `--json` — Output packet metadata as JSON
+
+
+
+## `forager offdesk plan`
+
+Validate and register a read-only Offdesk planning artifact
+
+**Usage:** `forager offdesk plan [OPTIONS] <INPUT>`
+
+###### **Arguments:**
+
+* `<INPUT>` — `offdesk_multiturn_plan.v1` or `offdesk_planner_council.v1` JSON to register
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEY>` — Optional project key for correlation
+* `--request-id <REQUEST_ID>` — Optional request ID for correlation
+* `--task-id <TASK_ID>` — Optional task ID for correlation
+* `--dry-run` — Validate without writing profile-local registry artifacts
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk plans`
+
+List registered read-only Offdesk planning artifacts
+
+**Usage:** `forager offdesk plans [OPTIONS]`
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEY>` — Filter by project key
+* `--task-id <TASK_ID>` — Filter by task ID
+* `--profile-key <PROFILE_KEY>` — Filter by planning profile key
+* `--artifact-kind <ARTIFACT_KIND>` — Filter by artifact kind, such as offdesk_multiturn_plan or offdesk_planner_council
+* `--latest` — Return only the newest matching registration
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk plan-show`
+
+Show one registered read-only Offdesk planning artifact
+
+**Usage:** `forager offdesk plan-show [OPTIONS] <PLAN_REF>`
+
+###### **Arguments:**
+
+* `<PLAN_REF>` — Plan ID from `forager offdesk plans`, or a registration/source path
+
+###### **Options:**
+
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk plan-review`
+
+Record an operator review for a registered Offdesk planning artifact
+
+**Usage:** `forager offdesk plan-review [OPTIONS] --decision <DECISION> --reason <REASON> <PLAN_REF>`
+
+###### **Arguments:**
+
+* `<PLAN_REF>` — Plan ID from `forager offdesk plans`, or a registration/source path
+
+###### **Options:**
+
+* `--decision <DECISION>` — Operator review decision. This command never enqueues or launches work
+
+  Possible values: `approved`, `revision-required`, `rejected`
+
+* `--reviewer <REVIEWER>` — Reviewer or reviewing model label
+
+  Default value: `operator`
+* `--review-provider <REVIEW_PROVIDER>` — Model/provider label used for review
+* `--review-file <REVIEW_FILE>` — Optional path to the raw review output
+* `--reason <REASON>` — Required review rationale. Secrets are redacted before persistence
+* `--blocker <BLOCKERS>` — Blocking issue reported by review; may be passed multiple times
+* `--follow-up <FOLLOWUPS>` — Follow-up requested by review; may be passed multiple times
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk plan-launch-prep`
+
+Build a read-only launch-preparation packet from an approved plan review
+
+**Usage:** `forager offdesk plan-launch-prep [OPTIONS] <PLAN_REF>`
+
+###### **Arguments:**
+
+* `<PLAN_REF>` — Plan ID from `forager offdesk plans`, or a registration/source path
+
+###### **Options:**
+
+* `--review-id <REVIEW_ID>` — Use a specific approved review ID instead of the latest review
+* `--prepared-by <PREPARED_BY>` — Operator or surface preparing the packet
+
+  Default value: `operator`
+* `--notes <NOTES>` — Optional preparation note. Secrets are redacted before persistence
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk remote-operator`
+
+Render read-only Remote Operator projections for mobile/chat transports
+
+**Usage:** `forager offdesk remote-operator <COMMAND>`
+
+###### **Subcommands:**
+
+* `status` — Render a read-only status projection for a remote operator surface
+* `pending` — Render read-only pending approval summaries without resolving or expiring them
+* `plans` — Render read-only Offdesk plan summaries for a remote operator surface
+* `show` — Render one read-only Offdesk plan detail projection
+
+
+
+## `forager offdesk remote-operator status`
+
+Render a read-only status projection for a remote operator surface
+
+**Usage:** `forager offdesk remote-operator status [OPTIONS]`
+
+###### **Options:**
+
+* `--transport <TRANSPORT>` — Remote transport label used for projection metadata
+
+  Default value: `telegram`
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk remote-operator pending`
+
+Render read-only pending approval summaries without resolving or expiring them
+
+**Usage:** `forager offdesk remote-operator pending [OPTIONS]`
+
+###### **Options:**
+
+* `--transport <TRANSPORT>` — Remote transport label used for projection metadata
+
+  Default value: `telegram`
+* `--all` — Include resolved approvals in addition to pending approval rows
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk remote-operator plans`
+
+Render read-only Offdesk plan summaries for a remote operator surface
+
+**Usage:** `forager offdesk remote-operator plans [OPTIONS]`
+
+###### **Options:**
+
+* `--transport <TRANSPORT>` — Remote transport label used for projection metadata
+
+  Default value: `telegram`
+* `--project-key <PROJECT_KEY>` — Filter by project key
+* `--task-id <TASK_ID>` — Filter by task ID
+* `--profile-key <PROFILE_KEY>` — Filter by planning profile key
+* `--artifact-kind <ARTIFACT_KIND>` — Filter by artifact kind, such as offdesk_multiturn_plan or offdesk_planner_council
+* `--latest` — Return only the newest matching registration
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk remote-operator show`
+
+Render one read-only Offdesk plan detail projection
+
+**Usage:** `forager offdesk remote-operator show [OPTIONS] <PLAN_REF>`
+
+###### **Arguments:**
+
+* `<PLAN_REF>` — Plan ID from `forager offdesk plans`, or a registration/source path
+
+###### **Options:**
+
+* `--transport <TRANSPORT>` — Remote transport label used for projection metadata
+
+  Default value: `telegram`
+* `--json` — Output as JSON
 
 
 
@@ -1065,6 +1341,8 @@ Run one offdesk control-loop pass
 * `--limit <LIMIT>` — Maximum queued tasks to dispatch in this tick
 
   Default value: `10`
+* `--project-key <PROJECT_KEY>` — Restrict this tick to one project key
+* `--task-id <TASK_ID>` — Restrict this tick to one task ID
 * `--lock-stale-minutes <LOCK_STALE_MINUTES>` — Treat previous free lock metadata as stale after this many minutes
 
   Default value: `30`
@@ -1116,6 +1394,7 @@ Inspect one canonical Offdesk decision record
 * `resolve` — Resolve a decision into an append-only execution handoff
 * `receipt` — Close a handoff-ready decision with an append-only receipt
 * `ingest-telegram` — Ingest a Telegram relay result into the canonical decision ledger
+* `ingest-telegram-feedback` — Promote Telegram freeform feedback into the canonical decision inbox
 
 
 
@@ -1205,6 +1484,23 @@ Ingest a Telegram relay result into the canonical decision ledger
 
 
 
+## `forager offdesk decision ingest-telegram-feedback`
+
+Promote Telegram freeform feedback into the canonical decision inbox
+
+**Usage:** `forager offdesk decision ingest-telegram-feedback [OPTIONS] --feedback <FEEDBACK>`
+
+###### **Options:**
+
+* `--feedback <FEEDBACK>` — Telegram feedback JSON or JSONL file
+* `--profile-dir <PROFILE_DIR>` — Override canonical profile directory for producer integrations
+* `--by <BY>` — Actor recording the inbox item
+
+  Default value: `telegram`
+* `--json` — Output as JSON
+
+
+
 ## `forager offdesk provider-capacity`
 
 Show provider capacity cooldown state
@@ -1247,6 +1543,61 @@ Mark a durable task cancelled without stopping its background runner
 ###### **Options:**
 
 * `--reason <REASON>` — Operator reason to store on the task
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk pause`
+
+Halt all new offdesk dispatch until resumed (existing runs keep polling)
+
+**Usage:** `forager offdesk pause [OPTIONS]`
+
+###### **Options:**
+
+* `--reason <REASON>` — Reason to record for the pause
+* `--by <BY>` — Actor engaging the pause
+
+  Default value: `cli`
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk unpause`
+
+Clear the global operator pause so new dispatch can proceed again
+
+**Usage:** `forager offdesk unpause [OPTIONS]`
+
+###### **Options:**
+
+* `--by <BY>` — Actor clearing the pause
+
+  Default value: `cli`
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk pause-status`
+
+Show the current global operator pause state
+
+**Usage:** `forager offdesk pause-status [OPTIONS]`
+
+###### **Options:**
+
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk learning-scan`
+
+Emit adaptive-wiki learning candidates from observed denials, failures, and resume-recovery rows (recommendation-only; runs each event once)
+
+**Usage:** `forager offdesk learning-scan [OPTIONS]`
+
+###### **Options:**
+
 * `--json` — Output as JSON
 
 
@@ -1392,8 +1743,12 @@ Acknowledge a stale or failed background probe after linked tasks are cancelled
 ###### **Options:**
 
 * `--reason <REASON>` — Operator reason for suppressing further recovery attention
-* `--by <BY>` — Operator or surface recording this acknowledgement [default: cli]
-* `--source-surface <SOURCE_SURFACE>` — Source surface recorded on the acknowledgement [default: cli]
+* `--by <BY>` — Operator or surface recording this acknowledgement
+
+  Default value: `cli`
+* `--source-surface <SOURCE_SURFACE>` — Source surface recorded on the acknowledgement
+
+  Default value: `cli`
 * `--allow-unlinked` — Permit acknowledgement when no durable task is linked to the background ticket
 * `--json` — Output as JSON
 
@@ -1513,6 +1868,35 @@ Create or reuse an approval request for a maintenance action
 
 
 
+## `forager offdesk deck`
+
+Generate a Marp-compatible review deck from a read-only Offdesk artifact
+
+**Usage:** `forager offdesk deck [OPTIONS] --from <SOURCE>`
+
+###### **Options:**
+
+* `--from <SOURCE>` — Source Offdesk JSON artifact to summarize into a Marp deck
+* `--kind <KIND>` — Artifact shape. Use auto unless the source is ambiguous
+
+  Default value: `auto`
+
+  Possible values: `auto`, `closeout`, `plan`, `status`
+
+* `--out <OUT>` — Markdown deck output path. Defaults to `<source-stem>.marp.md`
+* `--force` — Overwrite the Markdown deck or rendered artifact if it already exists
+* `--title <TITLE>` — Optional deck title
+* `--render <RENDER>` — Render the deck with Marp CLI after writing Markdown
+
+  Possible values: `html`, `pdf`, `pptx`
+
+* `--marp-bin <MARP_BIN>` — Marp CLI binary to use with --render
+
+  Default value: `marp`
+* `--json` — Output as JSON
+
+
+
 ## `forager offdesk closeout`
 
 Generate a mandatory closeout plan and commercial review packet
@@ -1623,6 +2007,7 @@ Inspect adaptive wiki candidates, entries, projections, and lint
 * `entries` — List adaptive wiki entries
 * `show` — Show one adaptive wiki entry or candidate
 * `projection` — Show the AI projection for a scope
+* `brief` — Render a compact, skepticism-aware knowledge brief for session start
 * `runtime-policy-acks` — List strict runtime projection policy acknowledgements
 * `runtime-policy-ack-report` — Report strict runtime projection acknowledgements that need attention
 * `review-after-report` — Report promoted entries whose review_after needs attention
@@ -1635,9 +2020,12 @@ Inspect adaptive wiki candidates, entries, projections, and lint
 * `episode-trace` — Trace live task/probe/wiki evidence for adaptive behavior review
 * `evaluate-recurrence` — Evaluate whether corrections recur after an entry is promoted
 * `promotion-chain` — Reconstruct the evidence chain captured at promotion time
+* `record-candidate` — Record an operator-authored learning candidate (e.g. from a doc review)
 * `promote` — Promote a candidate into a scoped wiki entry
 * `reject` — Reject a candidate without creating an entry
 * `rescope` — Change an entry scope
+* `edit` — Edit an entry's claim, instruction, summary, or evidence refs in place
+* `add-tag` — Add controlled/proposed tags to an entry (e.g. facet/* or domain/*)
 * `deprecate` — Deprecate an entry so it no longer appears in AI projection
 * `renew-review-after` — Renew an entry review_after timestamp without changing scope or instruction
 * `add-counterexample` — Add a counterexample evidence ref to an entry
@@ -1882,6 +2270,25 @@ Show the AI projection for a scope
 
 
 
+## `forager offdesk wiki brief`
+
+Render a compact, skepticism-aware knowledge brief for session start
+
+**Usage:** `forager offdesk wiki brief [OPTIONS]`
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEY>` — Project key scope to match
+* `--artifact-kind <ARTIFACT_KIND>` — Artifact kind scope to match
+* `--agent-mode <AGENT_MODE>` — Agent work mode to project for (omit for shared/universal entries)
+* `--max-entries <MAX_ENTRIES>` — Maximum entries in the brief
+
+  Default value: `12`
+* `--out <OUT>` — Write the brief to this path instead of stdout
+* `--json` — Output as JSON
+
+
+
 ## `forager offdesk wiki runtime-policy-acks`
 
 List strict runtime projection policy acknowledgements
@@ -2096,6 +2503,44 @@ Reconstruct the evidence chain captured at promotion time
 
 
 
+## `forager offdesk wiki record-candidate`
+
+Record an operator-authored learning candidate (e.g. from a doc review)
+
+**Usage:** `forager offdesk wiki record-candidate [OPTIONS] --kind <KIND> --scope <SCOPE> --claim <CLAIM>`
+
+###### **Options:**
+
+* `--kind <KIND>` — Knowledge kind
+* `--scope <SCOPE>` — Applicability scope
+* `--scope-ref <SCOPE_REF>` — Scope reference (e.g. project key). Required unless scope is user_global
+* `--claim <CLAIM>` — One-line durable claim
+* `--ai-instruction <AI_INSTRUCTION>` — Compact instruction for the AI projection
+
+  Default value: ``
+* `--human-summary <HUMAN_SUMMARY>` — Operator-facing governance summary
+
+  Default value: ``
+* `--evidence-ref <EVIDENCE_REFS>` — Evidence reference (repeatable), e.g. doc:/path/AGENTS.md#section
+* `--agent-mode <AGENT_MODES>` — Agent work mode this candidate applies to (repeatable; omit for universal)
+* `--core-tag <CORE_TAGS>` — Controlled core tag (repeatable), e.g. domain/twinpaper or harness/dispatch
+* `--proposed-tag <PROPOSED_TAGS>` — Proposed (reviewable) tag (repeatable)
+* `--confidence <CONFIDENCE>` — Confidence level
+
+  Default value: `explicit`
+* `--origin <ORIGIN>` — Provenance of this candidate: who observed it
+
+  Default value: `operator_explicit`
+* `--signal-kind <SIGNAL_KIND>` — What kind of signal produced this candidate. operator_correction also appends a first-class correction record for recurrence evaluation
+
+  Default value: `imported_doc`
+* `--review-reason <REVIEW_REASON>` — Why this is worth reviewing/promoting
+
+  Default value: ``
+* `--json` — Output as JSON
+
+
+
 ## `forager offdesk wiki promote`
 
 Promote a candidate into a scoped wiki entry
@@ -2120,6 +2565,9 @@ Promote a candidate into a scoped wiki entry
 * `--reason <REASON>` — Optional promotion reason for audit
 
   Default value: ``
+* `--review-after-days <REVIEW_AFTER_DAYS>` — Review window in days: entries must be re-reviewed after this horizon (skepticism-by-default; 0 disables)
+
+  Default value: `90`
 * `--json` — Output as JSON
 
 
@@ -2162,6 +2610,56 @@ Change an entry scope
 
   Default value: `cli`
 * `--reason <REASON>` — Optional rescope reason for audit
+
+  Default value: ``
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki edit`
+
+Edit an entry's claim, instruction, summary, or evidence refs in place
+
+**Usage:** `forager offdesk wiki edit [OPTIONS] <ENTRY_ID>`
+
+###### **Arguments:**
+
+* `<ENTRY_ID>` — Adaptive wiki entry id
+
+###### **Options:**
+
+* `--claim <CLAIM>` — Replace the durable claim
+* `--ai-instruction <AI_INSTRUCTION>` — Replace the compact AI instruction
+* `--human-summary <HUMAN_SUMMARY>` — Replace the operator-facing summary
+* `--evidence-ref <EVIDENCE_REFS>` — Add an evidence reference (repeatable)
+* `--by <BY>` — Operator or surface performing the edit
+
+  Default value: `cli`
+* `--reason <REASON>` — Optional edit reason for audit
+
+  Default value: ``
+* `--json` — Output as JSON
+
+
+
+## `forager offdesk wiki add-tag`
+
+Add controlled/proposed tags to an entry (e.g. facet/* or domain/*)
+
+**Usage:** `forager offdesk wiki add-tag [OPTIONS] <ENTRY_ID>`
+
+###### **Arguments:**
+
+* `<ENTRY_ID>` — Adaptive wiki entry id
+
+###### **Options:**
+
+* `--core-tag <CORE_TAGS>` — Controlled core tag (repeatable), e.g. facet/research or domain/twinpaper
+* `--proposed-tag <PROPOSED_TAGS>` — Proposed (reviewable) tag (repeatable)
+* `--by <BY>` — Operator or surface performing the retag
+
+  Default value: `cli`
+* `--reason <REASON>` — Optional retag reason for audit
 
   Default value: ``
 * `--json` — Output as JSON
@@ -2265,6 +2763,14 @@ Capture ondesk notes and prompt context from external harness work
 * `capture` — Capture live harness scrollback into an inspectable prompt package
 * `prompt-package` — Build a markdown prompt package from recent notes and optional capture
 * `review-surface` — Emit the shared review surface for Ondesk and future rich UIs
+* `workstation-surface` — Emit the workstation dashboard surface for the Web UI control plane
+* `action-envelope` — Validate a Web UI action envelope and record a receipt
+* `accepted-truth-recovery-envelope` — Validate an accepted-truth recovery envelope and record a receipt
+* `action-preflight` — Preflight a validated action receipt before any mutation-capable executor
+* `action-decision` — Execute a supported decision action from a ready action preflight
+* `action-closeout` — Close an applied decision action execution with a canonical decision receipt
+* `runtime-preflight` — Preflight a receipted decision action closeout before runtime dispatch
+* `runtime-dispatch` — Queue runtime work from a ready runtime dispatch preflight
 
 
 
@@ -2340,6 +2846,142 @@ Emit the shared review surface for Ondesk and future rich UIs
 
 * `--project-key <PROJECT_KEY>` — Stable project key to focus the review packet. Defaults to all projects
 * `--json` — Emit compact JSON. Without this flag, a human summary is printed
+
+
+
+## `forager ondesk workstation-surface`
+
+Emit the workstation dashboard surface for the Web UI control plane
+
+**Usage:** `forager ondesk workstation-surface [OPTIONS]`
+
+###### **Options:**
+
+* `--json` — Emit compact JSON. Without this flag, a human summary is printed
+
+
+
+## `forager ondesk action-envelope`
+
+Validate a Web UI action envelope and record a receipt
+
+**Usage:** `forager ondesk action-envelope [OPTIONS] --envelope <ENVELOPE>`
+
+###### **Options:**
+
+* `--envelope <ENVELOPE>` — JSON file containing an action_envelope.v1 preview
+* `--dry-run` — Validate without writing action_envelope_receipts.jsonl
+* `--json` — Output as JSON
+
+
+
+## `forager ondesk accepted-truth-recovery-envelope`
+
+Validate an accepted-truth recovery envelope and record a receipt
+
+**Usage:** `forager ondesk accepted-truth-recovery-envelope [OPTIONS] --envelope <ENVELOPE>`
+
+###### **Options:**
+
+* `--envelope <ENVELOPE>` — JSON file containing an accepted_truth_recovery_action_envelope.v1 preview
+* `--dry-run` — Validate without writing accepted_truth_recovery_action_receipts.jsonl
+* `--json` — Output as JSON
+
+
+
+## `forager ondesk action-preflight`
+
+Preflight a validated action receipt before any mutation-capable executor
+
+**Usage:** `forager ondesk action-preflight [OPTIONS] --receipt-id <RECEIPT_ID>`
+
+###### **Options:**
+
+* `--receipt-id <RECEIPT_ID>` — Receipt ID from action_envelope_receipts.jsonl
+* `--dry-run` — Validate without writing action_execution_preflights.jsonl
+* `--json` — Output as JSON
+
+
+
+## `forager ondesk action-decision`
+
+Execute a supported decision action from a ready action preflight
+
+**Usage:** `forager ondesk action-decision [OPTIONS] --preflight-id <PREFLIGHT_ID>`
+
+###### **Options:**
+
+* `--preflight-id <PREFLIGHT_ID>` — Ready action_execution_preflight.v1 ID
+* `--note <NOTE>` — Required bounded direction for revise/block/custom decisions
+
+  Default value: ``
+* `--by <BY>` — Actor recording the decision action
+
+  Default value: `operator`
+* `--target <TARGET>` — Override execution handoff target
+* `--dry-run` — Validate without appending the decision record or execution receipt
+* `--json` — Output as JSON
+
+
+
+## `forager ondesk action-closeout`
+
+Close an applied decision action execution with a canonical decision receipt
+
+**Usage:** `forager ondesk action-closeout [OPTIONS] --execution-id <EXECUTION_ID>`
+
+###### **Options:**
+
+* `--execution-id <EXECUTION_ID>` — Applied decision_action_execution.v1 ID
+* `--by <BY>` — Actor recording the closeout receipt
+
+  Default value: `operator`
+* `--result-status <RESULT_STATUS>` — Result status for the consumed decision action handoff
+
+  Default value: `closed`
+* `--evidence <EVIDENCE_SUMMARY>` — Evidence summary line. Repeat for multiple lines
+* `--remaining-review <REMAINING_REVIEW>` — Remaining review item. Repeat for multiple lines
+* `--dry-run` — Validate without appending the decision receipt or closeout record
+* `--json` — Output as JSON
+
+
+
+## `forager ondesk runtime-preflight`
+
+Preflight a receipted decision action closeout before runtime dispatch
+
+**Usage:** `forager ondesk runtime-preflight [OPTIONS] --closeout-id <CLOSEOUT_ID>`
+
+###### **Options:**
+
+* `--closeout-id <CLOSEOUT_ID>` — Receipted decision_action_closeout.v1 ID
+* `--dry-run` — Validate without writing runtime_dispatch_preflights.jsonl
+* `--json` — Output as JSON
+
+
+
+## `forager ondesk runtime-dispatch`
+
+Queue runtime work from a ready runtime dispatch preflight
+
+**Usage:** `forager ondesk runtime-dispatch [OPTIONS] --preflight-id <PREFLIGHT_ID> --runner <RUNNER> --cmd <COMMAND>`
+
+###### **Options:**
+
+* `--preflight-id <PREFLIGHT_ID>` — Ready runtime_dispatch_preflight.v1 ID
+* `--runner <RUNNER>` — Runner backend to queue for later offdesk tick dispatch
+* `--cmd <COMMAND>` — Shell command to execute when the queued task is dispatched
+* `--workdir <WORKDIR>` — Working directory for --cmd. Defaults to the current directory
+* `--task-id <TASK_ID>` — Task ID. Generated deterministically if omitted
+* `--capability-id <CAPABILITY_ID>` — Capability ID. Currently restricted to dispatch.runtime
+
+  Default value: `dispatch.runtime`
+* `--provider-id <PROVIDER_ID>` — Provider ID to check against provider capacity cooldown state when dispatched
+* `--model <MODEL>` — Provider model to check against provider capacity cooldown state when dispatched
+* `--log-artifact <LOG_ARTIFACT>` — Log artifact path for command stdout and stderr
+* `--result-artifact <RESULT_ARTIFACT>` — Result sidecar path used by tick to mark the task completed
+* `--dry-run` — Validate without writing offdesk_tasks.json or runtime_dispatch_receipts.jsonl
+* `--json` — Output as JSON
 
 
 

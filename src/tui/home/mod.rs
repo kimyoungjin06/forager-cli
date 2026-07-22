@@ -350,7 +350,20 @@ pub struct HomeView {
 
     // Offdesk durable artifact status
     pub(super) offdesk_resume: OffdeskResumeSummary,
+
+    // Orchestration signals for the status bar
+    pub(super) orchestration: OrchestrationSignals,
+
+    // Path awaiting a "register project?" confirmation after session creation
+    pub(super) pending_registry_path: Option<std::path::PathBuf>,
+
+    // Session to attach once the registry confirmation resolves either way
+    pub(super) pending_attach_after_registry: Option<String>,
 }
+
+pub(super) use crate::offdesk::{
+    load_orchestration_signals as load_orchestration_summary, OrchestrationSignals,
+};
 
 impl HomeView {
     pub fn new(storage: Storage, available_tools: AvailableTools) -> anyhow::Result<Self> {
@@ -382,6 +395,7 @@ impl HomeView {
             .map(|config| config.sound.clone())
             .unwrap_or_default();
         let offdesk_resume = load_offdesk_summary(storage.profile());
+        let profile_name = storage.profile().to_string();
 
         let mut view = Self {
             storage,
@@ -427,6 +441,9 @@ impl HomeView {
                 .and_then(|c| c.app_state.home_list_width)
                 .unwrap_or(35),
             offdesk_resume,
+            orchestration: load_orchestration_summary(profile_name.as_str()),
+            pending_registry_path: None,
+            pending_attach_after_registry: None,
         };
 
         view.update_selected();
@@ -464,6 +481,7 @@ impl HomeView {
         self.group_tree = GroupTree::new_with_groups(&self.instances, &self.groups);
         self.flat_items = flatten_tree(&self.group_tree, &self.instances);
         self.offdesk_resume = load_offdesk_summary(self.storage.profile());
+        self.orchestration = load_orchestration_summary(self.storage.profile());
 
         if self.cursor >= self.flat_items.len() && !self.flat_items.is_empty() {
             self.cursor = self.flat_items.len() - 1;

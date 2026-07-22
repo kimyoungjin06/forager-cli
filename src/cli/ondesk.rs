@@ -5,20 +5,46 @@ use chrono::{DateTime, Utc};
 use clap::{Args, Subcommand};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::str::FromStr;
 use uuid::Uuid;
 
 use super::project_audit::{
     audit_recommendations_for_project, AuditRecommendation, DocumentationAuditProfile,
 };
 use super::review_surface::{self, ReviewSurfaceArgs};
-use crate::offdesk::operator_safe_text;
+use super::workstation_surface::{self, WorkstationSurfaceArgs};
+use crate::offdesk::{
+    operator_safe_text, BackgroundRunnerKind, DecisionLedger, DecisionReceipt, DecisionRecord,
+    DecisionStatus, DecisionTraceRef, ExecutionHandoff, OffdeskTask, OffdeskTaskInput,
+    OffdeskTaskStore,
+};
 use crate::session::{get_profile_dir, Instance, Storage};
 
 const NOTES_FILE: &str = "ondesk_notes.jsonl";
+const ACTION_ENVELOPE_SCHEMA: &str = "action_envelope.v1";
+const ACTION_ENVELOPE_RECEIPT_SCHEMA: &str = "action_envelope_receipt.v1";
+const ACTION_ENVELOPE_RECEIPTS_FILE: &str = "action_envelope_receipts.jsonl";
+const ACCEPTED_TRUTH_RECOVERY_ACTION_ENVELOPE_SCHEMA: &str =
+    "accepted_truth_recovery_action_envelope.v1";
+const ACCEPTED_TRUTH_RECOVERY_ACTION_RECEIPT_SCHEMA: &str =
+    "accepted_truth_recovery_action_receipt.v1";
+const ACCEPTED_TRUTH_RECOVERY_ACTION_RECEIPTS_FILE: &str =
+    "accepted_truth_recovery_action_receipts.jsonl";
+const ACTION_EXECUTION_PREFLIGHT_SCHEMA: &str = "action_execution_preflight.v1";
+const ACTION_EXECUTION_PREFLIGHTS_FILE: &str = "action_execution_preflights.jsonl";
+const DECISION_ACTION_EXECUTION_SCHEMA: &str = "decision_action_execution.v1";
+const DECISION_ACTION_EXECUTIONS_FILE: &str = "decision_action_executions.jsonl";
+const DECISION_ACTION_CLOSEOUT_SCHEMA: &str = "decision_action_closeout.v1";
+const DECISION_ACTION_CLOSEOUTS_FILE: &str = "decision_action_closeouts.jsonl";
+const RUNTIME_DISPATCH_PREFLIGHT_SCHEMA: &str = "runtime_dispatch_preflight.v1";
+const RUNTIME_DISPATCH_PREFLIGHTS_FILE: &str = "runtime_dispatch_preflights.jsonl";
+const RUNTIME_DISPATCH_RECEIPT_SCHEMA: &str = "runtime_dispatch_receipt.v1";
+const RUNTIME_DISPATCH_RECEIPTS_FILE: &str = "runtime_dispatch_receipts.jsonl";
 const CAPTURES_DIR: &str = "ondesk_captures";
 const PROMPT_CONTEXT_FILE: &str = "PROMPT_CONTEXT.md";
 const CAPTURE_FILE: &str = "capture.json";
@@ -49,6 +75,38 @@ pub enum OndeskCommands {
     /// Emit the shared review surface for Ondesk and future rich UIs
     #[command(name = "review-surface")]
     ReviewSurface(ReviewSurfaceArgs),
+
+    /// Emit the workstation dashboard surface for the Web UI control plane
+    #[command(name = "workstation-surface")]
+    WorkstationSurface(WorkstationSurfaceArgs),
+
+    /// Validate a Web UI action envelope and record a receipt
+    #[command(name = "action-envelope")]
+    ActionEnvelope(ActionEnvelopeProcessArgs),
+
+    /// Validate an accepted-truth recovery envelope and record a receipt
+    #[command(name = "accepted-truth-recovery-envelope")]
+    AcceptedTruthRecoveryEnvelope(AcceptedTruthRecoveryEnvelopeProcessArgs),
+
+    /// Preflight a validated action receipt before any mutation-capable executor
+    #[command(name = "action-preflight")]
+    ActionPreflight(ActionPreflightArgs),
+
+    /// Execute a supported decision action from a ready action preflight
+    #[command(name = "action-decision")]
+    ActionDecision(ActionDecisionArgs),
+
+    /// Close an applied decision action execution with a canonical decision receipt
+    #[command(name = "action-closeout")]
+    ActionCloseout(ActionCloseoutArgs),
+
+    /// Preflight a receipted decision action closeout before runtime dispatch
+    #[command(name = "runtime-preflight")]
+    RuntimePreflight(RuntimePreflightArgs),
+
+    /// Queue runtime work from a ready runtime dispatch preflight
+    #[command(name = "runtime-dispatch")]
+    RuntimeDispatch(RuntimeDispatchArgs),
 }
 
 #[derive(Args)]
@@ -125,6 +183,175 @@ pub struct PromptPackageArgs {
     output: Option<PathBuf>,
 
     /// Output metadata as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct ActionEnvelopeProcessArgs {
+    /// JSON file containing an action_envelope.v1 preview
+    #[arg(long)]
+    envelope: PathBuf,
+
+    /// Validate without writing action_envelope_receipts.jsonl
+    #[arg(long)]
+    dry_run: bool,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct AcceptedTruthRecoveryEnvelopeProcessArgs {
+    /// JSON file containing an accepted_truth_recovery_action_envelope.v1 preview
+    #[arg(long)]
+    envelope: PathBuf,
+
+    /// Validate without writing accepted_truth_recovery_action_receipts.jsonl
+    #[arg(long)]
+    dry_run: bool,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct ActionPreflightArgs {
+    /// Receipt ID from action_envelope_receipts.jsonl
+    #[arg(long)]
+    receipt_id: String,
+
+    /// Validate without writing action_execution_preflights.jsonl
+    #[arg(long)]
+    dry_run: bool,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct ActionDecisionArgs {
+    /// Ready action_execution_preflight.v1 ID
+    #[arg(long)]
+    preflight_id: String,
+
+    /// Required bounded direction for revise/block/custom decisions
+    #[arg(long, default_value = "")]
+    note: String,
+
+    /// Actor recording the decision action
+    #[arg(long, default_value = "operator")]
+    by: String,
+
+    /// Override execution handoff target
+    #[arg(long)]
+    target: Option<String>,
+
+    /// Validate without appending the decision record or execution receipt
+    #[arg(long)]
+    dry_run: bool,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct ActionCloseoutArgs {
+    /// Applied decision_action_execution.v1 ID
+    #[arg(long)]
+    execution_id: String,
+
+    /// Actor recording the closeout receipt
+    #[arg(long, default_value = "operator")]
+    by: String,
+
+    /// Result status for the consumed decision action handoff
+    #[arg(long, default_value = "closed")]
+    result_status: String,
+
+    /// Evidence summary line. Repeat for multiple lines.
+    #[arg(long = "evidence")]
+    evidence_summary: Vec<String>,
+
+    /// Remaining review item. Repeat for multiple lines.
+    #[arg(long = "remaining-review")]
+    remaining_review: Vec<String>,
+
+    /// Validate without appending the decision receipt or closeout record
+    #[arg(long)]
+    dry_run: bool,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct RuntimePreflightArgs {
+    /// Receipted decision_action_closeout.v1 ID
+    #[arg(long)]
+    closeout_id: String,
+
+    /// Validate without writing runtime_dispatch_preflights.jsonl
+    #[arg(long)]
+    dry_run: bool,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct RuntimeDispatchArgs {
+    /// Ready runtime_dispatch_preflight.v1 ID
+    #[arg(long)]
+    preflight_id: String,
+
+    /// Runner backend to queue for later offdesk tick dispatch
+    #[arg(long)]
+    runner: String,
+
+    /// Shell command to execute when the queued task is dispatched
+    #[arg(long = "cmd")]
+    command: String,
+
+    /// Working directory for --cmd. Defaults to the current directory.
+    #[arg(long)]
+    workdir: Option<PathBuf>,
+
+    /// Task ID. Generated deterministically if omitted.
+    #[arg(long)]
+    task_id: Option<String>,
+
+    /// Capability ID. Currently restricted to dispatch.runtime.
+    #[arg(long, default_value = "dispatch.runtime")]
+    capability_id: String,
+
+    /// Provider ID to check against provider capacity cooldown state when dispatched
+    #[arg(long)]
+    provider_id: Option<String>,
+
+    /// Provider model to check against provider capacity cooldown state when dispatched
+    #[arg(long)]
+    model: Option<String>,
+
+    /// Log artifact path for command stdout and stderr
+    #[arg(long)]
+    log_artifact: Option<PathBuf>,
+
+    /// Result sidecar path used by tick to mark the task completed
+    #[arg(long)]
+    result_artifact: Option<PathBuf>,
+
+    /// Validate without writing offdesk_tasks.json or runtime_dispatch_receipts.jsonl
+    #[arg(long)]
+    dry_run: bool,
+
+    /// Output as JSON
     #[arg(long)]
     json: bool,
 }
@@ -248,6 +475,439 @@ struct PromptPackageOutput {
     content: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct ActionEnvelopeInput {
+    schema: String,
+    action_id: String,
+    action_kind: String,
+    profile: String,
+    project_key: String,
+    target_ref: ActionEnvelopeTargetRef,
+    observed_hash: String,
+    nonce: String,
+    ttl: String,
+    idempotency_key: String,
+    preview: String,
+    allowed_command: String,
+    forbidden_effects: Vec<String>,
+    expected_receipt_schema: String,
+    requires_confirmation: bool,
+    #[serde(default)]
+    confirmation_phrase: Option<String>,
+    stale_rejection_reason: String,
+    #[serde(default)]
+    issued_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    expires_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ActionEnvelopeTargetRef {
+    kind: String,
+    decision_id: String,
+    status: String,
+    updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AcceptedTruthRecoveryEnvelopeInput {
+    schema: String,
+    action_id: String,
+    action_kind: String,
+    profile: String,
+    project_key: String,
+    target_ref: AcceptedTruthRecoveryTargetRef,
+    observed_hash: String,
+    nonce: String,
+    ttl: String,
+    idempotency_key: String,
+    preview: String,
+    allowed_command: String,
+    forbidden_effects: Vec<String>,
+    expected_receipt_schema: String,
+    requires_confirmation: bool,
+    confirmation_phrase: String,
+    stale_rejection_reason: String,
+    #[serde(default)]
+    issued_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    expires_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AcceptedTruthRecoveryTargetRef {
+    kind: String,
+    closeout_id: String,
+    review_id: String,
+    receipt_id: String,
+    acceptance_status: String,
+    reviewed_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+struct ActionEnvelopeProcessOutput {
+    receipt: ActionEnvelopeReceipt,
+    receipt_path: String,
+    receipt_appended: bool,
+    dry_run: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct AcceptedTruthRecoveryEnvelopeProcessOutput {
+    receipt: AcceptedTruthRecoveryActionReceipt,
+    receipt_path: String,
+    receipt_appended: bool,
+    dry_run: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct ActionEnvelopeReceipt {
+    schema: &'static str,
+    receipt_id: String,
+    action_id: String,
+    action_kind: String,
+    profile: String,
+    project_key: String,
+    decision_id: String,
+    processed_at: DateTime<Utc>,
+    result_status: &'static str,
+    stale: bool,
+    reason: String,
+    observed_hash: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current_hash: Option<String>,
+    idempotency_key: String,
+    expected_receipt_schema: String,
+    allowed_command: String,
+    forbidden_effects: Vec<String>,
+    checks: Vec<ActionEnvelopeCheck>,
+}
+
+#[derive(Debug, Serialize)]
+struct AcceptedTruthRecoveryActionReceipt {
+    schema: &'static str,
+    receipt_id: String,
+    action_id: String,
+    action_kind: String,
+    profile: String,
+    project_key: String,
+    closeout_id: String,
+    review_id: String,
+    receipt_source_id: String,
+    processed_at: DateTime<Utc>,
+    result_status: &'static str,
+    stale: bool,
+    reason: String,
+    observed_hash: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current_hash: Option<String>,
+    idempotency_key: String,
+    expected_receipt_schema: String,
+    allowed_command: String,
+    forbidden_effects: Vec<String>,
+    checks: Vec<ActionEnvelopeCheck>,
+}
+
+#[derive(Debug, Serialize)]
+struct ActionEnvelopeCheck {
+    name: &'static str,
+    status: &'static str,
+    detail: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct StoredActionEnvelopeReceipt {
+    schema: String,
+    receipt_id: String,
+    action_id: String,
+    action_kind: String,
+    profile: String,
+    project_key: String,
+    decision_id: String,
+    processed_at: DateTime<Utc>,
+    result_status: String,
+    stale: bool,
+    observed_hash: String,
+    #[serde(default)]
+    current_hash: Option<String>,
+    idempotency_key: String,
+    allowed_command: String,
+    forbidden_effects: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ActionPreflightOutput {
+    preflight: ActionExecutionPreflight,
+    preflight_path: String,
+    preflight_appended: bool,
+    dry_run: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct ActionExecutionPreflight {
+    schema: &'static str,
+    preflight_id: String,
+    source_receipt_id: String,
+    action_id: String,
+    action_kind: String,
+    profile: String,
+    project_key: String,
+    decision_id: String,
+    processed_at: DateTime<Utc>,
+    result_status: &'static str,
+    executor_required: bool,
+    mutation_allowed_by_this_command: bool,
+    reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    receipt_current_hash: Option<String>,
+    idempotency_key: String,
+    next_step: String,
+    checks: Vec<ActionPreflightCheck>,
+}
+
+#[derive(Debug, Serialize)]
+struct ActionPreflightCheck {
+    name: &'static str,
+    status: &'static str,
+    detail: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct StoredActionExecutionPreflight {
+    schema: String,
+    preflight_id: String,
+    source_receipt_id: String,
+    action_id: String,
+    action_kind: String,
+    profile: String,
+    project_key: String,
+    decision_id: String,
+    result_status: String,
+    #[serde(default)]
+    current_hash: Option<String>,
+    idempotency_key: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ActionDecisionOutput {
+    execution: Value,
+    execution_path: String,
+    execution_appended: bool,
+    decision_appended: bool,
+    dry_run: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    updated_record: Option<DecisionRecord>,
+}
+
+#[derive(Debug, Serialize)]
+struct ActionCloseoutOutput {
+    closeout: Value,
+    closeout_path: String,
+    closeout_appended: bool,
+    decision_appended: bool,
+    dry_run: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    updated_record: Option<DecisionRecord>,
+}
+
+#[derive(Debug, Serialize)]
+struct DecisionActionExecution {
+    schema: &'static str,
+    execution_id: String,
+    preflight_id: String,
+    source_receipt_id: String,
+    action_id: String,
+    action_kind: String,
+    decision: String,
+    profile: String,
+    project_key: String,
+    decision_id: String,
+    executed_at: DateTime<Utc>,
+    result_status: &'static str,
+    mutation_allowed_by_this_command: bool,
+    decision_appended: bool,
+    reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    handoff_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current_hash: Option<String>,
+    idempotency_key: String,
+    checks: Vec<ActionDecisionCheck>,
+}
+
+#[derive(Debug, Serialize)]
+struct ActionDecisionCheck {
+    name: &'static str,
+    status: &'static str,
+    detail: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct StoredDecisionActionExecution {
+    schema: String,
+    execution_id: String,
+    preflight_id: String,
+    action_kind: String,
+    decision: String,
+    profile: String,
+    project_key: String,
+    decision_id: String,
+    result_status: String,
+    mutation_allowed_by_this_command: bool,
+    decision_appended: bool,
+    #[serde(default)]
+    handoff_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DecisionActionCloseout {
+    schema: &'static str,
+    closeout_id: String,
+    execution_id: String,
+    preflight_id: String,
+    action_kind: String,
+    decision: String,
+    profile: String,
+    project_key: String,
+    decision_id: String,
+    recorded_at: DateTime<Utc>,
+    result_status: &'static str,
+    receipt_result_status: String,
+    mutation_allowed_by_this_command: bool,
+    decision_appended: bool,
+    reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    receipt_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    handoff_id: Option<String>,
+    evidence_summary: Vec<String>,
+    remaining_review: Vec<String>,
+    checks: Vec<ActionCloseoutCheck>,
+}
+
+#[derive(Debug, Serialize)]
+struct ActionCloseoutCheck {
+    name: &'static str,
+    status: &'static str,
+    detail: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct StoredDecisionActionCloseout {
+    schema: String,
+    closeout_id: String,
+    execution_id: String,
+    preflight_id: String,
+    action_kind: String,
+    decision: String,
+    profile: String,
+    project_key: String,
+    decision_id: String,
+    result_status: String,
+    mutation_allowed_by_this_command: bool,
+    decision_appended: bool,
+    #[serde(default)]
+    receipt_id: Option<String>,
+    #[serde(default)]
+    handoff_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct RuntimePreflightOutput {
+    preflight: RuntimeDispatchPreflight,
+    preflight_path: String,
+    preflight_appended: bool,
+    dry_run: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct RuntimeDispatchOutput {
+    receipt: Value,
+    receipt_path: String,
+    receipt_appended: bool,
+    task_enqueued: bool,
+    dry_run: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    task: Option<crate::offdesk::OffdeskTaskView>,
+}
+
+#[derive(Debug, Serialize)]
+struct RuntimeDispatchPreflight {
+    schema: &'static str,
+    preflight_id: String,
+    source_closeout_id: String,
+    source_execution_id: String,
+    source_action_preflight_id: String,
+    action_kind: String,
+    decision: String,
+    profile: String,
+    project_key: String,
+    decision_id: String,
+    request_id: String,
+    source_task_id: String,
+    processed_at: DateTime<Utc>,
+    result_status: &'static str,
+    mutation_allowed_by_this_command: bool,
+    reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    receipt_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    handoff_id: Option<String>,
+    next_step: String,
+    checks: Vec<RuntimeDispatchCheck>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct StoredRuntimeDispatchPreflight {
+    schema: String,
+    preflight_id: String,
+    source_closeout_id: String,
+    source_execution_id: String,
+    profile: String,
+    project_key: String,
+    decision_id: String,
+    request_id: String,
+    result_status: String,
+}
+
+#[derive(Debug, Serialize)]
+struct RuntimeDispatchReceipt {
+    schema: &'static str,
+    receipt_id: String,
+    preflight_id: String,
+    source_closeout_id: String,
+    source_execution_id: String,
+    profile: String,
+    project_key: String,
+    decision_id: String,
+    request_id: String,
+    task_id: String,
+    capability_id: String,
+    runner_kind: BackgroundRunnerKind,
+    command: String,
+    workdir: String,
+    recorded_at: DateTime<Utc>,
+    result_status: &'static str,
+    mutation_allowed_by_this_command: bool,
+    task_enqueued: bool,
+    reason: String,
+    next_step: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    checks: Vec<RuntimeDispatchCheck>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RuntimeDispatchCheck {
+    name: &'static str,
+    status: &'static str,
+    detail: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 struct OndeskCloseoutSummary {
     closeout_id: String,
@@ -360,6 +1020,16 @@ pub async fn run(profile: &str, command: OndeskCommands) -> Result<()> {
         OndeskCommands::Capture(args) => capture(profile, args).await,
         OndeskCommands::PromptPackage(args) => prompt_package(profile, args).await,
         OndeskCommands::ReviewSurface(args) => review_surface::run(profile, args).await,
+        OndeskCommands::WorkstationSurface(args) => workstation_surface::run(profile, args).await,
+        OndeskCommands::ActionEnvelope(args) => action_envelope(profile, args).await,
+        OndeskCommands::AcceptedTruthRecoveryEnvelope(args) => {
+            accepted_truth_recovery_envelope(profile, args).await
+        }
+        OndeskCommands::ActionPreflight(args) => action_preflight(profile, args).await,
+        OndeskCommands::ActionDecision(args) => action_decision(profile, args).await,
+        OndeskCommands::ActionCloseout(args) => action_closeout(profile, args).await,
+        OndeskCommands::RuntimePreflight(args) => runtime_preflight(profile, args).await,
+        OndeskCommands::RuntimeDispatch(args) => runtime_dispatch(profile, args).await,
     }
 }
 
@@ -642,6 +1312,3477 @@ async fn prompt_package(profile: &str, args: PromptPackageArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn action_envelope(profile: &str, args: ActionEnvelopeProcessArgs) -> Result<()> {
+    let storage = Storage::new(profile)?;
+    let profile_name = storage.profile().to_string();
+    let profile_dir = get_profile_dir(&profile_name)?;
+    let envelope_content = fs::read_to_string(&args.envelope)
+        .with_context(|| format!("read action envelope {}", args.envelope.display()))?;
+    let envelope: ActionEnvelopeInput = serde_json::from_str(&envelope_content)
+        .with_context(|| format!("parse action envelope {}", args.envelope.display()))?;
+    let record = DecisionLedger::new(&profile_dir).find(&envelope.target_ref.decision_id)?;
+    let receipt = build_action_envelope_receipt(&profile_name, &envelope, record.as_ref());
+    let receipt_path = profile_dir.join(ACTION_ENVELOPE_RECEIPTS_FILE);
+    let receipt_appended = if args.dry_run {
+        false
+    } else {
+        append_action_envelope_receipt(&receipt_path, &receipt)?
+    };
+
+    if args.json {
+        let output = ActionEnvelopeProcessOutput {
+            receipt,
+            receipt_path: receipt_path.display().to_string(),
+            receipt_appended,
+            dry_run: args.dry_run,
+        };
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        println!(
+            "Action envelope {}: {}",
+            receipt.result_status, receipt.receipt_id
+        );
+        println!("  Decision: {}", receipt.decision_id);
+        println!("  Stale:    {}", receipt.stale);
+        println!("  Appended: {}", receipt_appended);
+        println!("  Receipt:  {}", receipt_path.display());
+        if receipt.stale {
+            println!("  Reason:   {}", receipt.reason);
+        }
+    }
+
+    Ok(())
+}
+
+async fn accepted_truth_recovery_envelope(
+    profile: &str,
+    args: AcceptedTruthRecoveryEnvelopeProcessArgs,
+) -> Result<()> {
+    let storage = Storage::new(profile)?;
+    let profile_name = storage.profile().to_string();
+    let profile_dir = get_profile_dir(&profile_name)?;
+    let envelope_content = fs::read_to_string(&args.envelope).with_context(|| {
+        format!(
+            "read accepted truth recovery envelope {}",
+            args.envelope.display()
+        )
+    })?;
+    let envelope: AcceptedTruthRecoveryEnvelopeInput = serde_json::from_str(&envelope_content)
+        .with_context(|| {
+            format!(
+                "parse accepted truth recovery envelope {}",
+                args.envelope.display()
+            )
+        })?;
+    let surface = workstation_surface::accepted_truth_recovery_surface_value(&profile_name)?;
+    let current_item = accepted_truth_recovery_current_item(&surface, &envelope);
+    let receipt =
+        build_accepted_truth_recovery_action_receipt(&profile_name, &envelope, current_item);
+    let receipt_path = profile_dir.join(ACCEPTED_TRUTH_RECOVERY_ACTION_RECEIPTS_FILE);
+    let receipt_appended = if args.dry_run {
+        false
+    } else {
+        append_accepted_truth_recovery_action_receipt(&receipt_path, &receipt)?
+    };
+
+    if args.json {
+        let output = AcceptedTruthRecoveryEnvelopeProcessOutput {
+            receipt,
+            receipt_path: receipt_path.display().to_string(),
+            receipt_appended,
+            dry_run: args.dry_run,
+        };
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        println!(
+            "Accepted-truth recovery envelope {}: {}",
+            receipt.result_status, receipt.receipt_id
+        );
+        println!("  Closeout: {}", receipt.closeout_id);
+        println!("  Stale:    {}", receipt.stale);
+        println!("  Appended: {}", receipt_appended);
+        println!("  Receipt:  {}", receipt_path.display());
+        if receipt.stale {
+            println!("  Reason:   {}", receipt.reason);
+        }
+    }
+
+    Ok(())
+}
+
+async fn action_preflight(profile: &str, args: ActionPreflightArgs) -> Result<()> {
+    let storage = Storage::new(profile)?;
+    let profile_name = storage.profile().to_string();
+    let profile_dir = get_profile_dir(&profile_name)?;
+    let receipts = read_action_envelope_receipts(&profile_dir)?;
+    let source_receipt = receipts
+        .iter()
+        .find(|receipt| receipt.receipt_id == args.receipt_id);
+    let record = source_receipt
+        .map(|receipt| {
+            DecisionLedger::new(&profile_dir)
+                .find(&receipt.decision_id)
+                .with_context(|| format!("read decision {}", receipt.decision_id))
+        })
+        .transpose()?
+        .flatten();
+    let preflight = build_action_execution_preflight(
+        &profile_name,
+        &args.receipt_id,
+        source_receipt,
+        &receipts,
+        record.as_ref(),
+    );
+    let preflight_path = profile_dir.join(ACTION_EXECUTION_PREFLIGHTS_FILE);
+    let preflight_appended = if args.dry_run {
+        false
+    } else {
+        append_action_execution_preflight(&preflight_path, &preflight)?
+    };
+
+    if args.json {
+        let output = ActionPreflightOutput {
+            preflight,
+            preflight_path: preflight_path.display().to_string(),
+            preflight_appended,
+            dry_run: args.dry_run,
+        };
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        println!(
+            "Action preflight {}: {}",
+            preflight.result_status, preflight.preflight_id
+        );
+        println!("  Receipt:  {}", preflight.source_receipt_id);
+        println!("  Decision: {}", preflight.decision_id);
+        println!("  Appended: {}", preflight_appended);
+        println!("  Path:     {}", preflight_path.display());
+        if preflight.result_status != "ready_for_executor" {
+            println!("  Reason:   {}", preflight.reason);
+        }
+    }
+
+    Ok(())
+}
+
+async fn action_decision(profile: &str, args: ActionDecisionArgs) -> Result<()> {
+    let storage = Storage::new(profile)?;
+    let profile_name = storage.profile().to_string();
+    let profile_dir = get_profile_dir(&profile_name)?;
+    let preflights = read_action_execution_preflights(&profile_dir)?;
+    let source_preflight = preflights
+        .iter()
+        .find(|preflight| preflight.preflight_id == args.preflight_id);
+    let ledger = DecisionLedger::new(&profile_dir);
+    let execution_path = profile_dir.join(DECISION_ACTION_EXECUTIONS_FILE);
+    if let Some(existing_execution) =
+        find_decision_action_execution_for_preflight(&execution_path, &args.preflight_id)?
+    {
+        if args.json {
+            let output = ActionDecisionOutput {
+                execution: existing_execution,
+                execution_path: execution_path.display().to_string(),
+                execution_appended: false,
+                decision_appended: false,
+                dry_run: args.dry_run,
+                updated_record: None,
+            };
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        } else {
+            println!("Decision action already recorded for {}", args.preflight_id);
+            println!("  Receipt: {}", execution_path.display());
+        }
+        return Ok(());
+    }
+
+    let record = source_preflight
+        .map(|preflight| {
+            ledger
+                .find(&preflight.decision_id)
+                .with_context(|| format!("read decision {}", preflight.decision_id))
+        })
+        .transpose()?
+        .flatten();
+    let execution = build_decision_action_execution(
+        &profile_name,
+        &args.preflight_id,
+        source_preflight,
+        record.as_ref(),
+        &args,
+    );
+    let mut updated_record = None;
+    let mut decision_appended = false;
+    let mut execution_appended = false;
+
+    if !args.dry_run {
+        if execution.result_status == "applied" {
+            if let Some(record) = record {
+                let updated = apply_decision_action(record, &execution, &args);
+                ledger.append(&updated)?;
+                decision_appended = true;
+                updated_record = Some(updated);
+            }
+        }
+        execution_appended = append_decision_action_execution(&execution_path, &execution)?;
+    }
+
+    if args.json {
+        let execution_value = serde_json::to_value(&execution)?;
+        let output = ActionDecisionOutput {
+            execution: execution_value,
+            execution_path: execution_path.display().to_string(),
+            execution_appended,
+            decision_appended,
+            dry_run: args.dry_run,
+            updated_record,
+        };
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        println!(
+            "Decision action {}: {}",
+            execution.result_status, execution.execution_id
+        );
+        println!("  Preflight: {}", execution.preflight_id);
+        println!("  Decision:  {}", execution.decision_id);
+        println!("  Appended:  {}", decision_appended);
+        println!("  Receipt:   {}", execution_path.display());
+        if execution.result_status != "applied" {
+            println!("  Reason:    {}", execution.reason);
+        }
+    }
+
+    Ok(())
+}
+
+async fn action_closeout(profile: &str, args: ActionCloseoutArgs) -> Result<()> {
+    let storage = Storage::new(profile)?;
+    let profile_name = storage.profile().to_string();
+    let profile_dir = get_profile_dir(&profile_name)?;
+    let execution_path = profile_dir.join(DECISION_ACTION_EXECUTIONS_FILE);
+    let closeout_path = profile_dir.join(DECISION_ACTION_CLOSEOUTS_FILE);
+
+    if let Some(existing_closeout) =
+        find_decision_action_closeout_for_execution(&closeout_path, &args.execution_id)?
+    {
+        if args.json {
+            let output = ActionCloseoutOutput {
+                closeout: existing_closeout,
+                closeout_path: closeout_path.display().to_string(),
+                closeout_appended: false,
+                decision_appended: false,
+                dry_run: args.dry_run,
+                updated_record: None,
+            };
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        } else {
+            println!(
+                "Decision action closeout already recorded for {}",
+                args.execution_id
+            );
+            println!("  Receipt: {}", closeout_path.display());
+        }
+        return Ok(());
+    }
+
+    let source_execution = find_decision_action_execution(&execution_path, &args.execution_id)?;
+    let ledger = DecisionLedger::new(&profile_dir);
+    let record = source_execution
+        .as_ref()
+        .map(|execution| {
+            ledger
+                .find(&execution.decision_id)
+                .with_context(|| format!("read decision {}", execution.decision_id))
+        })
+        .transpose()?
+        .flatten();
+    let closeout = build_decision_action_closeout(
+        &profile_name,
+        &args.execution_id,
+        source_execution.as_ref(),
+        record.as_ref(),
+        &args,
+    );
+    let mut updated_record = None;
+    let mut decision_appended = false;
+    let mut closeout_appended = false;
+
+    if !args.dry_run {
+        if closeout.result_status == "receipted" {
+            if let Some(record) = record {
+                let updated = apply_decision_action_closeout(record, &closeout, &args);
+                ledger.append(&updated)?;
+                decision_appended = true;
+                updated_record = Some(updated);
+            }
+        }
+        closeout_appended = append_decision_action_closeout(&closeout_path, &closeout)?;
+    }
+
+    if args.json {
+        let output = ActionCloseoutOutput {
+            closeout: serde_json::to_value(&closeout)?,
+            closeout_path: closeout_path.display().to_string(),
+            closeout_appended,
+            decision_appended,
+            dry_run: args.dry_run,
+            updated_record,
+        };
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        println!(
+            "Decision action closeout {}: {}",
+            closeout.result_status, closeout.closeout_id
+        );
+        println!("  Execution: {}", closeout.execution_id);
+        println!("  Decision:  {}", closeout.decision_id);
+        println!("  Appended:  {}", decision_appended);
+        println!("  Receipt:   {}", closeout_path.display());
+        if closeout.result_status != "receipted" {
+            println!("  Reason:    {}", closeout.reason);
+        }
+    }
+
+    Ok(())
+}
+
+async fn runtime_preflight(profile: &str, args: RuntimePreflightArgs) -> Result<()> {
+    let storage = Storage::new(profile)?;
+    let profile_name = storage.profile().to_string();
+    let profile_dir = get_profile_dir(&profile_name)?;
+    let closeout_path = profile_dir.join(DECISION_ACTION_CLOSEOUTS_FILE);
+    let closeouts = read_decision_action_closeouts(&closeout_path)?;
+    let source_closeout = closeouts
+        .iter()
+        .find(|closeout| closeout.closeout_id == args.closeout_id);
+    let record = source_closeout
+        .map(|closeout| {
+            DecisionLedger::new(&profile_dir)
+                .find(&closeout.decision_id)
+                .with_context(|| format!("read decision {}", closeout.decision_id))
+        })
+        .transpose()?
+        .flatten();
+    let preflight = build_runtime_dispatch_preflight(
+        &profile_name,
+        &args.closeout_id,
+        source_closeout,
+        record.as_ref(),
+    );
+    let preflight_path = profile_dir.join(RUNTIME_DISPATCH_PREFLIGHTS_FILE);
+    let preflight_appended = if args.dry_run {
+        false
+    } else {
+        append_runtime_dispatch_preflight(&preflight_path, &preflight)?
+    };
+
+    if args.json {
+        let output = RuntimePreflightOutput {
+            preflight,
+            preflight_path: preflight_path.display().to_string(),
+            preflight_appended,
+            dry_run: args.dry_run,
+        };
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        println!(
+            "Runtime dispatch preflight {}: {}",
+            preflight.result_status, preflight.preflight_id
+        );
+        println!("  Closeout: {}", preflight.source_closeout_id);
+        println!("  Decision: {}", preflight.decision_id);
+        println!("  Appended: {}", preflight_appended);
+        println!("  Path:     {}", preflight_path.display());
+        if preflight.result_status != "ready_for_runtime_dispatch" {
+            println!("  Reason:   {}", preflight.reason);
+        }
+    }
+
+    Ok(())
+}
+
+async fn runtime_dispatch(profile: &str, args: RuntimeDispatchArgs) -> Result<()> {
+    let storage = Storage::new(profile)?;
+    let profile_name = storage.profile().to_string();
+    let profile_dir = get_profile_dir(&profile_name)?;
+    let preflights = read_runtime_dispatch_preflights(&profile_dir)?;
+    let source_preflight = preflights
+        .iter()
+        .find(|preflight| preflight.preflight_id == args.preflight_id);
+    let receipt_path = profile_dir.join(RUNTIME_DISPATCH_RECEIPTS_FILE);
+    if let Some(existing_receipt) =
+        find_runtime_dispatch_receipt_for_preflight(&receipt_path, &args.preflight_id)?
+    {
+        if args.json {
+            let output = RuntimeDispatchOutput {
+                receipt: existing_receipt,
+                receipt_path: receipt_path.display().to_string(),
+                receipt_appended: false,
+                task_enqueued: false,
+                dry_run: args.dry_run,
+                task: None,
+            };
+            println!("{}", serde_json::to_string_pretty(&output)?);
+        } else {
+            println!(
+                "Runtime dispatch already recorded for {}",
+                args.preflight_id
+            );
+            println!("  Receipt: {}", receipt_path.display());
+        }
+        return Ok(());
+    }
+
+    let task_store = OffdeskTaskStore::new(&profile_dir);
+    let existing_tasks = task_store.load().unwrap_or_default();
+    let receipt = build_runtime_dispatch_receipt(
+        &profile_name,
+        &args.preflight_id,
+        source_preflight,
+        &preflights,
+        &existing_tasks,
+        &args,
+    );
+    let mut task = None;
+    let mut task_enqueued = false;
+    let mut receipt_appended = false;
+
+    if !args.dry_run {
+        if receipt.result_status == "queued" {
+            let queued_task = runtime_dispatch_task(&receipt, &args);
+            task_store.enqueue(queued_task.clone())?;
+            task = Some(queued_task.operator_view());
+            task_enqueued = true;
+        }
+        receipt_appended = append_runtime_dispatch_receipt(&receipt_path, &receipt)?;
+    }
+
+    if args.json {
+        let output = RuntimeDispatchOutput {
+            receipt: serde_json::to_value(&receipt)?,
+            receipt_path: receipt_path.display().to_string(),
+            receipt_appended,
+            task_enqueued,
+            dry_run: args.dry_run,
+            task,
+        };
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        println!(
+            "Runtime dispatch {}: {}",
+            receipt.result_status, receipt.receipt_id
+        );
+        println!("  Preflight: {}", receipt.preflight_id);
+        println!("  Task:      {}", receipt.task_id);
+        println!("  Appended:  {}", receipt_appended);
+        println!("  Receipt:   {}", receipt_path.display());
+        if receipt.result_status != "queued" {
+            println!("  Reason:    {}", receipt.reason);
+        }
+    }
+
+    Ok(())
+}
+
+fn build_action_envelope_receipt(
+    profile: &str,
+    envelope: &ActionEnvelopeInput,
+    record: Option<&DecisionRecord>,
+) -> ActionEnvelopeReceipt {
+    let processed_at = Utc::now();
+    let current_hash =
+        record.map(|record| action_envelope_observed_hash(record, &envelope.action_kind));
+    let expected_profile = safe(profile);
+    let mut checks = Vec::new();
+    let mut blockers = Vec::new();
+
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "schema",
+        envelope.schema == ACTION_ENVELOPE_SCHEMA,
+        format!("schema is {ACTION_ENVELOPE_SCHEMA}"),
+        format!(
+            "expected {ACTION_ENVELOPE_SCHEMA}, got {}",
+            safe(&envelope.schema)
+        ),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "expected_receipt_schema",
+        envelope.expected_receipt_schema == ACTION_ENVELOPE_RECEIPT_SCHEMA,
+        format!("receipt schema is {ACTION_ENVELOPE_RECEIPT_SCHEMA}"),
+        format!(
+            "expected {ACTION_ENVELOPE_RECEIPT_SCHEMA}, got {}",
+            safe(&envelope.expected_receipt_schema)
+        ),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "profile",
+        envelope.profile == expected_profile,
+        format!("profile matches {expected_profile}"),
+        format!(
+            "expected profile {expected_profile}, got {}",
+            safe(&envelope.profile)
+        ),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "action_id",
+        !envelope.action_id.trim().is_empty(),
+        "action id is present".to_string(),
+        "action id is required".to_string(),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "action_kind",
+        !envelope.action_kind.trim().is_empty(),
+        "action kind is present".to_string(),
+        "action kind is required".to_string(),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "target_kind",
+        envelope.target_ref.kind == "decision_record.v1",
+        "target kind is decision_record.v1".to_string(),
+        format!("unexpected target kind {}", safe(&envelope.target_ref.kind)),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "decision_exists",
+        record.is_some(),
+        format!(
+            "decision {} is present",
+            safe(&envelope.target_ref.decision_id)
+        ),
+        format!(
+            "decision {} was not found",
+            safe(&envelope.target_ref.decision_id)
+        ),
+    );
+
+    if let Some(record) = record {
+        record_action_envelope_check(
+            &mut checks,
+            &mut blockers,
+            "project_key",
+            envelope.project_key == record.project_key,
+            format!("project key matches {}", safe(&record.project_key)),
+            format!(
+                "expected project {}, got {}",
+                safe(&record.project_key),
+                safe(&envelope.project_key)
+            ),
+        );
+        record_action_envelope_check(
+            &mut checks,
+            &mut blockers,
+            "target_status",
+            envelope.target_ref.status == record.status.as_str(),
+            format!("status matches {}", record.status.as_str()),
+            format!(
+                "expected status {}, got {}",
+                record.status.as_str(),
+                safe(&envelope.target_ref.status)
+            ),
+        );
+        record_action_envelope_check(
+            &mut checks,
+            &mut blockers,
+            "target_updated_at",
+            envelope.target_ref.updated_at == record.updated_at,
+            format!("updated_at matches {}", record.updated_at.to_rfc3339()),
+            format!(
+                "expected {}, got {}",
+                record.updated_at.to_rfc3339(),
+                envelope.target_ref.updated_at.to_rfc3339()
+            ),
+        );
+        let expected_command = format!(
+            "forager offdesk decision show --json {}",
+            operator_safe_text(&record.decision_id)
+        );
+        record_action_envelope_check(
+            &mut checks,
+            &mut blockers,
+            "allowed_command",
+            envelope.allowed_command == expected_command,
+            "allowed command is the read-only decision inspector".to_string(),
+            format!(
+                "expected {}, got {}",
+                expected_command,
+                safe(&envelope.allowed_command)
+            ),
+        );
+    } else {
+        record_action_envelope_check(
+            &mut checks,
+            &mut blockers,
+            "project_key",
+            false,
+            String::new(),
+            "cannot verify project key without a decision record".to_string(),
+        );
+        record_action_envelope_check(
+            &mut checks,
+            &mut blockers,
+            "target_status",
+            false,
+            String::new(),
+            "cannot verify target status without a decision record".to_string(),
+        );
+        record_action_envelope_check(
+            &mut checks,
+            &mut blockers,
+            "target_updated_at",
+            false,
+            String::new(),
+            "cannot verify target timestamp without a decision record".to_string(),
+        );
+        record_action_envelope_check(
+            &mut checks,
+            &mut blockers,
+            "allowed_command",
+            false,
+            String::new(),
+            "cannot verify allowed command without a decision record".to_string(),
+        );
+    }
+
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "observed_hash",
+        current_hash.as_deref() == Some(envelope.observed_hash.as_str()),
+        format!(
+            "observed hash matches {}",
+            current_hash.as_deref().unwrap_or("missing")
+        ),
+        format!(
+            "expected {}, got {}",
+            current_hash.as_deref().unwrap_or("missing"),
+            safe(&envelope.observed_hash)
+        ),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "ttl",
+        envelope.ttl == "PT10M",
+        "ttl is PT10M".to_string(),
+        format!("expected PT10M, got {}", safe(&envelope.ttl)),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "issued_at",
+        envelope.issued_at.is_some(),
+        envelope
+            .issued_at
+            .map(|value| format!("issued_at is {}", value.to_rfc3339()))
+            .unwrap_or_default(),
+        "issued_at is required for stale rejection".to_string(),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "expires_at",
+        envelope
+            .expires_at
+            .map(|expires_at| expires_at >= processed_at)
+            .unwrap_or(false),
+        envelope
+            .expires_at
+            .map(|value| format!("expires_at is {}", value.to_rfc3339()))
+            .unwrap_or_default(),
+        envelope
+            .expires_at
+            .map(|value| {
+                format!(
+                    "envelope expired at {}, processed at {}",
+                    value.to_rfc3339(),
+                    processed_at.to_rfc3339()
+                )
+            })
+            .unwrap_or_else(|| "expires_at is required for stale rejection".to_string()),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "issued_before_expiry",
+        envelope
+            .issued_at
+            .zip(envelope.expires_at)
+            .map(|(issued_at, expires_at)| issued_at <= expires_at)
+            .unwrap_or(false),
+        "issued_at is not after expires_at".to_string(),
+        "issued_at must be less than or equal to expires_at".to_string(),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "idempotency_key",
+        !envelope.idempotency_key.trim().is_empty(),
+        "idempotency key is present".to_string(),
+        "idempotency key is required".to_string(),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "nonce",
+        !envelope.nonce.trim().is_empty(),
+        "nonce is present".to_string(),
+        "nonce is required".to_string(),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "preview",
+        !envelope.preview.trim().is_empty(),
+        "preview text is present".to_string(),
+        "preview text is required".to_string(),
+    );
+    let all_forbidden_effects_present = [
+        "project_file_mutation",
+        "runtime_dispatch",
+        "approval_ledger_mutation",
+        "accepted_truth_mutation",
+        "arbitrary_shell",
+    ]
+    .iter()
+    .all(|expected| {
+        envelope
+            .forbidden_effects
+            .iter()
+            .any(|effect| effect == expected)
+    });
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "forbidden_effects",
+        all_forbidden_effects_present,
+        "forbidden effects include mutation and arbitrary shell boundaries".to_string(),
+        "forbidden effects must include project/runtime/approval/truth/arbitrary_shell boundaries"
+            .to_string(),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "confirmation_phrase",
+        !envelope.requires_confirmation
+            || envelope
+                .confirmation_phrase
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty()),
+        if envelope.requires_confirmation {
+            "confirmation phrase is present".to_string()
+        } else {
+            "confirmation phrase is not required".to_string()
+        },
+        "confirmation phrase is required when requires_confirmation=true".to_string(),
+    );
+
+    let stale = !blockers.is_empty();
+    let result_status = if stale {
+        "rejected"
+    } else {
+        "validated_preview"
+    };
+    let reason = if stale {
+        format!(
+            "{} Checks failed: {}",
+            safe(&envelope.stale_rejection_reason),
+            blockers.join("; ")
+        )
+    } else {
+        "Envelope matches current decision ledger; processor remains read-only.".to_string()
+    };
+    let receipt_id = action_envelope_receipt_id(
+        &envelope.idempotency_key,
+        result_status,
+        current_hash.as_deref(),
+        &reason,
+        &envelope.observed_hash,
+    );
+
+    ActionEnvelopeReceipt {
+        schema: ACTION_ENVELOPE_RECEIPT_SCHEMA,
+        receipt_id,
+        action_id: safe(&envelope.action_id),
+        action_kind: safe(&envelope.action_kind),
+        profile: safe(&envelope.profile),
+        project_key: safe(&envelope.project_key),
+        decision_id: safe(&envelope.target_ref.decision_id),
+        processed_at,
+        result_status,
+        stale,
+        reason,
+        observed_hash: safe(&envelope.observed_hash),
+        current_hash,
+        idempotency_key: safe(&envelope.idempotency_key),
+        expected_receipt_schema: safe(&envelope.expected_receipt_schema),
+        allowed_command: safe(&envelope.allowed_command),
+        forbidden_effects: envelope
+            .forbidden_effects
+            .iter()
+            .map(|effect| safe(effect))
+            .collect(),
+        checks,
+    }
+}
+
+fn accepted_truth_recovery_current_item<'a>(
+    surface: &'a Value,
+    envelope: &AcceptedTruthRecoveryEnvelopeInput,
+) -> Option<&'a Value> {
+    surface
+        .get("items")
+        .and_then(Value::as_array)?
+        .iter()
+        .find(|item| {
+            item.get("closeout_id")
+                .and_then(Value::as_str)
+                .is_some_and(|value| value == envelope.target_ref.closeout_id)
+                && item
+                    .get("review_id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| value == envelope.target_ref.review_id)
+                && item
+                    .get("receipt_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    == envelope.target_ref.receipt_id
+        })
+}
+
+fn build_accepted_truth_recovery_action_receipt(
+    profile: &str,
+    envelope: &AcceptedTruthRecoveryEnvelopeInput,
+    current_item: Option<&Value>,
+) -> AcceptedTruthRecoveryActionReceipt {
+    let processed_at = Utc::now();
+    let current_hash = current_item.map(|item| {
+        workstation_surface::accepted_truth_recovery_observed_hash_from_value(
+            item,
+            &envelope.action_kind,
+        )
+    });
+    let expected_profile = safe(profile);
+    let mut checks = Vec::new();
+    let mut blockers = Vec::new();
+
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "schema",
+        envelope.schema == ACCEPTED_TRUTH_RECOVERY_ACTION_ENVELOPE_SCHEMA,
+        format!("schema is {ACCEPTED_TRUTH_RECOVERY_ACTION_ENVELOPE_SCHEMA}"),
+        format!(
+            "expected {ACCEPTED_TRUTH_RECOVERY_ACTION_ENVELOPE_SCHEMA}, got {}",
+            safe(&envelope.schema)
+        ),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "expected_receipt_schema",
+        envelope.expected_receipt_schema == ACCEPTED_TRUTH_RECOVERY_ACTION_RECEIPT_SCHEMA,
+        format!("receipt schema is {ACCEPTED_TRUTH_RECOVERY_ACTION_RECEIPT_SCHEMA}"),
+        format!(
+            "expected {ACCEPTED_TRUTH_RECOVERY_ACTION_RECEIPT_SCHEMA}, got {}",
+            safe(&envelope.expected_receipt_schema)
+        ),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "profile",
+        envelope.profile == expected_profile,
+        format!("profile matches {expected_profile}"),
+        format!(
+            "expected profile {expected_profile}, got {}",
+            safe(&envelope.profile)
+        ),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "action_id",
+        !envelope.action_id.trim().is_empty(),
+        "action id is present".to_string(),
+        "action id is required".to_string(),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "action_kind",
+        matches!(
+            envelope.action_kind.as_str(),
+            "resolve_followup" | "retire_closeout"
+        ),
+        "action kind is supported".to_string(),
+        format!(
+            "unsupported accepted-truth recovery action {}",
+            safe(&envelope.action_kind)
+        ),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "target_kind",
+        envelope.target_ref.kind == "accepted_truth_recovery.v1",
+        "target kind is accepted_truth_recovery.v1".to_string(),
+        format!("unexpected target kind {}", safe(&envelope.target_ref.kind)),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "target_exists",
+        current_item.is_some(),
+        format!(
+            "closeout {} review {} is still present",
+            safe(&envelope.target_ref.closeout_id),
+            safe(&envelope.target_ref.review_id)
+        ),
+        format!(
+            "closeout {} review {} receipt {} is not in current accepted-truth recovery surface",
+            safe(&envelope.target_ref.closeout_id),
+            safe(&envelope.target_ref.review_id),
+            safe(&envelope.target_ref.receipt_id)
+        ),
+    );
+
+    if let Some(item) = current_item {
+        let expected_project = value_text(item, "/project_key").unwrap_or_default();
+        let expected_acceptance_status = value_text(item, "/acceptance_status").unwrap_or_default();
+        let expected_reviewed_at = value_text(item, "/reviewed_at")
+            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+            .map(|value| value.with_timezone(&Utc));
+        let expected_command =
+            accepted_truth_recovery_expected_command(item, &envelope.action_kind);
+
+        record_action_envelope_check(
+            &mut checks,
+            &mut blockers,
+            "project_key",
+            envelope.project_key == expected_project,
+            format!("project key matches {}", safe(expected_project)),
+            format!(
+                "expected project {}, got {}",
+                safe(expected_project),
+                safe(&envelope.project_key)
+            ),
+        );
+        record_action_envelope_check(
+            &mut checks,
+            &mut blockers,
+            "target_acceptance_status",
+            envelope.target_ref.acceptance_status == expected_acceptance_status,
+            format!(
+                "acceptance status matches {}",
+                safe(expected_acceptance_status)
+            ),
+            format!(
+                "expected acceptance_status {}, got {}",
+                safe(expected_acceptance_status),
+                safe(&envelope.target_ref.acceptance_status)
+            ),
+        );
+        record_action_envelope_check(
+            &mut checks,
+            &mut blockers,
+            "target_reviewed_at",
+            expected_reviewed_at == Some(envelope.target_ref.reviewed_at),
+            envelope.target_ref.reviewed_at.to_rfc3339(),
+            expected_reviewed_at
+                .map(|value| {
+                    format!(
+                        "expected reviewed_at {}, got {}",
+                        value.to_rfc3339(),
+                        envelope.target_ref.reviewed_at.to_rfc3339()
+                    )
+                })
+                .unwrap_or_else(|| "current item reviewed_at is missing or invalid".to_string()),
+        );
+        record_action_envelope_check(
+            &mut checks,
+            &mut blockers,
+            "allowed_command",
+            expected_command
+                .as_deref()
+                .is_some_and(|expected| expected == envelope.allowed_command),
+            "allowed command matches current recovery fallback".to_string(),
+            expected_command
+                .map(|expected| {
+                    format!(
+                        "expected {}, got {}",
+                        safe(&expected),
+                        safe(&envelope.allowed_command)
+                    )
+                })
+                .unwrap_or_else(|| {
+                    format!(
+                        "no current fallback command is available for {}",
+                        safe(&envelope.action_kind)
+                    )
+                }),
+        );
+    } else {
+        record_action_envelope_check(
+            &mut checks,
+            &mut blockers,
+            "project_key",
+            false,
+            String::new(),
+            "cannot verify project key without a current recovery item".to_string(),
+        );
+        record_action_envelope_check(
+            &mut checks,
+            &mut blockers,
+            "target_acceptance_status",
+            false,
+            String::new(),
+            "cannot verify acceptance status without a current recovery item".to_string(),
+        );
+        record_action_envelope_check(
+            &mut checks,
+            &mut blockers,
+            "target_reviewed_at",
+            false,
+            String::new(),
+            "cannot verify reviewed_at without a current recovery item".to_string(),
+        );
+        record_action_envelope_check(
+            &mut checks,
+            &mut blockers,
+            "allowed_command",
+            false,
+            String::new(),
+            "cannot verify allowed command without a current recovery item".to_string(),
+        );
+    }
+
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "observed_hash",
+        current_hash.as_deref() == Some(envelope.observed_hash.as_str()),
+        format!(
+            "observed hash matches {}",
+            current_hash.as_deref().unwrap_or("missing")
+        ),
+        format!(
+            "expected {}, got {}",
+            current_hash.as_deref().unwrap_or("missing"),
+            safe(&envelope.observed_hash)
+        ),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "ttl",
+        envelope.ttl == "PT10M",
+        "ttl is PT10M".to_string(),
+        format!("expected PT10M, got {}", safe(&envelope.ttl)),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "issued_at",
+        envelope.issued_at.is_some(),
+        envelope
+            .issued_at
+            .map(|value| format!("issued_at is {}", value.to_rfc3339()))
+            .unwrap_or_default(),
+        "issued_at is required for stale rejection".to_string(),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "expires_at",
+        envelope
+            .expires_at
+            .map(|expires_at| expires_at >= processed_at)
+            .unwrap_or(false),
+        envelope
+            .expires_at
+            .map(|value| format!("expires_at is {}", value.to_rfc3339()))
+            .unwrap_or_default(),
+        envelope
+            .expires_at
+            .map(|value| {
+                format!(
+                    "envelope expired at {}, processed at {}",
+                    value.to_rfc3339(),
+                    processed_at.to_rfc3339()
+                )
+            })
+            .unwrap_or_else(|| "expires_at is required for stale rejection".to_string()),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "issued_before_expiry",
+        envelope
+            .issued_at
+            .zip(envelope.expires_at)
+            .map(|(issued_at, expires_at)| issued_at <= expires_at)
+            .unwrap_or(false),
+        "issued_at is not after expires_at".to_string(),
+        "issued_at must be less than or equal to expires_at".to_string(),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "idempotency_key",
+        !envelope.idempotency_key.trim().is_empty(),
+        "idempotency key is present".to_string(),
+        "idempotency key is required".to_string(),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "nonce",
+        !envelope.nonce.trim().is_empty(),
+        "nonce is present".to_string(),
+        "nonce is required".to_string(),
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "preview",
+        !envelope.preview.trim().is_empty(),
+        "preview text is present".to_string(),
+        "preview text is required".to_string(),
+    );
+    let all_forbidden_effects_present = [
+        "project_file_mutation",
+        "runtime_dispatch",
+        "approval_ledger_mutation",
+        "accepted_truth_mutation",
+        "arbitrary_shell",
+        "wiki_promotion",
+        "file_movement",
+    ]
+    .iter()
+    .all(|expected| {
+        envelope
+            .forbidden_effects
+            .iter()
+            .any(|effect| effect == expected)
+    });
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "forbidden_effects",
+        all_forbidden_effects_present,
+        "forbidden effects include recovery mutation boundaries".to_string(),
+        "forbidden effects must include project/runtime/approval/truth/shell/wiki/file boundaries"
+            .to_string(),
+    );
+    let expected_confirmation = format!(
+        "confirm {} {}",
+        envelope.action_kind,
+        action_envelope_slug(&envelope.target_ref.closeout_id)
+    );
+    record_action_envelope_check(
+        &mut checks,
+        &mut blockers,
+        "confirmation_phrase",
+        envelope.requires_confirmation && envelope.confirmation_phrase == expected_confirmation,
+        "confirmation phrase matches current recovery action".to_string(),
+        format!(
+            "expected confirmation phrase {}, got {}",
+            safe(&expected_confirmation),
+            safe(&envelope.confirmation_phrase)
+        ),
+    );
+
+    let stale = !blockers.is_empty();
+    let result_status = if stale {
+        "rejected"
+    } else {
+        "validated_preview"
+    };
+    let reason = if stale {
+        format!(
+            "{} Checks failed: {}",
+            safe(&envelope.stale_rejection_reason),
+            blockers.join("; ")
+        )
+    } else {
+        "Envelope matches current accepted-truth recovery surface; processor remains read-only."
+            .to_string()
+    };
+    let receipt_id = accepted_truth_recovery_action_receipt_id(
+        &envelope.idempotency_key,
+        result_status,
+        current_hash.as_deref(),
+        &reason,
+        &envelope.observed_hash,
+    );
+
+    AcceptedTruthRecoveryActionReceipt {
+        schema: ACCEPTED_TRUTH_RECOVERY_ACTION_RECEIPT_SCHEMA,
+        receipt_id,
+        action_id: safe(&envelope.action_id),
+        action_kind: safe(&envelope.action_kind),
+        profile: safe(&envelope.profile),
+        project_key: safe(&envelope.project_key),
+        closeout_id: safe(&envelope.target_ref.closeout_id),
+        review_id: safe(&envelope.target_ref.review_id),
+        receipt_source_id: safe(&envelope.target_ref.receipt_id),
+        processed_at,
+        result_status,
+        stale,
+        reason,
+        observed_hash: safe(&envelope.observed_hash),
+        current_hash,
+        idempotency_key: safe(&envelope.idempotency_key),
+        expected_receipt_schema: safe(&envelope.expected_receipt_schema),
+        allowed_command: safe(&envelope.allowed_command),
+        forbidden_effects: envelope
+            .forbidden_effects
+            .iter()
+            .map(|effect| safe(effect))
+            .collect(),
+        checks,
+    }
+}
+
+fn accepted_truth_recovery_expected_command(item: &Value, action_kind: &str) -> Option<String> {
+    let field = match action_kind {
+        "resolve_followup" => "resolve_command",
+        "retire_closeout" => "retire_command",
+        _ => return None,
+    };
+    item.get(field)
+        .and_then(Value::as_str)
+        .map(safe)
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn build_action_execution_preflight(
+    profile: &str,
+    requested_receipt_id: &str,
+    source_receipt: Option<&StoredActionEnvelopeReceipt>,
+    receipts: &[StoredActionEnvelopeReceipt],
+    record: Option<&DecisionRecord>,
+) -> ActionExecutionPreflight {
+    let processed_at = Utc::now();
+    let mut checks = Vec::new();
+    let mut blockers = Vec::new();
+    let expected_profile = safe(profile);
+    let current_hash = source_receipt.and_then(|receipt| {
+        record.map(|record| action_envelope_observed_hash(record, &receipt.action_kind))
+    });
+    let latest_matching_receipt_id = source_receipt.and_then(|receipt| {
+        latest_action_envelope_receipt(receipt, receipts).map(|latest| latest.receipt_id.as_str())
+    });
+
+    record_action_preflight_check(
+        &mut checks,
+        &mut blockers,
+        "source_receipt_exists",
+        source_receipt.is_some(),
+        format!("source receipt {} is present", safe(requested_receipt_id)),
+        format!(
+            "source receipt {} was not found",
+            safe(requested_receipt_id)
+        ),
+    );
+
+    if let Some(receipt) = source_receipt {
+        record_action_preflight_check(
+            &mut checks,
+            &mut blockers,
+            "source_schema",
+            receipt.schema == ACTION_ENVELOPE_RECEIPT_SCHEMA,
+            format!("source schema is {ACTION_ENVELOPE_RECEIPT_SCHEMA}"),
+            format!(
+                "expected {ACTION_ENVELOPE_RECEIPT_SCHEMA}, got {}",
+                safe(&receipt.schema)
+            ),
+        );
+        record_action_preflight_check(
+            &mut checks,
+            &mut blockers,
+            "source_result_status",
+            receipt.result_status == "validated_preview",
+            "source receipt is validated_preview".to_string(),
+            format!(
+                "source receipt status must be validated_preview, got {}",
+                safe(&receipt.result_status)
+            ),
+        );
+        record_action_preflight_check(
+            &mut checks,
+            &mut blockers,
+            "source_not_stale",
+            !receipt.stale,
+            "source receipt is non-stale".to_string(),
+            "source receipt is stale or rejected".to_string(),
+        );
+        record_action_preflight_check(
+            &mut checks,
+            &mut blockers,
+            "latest_receipt",
+            latest_matching_receipt_id == Some(receipt.receipt_id.as_str()),
+            "source receipt is the latest receipt for this action".to_string(),
+            format!(
+                "latest receipt for this action is {}",
+                latest_matching_receipt_id.unwrap_or("missing")
+            ),
+        );
+        record_action_preflight_check(
+            &mut checks,
+            &mut blockers,
+            "profile",
+            receipt.profile == expected_profile,
+            format!("profile matches {expected_profile}"),
+            format!(
+                "expected profile {expected_profile}, got {}",
+                safe(&receipt.profile)
+            ),
+        );
+        record_action_preflight_check(
+            &mut checks,
+            &mut blockers,
+            "action_id",
+            !receipt.action_id.trim().is_empty(),
+            "action id is present".to_string(),
+            "action id is required".to_string(),
+        );
+        record_action_preflight_check(
+            &mut checks,
+            &mut blockers,
+            "action_kind",
+            !receipt.action_kind.trim().is_empty(),
+            "action kind is present".to_string(),
+            "action kind is required".to_string(),
+        );
+        record_action_preflight_check(
+            &mut checks,
+            &mut blockers,
+            "idempotency_key",
+            !receipt.idempotency_key.trim().is_empty(),
+            "idempotency key is present".to_string(),
+            "idempotency key is required".to_string(),
+        );
+        record_action_preflight_check(
+            &mut checks,
+            &mut blockers,
+            "decision_exists",
+            record.is_some(),
+            format!("decision {} is present", safe(&receipt.decision_id)),
+            format!("decision {} was not found", safe(&receipt.decision_id)),
+        );
+
+        if let Some(record) = record {
+            record_action_preflight_check(
+                &mut checks,
+                &mut blockers,
+                "project_key",
+                receipt.project_key == record.project_key,
+                format!("project key matches {}", safe(&record.project_key)),
+                format!(
+                    "expected project {}, got {}",
+                    safe(&record.project_key),
+                    safe(&receipt.project_key)
+                ),
+            );
+            let expected_command = format!(
+                "forager offdesk decision show --json {}",
+                operator_safe_text(&record.decision_id)
+            );
+            record_action_preflight_check(
+                &mut checks,
+                &mut blockers,
+                "allowed_command",
+                receipt.allowed_command == expected_command,
+                "source receipt allowed command is the read-only decision inspector".to_string(),
+                format!(
+                    "expected {}, got {}",
+                    expected_command,
+                    safe(&receipt.allowed_command)
+                ),
+            );
+        }
+
+        let expected_hash = current_hash.as_deref().unwrap_or("missing");
+        record_action_preflight_check(
+            &mut checks,
+            &mut blockers,
+            "current_hash",
+            current_hash.as_deref() == receipt.current_hash.as_deref()
+                && current_hash.as_deref() == Some(receipt.observed_hash.as_str()),
+            format!("current hash still matches {expected_hash}"),
+            format!(
+                "current {}, receipt current {}, observed {}",
+                expected_hash,
+                receipt.current_hash.as_deref().unwrap_or("missing"),
+                safe(&receipt.observed_hash)
+            ),
+        );
+        let all_forbidden_effects_present = [
+            "project_file_mutation",
+            "runtime_dispatch",
+            "approval_ledger_mutation",
+            "accepted_truth_mutation",
+            "arbitrary_shell",
+        ]
+        .iter()
+        .all(|expected| {
+            receipt
+                .forbidden_effects
+                .iter()
+                .any(|effect| effect == expected)
+        });
+        record_action_preflight_check(
+            &mut checks,
+            &mut blockers,
+            "forbidden_effects",
+            all_forbidden_effects_present,
+            "forbidden effects include mutation and arbitrary shell boundaries".to_string(),
+            "forbidden effects must include project/runtime/approval/truth/arbitrary_shell boundaries"
+                .to_string(),
+        );
+    } else {
+        for name in [
+            "source_schema",
+            "source_result_status",
+            "source_not_stale",
+            "latest_receipt",
+            "profile",
+            "action_id",
+            "action_kind",
+            "idempotency_key",
+            "decision_exists",
+            "project_key",
+            "allowed_command",
+            "current_hash",
+            "forbidden_effects",
+        ] {
+            record_action_preflight_check(
+                &mut checks,
+                &mut blockers,
+                name,
+                false,
+                String::new(),
+                "cannot verify without a source receipt".to_string(),
+            );
+        }
+    }
+
+    let blocked = !blockers.is_empty();
+    let result_status = if blocked {
+        "blocked"
+    } else {
+        "ready_for_executor"
+    };
+    let reason = if blocked {
+        format!(
+            "Action execution preflight blocked. Checks failed: {}",
+            blockers.join("; ")
+        )
+    } else {
+        "Validated receipt is current and non-stale; a separate action-specific executor is still required."
+            .to_string()
+    };
+    let source_receipt_id = source_receipt
+        .map(|receipt| safe(&receipt.receipt_id))
+        .unwrap_or_else(|| safe(requested_receipt_id));
+    let action_id = source_receipt
+        .map(|receipt| safe(&receipt.action_id))
+        .unwrap_or_default();
+    let action_kind = source_receipt
+        .map(|receipt| safe(&receipt.action_kind))
+        .unwrap_or_else(|| "unknown".to_string());
+    let project_key = source_receipt
+        .map(|receipt| safe(&receipt.project_key))
+        .unwrap_or_default();
+    let decision_id = source_receipt
+        .map(|receipt| safe(&receipt.decision_id))
+        .unwrap_or_default();
+    let idempotency_key = source_receipt
+        .map(|receipt| safe(&receipt.idempotency_key))
+        .unwrap_or_else(|| format!("missing:{}", safe(requested_receipt_id)));
+    let receipt_current_hash = source_receipt.and_then(|receipt| {
+        receipt
+            .current_hash
+            .as_ref()
+            .map(|value| operator_safe_text(value))
+    });
+    let preflight_id = action_execution_preflight_id(
+        &source_receipt_id,
+        result_status,
+        current_hash.as_deref(),
+        &reason,
+    );
+
+    ActionExecutionPreflight {
+        schema: ACTION_EXECUTION_PREFLIGHT_SCHEMA,
+        preflight_id,
+        source_receipt_id,
+        action_id,
+        action_kind,
+        profile: expected_profile,
+        project_key,
+        decision_id,
+        processed_at,
+        result_status,
+        executor_required: true,
+        mutation_allowed_by_this_command: false,
+        reason,
+        current_hash,
+        receipt_current_hash,
+        idempotency_key,
+        next_step: "Run an action-specific executor that requires this ready preflight id; do not execute from the preview envelope alone.".to_string(),
+        checks,
+    }
+}
+
+fn build_decision_action_execution(
+    profile: &str,
+    requested_preflight_id: &str,
+    source_preflight: Option<&StoredActionExecutionPreflight>,
+    record: Option<&DecisionRecord>,
+    args: &ActionDecisionArgs,
+) -> DecisionActionExecution {
+    let executed_at = Utc::now();
+    let mut checks = Vec::new();
+    let mut blockers = Vec::new();
+    let expected_profile = safe(profile);
+    let decision = source_preflight
+        .map(|preflight| normalize_action_decision_choice(&preflight.action_kind))
+        .unwrap_or_else(|| "unknown".to_string());
+    let current_hash = source_preflight.and_then(|preflight| {
+        record.map(|record| action_envelope_observed_hash(record, &preflight.action_kind))
+    });
+
+    record_action_decision_check(
+        &mut checks,
+        &mut blockers,
+        "source_preflight_exists",
+        source_preflight.is_some(),
+        format!(
+            "source preflight {} is present",
+            safe(requested_preflight_id)
+        ),
+        format!(
+            "source preflight {} was not found",
+            safe(requested_preflight_id)
+        ),
+    );
+
+    if let Some(preflight) = source_preflight {
+        record_action_decision_check(
+            &mut checks,
+            &mut blockers,
+            "source_schema",
+            preflight.schema == ACTION_EXECUTION_PREFLIGHT_SCHEMA,
+            format!("source schema is {ACTION_EXECUTION_PREFLIGHT_SCHEMA}"),
+            format!(
+                "expected {ACTION_EXECUTION_PREFLIGHT_SCHEMA}, got {}",
+                safe(&preflight.schema)
+            ),
+        );
+        record_action_decision_check(
+            &mut checks,
+            &mut blockers,
+            "source_result_status",
+            preflight.result_status == "ready_for_executor",
+            "source preflight is ready_for_executor".to_string(),
+            format!(
+                "source preflight status must be ready_for_executor, got {}",
+                safe(&preflight.result_status)
+            ),
+        );
+        record_action_decision_check(
+            &mut checks,
+            &mut blockers,
+            "profile",
+            preflight.profile == expected_profile,
+            format!("profile matches {expected_profile}"),
+            format!(
+                "expected profile {expected_profile}, got {}",
+                safe(&preflight.profile)
+            ),
+        );
+        record_action_decision_check(
+            &mut checks,
+            &mut blockers,
+            "supported_action",
+            supported_decision_action(&decision),
+            format!("decision action `{decision}` is supported"),
+            format!(
+                "unsupported decision action `{}`",
+                safe(&preflight.action_kind)
+            ),
+        );
+        record_action_decision_check(
+            &mut checks,
+            &mut blockers,
+            "note",
+            !decision_action_requires_note(&decision) || !args.note.trim().is_empty(),
+            if decision_action_requires_note(&decision) {
+                "required note is present".to_string()
+            } else {
+                "note is not required for this action".to_string()
+            },
+            format!("decision `{decision}` requires --note with bounded direction or blocker"),
+        );
+        record_action_decision_check(
+            &mut checks,
+            &mut blockers,
+            "decision_exists",
+            record.is_some(),
+            format!("decision {} is present", safe(&preflight.decision_id)),
+            format!("decision {} was not found", safe(&preflight.decision_id)),
+        );
+
+        if let Some(record) = record {
+            record_action_decision_check(
+                &mut checks,
+                &mut blockers,
+                "project_key",
+                preflight.project_key == record.project_key,
+                format!("project key matches {}", safe(&record.project_key)),
+                format!(
+                    "expected project {}, got {}",
+                    safe(&record.project_key),
+                    safe(&preflight.project_key)
+                ),
+            );
+            record_action_decision_check(
+                &mut checks,
+                &mut blockers,
+                "decision_status",
+                decision_action_status_is_mutable(record.status),
+                format!(
+                    "decision status {} can receive an action",
+                    record.status.as_str()
+                ),
+                format!(
+                    "decision status {} cannot receive this action",
+                    record.status.as_str()
+                ),
+            );
+        }
+        record_action_decision_check(
+            &mut checks,
+            &mut blockers,
+            "current_hash",
+            current_hash.as_deref() == preflight.current_hash.as_deref(),
+            format!(
+                "current hash still matches {}",
+                current_hash.as_deref().unwrap_or("missing")
+            ),
+            format!(
+                "current {}, preflight {}",
+                current_hash.as_deref().unwrap_or("missing"),
+                preflight.current_hash.as_deref().unwrap_or("missing")
+            ),
+        );
+    } else {
+        for name in [
+            "source_schema",
+            "source_result_status",
+            "profile",
+            "supported_action",
+            "note",
+            "decision_exists",
+            "project_key",
+            "decision_status",
+            "current_hash",
+        ] {
+            record_action_decision_check(
+                &mut checks,
+                &mut blockers,
+                name,
+                false,
+                String::new(),
+                "cannot verify without a source preflight".to_string(),
+            );
+        }
+    }
+
+    let blocked = !blockers.is_empty();
+    let result_status = if blocked { "blocked" } else { "applied" };
+    let reason = if blocked {
+        format!(
+            "Decision action blocked. Checks failed: {}",
+            blockers.join("; ")
+        )
+    } else {
+        "Decision action applied to the canonical decision ledger as an execution handoff; no runtime work was dispatched.".to_string()
+    };
+    let preflight_id = source_preflight
+        .map(|preflight| safe(&preflight.preflight_id))
+        .unwrap_or_else(|| safe(requested_preflight_id));
+    let source_receipt_id = source_preflight
+        .map(|preflight| safe(&preflight.source_receipt_id))
+        .unwrap_or_default();
+    let action_id = source_preflight
+        .map(|preflight| safe(&preflight.action_id))
+        .unwrap_or_default();
+    let action_kind = source_preflight
+        .map(|preflight| safe(&preflight.action_kind))
+        .unwrap_or_else(|| "unknown".to_string());
+    let project_key = source_preflight
+        .map(|preflight| safe(&preflight.project_key))
+        .unwrap_or_default();
+    let decision_id = source_preflight
+        .map(|preflight| safe(&preflight.decision_id))
+        .unwrap_or_default();
+    let idempotency_key = source_preflight
+        .map(|preflight| safe(&preflight.idempotency_key))
+        .unwrap_or_else(|| format!("missing:{}", safe(requested_preflight_id)));
+    let execution_id =
+        decision_action_execution_id(&preflight_id, result_status, &decision, &reason);
+    let handoff_id = if result_status == "applied" && decision_creates_handoff(&decision) {
+        Some(decision_handoff_id(&execution_id))
+    } else {
+        None
+    };
+
+    DecisionActionExecution {
+        schema: DECISION_ACTION_EXECUTION_SCHEMA,
+        execution_id,
+        preflight_id,
+        source_receipt_id,
+        action_id,
+        action_kind,
+        decision,
+        profile: expected_profile,
+        project_key,
+        decision_id,
+        executed_at,
+        result_status,
+        mutation_allowed_by_this_command: result_status == "applied",
+        decision_appended: result_status == "applied",
+        reason,
+        handoff_id,
+        current_hash,
+        idempotency_key,
+        checks,
+    }
+}
+
+fn build_decision_action_closeout(
+    profile: &str,
+    requested_execution_id: &str,
+    source_execution: Option<&StoredDecisionActionExecution>,
+    record: Option<&DecisionRecord>,
+    args: &ActionCloseoutArgs,
+) -> DecisionActionCloseout {
+    let recorded_at = Utc::now();
+    let mut checks = Vec::new();
+    let mut blockers = Vec::new();
+    let expected_profile = safe(profile);
+    let handoff_id = source_execution.and_then(|execution| execution.handoff_id.clone());
+
+    record_action_closeout_check(
+        &mut checks,
+        &mut blockers,
+        "source_execution_exists",
+        source_execution.is_some(),
+        format!(
+            "source execution {} is present",
+            safe(requested_execution_id)
+        ),
+        format!(
+            "source execution {} was not found",
+            safe(requested_execution_id)
+        ),
+    );
+
+    if let Some(execution) = source_execution {
+        record_action_closeout_check(
+            &mut checks,
+            &mut blockers,
+            "source_schema",
+            execution.schema == DECISION_ACTION_EXECUTION_SCHEMA,
+            format!("source schema is {DECISION_ACTION_EXECUTION_SCHEMA}"),
+            format!(
+                "expected {DECISION_ACTION_EXECUTION_SCHEMA}, got {}",
+                safe(&execution.schema)
+            ),
+        );
+        record_action_closeout_check(
+            &mut checks,
+            &mut blockers,
+            "source_result_status",
+            execution.result_status == "applied",
+            "source execution is applied".to_string(),
+            format!(
+                "source execution status must be applied, got {}",
+                safe(&execution.result_status)
+            ),
+        );
+        record_action_closeout_check(
+            &mut checks,
+            &mut blockers,
+            "source_mutation_scope",
+            execution.mutation_allowed_by_this_command && execution.decision_appended,
+            "source execution appended a decision handoff".to_string(),
+            "source execution did not append a decision handoff".to_string(),
+        );
+        record_action_closeout_check(
+            &mut checks,
+            &mut blockers,
+            "profile",
+            execution.profile == expected_profile,
+            format!("profile matches {expected_profile}"),
+            format!(
+                "expected profile {expected_profile}, got {}",
+                safe(&execution.profile)
+            ),
+        );
+        record_action_closeout_check(
+            &mut checks,
+            &mut blockers,
+            "handoff_id",
+            execution
+                .handoff_id
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty()),
+            "source execution has a handoff id".to_string(),
+            "source execution has no handoff id to receipt".to_string(),
+        );
+        record_action_closeout_check(
+            &mut checks,
+            &mut blockers,
+            "decision_exists",
+            record.is_some(),
+            format!("decision {} is present", safe(&execution.decision_id)),
+            format!("decision {} was not found", safe(&execution.decision_id)),
+        );
+
+        if let Some(record) = record {
+            let matching_handoff = record
+                .execution_handoff
+                .as_ref()
+                .map(|handoff| {
+                    handoff.decision_id == execution.decision_id
+                        && handoff.approved_direction == execution.decision
+                        && execution
+                            .handoff_id
+                            .as_deref()
+                            .is_some_and(|id| id == handoff.handoff_id)
+                })
+                .unwrap_or(false);
+            record_action_closeout_check(
+                &mut checks,
+                &mut blockers,
+                "project_key",
+                execution.project_key == record.project_key,
+                format!("project key matches {}", safe(&record.project_key)),
+                format!(
+                    "expected project {}, got {}",
+                    safe(&record.project_key),
+                    safe(&execution.project_key)
+                ),
+            );
+            record_action_closeout_check(
+                &mut checks,
+                &mut blockers,
+                "decision_status",
+                record.status == DecisionStatus::HandoffReady,
+                "decision is handoff_ready".to_string(),
+                format!(
+                    "decision status must be handoff_ready, got {}",
+                    record.status.as_str()
+                ),
+            );
+            record_action_closeout_check(
+                &mut checks,
+                &mut blockers,
+                "execution_handoff",
+                matching_handoff,
+                "decision handoff matches the source execution".to_string(),
+                "decision handoff is missing or does not match the source execution".to_string(),
+            );
+            record_action_closeout_check(
+                &mut checks,
+                &mut blockers,
+                "decision_receipt_absent",
+                record.decision_receipt.is_none(),
+                "decision has no existing receipt".to_string(),
+                "decision already has a receipt".to_string(),
+            );
+        }
+    } else {
+        for name in [
+            "source_schema",
+            "source_result_status",
+            "source_mutation_scope",
+            "profile",
+            "handoff_id",
+            "decision_exists",
+            "project_key",
+            "decision_status",
+            "execution_handoff",
+            "decision_receipt_absent",
+        ] {
+            record_action_closeout_check(
+                &mut checks,
+                &mut blockers,
+                name,
+                false,
+                String::new(),
+                "cannot verify without a source execution".to_string(),
+            );
+        }
+    }
+
+    let blocked = !blockers.is_empty();
+    let result_status = if blocked { "blocked" } else { "receipted" };
+    let receipt_result_status = safe(args.result_status.trim());
+    let receipt_result_status = if receipt_result_status.trim().is_empty() {
+        "closed".to_string()
+    } else {
+        receipt_result_status
+    };
+    let reason = if blocked {
+        format!(
+            "Decision action closeout blocked. Checks failed: {}",
+            blockers.join("; ")
+        )
+    } else {
+        "Decision action handoff was closed with a canonical decision receipt; no runtime work was dispatched.".to_string()
+    };
+    let execution_id = source_execution
+        .map(|execution| safe(&execution.execution_id))
+        .unwrap_or_else(|| safe(requested_execution_id));
+    let closeout_id = decision_action_closeout_id(
+        &execution_id,
+        result_status,
+        &receipt_result_status,
+        &reason,
+    );
+    let receipt_id = if result_status == "receipted" {
+        Some(decision_action_receipt_id(
+            &execution_id,
+            &receipt_result_status,
+        ))
+    } else {
+        None
+    };
+    let evidence_summary = args
+        .evidence_summary
+        .iter()
+        .map(|line| safe(line.trim()))
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    let remaining_review = args
+        .remaining_review
+        .iter()
+        .map(|line| safe(line.trim()))
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+
+    DecisionActionCloseout {
+        schema: DECISION_ACTION_CLOSEOUT_SCHEMA,
+        closeout_id,
+        execution_id,
+        preflight_id: source_execution
+            .map(|execution| safe(&execution.preflight_id))
+            .unwrap_or_default(),
+        action_kind: source_execution
+            .map(|execution| safe(&execution.action_kind))
+            .unwrap_or_default(),
+        decision: source_execution
+            .map(|execution| safe(&execution.decision))
+            .unwrap_or_default(),
+        profile: expected_profile,
+        project_key: source_execution
+            .map(|execution| safe(&execution.project_key))
+            .unwrap_or_default(),
+        decision_id: source_execution
+            .map(|execution| safe(&execution.decision_id))
+            .unwrap_or_default(),
+        recorded_at,
+        result_status,
+        receipt_result_status,
+        mutation_allowed_by_this_command: result_status == "receipted",
+        decision_appended: result_status == "receipted",
+        reason,
+        receipt_id,
+        handoff_id,
+        evidence_summary,
+        remaining_review,
+        checks,
+    }
+}
+
+fn build_runtime_dispatch_preflight(
+    profile: &str,
+    requested_closeout_id: &str,
+    source_closeout: Option<&StoredDecisionActionCloseout>,
+    record: Option<&DecisionRecord>,
+) -> RuntimeDispatchPreflight {
+    let processed_at = Utc::now();
+    let mut checks = Vec::new();
+    let mut blockers = Vec::new();
+    let expected_profile = safe(profile);
+
+    record_runtime_dispatch_check(
+        &mut checks,
+        &mut blockers,
+        "source_closeout_exists",
+        source_closeout.is_some(),
+        format!("source closeout {} is present", safe(requested_closeout_id)),
+        format!(
+            "source closeout {} was not found",
+            safe(requested_closeout_id)
+        ),
+    );
+
+    if let Some(closeout) = source_closeout {
+        record_runtime_dispatch_check(
+            &mut checks,
+            &mut blockers,
+            "source_schema",
+            closeout.schema == DECISION_ACTION_CLOSEOUT_SCHEMA,
+            format!("source schema is {DECISION_ACTION_CLOSEOUT_SCHEMA}"),
+            format!(
+                "expected {DECISION_ACTION_CLOSEOUT_SCHEMA}, got {}",
+                safe(&closeout.schema)
+            ),
+        );
+        record_runtime_dispatch_check(
+            &mut checks,
+            &mut blockers,
+            "source_result_status",
+            closeout.result_status == "receipted",
+            "source closeout is receipted".to_string(),
+            format!(
+                "source closeout status must be receipted, got {}",
+                safe(&closeout.result_status)
+            ),
+        );
+        record_runtime_dispatch_check(
+            &mut checks,
+            &mut blockers,
+            "source_mutation_scope",
+            closeout.mutation_allowed_by_this_command && closeout.decision_appended,
+            "source closeout appended a canonical decision receipt".to_string(),
+            "source closeout did not append a canonical decision receipt".to_string(),
+        );
+        record_runtime_dispatch_check(
+            &mut checks,
+            &mut blockers,
+            "profile",
+            closeout.profile == expected_profile,
+            format!("profile matches {expected_profile}"),
+            format!(
+                "expected profile {expected_profile}, got {}",
+                safe(&closeout.profile)
+            ),
+        );
+        record_runtime_dispatch_check(
+            &mut checks,
+            &mut blockers,
+            "decision_exists",
+            record.is_some(),
+            format!("decision {} is present", safe(&closeout.decision_id)),
+            format!("decision {} was not found", safe(&closeout.decision_id)),
+        );
+
+        if let Some(record) = record {
+            let receipt = record.decision_receipt.as_ref();
+            let receipt_matches = receipt
+                .map(|receipt| {
+                    closeout
+                        .receipt_id
+                        .as_deref()
+                        .is_some_and(|id| id == receipt.receipt_id)
+                        && closeout
+                            .handoff_id
+                            .as_deref()
+                            .zip(receipt.applied_handoff_id.as_deref())
+                            .is_some_and(|(closeout_handoff, receipt_handoff)| {
+                                closeout_handoff == receipt_handoff
+                            })
+                        && receipt.final_decision == closeout.decision
+                })
+                .unwrap_or(false);
+            record_runtime_dispatch_check(
+                &mut checks,
+                &mut blockers,
+                "project_key",
+                closeout.project_key == record.project_key,
+                format!("project key matches {}", safe(&record.project_key)),
+                format!(
+                    "expected project {}, got {}",
+                    safe(&record.project_key),
+                    safe(&closeout.project_key)
+                ),
+            );
+            record_runtime_dispatch_check(
+                &mut checks,
+                &mut blockers,
+                "decision_status",
+                record.status == DecisionStatus::Receipted,
+                "decision is receipted".to_string(),
+                format!(
+                    "decision status must be receipted, got {}",
+                    record.status.as_str()
+                ),
+            );
+            record_runtime_dispatch_check(
+                &mut checks,
+                &mut blockers,
+                "decision_receipt",
+                receipt_matches,
+                "decision receipt matches the source closeout".to_string(),
+                "decision receipt is missing or does not match the source closeout".to_string(),
+            );
+        }
+    } else {
+        for name in [
+            "source_schema",
+            "source_result_status",
+            "source_mutation_scope",
+            "profile",
+            "decision_exists",
+            "project_key",
+            "decision_status",
+            "decision_receipt",
+        ] {
+            record_runtime_dispatch_check(
+                &mut checks,
+                &mut blockers,
+                name,
+                false,
+                String::new(),
+                "cannot verify without a source closeout".to_string(),
+            );
+        }
+    }
+
+    let blocked = !blockers.is_empty();
+    let result_status = if blocked {
+        "blocked"
+    } else {
+        "ready_for_runtime_dispatch"
+    };
+    let reason = if blocked {
+        format!(
+            "Runtime dispatch preflight blocked. Checks failed: {}",
+            blockers.join("; ")
+        )
+    } else {
+        "Receipted decision action closeout is current; a separate runtime dispatch receipt is still required.".to_string()
+    };
+    let source_closeout_id = source_closeout
+        .map(|closeout| safe(&closeout.closeout_id))
+        .unwrap_or_else(|| safe(requested_closeout_id));
+    let source_execution_id = source_closeout
+        .map(|closeout| safe(&closeout.execution_id))
+        .unwrap_or_default();
+    let receipt_id = record
+        .and_then(|record| record.decision_receipt.as_ref())
+        .map(|receipt| safe(&receipt.receipt_id));
+    let source_task_id = record
+        .map(|record| safe(&record.task_id))
+        .unwrap_or_default();
+    let request_id = record
+        .map(|record| safe(&record.request_id))
+        .unwrap_or_default();
+    let preflight_id = runtime_dispatch_preflight_id(
+        &source_closeout_id,
+        result_status,
+        receipt_id.as_deref(),
+        &reason,
+    );
+
+    RuntimeDispatchPreflight {
+        schema: RUNTIME_DISPATCH_PREFLIGHT_SCHEMA,
+        preflight_id,
+        source_closeout_id,
+        source_execution_id,
+        source_action_preflight_id: source_closeout
+            .map(|closeout| safe(&closeout.preflight_id))
+            .unwrap_or_default(),
+        action_kind: source_closeout
+            .map(|closeout| safe(&closeout.action_kind))
+            .unwrap_or_default(),
+        decision: source_closeout
+            .map(|closeout| safe(&closeout.decision))
+            .unwrap_or_default(),
+        profile: expected_profile,
+        project_key: source_closeout
+            .map(|closeout| safe(&closeout.project_key))
+            .unwrap_or_default(),
+        decision_id: source_closeout
+            .map(|closeout| safe(&closeout.decision_id))
+            .unwrap_or_default(),
+        request_id,
+        source_task_id,
+        processed_at,
+        result_status,
+        mutation_allowed_by_this_command: false,
+        reason,
+        receipt_id,
+        handoff_id: source_closeout.and_then(|closeout| closeout.handoff_id.clone()),
+        next_step: "Run `forager ondesk runtime-dispatch --preflight-id <ID> --runner <RUNNER> --cmd <CMD> --json`; runtime launch still happens later through `forager offdesk tick`."
+            .to_string(),
+        checks,
+    }
+}
+
+fn build_runtime_dispatch_receipt(
+    profile: &str,
+    requested_preflight_id: &str,
+    source_preflight: Option<&StoredRuntimeDispatchPreflight>,
+    preflights: &[StoredRuntimeDispatchPreflight],
+    existing_tasks: &[OffdeskTask],
+    args: &RuntimeDispatchArgs,
+) -> RuntimeDispatchReceipt {
+    let recorded_at = Utc::now();
+    let mut checks = Vec::new();
+    let mut blockers = Vec::new();
+    let expected_profile = safe(profile);
+    let runner = BackgroundRunnerKind::from_str(&args.runner);
+    let workdir = args
+        .workdir
+        .clone()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let task_id = runtime_dispatch_task_id(requested_preflight_id, args.task_id.as_deref());
+    let latest_matching_preflight_id = source_preflight.and_then(|preflight| {
+        latest_runtime_dispatch_preflight(preflight, preflights)
+            .map(|latest| latest.preflight_id.as_str())
+    });
+
+    record_runtime_dispatch_check(
+        &mut checks,
+        &mut blockers,
+        "source_preflight_exists",
+        source_preflight.is_some(),
+        format!(
+            "source preflight {} is present",
+            safe(requested_preflight_id)
+        ),
+        format!(
+            "source preflight {} was not found",
+            safe(requested_preflight_id)
+        ),
+    );
+
+    if let Some(preflight) = source_preflight {
+        record_runtime_dispatch_check(
+            &mut checks,
+            &mut blockers,
+            "source_schema",
+            preflight.schema == RUNTIME_DISPATCH_PREFLIGHT_SCHEMA,
+            format!("source schema is {RUNTIME_DISPATCH_PREFLIGHT_SCHEMA}"),
+            format!(
+                "expected {RUNTIME_DISPATCH_PREFLIGHT_SCHEMA}, got {}",
+                safe(&preflight.schema)
+            ),
+        );
+        record_runtime_dispatch_check(
+            &mut checks,
+            &mut blockers,
+            "source_result_status",
+            preflight.result_status == "ready_for_runtime_dispatch",
+            "source preflight is ready_for_runtime_dispatch".to_string(),
+            format!(
+                "source preflight status must be ready_for_runtime_dispatch, got {}",
+                safe(&preflight.result_status)
+            ),
+        );
+        record_runtime_dispatch_check(
+            &mut checks,
+            &mut blockers,
+            "latest_preflight",
+            latest_matching_preflight_id == Some(preflight.preflight_id.as_str()),
+            "source preflight is the latest runtime preflight for this closeout".to_string(),
+            format!(
+                "latest preflight for this closeout is {}",
+                latest_matching_preflight_id.unwrap_or("missing")
+            ),
+        );
+        record_runtime_dispatch_check(
+            &mut checks,
+            &mut blockers,
+            "profile",
+            preflight.profile == expected_profile,
+            format!("profile matches {expected_profile}"),
+            format!(
+                "expected profile {expected_profile}, got {}",
+                safe(&preflight.profile)
+            ),
+        );
+    } else {
+        for name in [
+            "source_schema",
+            "source_result_status",
+            "latest_preflight",
+            "profile",
+        ] {
+            record_runtime_dispatch_check(
+                &mut checks,
+                &mut blockers,
+                name,
+                false,
+                String::new(),
+                "cannot verify without a source preflight".to_string(),
+            );
+        }
+    }
+
+    record_runtime_dispatch_check(
+        &mut checks,
+        &mut blockers,
+        "capability_id",
+        args.capability_id.trim() == "dispatch.runtime",
+        "capability is dispatch.runtime".to_string(),
+        format!(
+            "runtime dispatch currently only accepts dispatch.runtime, got {}",
+            safe(&args.capability_id)
+        ),
+    );
+    record_runtime_dispatch_check(
+        &mut checks,
+        &mut blockers,
+        "runner_kind",
+        runner.is_ok(),
+        "runner kind is supported".to_string(),
+        runner
+            .as_ref()
+            .err()
+            .cloned()
+            .unwrap_or_else(|| "unknown runner kind".to_string()),
+    );
+    record_runtime_dispatch_check(
+        &mut checks,
+        &mut blockers,
+        "command",
+        !args.command.trim().is_empty(),
+        "command is present".to_string(),
+        "command is required".to_string(),
+    );
+    record_runtime_dispatch_check(
+        &mut checks,
+        &mut blockers,
+        "workdir",
+        workdir.is_dir(),
+        format!(
+            "workdir exists at {}",
+            safe(workdir.to_string_lossy().as_ref())
+        ),
+        format!(
+            "workdir must be an existing directory, got {}",
+            safe(workdir.to_string_lossy().as_ref())
+        ),
+    );
+    record_runtime_dispatch_check(
+        &mut checks,
+        &mut blockers,
+        "task_id",
+        !task_id.trim().is_empty(),
+        "task id is present".to_string(),
+        "task id is required".to_string(),
+    );
+    record_runtime_dispatch_check(
+        &mut checks,
+        &mut blockers,
+        "task_id_available",
+        !existing_tasks.iter().any(|task| task.task_id == task_id),
+        "task id is not already present in offdesk_tasks.json".to_string(),
+        format!("task id {} already exists", safe(&task_id)),
+    );
+
+    let blocked = !blockers.is_empty();
+    let result_status = if blocked { "blocked" } else { "queued" };
+    let reason = if blocked {
+        format!(
+            "Runtime dispatch blocked. Checks failed: {}",
+            blockers.join("; ")
+        )
+    } else {
+        "Runtime work was queued as an Offdesk task; no process was launched by this command."
+            .to_string()
+    };
+    let preflight_id = source_preflight
+        .map(|preflight| safe(&preflight.preflight_id))
+        .unwrap_or_else(|| safe(requested_preflight_id));
+    let receipt_id = runtime_dispatch_receipt_id(
+        &preflight_id,
+        result_status,
+        &task_id,
+        &args.command,
+        &reason,
+    );
+
+    RuntimeDispatchReceipt {
+        schema: RUNTIME_DISPATCH_RECEIPT_SCHEMA,
+        receipt_id,
+        preflight_id,
+        source_closeout_id: source_preflight
+            .map(|preflight| safe(&preflight.source_closeout_id))
+            .unwrap_or_default(),
+        source_execution_id: source_preflight
+            .map(|preflight| safe(&preflight.source_execution_id))
+            .unwrap_or_default(),
+        profile: expected_profile,
+        project_key: source_preflight
+            .map(|preflight| safe(&preflight.project_key))
+            .unwrap_or_default(),
+        decision_id: source_preflight
+            .map(|preflight| safe(&preflight.decision_id))
+            .unwrap_or_default(),
+        request_id: source_preflight
+            .map(|preflight| safe(&preflight.request_id))
+            .unwrap_or_default(),
+        task_id,
+        capability_id: safe(&args.capability_id),
+        runner_kind: runner.unwrap_or(BackgroundRunnerKind::LocalBackground),
+        command: safe(&args.command),
+        workdir: safe(workdir.to_string_lossy().as_ref()),
+        recorded_at,
+        result_status,
+        mutation_allowed_by_this_command: result_status == "queued",
+        task_enqueued: result_status == "queued",
+        reason,
+        next_step: if result_status == "queued" {
+            "Run `forager offdesk tick --task-id <TASK_ID>` when ready to pass through the existing scheduler gate and launch path.".to_string()
+        } else {
+            "Fix failed checks, then create a fresh runtime preflight before retrying dispatch."
+                .to_string()
+        },
+        provider_id: args.provider_id.as_deref().map(safe),
+        model: args.model.as_deref().map(safe),
+        checks,
+    }
+}
+
+fn record_action_envelope_check(
+    checks: &mut Vec<ActionEnvelopeCheck>,
+    blockers: &mut Vec<String>,
+    name: &'static str,
+    passed: bool,
+    pass_detail: String,
+    fail_detail: String,
+) {
+    let detail = if passed { pass_detail } else { fail_detail };
+    if !passed {
+        blockers.push(format!("{name}: {detail}"));
+    }
+    checks.push(ActionEnvelopeCheck {
+        name,
+        status: if passed { "passed" } else { "failed" },
+        detail,
+    });
+}
+
+fn append_action_envelope_receipt(path: &Path, receipt: &ActionEnvelopeReceipt) -> Result<bool> {
+    if action_envelope_receipt_exists(path, &receipt.receipt_id)? {
+        return Ok(false);
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    writeln!(file, "{}", serde_json::to_string(receipt)?)?;
+    Ok(true)
+}
+
+fn append_accepted_truth_recovery_action_receipt(
+    path: &Path,
+    receipt: &AcceptedTruthRecoveryActionReceipt,
+) -> Result<bool> {
+    if action_envelope_receipt_exists(path, &receipt.receipt_id)? {
+        return Ok(false);
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    writeln!(file, "{}", serde_json::to_string(receipt)?)?;
+    Ok(true)
+}
+
+fn action_envelope_receipt_exists(path: &Path, receipt_id: &str) -> Result<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("read action envelope receipts {}", path.display()))?;
+    for line in content.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if value
+            .get("receipt_id")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value == receipt_id)
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn read_action_envelope_receipts(profile_dir: &Path) -> Result<Vec<StoredActionEnvelopeReceipt>> {
+    let path = profile_dir.join(ACTION_ENVELOPE_RECEIPTS_FILE);
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let content = fs::read_to_string(&path)
+        .with_context(|| format!("read action envelope receipts {}", path.display()))?;
+    let mut receipts = Vec::new();
+    for (index, line) in content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .enumerate()
+    {
+        receipts.push(
+            serde_json::from_str::<StoredActionEnvelopeReceipt>(line).with_context(|| {
+                format!(
+                    "parse action envelope receipt {} line {}",
+                    path.display(),
+                    index + 1
+                )
+            })?,
+        );
+    }
+    Ok(receipts)
+}
+
+fn latest_action_envelope_receipt<'a>(
+    source: &StoredActionEnvelopeReceipt,
+    receipts: &'a [StoredActionEnvelopeReceipt],
+) -> Option<&'a StoredActionEnvelopeReceipt> {
+    receipts
+        .iter()
+        .enumerate()
+        .filter(|(_, receipt)| {
+            receipt.action_id == source.action_id
+                || receipt.idempotency_key == source.idempotency_key
+        })
+        .max_by_key(|(index, receipt)| (receipt.processed_at, *index))
+        .map(|(_, receipt)| receipt)
+}
+
+fn record_action_preflight_check(
+    checks: &mut Vec<ActionPreflightCheck>,
+    blockers: &mut Vec<String>,
+    name: &'static str,
+    passed: bool,
+    pass_detail: String,
+    fail_detail: String,
+) {
+    let detail = if passed { pass_detail } else { fail_detail };
+    if !passed {
+        blockers.push(format!("{name}: {detail}"));
+    }
+    checks.push(ActionPreflightCheck {
+        name,
+        status: if passed { "passed" } else { "failed" },
+        detail,
+    });
+}
+
+fn append_action_execution_preflight(
+    path: &Path,
+    preflight: &ActionExecutionPreflight,
+) -> Result<bool> {
+    if action_execution_preflight_exists(path, &preflight.preflight_id)? {
+        return Ok(false);
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    writeln!(file, "{}", serde_json::to_string(preflight)?)?;
+    Ok(true)
+}
+
+fn action_execution_preflight_exists(path: &Path, preflight_id: &str) -> Result<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("read action execution preflights {}", path.display()))?;
+    for line in content.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if value
+            .get("preflight_id")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value == preflight_id)
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn action_execution_preflight_id(
+    source_receipt_id: &str,
+    result_status: &str,
+    current_hash: Option<&str>,
+    reason: &str,
+) -> String {
+    let canonical = format!(
+        "{}\n{}\n{}\n{}",
+        source_receipt_id,
+        result_status,
+        current_hash.unwrap_or("missing"),
+        reason
+    );
+    let digest = action_envelope_sha256_hex(canonical.as_bytes());
+    format!(
+        "action-preflight-{}",
+        digest
+            .strip_prefix("sha256:")
+            .unwrap_or(&digest)
+            .chars()
+            .take(16)
+            .collect::<String>()
+    )
+}
+
+fn apply_decision_action(
+    mut record: DecisionRecord,
+    execution: &DecisionActionExecution,
+    args: &ActionDecisionArgs,
+) -> DecisionRecord {
+    let decision = execution.decision.as_str();
+    let by = safe(args.by.trim());
+    record.updated_at = execution.executed_at;
+    record.trace_refs.push(DecisionTraceRef {
+        kind: "decision_action_execution".to_string(),
+        label: by.clone(),
+        reference: format!(
+            "{} choice={} preflight={}",
+            execution.execution_id, decision, execution.preflight_id
+        ),
+    });
+
+    match decision {
+        "deny" => {
+            record.status = DecisionStatus::Denied;
+            record.execution_handoff = None;
+        }
+        "defer" => {
+            record.status = DecisionStatus::Deferred;
+            record.execution_handoff = None;
+        }
+        _ => {
+            record.status = DecisionStatus::HandoffReady;
+            record.execution_handoff =
+                Some(build_decision_action_handoff(&record, execution, args, by));
+        }
+    }
+    record
+}
+
+fn apply_decision_action_closeout(
+    mut record: DecisionRecord,
+    closeout: &DecisionActionCloseout,
+    args: &ActionCloseoutArgs,
+) -> DecisionRecord {
+    let by = safe(args.by.trim());
+    let applied_handoff_id = record
+        .execution_handoff
+        .as_ref()
+        .map(|handoff| handoff.handoff_id.clone());
+    record.updated_at = closeout.recorded_at;
+    record.status = DecisionStatus::Receipted;
+    record.decision_receipt = Some(DecisionReceipt {
+        receipt_id: closeout
+            .receipt_id
+            .clone()
+            .unwrap_or_else(|| decision_action_receipt_id(&closeout.execution_id, &closeout.receipt_result_status)),
+        decision_id: record.decision_id.clone(),
+        resolved_by: by.clone(),
+        resolved_at: closeout.recorded_at,
+        final_decision: closeout.decision.clone(),
+        applied_handoff_id,
+        authorization_summary: "Receipt closes the Web/mobile decision action handoff; it does not authorize runtime mutation, cleanup, provider retargeting, accepted-truth changes, or wiki promotion.".to_string(),
+        evidence_summary: closeout.evidence_summary.clone(),
+        result_status: closeout.receipt_result_status.clone(),
+        remaining_review: closeout.remaining_review.clone(),
+    });
+    record.trace_refs.push(DecisionTraceRef {
+        kind: "decision_action_closeout".to_string(),
+        label: by,
+        reference: format!(
+            "{} execution={}",
+            closeout.closeout_id, closeout.execution_id
+        ),
+    });
+    record
+}
+
+fn build_decision_action_handoff(
+    record: &DecisionRecord,
+    execution: &DecisionActionExecution,
+    args: &ActionDecisionArgs,
+    by: String,
+) -> ExecutionHandoff {
+    let decision = execution.decision.as_str();
+    let note = safe(args.note.trim());
+    let mut instructions = vec![
+        format!("Operator selected `{decision}` through action preflight."),
+        format!("Decision action execution: {}", execution.execution_id),
+        format!("Source preflight: {}", execution.preflight_id),
+    ];
+    if !note.trim().is_empty() {
+        instructions.push(format!("Operator note: {note}"));
+    }
+    instructions.push("Before execution, read the decision request, Council review, approval brief projection, action envelope receipt, and action execution preflight.".to_string());
+
+    let non_authorized_actions = record.decision_request.non_authorized_scope.clone();
+    let constraints = non_authorized_actions
+        .iter()
+        .map(|scope| format!("This handoff does not authorize {scope}."))
+        .collect::<Vec<_>>();
+
+    ExecutionHandoff {
+        handoff_id: execution
+            .handoff_id
+            .clone()
+            .unwrap_or_else(|| decision_handoff_id(&execution.execution_id)),
+        decision_id: record.decision_id.clone(),
+        target: args
+            .target
+            .as_deref()
+            .map(safe)
+            .filter(|target| !target.trim().is_empty())
+            .unwrap_or_else(|| default_decision_action_target(decision).to_string()),
+        approved_direction: decision.to_string(),
+        approved_scope: record.decision_request.current_scope.clone(),
+        instructions,
+        constraints,
+        verification_required: vec![
+            "Record a decision receipt before treating this handoff as accepted.".to_string(),
+            "Use separate approvals for runtime mutation, cleanup, provider retargeting, accepted-truth changes, or wiki promotion.".to_string(),
+        ],
+        non_authorized_actions: {
+            let mut actions = non_authorized_actions;
+            actions.push(format!(
+                "This execution was recorded by {by}; it does not dispatch runtime work."
+            ));
+            actions
+        },
+    }
+}
+
+fn read_action_execution_preflights(
+    profile_dir: &Path,
+) -> Result<Vec<StoredActionExecutionPreflight>> {
+    let path = profile_dir.join(ACTION_EXECUTION_PREFLIGHTS_FILE);
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let content = fs::read_to_string(&path)
+        .with_context(|| format!("read action execution preflights {}", path.display()))?;
+    let mut preflights = Vec::new();
+    for (index, line) in content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .enumerate()
+    {
+        preflights.push(
+            serde_json::from_str::<StoredActionExecutionPreflight>(line).with_context(|| {
+                format!(
+                    "parse action execution preflight {} line {}",
+                    path.display(),
+                    index + 1
+                )
+            })?,
+        );
+    }
+    Ok(preflights)
+}
+
+fn find_decision_action_execution_for_preflight(
+    path: &Path,
+    preflight_id: &str,
+) -> Result<Option<Value>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("read decision action executions {}", path.display()))?;
+    for line in content.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if value
+            .get("preflight_id")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value == preflight_id)
+            && value
+                .get("result_status")
+                .and_then(Value::as_str)
+                .is_some_and(|value| value == "applied")
+        {
+            return Ok(Some(value));
+        }
+    }
+    Ok(None)
+}
+
+fn find_decision_action_execution(
+    path: &Path,
+    execution_id: &str,
+) -> Result<Option<StoredDecisionActionExecution>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("read decision action executions {}", path.display()))?;
+    for (index, line) in content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .enumerate()
+    {
+        let execution =
+            serde_json::from_str::<StoredDecisionActionExecution>(line).with_context(|| {
+                format!(
+                    "parse decision action execution {} line {}",
+                    path.display(),
+                    index + 1
+                )
+            })?;
+        if execution.execution_id == execution_id {
+            return Ok(Some(execution));
+        }
+    }
+    Ok(None)
+}
+
+fn append_decision_action_execution(
+    path: &Path,
+    execution: &DecisionActionExecution,
+) -> Result<bool> {
+    if decision_action_execution_exists(path, &execution.execution_id)? {
+        return Ok(false);
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    writeln!(file, "{}", serde_json::to_string(execution)?)?;
+    Ok(true)
+}
+
+fn decision_action_execution_exists(path: &Path, execution_id: &str) -> Result<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("read decision action executions {}", path.display()))?;
+    for line in content.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if value
+            .get("execution_id")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value == execution_id)
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn find_decision_action_closeout_for_execution(
+    path: &Path,
+    execution_id: &str,
+) -> Result<Option<Value>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("read decision action closeouts {}", path.display()))?;
+    for line in content.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if value
+            .get("execution_id")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value == execution_id)
+            && value
+                .get("result_status")
+                .and_then(Value::as_str)
+                .is_some_and(|value| value == "receipted")
+        {
+            return Ok(Some(value));
+        }
+    }
+    Ok(None)
+}
+
+fn append_decision_action_closeout(path: &Path, closeout: &DecisionActionCloseout) -> Result<bool> {
+    if decision_action_closeout_exists(path, &closeout.closeout_id)? {
+        return Ok(false);
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    writeln!(file, "{}", serde_json::to_string(closeout)?)?;
+    Ok(true)
+}
+
+fn decision_action_closeout_exists(path: &Path, closeout_id: &str) -> Result<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("read decision action closeouts {}", path.display()))?;
+    for line in content.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if value
+            .get("closeout_id")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value == closeout_id)
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn read_decision_action_closeouts(path: &Path) -> Result<Vec<StoredDecisionActionCloseout>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("read decision action closeouts {}", path.display()))?;
+    let mut closeouts = Vec::new();
+    for (index, line) in content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .enumerate()
+    {
+        closeouts.push(
+            serde_json::from_str::<StoredDecisionActionCloseout>(line).with_context(|| {
+                format!(
+                    "parse decision action closeout {} line {}",
+                    path.display(),
+                    index + 1
+                )
+            })?,
+        );
+    }
+    Ok(closeouts)
+}
+
+fn append_runtime_dispatch_preflight(
+    path: &Path,
+    preflight: &RuntimeDispatchPreflight,
+) -> Result<bool> {
+    if runtime_dispatch_preflight_exists(path, &preflight.preflight_id)? {
+        return Ok(false);
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    writeln!(file, "{}", serde_json::to_string(preflight)?)?;
+    Ok(true)
+}
+
+fn runtime_dispatch_preflight_exists(path: &Path, preflight_id: &str) -> Result<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("read runtime dispatch preflights {}", path.display()))?;
+    for line in content.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if value
+            .get("preflight_id")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value == preflight_id)
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn read_runtime_dispatch_preflights(
+    profile_dir: &Path,
+) -> Result<Vec<StoredRuntimeDispatchPreflight>> {
+    let path = profile_dir.join(RUNTIME_DISPATCH_PREFLIGHTS_FILE);
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let content = fs::read_to_string(&path)
+        .with_context(|| format!("read runtime dispatch preflights {}", path.display()))?;
+    let mut preflights = Vec::new();
+    for (index, line) in content
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .enumerate()
+    {
+        preflights.push(
+            serde_json::from_str::<StoredRuntimeDispatchPreflight>(line).with_context(|| {
+                format!(
+                    "parse runtime dispatch preflight {} line {}",
+                    path.display(),
+                    index + 1
+                )
+            })?,
+        );
+    }
+    Ok(preflights)
+}
+
+fn latest_runtime_dispatch_preflight<'a>(
+    source: &StoredRuntimeDispatchPreflight,
+    preflights: &'a [StoredRuntimeDispatchPreflight],
+) -> Option<&'a StoredRuntimeDispatchPreflight> {
+    preflights
+        .iter()
+        .rev()
+        .find(|preflight| preflight.source_closeout_id == source.source_closeout_id)
+}
+
+fn find_runtime_dispatch_receipt_for_preflight(
+    path: &Path,
+    preflight_id: &str,
+) -> Result<Option<Value>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("read runtime dispatch receipts {}", path.display()))?;
+    for line in content.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if value
+            .get("preflight_id")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value == preflight_id)
+            && value
+                .get("result_status")
+                .and_then(Value::as_str)
+                .is_some_and(|value| value == "queued")
+        {
+            return Ok(Some(value));
+        }
+    }
+    Ok(None)
+}
+
+fn append_runtime_dispatch_receipt(path: &Path, receipt: &RuntimeDispatchReceipt) -> Result<bool> {
+    if runtime_dispatch_receipt_exists(path, &receipt.receipt_id)? {
+        return Ok(false);
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    writeln!(file, "{}", serde_json::to_string(receipt)?)?;
+    Ok(true)
+}
+
+fn runtime_dispatch_receipt_exists(path: &Path, receipt_id: &str) -> Result<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("read runtime dispatch receipts {}", path.display()))?;
+    for line in content.lines().filter(|line| !line.trim().is_empty()) {
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if value
+            .get("receipt_id")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value == receipt_id)
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn runtime_dispatch_task(
+    receipt: &RuntimeDispatchReceipt,
+    args: &RuntimeDispatchArgs,
+) -> OffdeskTask {
+    OffdeskTask::new(
+        OffdeskTaskInput {
+            task_id: Some(receipt.task_id.clone()),
+            request_id: receipt.request_id.clone(),
+            project_key: receipt.project_key.clone(),
+            capability_id: receipt.capability_id.clone(),
+            runner_kind: receipt.runner_kind,
+            command: receipt.command.clone(),
+            workdir: receipt.workdir.clone(),
+            execution_brief: None,
+            not_before: None,
+            mutation_class: Some("runtime_dispatch".to_string()),
+            artifact_refs: Vec::new(),
+            implementation_packet: None,
+            artifact_kind: None,
+            agent_mode: None,
+            provider_id: args.provider_id.as_deref().map(safe),
+            model: args.model.as_deref().map(safe),
+            preview: format!(
+                "Queued from {} for decision {}.",
+                receipt.source_closeout_id, receipt.decision_id
+            ),
+            reason: receipt.reason.clone(),
+            log_artifact_path: args
+                .log_artifact
+                .as_ref()
+                .map(|path| safe(path.to_string_lossy().as_ref())),
+            result_artifact_path: args
+                .result_artifact
+                .as_ref()
+                .map(|path| safe(path.to_string_lossy().as_ref())),
+        },
+        receipt.recorded_at,
+    )
+}
+
+fn record_action_decision_check(
+    checks: &mut Vec<ActionDecisionCheck>,
+    blockers: &mut Vec<String>,
+    name: &'static str,
+    passed: bool,
+    pass_detail: String,
+    fail_detail: String,
+) {
+    let detail = if passed { pass_detail } else { fail_detail };
+    if !passed {
+        blockers.push(format!("{name}: {detail}"));
+    }
+    checks.push(ActionDecisionCheck {
+        name,
+        status: if passed { "passed" } else { "failed" },
+        detail,
+    });
+}
+
+fn record_action_closeout_check(
+    checks: &mut Vec<ActionCloseoutCheck>,
+    blockers: &mut Vec<String>,
+    name: &'static str,
+    passed: bool,
+    pass_detail: String,
+    fail_detail: String,
+) {
+    let detail = if passed { pass_detail } else { fail_detail };
+    if !passed {
+        blockers.push(format!("{name}: {detail}"));
+    }
+    checks.push(ActionCloseoutCheck {
+        name,
+        status: if passed { "passed" } else { "failed" },
+        detail,
+    });
+}
+
+fn record_runtime_dispatch_check(
+    checks: &mut Vec<RuntimeDispatchCheck>,
+    blockers: &mut Vec<String>,
+    name: &'static str,
+    passed: bool,
+    pass_detail: String,
+    fail_detail: String,
+) {
+    let detail = if passed { pass_detail } else { fail_detail };
+    if !passed {
+        blockers.push(format!("{name}: {detail}"));
+    }
+    checks.push(RuntimeDispatchCheck {
+        name,
+        status: if passed { "passed" } else { "failed" },
+        detail,
+    });
+}
+
+fn normalize_action_decision_choice(value: &str) -> String {
+    let normalized = value.trim().to_lowercase().replace([' ', '-'], "_");
+    match normalized.as_str() {
+        "go" | "ok" | "okay" | "yes" | "proceed" => "continue".to_string(),
+        "retry" | "redo" => "revise".to_string(),
+        "hold" => "block".to_string(),
+        "cancel" | "abort" => "stop".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn supported_decision_action(decision: &str) -> bool {
+    matches!(
+        decision,
+        "continue" | "revise" | "block" | "stop" | "deny" | "defer"
+    )
+}
+
+fn decision_action_requires_note(decision: &str) -> bool {
+    matches!(decision, "revise" | "block")
+}
+
+fn decision_action_status_is_mutable(status: DecisionStatus) -> bool {
+    matches!(
+        status,
+        DecisionStatus::Draft
+            | DecisionStatus::CouncilReview
+            | DecisionStatus::UserPending
+            | DecisionStatus::Deferred
+    )
+}
+
+fn decision_creates_handoff(decision: &str) -> bool {
+    !matches!(decision, "deny" | "defer")
+}
+
+fn default_decision_action_target(decision: &str) -> &'static str {
+    match decision {
+        "stop" => "closeout",
+        _ => "agent",
+    }
+}
+
+fn decision_handoff_id(execution_id: &str) -> String {
+    format!("handoff-{}", safe(execution_id))
+}
+
+fn decision_action_execution_id(
+    preflight_id: &str,
+    result_status: &str,
+    decision: &str,
+    reason: &str,
+) -> String {
+    let canonical = format!("{preflight_id}\n{result_status}\n{decision}\n{reason}");
+    let digest = action_envelope_sha256_hex(canonical.as_bytes());
+    format!(
+        "decision-action-{}",
+        digest
+            .strip_prefix("sha256:")
+            .unwrap_or(&digest)
+            .chars()
+            .take(16)
+            .collect::<String>()
+    )
+}
+
+fn decision_action_closeout_id(
+    execution_id: &str,
+    result_status: &str,
+    receipt_result_status: &str,
+    reason: &str,
+) -> String {
+    let canonical = format!("{execution_id}\n{result_status}\n{receipt_result_status}\n{reason}");
+    let digest = action_envelope_sha256_hex(canonical.as_bytes());
+    format!(
+        "decision-action-closeout-{}",
+        digest
+            .strip_prefix("sha256:")
+            .unwrap_or(&digest)
+            .chars()
+            .take(16)
+            .collect::<String>()
+    )
+}
+
+fn decision_action_receipt_id(execution_id: &str, receipt_result_status: &str) -> String {
+    let canonical = format!("{execution_id}\n{receipt_result_status}");
+    let digest = action_envelope_sha256_hex(canonical.as_bytes());
+    format!(
+        "receipt-decision-action-{}",
+        digest
+            .strip_prefix("sha256:")
+            .unwrap_or(&digest)
+            .chars()
+            .take(16)
+            .collect::<String>()
+    )
+}
+
+fn runtime_dispatch_preflight_id(
+    closeout_id: &str,
+    result_status: &str,
+    receipt_id: Option<&str>,
+    reason: &str,
+) -> String {
+    let canonical = format!(
+        "{}\n{}\n{}\n{}",
+        closeout_id,
+        result_status,
+        receipt_id.unwrap_or("missing"),
+        reason
+    );
+    let digest = action_envelope_sha256_hex(canonical.as_bytes());
+    format!(
+        "runtime-preflight-{}",
+        digest
+            .strip_prefix("sha256:")
+            .unwrap_or(&digest)
+            .chars()
+            .take(16)
+            .collect::<String>()
+    )
+}
+
+fn runtime_dispatch_receipt_id(
+    preflight_id: &str,
+    result_status: &str,
+    task_id: &str,
+    command: &str,
+    reason: &str,
+) -> String {
+    let canonical = format!("{preflight_id}\n{result_status}\n{task_id}\n{command}\n{reason}");
+    let digest = action_envelope_sha256_hex(canonical.as_bytes());
+    format!(
+        "runtime-dispatch-{}",
+        digest
+            .strip_prefix("sha256:")
+            .unwrap_or(&digest)
+            .chars()
+            .take(16)
+            .collect::<String>()
+    )
+}
+
+fn runtime_dispatch_task_id(preflight_id: &str, override_task_id: Option<&str>) -> String {
+    override_task_id
+        .map(safe)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| {
+            let digest = action_envelope_sha256_hex(preflight_id.as_bytes());
+            format!(
+                "runtime-task-{}",
+                digest
+                    .strip_prefix("sha256:")
+                    .unwrap_or(&digest)
+                    .chars()
+                    .take(12)
+                    .collect::<String>()
+            )
+        })
+}
+
+fn action_envelope_receipt_id(
+    idempotency_key: &str,
+    result_status: &str,
+    current_hash: Option<&str>,
+    reason: &str,
+    observed_hash: &str,
+) -> String {
+    let canonical = format!(
+        "{}\n{}\n{}\n{}\n{}",
+        idempotency_key,
+        result_status,
+        current_hash.unwrap_or("missing"),
+        reason,
+        observed_hash
+    );
+    let digest = action_envelope_sha256_hex(canonical.as_bytes());
+    format!(
+        "action-receipt-{}",
+        digest
+            .strip_prefix("sha256:")
+            .unwrap_or(&digest)
+            .chars()
+            .take(16)
+            .collect::<String>()
+    )
+}
+
+fn accepted_truth_recovery_action_receipt_id(
+    idempotency_key: &str,
+    result_status: &str,
+    current_hash: Option<&str>,
+    reason: &str,
+    observed_hash: &str,
+) -> String {
+    let canonical = format!(
+        "{}\n{}\n{}\n{}\n{}",
+        idempotency_key,
+        result_status,
+        current_hash.unwrap_or("missing"),
+        reason,
+        observed_hash
+    );
+    let digest = action_envelope_sha256_hex(canonical.as_bytes());
+    format!(
+        "truth-recovery-receipt-{}",
+        digest
+            .strip_prefix("sha256:")
+            .unwrap_or(&digest)
+            .chars()
+            .take(16)
+            .collect::<String>()
+    )
+}
+
+fn action_envelope_observed_hash(record: &DecisionRecord, action_kind: &str) -> String {
+    let canonical = format!(
+        "{}\n{}\n{}\n{}\n{}\n{}\n{}",
+        record.decision_id,
+        record.project_key,
+        record.status.as_str(),
+        record.materiality.as_str(),
+        record.updated_at.to_rfc3339(),
+        record.decision_request.kind,
+        action_kind
+    );
+    action_envelope_sha256_hex(canonical.as_bytes())
+}
+
+fn action_envelope_slug(value: &str) -> String {
+    let mut output = String::new();
+    let mut last_was_separator = false;
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            output.push(ch.to_ascii_lowercase());
+            last_was_separator = false;
+        } else if !last_was_separator && !output.is_empty() {
+            output.push('_');
+            last_was_separator = true;
+        }
+    }
+    while output.ends_with('_') {
+        output.pop();
+    }
+    if output.is_empty() {
+        "action".to_string()
+    } else {
+        output
+    }
+}
+
+fn action_envelope_sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("sha256:{:x}", hasher.finalize())
 }
 
 fn resolve_context(

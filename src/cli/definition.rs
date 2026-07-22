@@ -8,6 +8,7 @@ use clap_complete::Shell;
 
 use super::add::AddArgs;
 use super::doctor::DoctorArgs;
+use super::go::GoArgs;
 use super::group::GroupCommands;
 use super::init::InitArgs;
 use super::list::ListArgs;
@@ -49,6 +50,9 @@ pub struct Cli {
 pub enum Commands {
     /// Add a new session
     Add(AddArgs),
+
+    /// Find-or-create a session for this directory, refresh its wiki brief, and attach
+    Go(GoArgs),
 
     /// Initialize .forager/config.toml in a repository
     Init(InitArgs),
