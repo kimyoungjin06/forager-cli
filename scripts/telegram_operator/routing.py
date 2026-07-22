@@ -44,6 +44,33 @@ CORE_OR_SLASH_COMMANDS = {
     "cancel",
 }
 SESSION_INPUT_COMMANDS = {"select", "choose", "path", "workload", "session_input", "plan_input"}
+# One usage/description line per operator-facing command. This is handed to the
+# local chat agent as the complete command surface, so keep it in sync with
+# parse_remote_command when commands are added or removed.
+COMMAND_SURFACE = (
+    ("/status", "offdesk 상태 요약"),
+    ("/pending [--all]", "승인 대기 항목"),
+    ("/plans", "계획 목록"),
+    ("/show <id>", "항목 상세 보기"),
+    ("/decisions", "결정 대기함"),
+    ("/decision <id> <action> [메모]", "결정 처리 (확인 카드 후 실행)"),
+    ("/recovery", "복구 대기 항목"),
+    ("/recover <id>", "복구 실행"),
+    ("/runtime", "런타임 디스패치 상태"),
+    ("/run [name]", "사전 승인된 명령 목록/실행"),
+    ("/tasks", "실행 중 작업 목록"),
+    ("/cancel_task <id> [이유]", "작업 취소"),
+    ("/attention", "주의 필요 항목 카드"),
+    ("/pause [이유]", "전체 일시정지"),
+    ("/resume", "재개"),
+    ("/confirm", "대기 중인 확인 승인"),
+    ("/cancel", "대기 중인 확인 취소"),
+    ("/plan <내용>", "계획 후보로 기록 (로컬 Plan Mode에서 이어감)"),
+    ("/feedback <내용>", "의견 기록"),
+    ("/remember <내용>", "위키 후보로 기록"),
+    ("/chat <내용>", "에이전트 채팅 (평문과 동일)"),
+    ("/help", "도움말"),
+)
 DISPATCH_BUTTON_ALIASES = {
     "결정 목록": "/decisions",
     "복구 목록": "/recovery",

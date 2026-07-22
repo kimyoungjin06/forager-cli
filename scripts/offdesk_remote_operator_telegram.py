@@ -86,6 +86,11 @@ from telegram_operator.notifier import (
     build_attention_notification,
     render_attention_message,
 )
+from telegram_operator.project_candidates import (
+    discover_project_paths,
+    relative_path_hint,
+    workspace_roots,
+)
 from telegram_operator.persistence import (
     append_chat_history,
     chat_history_for_chat_hash,
@@ -1551,6 +1556,46 @@ def resolve_dispatch_confirmation(
         rendered["mobile_card_contract"] = mobile_card_contract(message_preview)
 
 
+def build_chat_operator_snapshot(args: argparse.Namespace) -> dict[str, Any]:
+    """Compact live read-only state handed to the local chat agent.
+
+    Without this the agent only sees chat history, so it answers state and
+    workspace questions with "cannot check" and invents slash commands. Every
+    section degrades gracefully; the chat must still work if a probe fails.
+    """
+
+    snapshot: dict[str, Any] = {"schema": "telegram_chat_operator_snapshot.v1"}
+    try:
+        surface = export_workstation_surface(args.forager_bin, args.profile)
+        snapshot["workstation"] = {
+            "generated_at": surface.get("generated_at"),
+            "attention_counts": surface.get("attention_counts"),
+            "capacity": surface.get("capacity"),
+            "health": [
+                {"id": item.get("id"), "status": item.get("status")}
+                for item in surface.get("health") or []
+                if isinstance(item, dict)
+            ],
+            "open_decisions": [
+                {"decision_id": item.get("decision_id"), "title": item.get("title")}
+                for item in open_decision_actions(surface)[:5]
+            ],
+        }
+    except (OSError, RemoteOperatorTelegramError) as error:
+        snapshot["workstation"] = {
+            "status": "unavailable",
+            "error": sanitize_text(str(error), max_chars=120),
+        }
+    snapshot["autonomy_armed"] = autonomy_is_armed(args.profile)
+    try:
+        roots = workspace_roots(args)
+        paths = discover_project_paths(roots, max_paths=60)
+        snapshot["workspace_projects"] = [relative_path_hint(path, roots) for path in paths][:40]
+    except OSError:
+        snapshot["workspace_projects"] = []
+    return snapshot
+
+
 def render_command_result(
     args: argparse.Namespace,
     config: dict[str, Any],
@@ -1596,6 +1641,7 @@ def render_command_result(
             str(parsed.get("chat_text") or command_text),
             feedback_context=feedback_context,
             chat_history=chat_history,
+            operator_snapshot=build_chat_operator_snapshot(args),
         )
         if isinstance(agent_intent, dict):
             parsed["agent_intent"] = agent_intent
@@ -1897,7 +1943,11 @@ def scan_and_propose_autonomy(
             pass
         pending = (state.get("pending_dispatch_confirmations_by_chat") or {}).get(chat_hash)
         if isinstance(pending, dict):
-            return {"status": "confirmation_already_pending"}
+            if confirmation_is_fresh(pending):
+                return {"status": "confirmation_already_pending"}
+            # An expired confirmation (e.g. last night's unanswered proposal)
+            # must not block proposals forever.
+            clear_confirmation(state, chat_hash)
         last = float(state.get("autonomy_proposal_at") or 0)
         if now - last < int(args.autonomy_backoff_sec):
             return {"status": "backoff"}

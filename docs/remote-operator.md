@@ -452,6 +452,28 @@ project-selection buttons
 plan-session buttons through 계획 승인
 ```
 
+### Grounded freeform chat
+
+Plain text routes to the local chat agent (Ollama). The chat prompt is
+grounded with two payload sections so answers come from real state instead of
+guesses:
+
+- `operator_snapshot`: live read-only state gathered per message in
+  `build_chat_operator_snapshot()`: workstation surface summary
+  (attention counts, capacity, health, up to 5 open decision titles),
+  `autonomy_armed`, and workspace project folder hints discovered under the
+  operator's workspace roots. Every section degrades gracefully; chat still
+  works if a probe fails.
+- `supported_commands`: the complete slash-command surface from
+  `telegram_operator/routing.py::COMMAND_SURFACE` (keep in sync with
+  `parse_remote_command`).
+
+A deterministic guard (`telegram_operator/agent.py::scrub_unknown_commands`)
+rewrites any slash command outside the real surface to `/help` in model
+replies, so the agent can never teach the operator a command that bounces
+with `unsupported_remote_operator_command`. Filesystem paths and URLs are
+left untouched.
+
 The following command classes are future design targets, not current Telegram
 runtime authority:
 
@@ -687,7 +709,9 @@ been idle past the threshold (default 30 minutes, only after
 card offering to arm the bounded overnight window; the operator's 확인 tap is
 the only thing that arms it. Unanswered or declined proposals back off
 (default 2h); an already-armed window, an active operator pause, or another
-pending confirmation suppresses proposals entirely.
+FRESH pending confirmation suppresses proposals. An expired pending
+confirmation (for example last night's unanswered proposal card) is cleared
+by the scan instead of blocking proposals forever.
 
 Approval runs `offdesk_autonomy_run.py --arm` (window until 09:00 local by
 default). While armed, three systemd user timers do the night work: an

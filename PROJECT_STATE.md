@@ -301,7 +301,18 @@ out of product-facing docs. The product direction is defined in
   (auto-expiring, /pause-independent), and three armed-gated systemd timers
   run the night: tick heartbeat every 10 min, nightly distillation playbook
   at 02:00, morning brief at 08:50 which then disarms. Timers are installed
-  by `install_offdesk_autonomy_timers.py` and are inert unless armed.
+  by `install_offdesk_autonomy_timers.py` and are inert unless armed. Expired
+  pending confirmations are cleared by the proposal scan instead of blocking
+  future proposals.
+
+- Telegram freeform chat is grounded: every plain-text message hands the local
+  chat agent an `operator_snapshot` (workstation surface summary, health,
+  open decisions, workspace project folder hints, autonomy state) plus the
+  complete `supported_commands` surface from `routing.py::COMMAND_SURFACE`,
+  and `scrub_unknown_commands()` rewrites hallucinated slash commands to
+  `/help`. Before this the agent answered state questions with "cannot check"
+  and invented commands like `/list` and `/projects` that bounced as
+  unsupported.
 
 ## Next Work Candidates
 

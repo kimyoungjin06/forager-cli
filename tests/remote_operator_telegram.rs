@@ -7045,3 +7045,217 @@ fn remote_operator_telegram_plans_fixture_has_empty_and_nonempty_next_actions() 
     assert_mobile_contract(&result);
     Ok(())
 }
+
+#[test]
+#[serial]
+fn remote_operator_telegram_chat_prompt_includes_command_surface_and_snapshot() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let out = temp.path().join("grounded_chat.json");
+    let agent_request_path = temp.path().join("ollama_grounded_request.json");
+    let (base_url, server) = spawn_fake_ollama_with_classification(
+        agent_request_path.clone(),
+        json!({
+            "intent": "chat",
+            "confidence": 0.9,
+            "requires_clarification": false,
+            "clarifying_question": null,
+            "assistant_reply": "대기 중인 결정은 없습니다.",
+            "reason": "State question answered from the operator snapshot.",
+            "non_authorized": ["execution", "approval", "shell"]
+        }),
+    )?;
+
+    let output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--command-text")
+        .arg("마지막 상태를 먼저 읽어볼까")
+        .arg("--forager-bin")
+        .arg(temp.path().join("missing-forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--out")
+        .arg(&out)
+        .arg("--agent-intent-mode")
+        .arg("required")
+        .arg("--agent-base-url")
+        .arg(&base_url)
+        .arg("--agent-model")
+        .arg("qwen3-coder-next:latest")
+        .output()?;
+
+    server.join().expect("fake ollama server panicked")?;
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["status"], "rendered");
+    assert_eq!(result["parsed_command"]["command"], "chat");
+
+    let agent_request: Value = serde_json::from_slice(&fs::read(&agent_request_path)?)?;
+    let prompt = agent_request["prompt"].as_str().expect("agent prompt");
+    // The chat agent must receive the live snapshot and the complete command
+    // surface so it answers from real state and never invents slash commands.
+    assert!(prompt.contains("operator_snapshot"));
+    assert!(prompt.contains("supported_commands"));
+    assert!(prompt.contains("autonomy_armed"));
+    assert!(prompt.contains("workspace_projects"));
+    assert!(prompt.contains("/remember"));
+    assert!(prompt.contains("Never mention, suggest, or invent a slash command"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_chat_scrubs_hallucinated_commands() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let out = temp.path().join("scrubbed_chat.json");
+    let agent_request_path = temp.path().join("ollama_scrub_request.json");
+    let (base_url, server) = spawn_fake_ollama_with_classification(
+        agent_request_path.clone(),
+        json!({
+            "intent": "chat",
+            "confidence": 0.95,
+            "requires_clarification": false,
+            "clarifying_question": null,
+            "assistant_reply": "목록은 /list 명령어로 확인할 수 있습니다.",
+            "reason": "Model hallucinated a nonexistent command.",
+            "non_authorized": ["execution", "approval", "shell"]
+        }),
+    )?;
+
+    let output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--command-text")
+        .arg("목록이 안보이잖아")
+        .arg("--forager-bin")
+        .arg(temp.path().join("missing-forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--out")
+        .arg(&out)
+        .arg("--agent-intent-mode")
+        .arg("required")
+        .arg("--agent-base-url")
+        .arg(&base_url)
+        .arg("--agent-model")
+        .arg("qwen3-coder-next:latest")
+        .output()?;
+
+    server.join().expect("fake ollama server panicked")?;
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["status"], "rendered");
+    // /list does not exist; the reply must not teach the operator a command
+    // that will bounce with unsupported_remote_operator_command.
+    assert_eq!(
+        result["parsed_command"]["agent_intent"]["assistant_reply"],
+        "목록은 /help 명령어로 확인할 수 있습니다."
+    );
+    let preview = result["message_preview"].as_str().expect("message preview");
+    assert!(!preview.contains("/list"));
+    assert_mobile_contract(&result);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_autonomy_stale_confirmation_does_not_block_proposal() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let update_path = temp.path().join("idle_update.json");
+    write_text_update(&update_path, 700, 900, "/status")?;
+    let state_path = temp.path().join("telegram_state.json");
+    let out = temp.path().join("autonomy_result.json");
+
+    // An expired proposal confirmation (TTL long past) left in state must be
+    // cleared, not treated as pending forever.
+    let chat_hash = "sha256:15e2b0d3c33891eb";
+    let state = json!({
+        "schema": "remote_operator_telegram_state.v1",
+        "offset": 0,
+        "pending_dispatch_confirmations_by_chat": {
+            chat_hash: {
+                "schema": "telegram_dispatch_confirmation.v1",
+                "token": "deadbeef0000",
+                "kind": "autonomy_start",
+                "target_id": "overnight",
+                "action_kind": "arm",
+                "observed_hash": "",
+                "note": "idle 45m",
+                "chat_id_hash": chat_hash,
+                "created_at": "2026-07-01T00:00:00+00:00",
+                "ttl_sec": 1800
+            }
+        }
+    });
+    fs::write(&state_path, serde_json::to_string_pretty(&state)?)?;
+
+    // Watch tree whose newest mtime is hours old -> idle.
+    let watch_dir = temp.path().join("sessions");
+    fs::create_dir_all(&watch_dir)?;
+    let marker = watch_dir.join("session.jsonl");
+    fs::write(&marker, "{}\n")?;
+    let old = std::time::SystemTime::now() - Duration::from_secs(2 * 3600);
+    fs::File::options()
+        .write(true)
+        .open(&marker)?
+        .set_modified(old)?;
+    fs::File::open(&watch_dir)?.set_modified(old)?;
+
+    let output = remote_operator_command(temp.path())
+        .arg("--dry-run")
+        .arg("--once")
+        .arg("--replay-update-file")
+        .arg(&update_path)
+        .arg("--forager-bin")
+        .arg(env!("CARGO_BIN_EXE_forager"))
+        .arg("--env-file")
+        .arg(&env_path)
+        .arg("--state-file")
+        .arg(&state_path)
+        .arg("--out")
+        .arg(&out)
+        .arg("--autonomy-propose")
+        .arg("--autonomy-idle-min")
+        .arg("30")
+        .arg("--autonomy-propose-from-hour")
+        .arg("0")
+        .arg("--autonomy-watch-path")
+        .arg(&watch_dir)
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
+    assert_eq!(result["autonomy_proposal"]["status"], "proposed");
+    assert!(
+        result["autonomy_proposal"]["idle_min"]
+            .as_i64()
+            .expect("idle minutes")
+            >= 30
+    );
+
+    // The stale token was replaced by a fresh confirmation for the new card.
+    let state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
+    let pending = &state["pending_dispatch_confirmations_by_chat"][chat_hash];
+    assert_eq!(pending["kind"], "autonomy_start");
+    assert_ne!(pending["token"], "deadbeef0000");
+    Ok(())
+}

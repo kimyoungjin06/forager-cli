@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import sys
 import urllib.error
 from typing import Any
@@ -21,6 +22,7 @@ from offdesk_llm_endpoint import (
 
 from .common import RemoteOperatorTelegramError, csv_values, unique_nonempty
 from .rendering import ASSISTANT_REPLY_MAX_CHARS, sanitize_text
+from .routing import COMMAND_SURFACE, CORE_OR_SLASH_COMMANDS, SESSION_INPUT_COMMANDS
 
 
 DEFAULT_AGENT_CONFIG_FILE = pathlib.Path(
@@ -38,6 +40,32 @@ DEFAULT_AGENT_MODEL_CANDIDATES = DEFAULT_CODING_MODEL_CANDIDATES
 
 def arg_was_provided(flag: str) -> bool:
     return any(raw == flag or raw.startswith(flag + "=") for raw in sys.argv[1:])
+
+
+KNOWN_COMMAND_TOKENS = frozenset(CORE_OR_SLASH_COMMANDS) | frozenset(SESSION_INPUT_COMMANDS)
+# A slash command mention: "/word" at a token start, not followed by more path
+# segments, so filesystem paths like /home/user stay untouched.
+SLASH_COMMAND_MENTION = re.compile(r"(?<![\w/.~-])/([A-Za-z][A-Za-z0-9_-]*)(?![A-Za-z0-9_/-])")
+
+
+def scrub_unknown_commands(text: str | None) -> str | None:
+    """Replace hallucinated slash commands in model output with /help.
+
+    The local model occasionally invents commands (e.g. /list, /projects); the
+    operator then types them and hits unsupported_remote_operator_command. Any
+    slash mention outside the real command surface is rewritten to /help.
+    """
+
+    if not text:
+        return text
+
+    def replace(match: re.Match[str]) -> str:
+        name = match.group(1).lower().replace("-", "_")
+        if name in KNOWN_COMMAND_TOKENS:
+            return match.group(0)
+        return "/help"
+
+    return SLASH_COMMAND_MENTION.sub(replace, text)
 
 
 def classify_feedback_kind(text: str) -> str:
@@ -174,6 +202,7 @@ def build_agent_chat_prompt(
     chat_text: str,
     feedback_context: dict[str, Any] | None,
     chat_history: list[dict[str, Any]] | None = None,
+    operator_snapshot: dict[str, Any] | None = None,
 ) -> str:
     context = feedback_context if isinstance(feedback_context, dict) else {}
     history = [
@@ -188,14 +217,20 @@ def build_agent_chat_prompt(
         "telegram_text": sanitize_text(chat_text, max_chars=1200),
         "last_interaction_context": context,
         "recent_chat_history": history,
+        "operator_snapshot": operator_snapshot if isinstance(operator_snapshot, dict) else {},
+        "supported_commands": [
+            {"usage": usage, "desc": desc} for usage, desc in COMMAND_SURFACE
+        ],
     }
     return "\n".join(
         [
             "You are the Telegram chat assistant for a generic Offdesk remote operator harness.",
             "Answer the operator's plain Telegram message directly. Keep the answer short, useful, and in the same language as telegram_text.",
+            "operator_snapshot is live read-only workstation state: attention counts, health, open decisions, running-capacity, workspace_projects (folder name hints under the operator's Workspace), and autonomy_armed. Answer state and workspace questions directly from it. Never claim you cannot check something the snapshot already contains.",
+            "supported_commands is the COMPLETE slash-command surface. Never mention, suggest, or invent a slash command that is not listed there.",
             "recent_chat_history lists earlier turns in this Telegram chat, oldest first. Use it to resolve follow-up questions and pronouns; telegram_text is the message to answer now.",
             "You are read-only. You are not allowed to approve, launch, dispatch, run shell commands, mutate files, resolve approvals, or retarget providers.",
-            "When the operator asks to perform an operation, explain the safe slash command to use instead of treating the chat as authorization.",
+            "When the operator asks to perform, inspect, or plan work beyond the snapshot, recommend the matching supported command (for example /plan <goal> queues it for local Plan Mode) instead of asking the operator for file paths or treating the chat as authorization.",
             "Return exactly one JSON object. Do not include markdown.",
             "JSON schema:",
             json.dumps(
@@ -281,8 +316,12 @@ def normalize_agent_intent(
         "goal": short_optional_text(parsed.get("goal"), max_chars=240),
         "timebox": short_optional_text(parsed.get("timebox"), max_chars=120),
         "requires_clarification": bool(parsed.get("requires_clarification")),
-        "clarifying_question": short_optional_text(parsed.get("clarifying_question"), max_chars=240),
-        "assistant_reply": short_optional_text(parsed.get("assistant_reply"), max_chars=260),
+        "clarifying_question": scrub_unknown_commands(
+            short_optional_text(parsed.get("clarifying_question"), max_chars=240)
+        ),
+        "assistant_reply": scrub_unknown_commands(
+            short_optional_text(parsed.get("assistant_reply"), max_chars=260)
+        ),
         "reason": short_optional_text(parsed.get("reason"), max_chars=240),
         "non_authorized": non_authorized,
         "config_sources": list(runtime.get("config_sources") or []),
@@ -344,9 +383,11 @@ def normalize_agent_chat(parsed: dict[str, Any], *, runtime: dict[str, Any]) -> 
         "feedback_kind": "chat",
         "confidence": clamp_float(parsed.get("confidence")),
         "requires_clarification": bool(parsed.get("requires_clarification")),
-        "clarifying_question": short_optional_text(parsed.get("clarifying_question"), max_chars=240),
-        "assistant_reply": short_optional_text(
-            parsed.get("assistant_reply"), max_chars=ASSISTANT_REPLY_MAX_CHARS
+        "clarifying_question": scrub_unknown_commands(
+            short_optional_text(parsed.get("clarifying_question"), max_chars=240)
+        ),
+        "assistant_reply": scrub_unknown_commands(
+            short_optional_text(parsed.get("assistant_reply"), max_chars=ASSISTANT_REPLY_MAX_CHARS)
         ),
         "reason": short_optional_text(parsed.get("reason"), max_chars=240),
         "non_authorized": non_authorized,
@@ -360,6 +401,7 @@ def chat_with_agent(
     *,
     feedback_context: dict[str, Any] | None = None,
     chat_history: list[dict[str, Any]] | None = None,
+    operator_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     agent_config = resolve_agent_config(args)
     if agent_config.get("mode") == "off":
@@ -371,6 +413,7 @@ def chat_with_agent(
         chat_text=chat_text,
         feedback_context=feedback_context,
         chat_history=chat_history,
+        operator_snapshot=operator_snapshot,
     )
     try:
         parsed = call_ollama_intent_agent(runtime, prompt)
