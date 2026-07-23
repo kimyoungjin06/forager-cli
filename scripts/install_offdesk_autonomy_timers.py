@@ -22,7 +22,11 @@ import subprocess
 import sys
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
-RUNNER = REPO_ROOT / "scripts" / "offdesk_autonomy_run.py"
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+from deploy_harness_scripts import deploy as deploy_harness_scripts
+
+# Timers execute from the stable copy so repo checkouts cannot break them.
+RUNNER = deploy_harness_scripts() / "offdesk_autonomy_run.py"
 
 UNITS = [
     ("forager-autonomy-tick", "*:00/10", "tick", "Forager offdesk tick heartbeat (armed-gated)"),

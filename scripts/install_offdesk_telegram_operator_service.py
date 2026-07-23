@@ -102,7 +102,12 @@ def service_path(service_name: str) -> pathlib.Path:
 
 
 def render_unit(args: argparse.Namespace) -> str:
-    script = args.repo_root / "scripts" / "offdesk_remote_operator_telegram.py"
+    # Deploy scripts to a stable path so branch switches in the repo cannot
+    # break the running service, then execute from that copy.
+    sys.path.insert(0, str(args.repo_root / "scripts"))
+    from deploy_harness_scripts import deploy
+
+    script = deploy() / "offdesk_remote_operator_telegram.py"
     command = [
         args.python_bin,
         script,
