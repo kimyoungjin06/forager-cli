@@ -1463,6 +1463,14 @@ def resolve_dispatch_confirmation(
                 headline="작업 취소에 실패했습니다",
                 detail=str(error),
             )
+    elif str(confirmation.get("kind") or "") == "plan_capture":
+        rendered["captured_plan_text"] = str(confirmation.get("note") or "")
+        message_preview = "\n".join([
+            "<b>계획 후보 등록</b>",
+            sanitize_text(rendered["captured_plan_text"], max_chars=140),
+            "검토 후 로컬 Plan Mode 또는 야간 창에서 이어집니다.",
+            "다음 조치: /plans · /status",
+        ])
     elif str(confirmation.get("kind") or "") == "autonomy_start":
         try:
             proc = subprocess.run(
@@ -2306,6 +2314,31 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                     )
                     attach_choice_surface(rendered, remote_plan_selection_context(session))
                     rendered["mobile_card_contract"] = mobile_card_contract(rendered["message_preview"])
+        if parsed_command.get("command") == "chat":
+            from telegram_operator.agent import classify_feedback_kind  # noqa: PLC0415
+
+            pending_now = (state.get("pending_dispatch_confirmations_by_chat") or {}).get(chat_hash)
+            if classify_feedback_kind(text) == "planning_request" and not (
+                isinstance(pending_now, dict) and confirmation_is_fresh(pending_now)
+            ):
+                # Natural-language delegation: offer to capture it as a plan
+                # candidate. The tap is the approval; chat alone records nothing.
+                capture = build_confirmation(
+                    kind="plan_capture", target_id="plan", action_kind="capture",
+                    observed_hash="", note=sanitize_text(text, max_chars=380),
+                    chat_hash=chat_hash, ttl_sec=900,
+                )
+                store_confirmation(state, chat_hash, capture)
+                preview = "\n".join([
+                    "<b>계획 후보로 등록할까요?</b>",
+                    sanitize_text(text, max_chars=150),
+                    "확인 시 검토와 야간 실행 대기열에 계획 후보로 기록됩니다.",
+                    "다음 조치: 확인 또는 취소",
+                ])
+                rendered["message_preview"] = preview
+                rendered["mobile_card_contract"] = mobile_card_contract(preview)
+                rendered["reply_markup_preview"] = choice_keyboard({"context_kind": "dispatch_confirm"})
+                rendered["plan_capture_offered"] = True
         if parsed_command.get("command") in {
             "decision",
             "recover",
@@ -2320,6 +2353,30 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
             # Guarded remote execution. Every branch catches its own errors so
             # nothing raises before the offset save and re-delivers the update.
             resolve_dispatch_confirmation(args, state, chat_hash, rendered, parsed_command)
+            plan_text = rendered.pop("captured_plan_text", None)
+            if plan_text:
+                synthetic = {
+                    "command": "plan_request", "feedback_kind": "planning_request",
+                    "plan_text": plan_text, "feedback_text": plan_text,
+                    "reason": "plan_capture_confirm",
+                }
+                capture_context = last_context_for_chat_hash(
+                    state, chat_hash, max_age_sec=args.context_max_age_sec,
+                )
+                capture_result = record_feedback(
+                    args, config, message, plan_text,
+                    feedback_context=capture_context, parsed_command=synthetic,
+                )
+                capture_record = capture_result.pop("feedback_record", None)
+                rendered.update(capture_result)
+                if isinstance(capture_record, dict):
+                    capture_ingest = ingest_feedback_decision(args, capture_record)
+                    rendered.update(capture_ingest)
+                    create_remote_plan_session(
+                        args, chat_hash=chat_hash, request_text=plan_text,
+                        parsed_command=synthetic, feedback_context=capture_context,
+                        decision_id=capture_ingest.get("decision_feedback_decision_id"),
+                    )
         try:
             message_id = send_message(
                 config,
