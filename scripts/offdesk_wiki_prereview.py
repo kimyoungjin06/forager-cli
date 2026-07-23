@@ -157,6 +157,17 @@ def main() -> int:
             salvaged, _ = parse_candidates(raw.replace('"verdicts"', '"candidates"', 1))
             return {int(v.get("n", 0)): v for v in salvaged if isinstance(v, dict)}
 
+    def stakes_high(item: dict) -> bool:
+        """Stakes come from what a wrong promotion would do, not from a new
+        LLM judgment: rules that steer agent behaviour (policy_rule,
+        procedure, failure_pattern) and user-global scope outrank plain
+        facts scoped to one project."""
+        c = next((c for c in candidates if c.get("id") == item.get("id")), {})
+        return (
+            str(c.get("kind") or "") in {"policy_rule", "procedure", "failure_pattern"}
+            or str(c.get("scope") or "") == "user_global"
+        )
+
     if args.council:
         council_models = [m.strip() for m in args.council_models.split(",") if m.strip()]
         passes = {model: one_pass(model) for model in council_models}
@@ -172,6 +183,10 @@ def main() -> int:
                 }
             item["council_votes"] = votes
             kinds = {v["verdict"] for v in votes.values()}
+            # Escalation to a commercial council is stakes x uncertainty:
+            # local dissent on a behaviour-steering candidate is exactly the
+            # case worth spending frontier-model quota on.
+            item["escalate_commercial"] = kinds != {"supported"} and stakes_high(item)
             if kinds == {"supported"}:
                 verdicts[item["n"]] = {"verdict": "supported", "reason": "council unanimous"}
             else:
@@ -205,6 +220,8 @@ def main() -> int:
         print(f"  {marker:2} [{item['verdict']:11}] {item['claim'][:70]}")
         if item["verdict"] != "supported" and item["reason"]:
             print(f"       ↳ {item['reason'][:100]}")
+        if item.get("escalate_commercial"):
+            print("       ↳ ESCALATE: high-stakes + council dissent -> commercial council review")
     print(f"\n{len(items)} candidates: {len(items)-flagged} supported, {flagged} flagged for operator attention")
     if LLM_USAGE["calls"]:
         print(f"llm cost: {LLM_USAGE['calls']} call(s), {LLM_USAGE['prompt_tokens']}+{LLM_USAGE['output_tokens']} tokens, "
