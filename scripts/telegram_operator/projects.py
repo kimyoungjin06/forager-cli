@@ -18,6 +18,8 @@ import subprocess
 import tomllib
 from typing import Any
 
+from .project_candidates import build_project_candidate
+
 PROJECT_REGISTRY_SCHEMA = "forager_project_registry.v1"
 
 
@@ -406,37 +408,192 @@ def build_project_portfolio_summary(
             counts[state] = counts.get(state, 0) + 1
     except (OSError, ValueError, subprocess.TimeoutExpired):
         status = {}
+    resolved_entries = [
+        (entry, find_project_dir(entry, roots)) for entry in registry.values()
+    ]
+    candidate_evidence: dict[str, dict[str, Any]] = {}
+    available_entries = [
+        (entry, path)
+        for entry, path in resolved_entries
+        if isinstance(path, pathlib.Path)
+    ]
+    if available_entries:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=min(6, len(available_entries))
+        ) as pool:
+            futures = {
+                pool.submit(
+                    build_project_candidate,
+                    path,
+                    roots=roots,
+                    tokens=set(),
+                    rank=0,
+                ): str(entry.get("key") or "")
+                for entry, path in available_entries
+            }
+            for future, key in futures.items():
+                try:
+                    candidate_evidence[key] = future.result()
+                except (OSError, ValueError, subprocess.SubprocessError):
+                    candidate_evidence[key] = {}
     rows: list[dict[str, Any]] = []
-    for entry in registry.values():
+    for entry, workspace_path in resolved_entries:
         key = str(entry.get("key") or "")
         counts = session_counts.get(key, {})
+        evidence = candidate_evidence.get(key, {})
+        workspace_available = isinstance(workspace_path, pathlib.Path)
+        active_sessions = sum(
+            int(counts.get(state) or 0) for state in ("running", "waiting", "idle")
+        )
+        readiness = str(evidence.get("readiness") or "path_missing")
+        risk_level = str(evidence.get("risk_level") or "high")
+        autonomy_fit = str(evidence.get("autonomy_fit") or "low")
+        available_tests = list(evidence.get("available_tests") or [])
+        comparison_components = {
+            "active_sessions": min(5, active_sessions) * 10,
+            "workspace_status": 20 if workspace_available else -100,
+            "git_readiness": {
+                "ready": 15,
+                "needs_review": 5,
+                "not_git": 0,
+                "path_missing": -20,
+            }.get(readiness, -20),
+            "risk_level": {"low": 10, "medium": 3, "high": -10}.get(
+                risk_level, -10
+            ),
+            "autonomy_fit": {"high": 10, "medium": 3, "low": -10}.get(
+                autonomy_fit, -10
+            ),
+            "test_entrypoints": min(2, len(available_tests)) * 2,
+        }
+        comparison_score = sum(comparison_components.values())
+        comparison_reasons = []
+        if active_sessions:
+            comparison_reasons.append(f"active_sessions:{active_sessions}")
+        comparison_reasons.append(
+            f"workspace:{'available' if workspace_available else 'missing'}"
+        )
+        if evidence.get("readiness"):
+            comparison_reasons.append(f"readiness:{evidence.get('readiness')}")
+        if evidence.get("risk"):
+            comparison_reasons.append(f"risk:{evidence.get('risk')}")
         rows.append(
             {
                 "key": key,
                 "display_name": entry.get("display_name"),
                 "aliases": list(entry.get("aliases") or []),
-                "workspace_status": "available"
-                if find_project_dir(entry, roots) is not None
-                else "missing",
+                "workspace_status": "available" if workspace_available else "missing",
                 "session_counts": counts,
-                "active_sessions": sum(
-                    int(counts.get(state) or 0) for state in ("running", "waiting", "idle")
+                "active_sessions": active_sessions,
+                "comparison_score": comparison_score,
+                "comparison_components": comparison_components,
+                "comparison_reasons": comparison_reasons,
+                "current_branch": evidence.get("current_branch"),
+                "head_ref": evidence.get("head_ref"),
+                "dirty_tree": evidence.get("dirty_tree"),
+                "remote_sync": evidence.get("remote_sync") or "unknown",
+                "recent_failures": list(evidence.get("recent_failures") or []),
+                "recent_failures_observed": bool(
+                    evidence.get("recent_failures_observed")
                 ),
+                "available_tests": available_tests,
+                "estimated_runtime_minutes": evidence.get(
+                    "estimated_runtime_minutes"
+                ),
+                "readiness": readiness,
+                "risk_level": risk_level,
+                "autonomy_fit": autonomy_fit,
+                "requires_network": evidence.get("requires_network"),
+                "requires_secrets": evidence.get("requires_secrets"),
+                "requires_human_context": evidence.get("requires_human_context"),
+                "recommended_next_action": evidence.get("recommended_next_action")
+                or ("resolve_workspace" if not workspace_available else "init_review"),
+                "blocked_reason": evidence.get("blocked_reason")
+                or ("workspace_missing" if not workspace_available else None),
+                "comparison_evidence": evidence.get("comparison_evidence")
+                or {
+                    "observed": ["project_registry", "workspace_resolution"],
+                    "not_observed": [
+                        "git_repository",
+                        "git_branch",
+                        "git_head",
+                        "git_worktree",
+                        "git_remote_sync",
+                        "test_entrypoints",
+                        "recent_failures",
+                        "estimated_runtime_minutes",
+                        "requires_network",
+                        "requires_secrets",
+                        "requires_human_context",
+                    ],
+                },
             }
         )
     rows.sort(
         key=lambda row: (
-            -int(row.get("active_sessions") or 0),
+            -int(row.get("comparison_score") or 0),
             0 if row.get("workspace_status") == "available" else 1,
             str(row.get("display_name") or row.get("key") or "").lower(),
         )
     )
+    for rank, row in enumerate(rows, start=1):
+        row["comparison_rank"] = rank
+    recommended = next(
+        (row for row in rows if row.get("workspace_status") == "available"), None
+    )
+    if recommended:
+        recommended["recommended"] = True
+        recommended["recommendation_reason"] = "highest_observed_comparison_score"
+        for row in rows:
+            if row is recommended:
+                row["not_recommended_because"] = []
+                continue
+            differences: list[str] = []
+            if row.get("workspace_status") != "available":
+                differences.append("workspace_missing")
+            if int(row.get("active_sessions") or 0) < int(
+                recommended.get("active_sessions") or 0
+            ):
+                differences.append("fewer_active_sessions")
+            if str(row.get("readiness") or "") != str(
+                recommended.get("readiness") or ""
+            ):
+                differences.append("different_readiness")
+            if str(row.get("risk_level") or "") != str(
+                recommended.get("risk_level") or ""
+            ):
+                differences.append("different_risk")
+            row["recommended"] = False
+            row["not_recommended_because"] = differences or [
+                "lower_deterministic_tiebreak_rank"
+            ]
     return {
         "schema": "telegram_project_portfolio.v1",
+        "comparison_schema": "telegram_project_portfolio_comparison.v1",
         "registered_count": len(rows),
         "available_count": sum(1 for row in rows if row["workspace_status"] == "available"),
         "active_count": sum(1 for row in rows if int(row["active_sessions"]) > 0),
         "status_available": bool(status),
+        "recommended_project_key": recommended.get("key") if recommended else None,
+        "comparison_leader_project_key": recommended.get("key") if recommended else None,
+        "comparison_purpose": "read_only_attention_ranking",
+        "ranking_basis": [
+            "active_sessions",
+            "workspace_status",
+            "git_readiness",
+            "risk_level",
+            "autonomy_fit",
+            "test_entrypoints",
+            "deterministic_project_name",
+        ],
+        "read_only": True,
+        "mutation_authorized": False,
+        "approval_authorized": False,
+        "execution_authorized": False,
+        "enqueue_authorized": False,
+        "launch_authorized": False,
+        "runtime_authorized": False,
+        "accepted_truth_authorized": False,
         "projects": rows,
     }
 

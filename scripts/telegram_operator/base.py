@@ -13,6 +13,7 @@ import argparse
 from typing import Any
 
 from .common import utc_now
+from .config import public_control_generation_id
 from .effects import no_effect
 from .rendering import choice_keyboard, choice_surface_contract
 from .schemas import FORBIDDEN_REMOTE_INTENTS, RESULT_SCHEMA
@@ -24,6 +25,13 @@ def result_base(args: argparse.Namespace, config: dict[str, Any], mode: str) -> 
         "generated_at": utc_now(),
         "mode": mode,
         "profile": args.profile,
+        "operator_mode": config.get("operator_mode"),
+        "operator_identity_configured": bool(
+            config.get("operator_identity_configured")
+        ),
+        "control_generation_id": public_control_generation_id(
+            config.get("_control_generation_sha256")
+        ),
         "target_chat_id_hash": config.get("target_chat_id_hash"),
         "chat_allowlist_configured": bool(config.get("chat_allowlist_configured")),
         "user_allowlist_configured": bool(config.get("user_allowlist_configured")),

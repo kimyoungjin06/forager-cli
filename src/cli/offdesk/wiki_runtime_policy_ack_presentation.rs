@@ -10,8 +10,8 @@ use serde::Serialize;
 
 use super::{adaptive_wiki_agent_mode_cli_value, operator_safe_json_value, shell_quote_arg};
 use crate::offdesk::{
-    AdaptiveWikiAgentModeFilter, AdaptiveWikiProjectionBudget, AdaptiveWikiProjectionPolicy,
-    AdaptiveWikiQuery, AdaptiveWikiRuntimePolicyAckScopeMode,
+    operator_safe_text, AdaptiveWikiAgentModeFilter, AdaptiveWikiProjectionBudget,
+    AdaptiveWikiProjectionPolicy, AdaptiveWikiQuery, AdaptiveWikiRuntimePolicyAckScopeMode,
     AdaptiveWikiRuntimePolicyAcknowledgement, AdaptiveWikiRuntimePolicyDecision,
     AdaptiveWikiRuntimePolicyDecisionStatus,
 };
@@ -193,7 +193,7 @@ pub(super) fn present_runtime_policy_acknowledgements(
     for acknowledgement in acknowledgements {
         println!(
             "{:<48} {:<18} {:<22} {:<22} review_expired={:?}",
-            acknowledgement.id,
+            operator_safe_text(&acknowledgement.id),
             runtime_ack_scope_mode_label(acknowledgement.scope_mode),
             acknowledgement.created_at,
             acknowledgement.expires_at,
@@ -215,7 +215,7 @@ pub(super) fn present_runtime_policy_acknowledgement(
 
     println!(
         "Recorded adaptive wiki runtime policy acknowledgement {}",
-        acknowledgement.id
+        operator_safe_text(&acknowledgement.id)
     );
     println!(
         "  policy: review_expired={:?}",
@@ -225,28 +225,31 @@ pub(super) fn present_runtime_policy_acknowledgement(
         "  scope_mode: {}",
         runtime_ack_scope_mode_label(acknowledgement.scope_mode)
     );
-    println!("  comparison_hash: {}", acknowledgement.comparison_hash);
+    println!(
+        "  comparison_hash: {}",
+        operator_safe_text(&acknowledgement.comparison_hash)
+    );
     println!("  expires_at: {}", acknowledgement.expires_at);
     if !acknowledgement.review_expired_excluded.is_empty() {
         println!(
             "  review_expired_excluded: {}",
-            acknowledgement.review_expired_excluded.join(", ")
+            operator_safe_list(&acknowledgement.review_expired_excluded)
         );
     }
     if !acknowledgement.selected_only_in_warn.is_empty() {
         println!(
             "  selected_only_in_warn: {}",
-            acknowledgement.selected_only_in_warn.join(", ")
+            operator_safe_list(&acknowledgement.selected_only_in_warn)
         );
     }
     if !acknowledgement.selected_only_in_strict.is_empty() {
         println!(
             "  selected_only_in_strict: {}",
-            acknowledgement.selected_only_in_strict.join(", ")
+            operator_safe_list(&acknowledgement.selected_only_in_strict)
         );
     }
     if !acknowledgement.reason.trim().is_empty() {
-        println!("  reason: {}", acknowledgement.reason);
+        println!("  reason: {}", operator_safe_text(&acknowledgement.reason));
     }
     Ok(())
 }
@@ -273,8 +276,8 @@ pub(super) fn present_runtime_policy_ack_report(
         println!(
             "  query_decision: {:?} ack={} reason={}",
             decision.status,
-            decision.acknowledgement_id.as_deref().unwrap_or("-"),
-            decision.reason
+            operator_safe_or_dash(decision.acknowledgement_id.as_deref()),
+            operator_safe_text(&decision.reason)
         );
     }
     if report.acknowledgements.is_empty() {
@@ -288,17 +291,23 @@ pub(super) fn present_runtime_policy_ack_report(
     for acknowledgement in &report.acknowledgements {
         println!(
             "{:<48} {:<18} {:<34} {:<22} {}",
-            acknowledgement.id,
+            operator_safe_text(&acknowledgement.id),
             runtime_ack_scope_mode_label(acknowledgement.scope_mode),
             runtime_ack_query_label(&acknowledgement.query),
             acknowledgement.expires_at,
-            acknowledgement.status.join(",")
+            operator_safe_list_with_separator(&acknowledgement.status, ",")
         );
         if let Some(action) = acknowledgement.suggested_action.as_ref() {
-            println!("  suggested_action: {}", action.kind);
-            println!("    {}", action.detail);
-            println!("    compare: {}", action.compare_command_template);
-            println!("    ack:     {}", action.ack_command_template);
+            println!("  suggested_action: {}", operator_safe_text(&action.kind));
+            println!("    {}", operator_safe_text(&action.detail));
+            println!(
+                "    compare: {}",
+                operator_safe_text(&action.compare_command_template)
+            );
+            println!(
+                "    ack:     {}",
+                operator_safe_text(&action.ack_command_template)
+            );
         }
     }
     Ok(())
@@ -490,12 +499,31 @@ fn runtime_ack_scope_mode_label(mode: AdaptiveWikiRuntimePolicyAckScopeMode) -> 
 }
 
 fn runtime_ack_query_label(query: &AdaptiveWikiQuery) -> String {
-    let session = query.session_id.as_deref().unwrap_or("-");
-    let project = query.project_key.as_deref().unwrap_or("-");
-    let artifact = query.artifact_kind.as_deref().unwrap_or("-");
+    let session = operator_safe_or_dash(query.session_id.as_deref());
+    let project = operator_safe_or_dash(query.project_key.as_deref());
+    let artifact = operator_safe_or_dash(query.artifact_kind.as_deref());
     let agent_mode = query
         .agent_mode
         .map(adaptive_wiki_agent_mode_cli_value)
         .unwrap_or("-");
     format!("s:{session} p:{project} a:{artifact} m:{agent_mode}")
+}
+
+fn operator_safe_or_dash(value: Option<&str>) -> String {
+    value
+        .map(operator_safe_text)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn operator_safe_list(values: &[String]) -> String {
+    operator_safe_list_with_separator(values, ", ")
+}
+
+fn operator_safe_list_with_separator(values: &[String], separator: &str) -> String {
+    values
+        .iter()
+        .map(|value| operator_safe_text(value))
+        .collect::<Vec<_>>()
+        .join(separator)
 }

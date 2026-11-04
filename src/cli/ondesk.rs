@@ -62,6 +62,24 @@ const MAX_DOC_AUDIT_PATHS: usize = 3;
 
 #[derive(Subcommand)]
 pub enum OndeskCommands {
+    /// Inspect an explicitly selected Markdown task plan without importing or changing it
+    PlanInspect(PlanInspectArgs),
+
+    /// Draft shared night readiness from exact owning tasks without writes or model calls
+    PrepareOffdesk(super::ondesk_preparation::PrepareOffdeskArgs),
+
+    /// Propose explicit task mapping in a plain owning TODO without changing it
+    PlanAdoptProposal(PlanAdoptProposalArgs),
+
+    /// Apply one explicitly confirmed, hash-bound change to an existing plan
+    PlanApply(PlanApplyArgs),
+
+    /// Preview attributed review decisions without writing a plan or starting work
+    PlanReviewProposal(PlanReviewProposalArgs),
+
+    /// Prepare a read-only binding from preserved execution copies to an original owning plan
+    ReturnBinding(ReturnBindingArgs),
+
     /// Append a safe operator note for an ondesk session or project
     Note(NoteArgs),
 
@@ -71,6 +89,10 @@ pub enum OndeskCommands {
     /// Build a markdown prompt package from recent notes and optional capture
     #[command(name = "prompt-package")]
     PromptPackage(PromptPackageArgs),
+
+    /// Preview and explicitly deliver a morning package to one ready local session
+    #[command(subcommand)]
+    Return(ReturnCommands),
 
     /// Emit the shared review surface for Ondesk and future rich UIs
     #[command(name = "review-surface")]
@@ -107,6 +129,202 @@ pub enum OndeskCommands {
     /// Queue runtime work from a ready runtime dispatch preflight
     #[command(name = "runtime-dispatch")]
     RuntimeDispatch(RuntimeDispatchArgs),
+}
+
+impl OndeskCommands {
+    pub(crate) fn is_morning_return(&self) -> bool {
+        matches!(self, Self::Return(_) | Self::ReturnBinding(_))
+            || matches!(self, Self::PromptPackage(args) if args.morning_review.is_some())
+    }
+}
+
+#[derive(Subcommand)]
+pub enum ReturnCommands {
+    /// Launch a stopped registered session under the canonical Landlock read policy
+    LaunchRestricted(ReturnLaunchArgs),
+    /// Build a short-lived preview without sending input or writing runtime state
+    Preview(ReturnPreviewArgs),
+    /// Attempt input once after confirming the exact preview hash
+    Send(ReturnSendArgs),
+    /// Observe a bound agent read-claim marker without sending more input
+    Observe(ReturnRecordArgs),
+    /// Read the durable delivery record without contacting the session
+    Status(ReturnRecordArgs),
+}
+
+#[derive(Args)]
+pub struct ReturnLaunchArgs {
+    /// Exact explicitly selected stopped session ID; runs its registered command
+    #[arg(long)]
+    session: String,
+}
+
+#[derive(Args)]
+pub struct ReturnPreviewArgs {
+    /// Require the matching live restricted-launch receipt; absence keeps legacy behavior
+    #[arg(long)]
+    read_policy_receipt: Option<PathBuf>,
+    /// Absolute saved morning prompt-package path
+    #[arg(long)]
+    package: PathBuf,
+    /// Exact explicitly selected session ID
+    #[arg(long)]
+    session: String,
+    /// Save a new ticket file; keep it outside the worktree or in ignored storage
+    #[arg(long)]
+    output: Option<PathBuf>,
+}
+
+#[derive(Args)]
+pub struct ReturnSendArgs {
+    /// Absolute prepared ticket JSON path
+    ticket: PathBuf,
+    /// Exact preview hash printed by return preview
+    #[arg(long)]
+    expected_preview_sha256: String,
+    /// Explicit consent to context-reading input, not task execution
+    #[arg(long)]
+    confirm_input: bool,
+}
+
+#[derive(Args)]
+pub struct ReturnRecordArgs {
+    request_id: String,
+}
+
+#[derive(Args)]
+pub struct PlanInspectArgs {
+    /// Existing owning Markdown document with one forager-plan JSON fence
+    path: PathBuf,
+    #[arg(long)]
+    project_key: String,
+    /// Candidate document to compare, without applying any changes
+    #[arg(long, requires = "expected_sha256")]
+    candidate: Option<PathBuf>,
+    #[arg(long, requires = "candidate")]
+    expected_sha256: Option<String>,
+}
+
+#[derive(Args)]
+pub struct PlanApplyArgs {
+    /// JSON change request binding the exact source path and both content hashes
+    request: PathBuf,
+    #[arg(long)]
+    candidate: PathBuf,
+    /// Confirm only the exact plan write, not execution or knowledge promotion
+    #[arg(long)]
+    confirm_plan_write: bool,
+}
+
+#[derive(Args)]
+pub struct PlanAdoptProposalArgs {
+    /// Absolute existing plain Markdown owning TODO
+    source: PathBuf,
+    /// Explicit ondesk_task_plan.v1 JSON selection; checklist text is not imported
+    #[arg(long)]
+    tasks: PathBuf,
+    #[arg(long)]
+    project_key: String,
+    #[arg(long)]
+    expected_sha256: String,
+    #[arg(long)]
+    request_id: String,
+    #[arg(long)]
+    decision_ref: String,
+}
+
+fn adopt_task_plan(args: PlanAdoptProposalArgs) -> Result<()> {
+    let proposal = crate::offdesk::workflow::ondesk_plan_adoption::propose(
+        &args.source,
+        serde_json::from_str(&read_task_plan(&args.tasks)?)?,
+        &args.project_key,
+        &args.expected_sha256,
+        args.request_id,
+        args.decision_ref,
+    )?;
+    println!("{}", serde_json::to_string_pretty(&proposal)?);
+    Ok(())
+}
+
+#[derive(Args)]
+pub struct PlanReviewProposalArgs {
+    source: PathBuf,
+    #[arg(long)]
+    decisions: PathBuf,
+    /// Exact preserved execution-era plan, for narrative/format-only drift
+    #[arg(long, requires = "reconciliation_reason")]
+    reconcile_baseline: Option<PathBuf>,
+    /// Operator's reason for connecting this execution baseline to the current plan
+    #[arg(long, requires = "reconcile_baseline")]
+    reconciliation_reason: Option<String>,
+}
+
+fn review_task_plan(args: PlanReviewProposalArgs) -> Result<()> {
+    use crate::offdesk::workflow::ondesk_review;
+    let mut decisions: ondesk_review::ReviewDecisions =
+        serde_json::from_str(&read_task_plan(&args.decisions)?)?;
+    if let Some(path) = args.reconcile_baseline {
+        anyhow::ensure!(
+            decisions.reconciliation.is_none(),
+            "reconciliation already present in decisions"
+        );
+        decisions.reconciliation = Some(ondesk_review::NarrativeReconciliation::new(
+            read_task_plan(&path)?,
+            decisions.baseline_sha256.clone(),
+            args.reconciliation_reason
+                .context("reconciliation reason required")?,
+        ));
+    }
+    let proposal = ondesk_review::propose(&read_task_plan(&args.source)?, &args.source, decisions)?;
+    println!("{}", serde_json::to_string_pretty(&proposal)?);
+    Ok(())
+}
+
+fn apply_task_plan(args: PlanApplyArgs) -> Result<()> {
+    use crate::offdesk::workflow::ondesk_plan_store::{apply, PlanChangeRequest};
+    let request: PlanChangeRequest = serde_json::from_str(&read_task_plan(&args.request)?)?;
+    let result = apply(
+        &request,
+        &read_task_plan(&args.candidate)?,
+        args.confirm_plan_write,
+    )?;
+    println!("{}", serde_json::to_string_pretty(&result)?);
+    Ok(())
+}
+
+fn read_task_plan(path: &Path) -> Result<String> {
+    use crate::offdesk::workflow::ondesk_plan;
+    use std::io::Read;
+    anyhow::ensure!(fs::metadata(path)?.is_file(), "plan must be a regular file");
+    let file = fs::File::open(path).with_context(|| format!("read plan {}", path.display()))?;
+    anyhow::ensure!(file.metadata()?.is_file(), "plan must be a regular file");
+    let mut source = String::new();
+    file.take(ondesk_plan::MAX_PLAN_BYTES as u64 + 1)
+        .read_to_string(&mut source)?;
+    anyhow::ensure!(
+        source.len() <= ondesk_plan::MAX_PLAN_BYTES,
+        "plan exceeds byte budget"
+    );
+    Ok(source)
+}
+
+fn inspect_task_plan(args: PlanInspectArgs) -> Result<()> {
+    use crate::offdesk::workflow::ondesk_plan;
+    let source = read_task_plan(&args.path)?;
+    let value = if let Some(path) = args.candidate {
+        serde_json::to_value(ondesk_plan::preview(
+            &source,
+            &read_task_plan(&path)?,
+            &args.project_key,
+            args.expected_sha256
+                .as_deref()
+                .context("expected hash required")?,
+        )?)?
+    } else {
+        serde_json::to_value(ondesk_plan::inspect(&source, &args.project_key)?)?
+    };
+    println!("{}", serde_json::to_string_pretty(&value)?);
+    Ok(())
 }
 
 #[derive(Args)]
@@ -162,6 +380,34 @@ pub struct PromptPackageArgs {
     /// Session ID, title, or project path. Defaults to current tmux Forager session or cwd.
     identifier: Option<String>,
 
+    /// Exact saved shift-review reference JSON for morning recovery
+    #[arg(long, requires_all = ["identifier", "owning_plan", "project_key"], conflicts_with_all = ["capture_id", "mode", "include_doc_audit"])]
+    morning_review: Option<PathBuf>,
+
+    /// Absolute current owning plan for morning recovery
+    #[arg(long, requires = "morning_review")]
+    owning_plan: Option<PathBuf>,
+
+    /// Exact operator-attributed binding for an execution-copy return
+    #[arg(long, requires_all = ["morning_review", "return_binding_sha256"], conflicts_with = "review_only_unstructured")]
+    return_binding: Option<PathBuf>,
+
+    /// SHA256 of the selected return-binding artifact
+    #[arg(long, requires = "return_binding")]
+    return_binding_sha256: Option<String>,
+
+    /// Build a review-only return for an existing plan without a forager-plan block
+    #[arg(long, requires = "morning_review")]
+    review_only_unstructured: bool,
+
+    /// Existing session ID to bind without sending input
+    #[arg(long, requires = "morning_review")]
+    resume_session: Option<String>,
+
+    /// Require the currently selected Git branch
+    #[arg(long, requires = "morning_review")]
+    expected_branch: Option<String>,
+
     /// Existing capture ID to render
     #[arg(long)]
     capture_id: Option<String>,
@@ -185,6 +431,23 @@ pub struct PromptPackageArgs {
     /// Output metadata as JSON
     #[arg(long)]
     json: bool,
+}
+
+#[derive(Args)]
+pub struct ReturnBindingArgs {
+    /// Absolute original project root
+    workdir: PathBuf,
+    #[arg(long)]
+    owning_plan: PathBuf,
+    #[arg(long)]
+    project_key: String,
+    #[arg(long)]
+    morning_review: PathBuf,
+    /// Operator attribution; preparation grants no task disposition
+    #[arg(long)]
+    by: String,
+    #[arg(long)]
+    decision_ref: String,
 }
 
 #[derive(Args)]
@@ -1016,9 +1279,16 @@ struct ResolvedOndeskContext {
 
 pub async fn run(profile: &str, command: OndeskCommands) -> Result<()> {
     match command {
+        OndeskCommands::PlanInspect(args) => inspect_task_plan(args),
+        OndeskCommands::PrepareOffdesk(args) => super::ondesk_preparation::run(args),
+        OndeskCommands::PlanAdoptProposal(args) => adopt_task_plan(args),
+        OndeskCommands::PlanApply(args) => apply_task_plan(args),
+        OndeskCommands::PlanReviewProposal(args) => review_task_plan(args),
+        OndeskCommands::ReturnBinding(args) => prepare_return_binding(profile, args),
         OndeskCommands::Note(args) => note(profile, args).await,
         OndeskCommands::Capture(args) => capture(profile, args).await,
         OndeskCommands::PromptPackage(args) => prompt_package(profile, args).await,
+        OndeskCommands::Return(command) => return_delivery(profile, command),
         OndeskCommands::ReviewSurface(args) => review_surface::run(profile, args).await,
         OndeskCommands::WorkstationSurface(args) => workstation_surface::run(profile, args).await,
         OndeskCommands::ActionEnvelope(args) => action_envelope(profile, args).await,
@@ -1031,6 +1301,41 @@ pub async fn run(profile: &str, command: OndeskCommands) -> Result<()> {
         OndeskCommands::RuntimePreflight(args) => runtime_preflight(profile, args).await,
         OndeskCommands::RuntimeDispatch(args) => runtime_dispatch(profile, args).await,
     }
+}
+
+fn return_delivery(profile: &str, command: ReturnCommands) -> Result<()> {
+    use crate::offdesk::workflow::ondesk_delivery as delivery;
+    let result = match command {
+        ReturnCommands::LaunchRestricted(args) => {
+            delivery::launch_restricted(profile, &args.session)?
+        }
+        ReturnCommands::Preview(args) => {
+            let value = delivery::preview_with_read_policy(
+                profile,
+                &args.package,
+                &args.session,
+                args.read_policy_receipt.as_deref(),
+            )?;
+            if let Some(path) = args.output {
+                anyhow::ensure!(path.is_absolute(), "absolute return ticket output required");
+                write_new_morning_package(&path, |file| {
+                    file.write_all(&serde_json::to_vec_pretty(&value["ticket"])?)?;
+                    Ok(())
+                })?;
+            }
+            value
+        }
+        ReturnCommands::Send(args) => delivery::send(
+            profile,
+            &delivery::read_ticket(&args.ticket)?,
+            &args.expected_preview_sha256,
+            args.confirm_input,
+        )?,
+        ReturnCommands::Observe(args) => delivery::observe(profile, &args.request_id)?,
+        ReturnCommands::Status(args) => delivery::status(profile, &args.request_id)?,
+    };
+    println!("{}", serde_json::to_string_pretty(&result)?);
+    Ok(())
 }
 
 async fn note(profile: &str, args: NoteArgs) -> Result<()> {
@@ -1178,6 +1483,9 @@ async fn capture(profile: &str, args: CaptureArgs) -> Result<()> {
 }
 
 async fn prompt_package(profile: &str, args: PromptPackageArgs) -> Result<()> {
+    if args.morning_review.is_some() {
+        return morning_prompt_package(profile, args);
+    }
     let profile_dir = get_profile_dir(profile)?;
     let profile_name = Storage::new(profile)?.profile().to_string();
     let (
@@ -1312,6 +1620,127 @@ async fn prompt_package(profile: &str, args: PromptPackageArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn prepare_return_binding(profile: &str, args: ReturnBindingArgs) -> Result<()> {
+    use crate::offdesk::workflow::{ondesk_return::MorningReturnInput, ondesk_return_binding};
+    let reference = serde_json::from_str(&read_task_plan(&args.morning_review)?)?;
+    let input = MorningReturnInput {
+        profile,
+        project_key: &args.project_key,
+        workdir: &args.workdir,
+        owning_plan: &args.owning_plan,
+        reference,
+        resume_session: None,
+        expected_branch: None,
+    };
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&ondesk_return_binding::propose(
+            &input,
+            &args.by,
+            &args.decision_ref
+        )?)?
+    );
+    Ok(())
+}
+
+fn morning_prompt_package(profile: &str, args: PromptPackageArgs) -> Result<()> {
+    use crate::offdesk::workflow::ondesk_return::{self, MorningReturnInput};
+    let reference_path = args
+        .morning_review
+        .as_ref()
+        .context("morning reference required")?;
+    let reference = serde_json::from_str(&read_task_plan(reference_path)?)?;
+    let input = MorningReturnInput {
+        profile,
+        project_key: args
+            .project_key
+            .as_deref()
+            .context("morning project required")?,
+        workdir: Path::new(
+            args.identifier
+                .as_deref()
+                .context("morning workdir required")?,
+        ),
+        owning_plan: args
+            .owning_plan
+            .as_deref()
+            .context("morning owning plan required")?,
+        reference,
+        resume_session: args.resume_session.as_deref(),
+        expected_branch: args.expected_branch.as_deref(),
+    };
+    let mut value = if args.review_only_unstructured {
+        ondesk_return::build_unstructured_review(input)?
+    } else {
+        let mapping = args.return_binding.as_ref().map(|path| {
+            crate::offdesk::workflow::ondesk_return_binding::ArtifactPin {
+                path: path.clone(),
+                sha256: args
+                    .return_binding_sha256
+                    .clone()
+                    .expect("clap requires binding hash"),
+            }
+        });
+        serde_json::to_value(ondesk_return::build_with_binding(input, mapping.as_ref())?)?
+    };
+    sanitize_morning_value(&mut value);
+    let content = format!(
+        "# Forager Ondesk Prompt Package\n\n## Morning Return\n\nRead the current owning plan and compare it with the preserved execution baseline where available. Review the saved evidence, limitations and Council questions before recording dispositions. A changed or unstructured baseline requires explicit reconciliation before a review proposal. This package does not send session input or establish acknowledgement.\n\n{}\n",
+        fenced("json", &serde_json::to_string_pretty(&value)?)
+    );
+    anyhow::ensure!(
+        content.chars().count() <= MAX_PROMPT_CHARS,
+        "morning package exceeds output budget; select a smaller reviewed shift"
+    );
+    if let Some(path) = args.output.as_ref() {
+        write_new_morning_package(path, |file| {
+            file.write_all(content.as_bytes())?;
+            Ok(())
+        })?;
+    }
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "profile":profile,"project_key":args.project_key,"morning_return":value,
+                "output_path":args.output,"content":content
+            }))?
+        );
+    } else if let Some(path) = args.output {
+        println!("Wrote ondesk prompt package: {}", path.display());
+    } else {
+        print!("{content}");
+    }
+    Ok(())
+}
+
+fn write_new_morning_package(
+    path: &Path,
+    write: impl FnOnce(&mut fs::File) -> Result<()>,
+) -> Result<()> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    fs::create_dir_all(parent)?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    write(temporary.as_file_mut())?;
+    temporary.as_file_mut().sync_all()?;
+    temporary
+        .persist_noclobber(path)
+        .with_context(|| format!("publish new morning package {}", path.display()))?;
+    Ok(())
+}
+
+fn sanitize_morning_value(value: &mut Value) {
+    match value {
+        Value::String(text) => *text = safe(text),
+        Value::Array(items) => items.iter_mut().for_each(sanitize_morning_value),
+        Value::Object(fields) => fields.values_mut().for_each(sanitize_morning_value),
+        _ => {}
+    }
 }
 
 async fn action_envelope(profile: &str, args: ActionEnvelopeProcessArgs) -> Result<()> {
@@ -5067,7 +5496,7 @@ fn latest_closeout_package(
     let safe_return_package = safe(&raw_return_package);
     let (return_package, return_package_truncated) =
         truncate_chars(&safe_return_package, MAX_CLOSEOUT_CHARS);
-    let review = latest_closeout_review(&artifact_dir)?;
+    let review = latest_closeout_review(profile_dir, &artifact_dir)?;
     let closeout_id = plan
         .get("closeout_id")
         .and_then(Value::as_str)
@@ -5485,7 +5914,11 @@ struct OndeskCloseoutReview {
     receipt_path: Option<String>,
 }
 
-fn latest_closeout_review(artifact_dir: &Path) -> Result<Option<OndeskCloseoutReview>> {
+fn latest_closeout_review(
+    profile_dir: &Path,
+    artifact_dir: &Path,
+) -> Result<Option<OndeskCloseoutReview>> {
+    let tasks = OffdeskTaskStore::new(profile_dir).load()?;
     let mut reviews = Vec::new();
     for entry in fs::read_dir(artifact_dir)? {
         let entry = entry?;
@@ -5515,8 +5948,13 @@ fn latest_closeout_review(artifact_dir: &Path) -> Result<Option<OndeskCloseoutRe
             .and_then(Value::as_str)
             .map(safe)
             .unwrap_or_else(|| "unknown".to_string());
-        let receipt_status = value
-            .pointer("/closeout_receipt/acceptance_status")
+        let receipt = crate::offdesk::workflow::review_link::effective_closeout_receipt(
+            profile_dir,
+            &tasks,
+            &value,
+        );
+        let receipt_status = receipt
+            .get("acceptance_status")
             .and_then(Value::as_str)
             .map(safe);
         let receipt_path = value
@@ -6346,4 +6784,61 @@ fn truncate_chars(value: &str, max_chars: usize) -> (String, bool) {
         return (value.to_string(), false);
     }
     (value.chars().take(max_chars).collect(), true)
+}
+
+#[cfg(test)]
+mod morning_package_tests {
+    use super::*;
+
+    #[test]
+    fn failed_publication_leaves_no_destination_and_allows_retry() {
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("return.md");
+        let failed = write_new_morning_package(&destination, |file| {
+            file.write_all(b"incomplete")?;
+            anyhow::bail!("injected write failure")
+        });
+        assert!(failed.is_err());
+        assert!(!destination.exists());
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+        write_new_morning_package(&destination, |file| {
+            file.write_all(b"complete package")?;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), b"complete package");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&destination).unwrap().permissions().mode() & 0o077,
+                0
+            );
+        }
+    }
+
+    #[test]
+    fn publication_refuses_existing_files_and_symlinks() {
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("return.md");
+        fs::write(&destination, b"keep original").unwrap();
+        let write = |file: &mut fs::File| -> Result<()> {
+            file.write_all(b"new package")?;
+            Ok(())
+        };
+        assert!(write_new_morning_package(&destination, write).is_err());
+        assert_eq!(fs::read(&destination).unwrap(), b"keep original");
+        #[cfg(unix)]
+        {
+            let linked = root.path().join("linked.md");
+            std::os::unix::fs::symlink(&destination, &linked).unwrap();
+            assert!(write_new_morning_package(&linked, write).is_err());
+            assert_eq!(fs::read(&destination).unwrap(), b"keep original");
+        }
+        assert!(!fs::read_dir(root.path()).unwrap().any(|entry| entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".tmp")));
+    }
 }

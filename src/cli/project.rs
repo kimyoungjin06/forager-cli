@@ -1,5 +1,10 @@
 //! `forager project` subcommands for project-level operation initialization.
 
+mod closeout_scope;
+mod inventory;
+mod plan_routing;
+mod wiki_context;
+
 use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use clap::{Args, Subcommand, ValueEnum};
@@ -15,6 +20,11 @@ use super::artifact_index::{
     self, ProjectArtifactIndexArgs, ProjectRetentionApplyArgs, ProjectRetentionPromoteArgs,
     ProjectRetentionRequestArgs, ProjectRetentionReviewArgs,
 };
+use super::document_catalog::{self, ProjectDocumentCatalogArgs, ProjectDocumentSearchArgs};
+use super::document_lifecycle::{
+    self, ProjectDocumentLifecycleApplyArgs, ProjectDocumentLifecycleHistoryArgs,
+    ProjectDocumentLifecycleRequestArgs, ProjectDocumentLifecycleReviewArgs,
+};
 use super::project_audit::{run_audit_docs, ProjectAuditDocsArgs};
 use crate::offdesk::{
     draft_implementation_packet, operator_safe_text, ImplementationAlignment,
@@ -24,6 +34,7 @@ use crate::offdesk::{
     RecursiveAlignmentReview,
 };
 use crate::session::get_profile_dir;
+use wiki_context::{run_wiki_context, ProjectWikiContextArgs};
 
 const PROFILE_FILE: &str = "PROJECT_OPERATION_PROFILE.json";
 const ONBOARDING_FILE: &str = "PROJECT_ONBOARDING.md";
@@ -43,8 +54,15 @@ pub enum ProjectCommands {
     /// Create a read-only project operation initialization packet
     Init(ProjectInitArgs),
 
+    /// Preview or apply exact-hash-reviewed owning TODO and AGENTS routing
+    PlanRouting(plan_routing::ProjectPlanRoutingArgs),
+
     /// Apply reviewed governance surface templates to a project
     ApplyGovernanceHints(ProjectApplyGovernanceHintsArgs),
+
+    /// Lint or apply reviewed local-agent wiki context discovery markers
+    #[command(name = "wiki-context")]
+    WikiContext(ProjectWikiContextArgs),
 
     /// Audit documentation and human-facing artifact governance surfaces
     AuditDocs(ProjectAuditDocsArgs),
@@ -52,6 +70,30 @@ pub enum ProjectCommands {
     /// Build a read-only project/profile artifact index
     #[command(name = "artifact-index")]
     ArtifactIndex(ProjectArtifactIndexArgs),
+
+    /// Build a bounded read-only document catalog without storing state
+    #[command(name = "document-catalog")]
+    DocumentCatalog(ProjectDocumentCatalogArgs),
+
+    /// Search a fresh visibility-neutral document catalog
+    #[command(name = "document-search")]
+    DocumentSearch(ProjectDocumentSearchArgs),
+
+    /// Review one exact document lifecycle proposal without writing state
+    #[command(name = "document-lifecycle-review")]
+    DocumentLifecycleReview(ProjectDocumentLifecycleReviewArgs),
+
+    /// Open one proposal-hash-bound lifecycle approval request
+    #[command(name = "document-lifecycle-request")]
+    DocumentLifecycleRequest(ProjectDocumentLifecycleRequestArgs),
+
+    /// Apply one approved lifecycle proposal to the append-only profile ledger
+    #[command(name = "document-lifecycle-apply")]
+    DocumentLifecycleApply(ProjectDocumentLifecycleApplyArgs),
+
+    /// Inspect append-only lifecycle history without opening document bodies
+    #[command(name = "document-lifecycle-history")]
+    DocumentLifecycleHistory(ProjectDocumentLifecycleHistoryArgs),
 
     /// Build a read-only artifact retention review packet
     #[command(name = "retention-review")]
@@ -75,6 +117,24 @@ pub enum ProjectCommands {
 
     /// Scan workspace roots and bulk-register unmatched projects into the registry
     Sync(ProjectSyncArgs),
+
+    /// Account for workspace paths and registry entries without writing state
+    Inventory(inventory::ProjectInventoryArgs),
+}
+
+impl ProjectCommands {
+    pub fn is_ephemeral_document_observation(&self) -> bool {
+        matches!(
+            self,
+            Self::Inventory(_)
+                | Self::PlanRouting(_)
+                | Self::DocumentCatalog(_)
+                | Self::DocumentSearch(_)
+                | Self::DocumentLifecycleReview(_)
+                | Self::DocumentLifecycleHistory(_)
+                | Self::WikiContext(_)
+        )
+    }
 }
 
 #[derive(Args)]
@@ -101,9 +161,17 @@ pub struct ProjectInitArgs {
     #[arg(long)]
     project_key: String,
 
+    /// Existing authoritative TODO, relative to this project root (explicit selection)
+    #[arg(long)]
+    owning_plan: Option<String>,
+
     /// Module path/id to mark as a prioritized operation target
     #[arg(long, value_name = "MODULE_PATH_OR_ID")]
     operation_target: Vec<String>,
+
+    /// Explicit logical subproject scope spec. Repeat for several subprojects.
+    #[arg(long = "subproject-spec", value_name = "PATH")]
+    subproject_spec: Vec<PathBuf>,
 
     /// Project-specific module operation profile spec. Repeat to register multiple specs.
     #[arg(long = "module-profile-spec", value_name = "PATH")]
@@ -420,6 +488,7 @@ struct ProjectOperationProfile {
     project_root: String,
     read_only_project_state: bool,
     scope_model: ScopeModel,
+    owning_plan_routing: plan_routing::RoutingPreview,
     initialization_policy: InitializationPolicy,
     project_scan: ProjectScan,
     agent_modes: Vec<AgentModeContract>,
@@ -465,6 +534,10 @@ struct ScopeTarget {
     parent_scope_ref: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     path: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    read_paths: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    owning_plan_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -563,6 +636,22 @@ struct ModuleCandidate {
     entrypoints: Vec<EntryPointCandidate>,
     documentation_sources: Vec<PathSignal>,
     operation_profile_status: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    read_paths: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    owning_plan_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SubprojectSpec {
+    schema: String,
+    project_key: String,
+    subproject_id: String,
+    label: String,
+    anchor_path: String,
+    #[serde(default)]
+    read_paths: Vec<String>,
+    owning_plan_path: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -585,6 +674,11 @@ struct ModuleOperationPreflightTarget {
     scope_ref: String,
     label: String,
     path: String,
+    scope_kind: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    read_paths: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    owning_plan_path: Option<String>,
     selected_operation_target: bool,
     readiness_level: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -680,9 +774,25 @@ struct ReadinessGate {
 pub async fn run(profile: &str, command: ProjectCommands) -> Result<()> {
     match command {
         ProjectCommands::Init(args) => run_init(profile, args).await,
+        ProjectCommands::PlanRouting(args) => plan_routing::run(args),
         ProjectCommands::ApplyGovernanceHints(args) => run_apply_governance_hints(args),
+        ProjectCommands::WikiContext(args) => run_wiki_context(args),
         ProjectCommands::AuditDocs(args) => run_audit_docs(args),
         ProjectCommands::ArtifactIndex(args) => artifact_index::run(profile, args).await,
+        ProjectCommands::DocumentCatalog(args) => document_catalog::run_catalog(profile, args),
+        ProjectCommands::DocumentSearch(args) => document_catalog::run_search(profile, args),
+        ProjectCommands::DocumentLifecycleReview(args) => {
+            document_lifecycle::run_review(profile, args)
+        }
+        ProjectCommands::DocumentLifecycleRequest(args) => {
+            document_lifecycle::run_request(profile, args)
+        }
+        ProjectCommands::DocumentLifecycleApply(args) => {
+            document_lifecycle::run_apply(profile, args)
+        }
+        ProjectCommands::DocumentLifecycleHistory(args) => {
+            document_lifecycle::run_history(profile, args)
+        }
         ProjectCommands::RetentionReview(args) => {
             artifact_index::run_retention_review(profile, args).await
         }
@@ -697,6 +807,7 @@ pub async fn run(profile: &str, command: ProjectCommands) -> Result<()> {
         }
         ProjectCommands::ImplementationPacket(args) => run_implementation_packet(profile, *args),
         ProjectCommands::Sync(args) => run_sync(args),
+        ProjectCommands::Inventory(args) => inventory::run(args),
     }
 }
 
@@ -806,6 +917,13 @@ async fn run_init(profile: &str, args: ProjectInitArgs) -> Result<()> {
     let entrypoints = collect_entrypoints(&project_root, &project_root);
     let artifact_roots = collect_artifact_roots(&project_root);
     let mut module_candidates = discover_module_candidates(&project_key, &project_root);
+    module_candidates.extend(load_subproject_candidates(
+        &args.subproject_spec,
+        &project_key,
+        &project_root,
+        &module_candidates,
+    )?);
+    module_candidates.sort_by(|left, right| left.scope_ref.cmp(&right.scope_ref));
     apply_operation_targets(&mut module_candidates, &args.operation_target)?;
     let operation_target_count = module_candidates
         .iter()
@@ -834,7 +952,16 @@ async fn run_init(profile: &str, args: ProjectInitArgs) -> Result<()> {
         project_root: safe_path(&project_root),
         candidates: module_candidates,
     };
-    let scope_model = scope_model(&project_key, &project_root, &module_report);
+    let mut scope_model = scope_model(&project_key, &project_root, &module_report);
+    let owning_plan_routing = plan_routing::inspect(
+        &project_root,
+        &project_key,
+        args.owning_plan.as_deref(),
+        ".",
+        &[],
+        false,
+    )?;
+    scope_model.project_target.owning_plan_path = owning_plan_routing.selected_existing_owner();
     let module_operation_preflight = module_operation_preflight(
         generated_at,
         &project_key,
@@ -858,7 +985,16 @@ async fn run_init(profile: &str, args: ProjectInitArgs) -> Result<()> {
         &project_scan,
         &module_report,
     );
-    let governance_hints = governance_surface_hints(&project_root);
+    let mut governance_hints = governance_surface_hints(&project_root);
+    if let Some(hint) = governance_hints
+        .iter_mut()
+        .find(|hint| hint.role == "next_actions")
+    {
+        hint.existing_paths
+            .extend(owning_plan_routing.existing_candidate_paths());
+        hint.existing_paths.sort();
+        hint.existing_paths.dedup();
+    }
     let governance_surface_missing_count = governance_hints
         .iter()
         .filter(|hint| hint.existing_paths.is_empty())
@@ -872,6 +1008,7 @@ async fn run_init(profile: &str, args: ProjectInitArgs) -> Result<()> {
         project_root: safe_path(&project_root),
         read_only_project_state: true,
         scope_model,
+        owning_plan_routing,
         initialization_policy: InitializationPolicy {
             grants_execution_authority: false,
             grants_wiki_promotion_authority: false,
@@ -1012,7 +1149,15 @@ fn run_apply_governance_hints(args: ProjectApplyGovernanceHintsArgs) -> Result<(
         .map(|role| role.role().to_string())
         .collect();
     let selected_all = selected_roles.is_empty();
-    let hints = governance_surface_hints(&project_root);
+    let mut hints = governance_surface_hints(&project_root);
+    let owner_discovery =
+        plan_routing::inspect(&project_root, &project_key, None, ".", &[], false)?;
+    if let Some(hint) = hints.iter_mut().find(|hint| hint.role == "next_actions") {
+        hint.existing_paths
+            .extend(owner_discovery.existing_candidate_paths());
+        hint.existing_paths.sort();
+        hint.existing_paths.dedup();
+    }
     let mut operations = Vec::new();
     let mut planned_count = 0usize;
     let mut created_count = 0usize;
@@ -1030,6 +1175,17 @@ fn run_apply_governance_hints(args: ProjectApplyGovernanceHintsArgs) -> Result<(
                 path: existing.clone(),
                 status: "skipped_existing".to_string(),
                 reason: "A governance surface for this role already exists; existing files are never overwritten.".to_string(),
+                content_preview: None,
+            });
+            continue;
+        }
+
+        if hint.role == "next_actions" && owner_discovery.has_unresolved_candidates() {
+            operations.push(ProjectGovernanceSurfaceOperation {
+                role: hint.role,
+                path: hint.recommended_path,
+                status: "held_owner_resolution".into(),
+                reason: "An unresolved owning-plan candidate exists. Review project plan-routing before creating another TODO.".into(),
                 content_preview: None,
             });
             continue;
@@ -1075,7 +1231,10 @@ fn run_apply_governance_hints(args: ProjectApplyGovernanceHintsArgs) -> Result<(
         project_root: safe_path(&project_root),
         reviewed: args.reviewed,
         writes_target_project_state: args.reviewed && created_count > 0,
-        requires_operator_review: !args.reviewed,
+        requires_operator_review: !args.reviewed
+            || operations
+                .iter()
+                .any(|op| op.status == "held_owner_resolution"),
         planned_count,
         created_count,
         skipped_existing_count,
@@ -1732,11 +1891,108 @@ fn discover_module_candidates(project_key: &str, root: &Path) -> Vec<ModuleCandi
                 entrypoints,
                 documentation_sources: docs,
                 operation_profile_status: "candidate_requires_operator_review".to_string(),
+                read_paths: Vec::new(),
+                owning_plan_path: None,
             });
         }
     }
     candidates.sort_by(|left, right| left.path.cmp(&right.path));
     candidates
+}
+
+fn load_subproject_candidates(
+    paths: &[PathBuf],
+    project_key: &str,
+    root: &Path,
+    discovered: &[ModuleCandidate],
+) -> Result<Vec<ModuleCandidate>> {
+    let mut ids = discovered
+        .iter()
+        .map(|candidate| candidate.scope_ref.clone())
+        .collect::<BTreeSet<_>>();
+    let mut candidates = Vec::new();
+    for spec_path in paths {
+        let text = fs::read_to_string(spec_path)
+            .with_context(|| format!("read subproject spec {}", spec_path.display()))?;
+        let spec: SubprojectSpec = serde_json::from_str(&text)
+            .with_context(|| format!("parse subproject spec {}", spec_path.display()))?;
+        if spec.schema != "forager_subproject_scope.v1" {
+            bail!(
+                "unsupported subproject spec schema in {}",
+                spec_path.display()
+            );
+        }
+        if spec.project_key != project_key {
+            bail!(
+                "subproject spec project_key mismatch in {}",
+                spec_path.display()
+            );
+        }
+        let id = spec.subproject_id.trim();
+        if id.is_empty()
+            || id.len() > 64
+            || !id.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-' || byte == b'_'
+            })
+            || !id.as_bytes()[0].is_ascii_alphanumeric()
+        {
+            bail!("invalid subproject_id in {}", spec_path.display());
+        }
+        if !ids.insert(id.to_string()) {
+            bail!("duplicate operation scope_ref: {id}");
+        }
+        let label = sanitize_required("subproject label", &spec.label)?;
+        let anchor = resolve_subproject_path(root, &spec.anchor_path, true)?;
+        if anchor == "." {
+            bail!("subproject anchor_path must be narrower than project root");
+        }
+        let owning_plan_path = resolve_subproject_path(root, &spec.owning_plan_path, false)?;
+        if !root.join(&owning_plan_path).is_file() {
+            bail!("subproject owning_plan_path must be a file");
+        }
+        let mut read_paths = BTreeSet::new();
+        read_paths.insert(anchor.clone());
+        for path in &spec.read_paths {
+            let resolved = resolve_subproject_path(root, path, false)?;
+            if resolved == "." {
+                bail!("subproject read_paths cannot include the project root");
+            }
+            read_paths.insert(resolved);
+        }
+        let anchor_abs = root.join(&anchor);
+        candidates.push(ModuleCandidate {
+            module_id: id.to_string(),
+            label,
+            path: anchor,
+            scope_kind: "subproject".to_string(),
+            scope_ref: id.to_string(),
+            parent_project_key: project_key.to_string(),
+            selected_operation_target: false,
+            confidence: "explicit".to_string(),
+            signals: vec!["operator_declared_scope".to_string()],
+            entrypoints: collect_entrypoints(root, &anchor_abs),
+            documentation_sources: module_docs(root, &anchor_abs),
+            operation_profile_status: "candidate_requires_operator_review".to_string(),
+            read_paths: read_paths.into_iter().collect(),
+            owning_plan_path: Some(owning_plan_path),
+        });
+    }
+    Ok(candidates)
+}
+
+fn resolve_subproject_path(root: &Path, value: &str, directory_required: bool) -> Result<String> {
+    let relative = Path::new(value.trim());
+    if relative.as_os_str().is_empty() || relative.is_absolute() {
+        bail!("subproject path must be a nonempty project-relative path: {value}");
+    }
+    let resolved = root
+        .join(relative)
+        .canonicalize()
+        .with_context(|| format!("resolve subproject path {value}"))?;
+    if !resolved.starts_with(root) || (directory_required && !resolved.is_dir()) {
+        bail!("subproject path is outside scope or has the wrong type: {value}");
+    }
+    Ok(rel_path(root, &resolved))
 }
 
 fn apply_operation_targets(
@@ -1748,21 +2004,39 @@ fn apply_operation_targets(
         if requested.is_empty() {
             continue;
         }
-        let mut matched = false;
-        for candidate in candidates.iter_mut() {
-            if module_target_matches(candidate, &requested) {
-                candidate.selected_operation_target = true;
-                candidate.operation_profile_status =
-                    "operation_target_requires_module_profile_review".to_string();
-                matched = true;
-            }
-        }
-        if !matched {
+        let exact = candidates
+            .iter()
+            .enumerate()
+            .filter(|(_, candidate)| {
+                candidate.scope_ref == requested
+                    || candidate.module_id == requested
+                    || candidate.path == requested
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        let matches = if exact.is_empty() {
+            candidates
+                .iter()
+                .enumerate()
+                .filter(|(_, candidate)| module_target_matches(candidate, &requested))
+                .map(|(index, _)| index)
+                .collect::<Vec<_>>()
+        } else {
+            exact
+        };
+        if matches.is_empty() {
             bail!(
                 "operation target not found among module candidates: {}",
                 requested
             );
         }
+        if matches.len() > 1 {
+            bail!("ambiguous operation target: {requested}; use an exact scope_ref");
+        }
+        let candidate = &mut candidates[matches[0]];
+        candidate.selected_operation_target = true;
+        candidate.operation_profile_status =
+            "operation_target_requires_module_profile_review".to_string();
     }
     Ok(())
 }
@@ -1804,6 +2078,8 @@ fn scope_model(
             parent_scope_kind: None,
             parent_scope_ref: None,
             path: Some(safe_path(project_root)),
+            read_paths: Vec::new(),
+            owning_plan_path: None,
         },
         operation_targets,
         module_candidates,
@@ -1817,6 +2093,8 @@ fn scope_model(
                 parent_scope_kind: Some("project".to_string()),
                 parent_scope_ref: Some(project_key.to_string()),
                 path: None,
+                read_paths: Vec::new(),
+                owning_plan_path: None,
             },
             ScopeTarget {
                 scope_kind: "artifact_kind".to_string(),
@@ -1827,31 +2105,40 @@ fn scope_model(
                 parent_scope_kind: Some("project".to_string()),
                 parent_scope_ref: Some(project_key.to_string()),
                 path: None,
+                read_paths: Vec::new(),
+                owning_plan_path: None,
             },
         ],
         policy: vec![
             "Project target owns overall objective, wiki scope, closeout, and Ondesk return context.".to_string(),
-            "Module operation targets own canonical commands, module evidence gates, and module-specific reportability vocabulary.".to_string(),
+            "Operation targets own canonical commands, evidence gates, and scope-specific reportability vocabulary; declared read paths do not grant write authority.".to_string(),
             "Artifact scopes own concrete evidence bundles and should not replace project or module scope.".to_string(),
-            "A module operation target remains a candidate until an operator reviews or creates its module operation profile.".to_string(),
+            "An operation target remains a candidate until its scope and operation profile are reviewed by an operator.".to_string(),
         ],
     }
 }
 
 fn module_scope_target(candidate: &ModuleCandidate) -> ScopeTarget {
     ScopeTarget {
-        scope_kind: "module".to_string(),
+        scope_kind: candidate.scope_kind.clone(),
         scope_ref: candidate.scope_ref.clone(),
         label: candidate.label.clone(),
-        role: if candidate.selected_operation_target {
-            "module_operation_target".to_string()
-        } else {
-            "module_candidate".to_string()
-        },
+        role: match (
+            candidate.scope_kind.as_str(),
+            candidate.selected_operation_target,
+        ) {
+            ("subproject", true) => "subproject_operation_target",
+            ("subproject", false) => "subproject_candidate",
+            (_, true) => "module_operation_target",
+            (_, false) => "module_candidate",
+        }
+        .to_string(),
         status: candidate.operation_profile_status.clone(),
         parent_scope_kind: Some("project".to_string()),
         parent_scope_ref: Some(candidate.parent_project_key.clone()),
         path: Some(candidate.path.clone()),
+        read_paths: candidate.read_paths.clone(),
+        owning_plan_path: candidate.owning_plan_path.clone(),
     }
 }
 
@@ -1928,7 +2215,7 @@ fn module_operation_preflight_target(
         "evidence_bundle_requires_review".to_string(),
     ];
     let mut required_operator_decisions = vec![
-        "Confirm this module target is the active operation scope.".to_string(),
+        "Confirm this target is the active operation scope.".to_string(),
         "Review or create the module operation profile before Offdesk runtime.".to_string(),
         "Review deterministic evidence before reportability or completion claims.".to_string(),
     ];
@@ -1946,6 +2233,9 @@ fn module_operation_preflight_target(
         scope_ref: candidate.scope_ref.clone(),
         label: candidate.label.clone(),
         path: candidate.path.clone(),
+        scope_kind: candidate.scope_kind.clone(),
+        read_paths: candidate.read_paths.clone(),
+        owning_plan_path: candidate.owning_plan_path.clone(),
         selected_operation_target: candidate.selected_operation_target,
         readiness_level: if recognized {
             "known_profile_builder_available".to_string()
@@ -2435,8 +2725,8 @@ fn render_evidence_plan(
     } else {
         for candidate in &modules.candidates {
             output.push_str(&format!(
-                "- `{}` scope=`module:{}` target=`{}`: define required docs, run summaries, reportability metrics, and stale-evidence rules.\n",
-                candidate.path, candidate.scope_ref, candidate.selected_operation_target
+                "- `{}` scope=`{}:{}` target=`{}`: define required docs, run summaries, reportability metrics, and stale-evidence rules.\n",
+                candidate.path, candidate.scope_kind, candidate.scope_ref, candidate.selected_operation_target
             ));
         }
     }
@@ -2569,9 +2859,10 @@ fn render_ondesk_start_package(
     output.push_str("\n## Module Candidates\n\n");
     for candidate in &modules.candidates {
         output.push_str(&format!(
-            "- `{}` at `{}` scope=`module:{}` confidence=`{}` target=`{}`\n",
+            "- `{}` at `{}` scope=`{}:{}` confidence=`{}` target=`{}`\n",
             candidate.module_id,
             candidate.path,
+            candidate.scope_kind,
             candidate.scope_ref,
             candidate.confidence,
             candidate.selected_operation_target
@@ -2864,3 +3155,5 @@ impl ExpandUser for PathBuf {
         self.clone()
     }
 }
+
+pub(crate) use closeout_scope::select as closeout_documentation_scope;

@@ -13,12 +13,20 @@ never mutates project or runtime state.
 from __future__ import annotations
 
 import html
+import hashlib
+import json
 from typing import Any
 
 from .common import utc_now
 from .dispatch import open_decision_actions, open_recovery_actions
 from .persistence import parse_utc_timestamp
 from .rendering import sanitize_text, title_with_profile
+
+def decision_version(item: dict[str, Any]) -> str:
+    observed = [(row.get("action_kind"), row.get("observed_hash")) for row in item.get("actions", [])]
+    return hashlib.sha256(json.dumps([item.get("status"), item.get("stage"), item.get("acceptance_status"), observed],
+        sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
 
 ATTENTION_NOTIFICATION_SCHEMA = "telegram_attention_notification.v1"
 
@@ -38,6 +46,7 @@ def attention_items_from_surface(surface: dict[str, Any]) -> list[dict[str, Any]
         items.append(
             {
                 "kind": "decision",
+                "version": decision_version(decision),
                 "key": f"decision:{decision_id}",
                 "id": decision_id,
                 "title": sanitize_text(str(decision.get("title") or decision_id), max_chars=80),
@@ -55,6 +64,7 @@ def attention_items_from_surface(surface: dict[str, Any]) -> list[dict[str, Any]
         items.append(
             {
                 "kind": "recovery",
+                "version": decision_version(recovery),
                 "key": f"recovery:{closeout_id}",
                 "id": closeout_id,
                 "title": sanitize_text(
@@ -63,7 +73,7 @@ def attention_items_from_surface(surface: dict[str, Any]) -> list[dict[str, Any]
                 "command_hint": f"/recover {closeout_id} {first_action}".strip(),
             }
         )
-    return items
+    return list({item["key"]: item for item in items}.values())
 
 
 def tasks_needing_review_from_surface(surface: dict[str, Any]) -> list[dict[str, Any]]:
@@ -90,14 +100,19 @@ def tasks_needing_review_from_surface(surface: dict[str, Any]) -> list[dict[str,
             items.append(
                 {
                     "kind": "task",
+                    "version": str(item.get("attention_version") or decision_version(item)),
+                    "project_key": str(project.get("project_key") or ""),
+                    "request_id": str(item.get("request_id") or ""),
+                    "reason": str(item.get("next_safe_action_kind") or "review_required"),
                     "key": f"task:{task_id}",
                     "id": task_id,
                     "title": sanitize_text(str(item.get("title") or task_id), max_chars=80),
                     "status": str(item.get("status") or ""),
-                    "command_hint": f"/cancel-task {task_id}",
+                    "command_hint": "/tasks",
+                    "inspection_command": str(item.get("command") or ""),
                 }
             )
-    return items
+    return list({item["key"]: item for item in items}.values())
 
 
 def attention_summary(surface: dict[str, Any]) -> dict[str, Any]:
@@ -151,9 +166,10 @@ def select_items_to_notify(
         if not key:
             continue
         record = notified.get(key)
-        if record is None:
+        version = str(item.get("version") or "")
+        if not isinstance(record, dict) or str(record.get("version") or "") != version:
             to_notify.append(item)
-            notified[key] = {"first_notified_at": now, "last_notified_at": now}
+            notified[key] = {"first_notified_at": now, "last_notified_at": now, "version": version}
             continue
         if reminder_sec > 0 and now_dt is not None:
             last = parse_utc_timestamp(record.get("last_notified_at"))
@@ -171,8 +187,14 @@ def render_attention_message(*, profile: Any, generated_at: Any, items: list[dic
     else:
         lines.append(f"{total}건이 대기 중입니다.")
     for item in items[:2]:
-        lines.append(f"{html.escape(str(item.get('title') or ''))} → {html.escape(str(item.get('command_hint') or ''))}")
-    lines.append("다음 조치: /decisions · /recovery")
+        label = str(item.get("title") or "")
+        if item.get("kind") == "task":
+            reason = {"review_binding_changed": "검토 근거 변경", "review_required": "결과 검토",
+                      "closeout_check": "종료 기록 확인", "recovery_required": "실행 실패 검토",
+                      "resume_review_required": "중단 상태 검토"}.get(str(item.get("reason") or ""), "후속 조치")
+            label = sanitize_text(f"{reason} · {item.get('project_key') or ''} · {item.get('id') or ''}", max_chars=120)
+        lines.append(f"{html.escape(label)} → {html.escape(str(item.get('command_hint') or ''))}")
+    lines.append("다음 조치: /decisions · /recovery · /tasks")
     return "\n".join(lines)
 
 
@@ -190,17 +212,51 @@ def build_attention_notification(
     *,
     reminder_sec: int,
 ) -> dict[str, Any]:
-    """Compute the attention items to notify and mark them in ``state``.
+    """Compute the attention items to notify using a staged registry.
 
     Returns a result describing the pending items and which ones are fresh; the
-    caller renders and sends the card for ``fresh_items``.
+    caller renders and sends the card for ``fresh_items``. The staged registry
+    is committed only after delivery succeeds (or a dry-run delivery is
+    accepted), so a failed send remains retryable.
     """
 
     items = attention_items_from_surface(surface)
-    notified = attention_notified_state(state)
+    items.extend(tasks_needing_review_from_surface(surface))
+    items = list({item["key"]: item for item in items}.values())
+    current = state.get("attention_notified_by_key")
+    # The selector updates nested timestamp records in place. Copy those
+    # records as well as the outer mapping so reminder bookkeeping cannot leak
+    # into durable state before the Telegram send succeeds.
+    notified = {
+        str(key): dict(value) if isinstance(value, dict) else value
+        for key, value in current.items()
+    } if isinstance(current, dict) else {}
     fresh = select_items_to_notify(items, notified, now=utc_now(), reminder_sec=reminder_sec)
     return {
         "schema": ATTENTION_NOTIFICATION_SCHEMA,
         "pending_count": len(items),
         "fresh_items": fresh,
+        "staged_notified_by_key": notified,
     }
+
+
+def commit_attention_notification(
+    state: dict[str, Any], notification: dict[str, Any],
+    *, delivered_keys: tuple[str, ...],
+) -> bool:
+    """Prune resolved items and commit only the delivered staged records.
+
+    An empty selection prunes without consuming any pending notification.
+    """
+
+    staged = notification.get("staged_notified_by_key")
+    if not isinstance(staged, dict):
+        return False
+    current = state.get("attention_notified_by_key")
+    current = current if isinstance(current, dict) else {}
+    committed = {key: value for key, value in current.items() if key in staged}
+    for key in delivered_keys:
+        if key in staged:
+            committed[key] = staged[key]
+    state["attention_notified_by_key"] = committed
+    return True

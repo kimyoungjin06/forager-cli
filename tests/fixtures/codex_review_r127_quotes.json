@@ -1,0 +1,120 @@
+{
+  "origin": "R127 native response, rejected by literal-quote validation",
+  "raw_model_report_sha256": "29d0217440a9ddf7810443d2ade028089f3b7c193ee29e63b0aba27d2bb845ab",
+  "source_bindings": {
+    "S07": {
+      "path": "input/src/cli/offdesk/shift_commands.rs",
+      "sha256": "3ee3c5257f421766cf034850d5ad1805102ff74edecd9d6458c191a92e1b0d1b"
+    },
+    "S04": {
+      "path": "input/src/offdesk/shift_runtime.rs",
+      "sha256": "72fdb14ba3ebd24a4fcfc4f133aa4232a44190617db7e83c619a9ddee95f038f"
+    },
+    "S06": {
+      "path": "input/src/cli/offdesk/shift_commands/local_review.rs",
+      "sha256": "96f6abed1f1d709d9e5f5c3c4ddf6e618fb658156426fc48bf3a33c8ad88f03b"
+    },
+    "S05": {
+      "path": "input/src/offdesk/weekly_usage.rs",
+      "sha256": "2a00b0bfb106c4fd7c260d23814b870123cdec776873a8095613a19f94e59f79"
+    },
+    "S12": {
+      "path": "input/docs/offdesk-shift.md",
+      "sha256": "54fb4eee8a262bc15f8b6282328c67dee36c02c734dd5e9001f0dfda84a25693"
+    },
+    "S00": {
+      "path": "input/scripts/offdesk_usage_guard.py",
+      "sha256": "ea5248bae3c3eadb4bc39c362ab14d1d4a9bea3bc0735f182fbefa7342590351"
+    }
+  },
+  "references": [
+    {
+      "finding_index": 0,
+      "kind": "evidence",
+      "reference": {
+        "source_id": "S07",
+        "line_start": 648,
+        "line_end": 649,
+        "quote": "let created = store.save_manifest(manifest.clone())?;\n649:     ensure_boundaries_current(&sources, &project_roots)?;"
+      },
+      "expected_quote": "    let created = store.save_manifest(manifest.clone())?;\n    ensure_boundaries_current(&sources, &project_roots)?;"
+    },
+    {
+      "finding_index": 0,
+      "kind": "evidence",
+      "reference": {
+        "source_id": "S07",
+        "line_start": 1247,
+        "line_end": 1249,
+        "quote": "let created = store.arm_shift(receipt, initial_state, &transition_id)?;\n1248:             live.ensure_current()?;\n1249:             session.ensure_bounded_root_active()?;"
+      },
+      "expected_quote": "            let created = store.arm_shift(receipt, initial_state, &transition_id)?;\n            live.ensure_current()?;\n            session.ensure_bounded_root_active()?;"
+    },
+    {
+      "finding_index": 0,
+      "kind": "counterevidence",
+      "reference": {
+        "source_id": "S07",
+        "line_start": 1656,
+        "line_end": 1658,
+        "quote": "selection::ensure_serial_inputs(manifest, &mut sources, initial_serial_confirmation)?;\n1657:     ensure_boundaries_current(&sources, &roots)?;\n1658:     Ok(OffdeskShiftLiveSources::new(sources, roots))"
+      },
+      "expected_quote": "    selection::ensure_serial_inputs(manifest, &mut sources, initial_serial_confirmation)?;\n    ensure_boundaries_current(&sources, &roots)?;\n    Ok(OffdeskShiftLiveSources::new(sources, roots))"
+    },
+    {
+      "finding_index": 0,
+      "kind": "counterevidence",
+      "reference": {
+        "source_id": "S04",
+        "line_start": 253,
+        "line_end": 254,
+        "quote": "super::workflow::invocation_inputs::ReviewInputScope::ensure_current()?;\n254:         self.profile.ensure_current()"
+      },
+      "expected_quote": "        super::workflow::invocation_inputs::ReviewInputScope::ensure_current()?;\n        self.profile.ensure_current()"
+    },
+    {
+      "finding_index": 0,
+      "kind": "counterevidence",
+      "reference": {
+        "source_id": "S06",
+        "line_start": 271,
+        "line_end": 272,
+        "quote": "// Reuse arm's live source, policy and receipt checks after resolving approval.\n272:     // A failure here preserves the approved request for explicit recovery, without retry."
+      },
+      "expected_quote": "    // Reuse arm's live source, policy and receipt checks after resolving approval.\n    // A failure here preserves the approved request for explicit recovery, without retry."
+    },
+    {
+      "finding_index": 1,
+      "kind": "evidence",
+      "reference": {
+        "source_id": "S05",
+        "line_start": 310,
+        "line_end": 313,
+        "quote": "\"enforcement\":\"task_and_wiki_dispatch_and_reservation_admission_only\",\n311:                 \"inflight_call_can_overshoot\":true,\"inflight_task_can_overshoot\":true,\"account_usage_includes_other_sessions\":true,\n312:                 \"automatic_provider_polling\":false,\"running_tasks_killed\":false,\n313:                 \"usd_or_token_ceiling\":false})"
+      },
+      "expected_quote": "                \"enforcement\":\"task_and_wiki_dispatch_and_reservation_admission_only\",\n                \"inflight_call_can_overshoot\":true,\"inflight_task_can_overshoot\":true,\"account_usage_includes_other_sessions\":true,\n                \"automatic_provider_polling\":false,\"running_tasks_killed\":false,\n                \"usd_or_token_ceiling\":false})"
+    },
+    {
+      "finding_index": 1,
+      "kind": "evidence",
+      "reference": {
+        "source_id": "S12",
+        "line_start": 1355,
+        "line_end": 1357,
+        "quote": "account contribute to the observed increase. Delayed or rounded provider data,\n1356: poll latency and an in-flight request can exceed the target before the next\n1357: check. This is a conservative admission guard, not an exact token or billing cap."
+      },
+      "expected_quote": "account contribute to the observed increase. Delayed or rounded provider data,\npoll latency and an in-flight request can exceed the target before the next\ncheck. This is a conservative admission guard, not an exact token or billing cap."
+    },
+    {
+      "finding_index": 1,
+      "kind": "counterevidence",
+      "reference": {
+        "source_id": "S00",
+        "line_start": 220,
+        "line_end": 221,
+        "quote": "if delta >= state[\"limit_percentage_points\"] or meter[\"used_percent\"] >= 100:\n221:                     reasons.append(f\"{provider}:{key}:budget_reached\")"
+      },
+      "expected_quote": "                if delta >= state[\"limit_percentage_points\"] or meter[\"used_percent\"] >= 100:\n                    reasons.append(f\"{provider}:{key}:budget_reached\")"
+    }
+  ]
+}

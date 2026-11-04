@@ -1,20 +1,36 @@
 //! `forager offdesk` operator commands.
 
+mod approval_resolution_presentation;
+mod capability_harness_presentation;
+#[cfg(test)]
+mod closeout_file_tests;
+mod closeout_presentation;
 mod closeout_records;
 mod closeout_render;
 mod closeout_report;
+mod debug_bundle_presentation;
 mod decision_ingest;
+mod decision_presentation;
 mod deck;
 mod hosted_harness;
+mod maintenance_presentation;
+mod mutation_snapshot_presentation;
 mod operator_control_presentation;
 mod parsing;
+mod pending_approval_presentation;
 mod plan_commands;
 mod plan_presentation;
 mod plan_queries;
 mod plan_registry;
+mod provider_presentation;
 mod remote_operator_presentation;
+mod remote_session_presentation;
+mod review_link_commands;
 mod runtime_recovery_presentation;
 mod scheduler_launch_presentation;
+mod shift_commands;
+pub(crate) use shift_commands::local_review;
+mod shift_presentation;
 mod task_lifecycle_presentation;
 mod wiki_audit_presentation;
 mod wiki_brief_presentation;
@@ -29,6 +45,14 @@ mod wiki_review_after_presentation;
 mod wiki_review_presentation;
 mod wiki_runtime_policy_ack_presentation;
 
+use approval_resolution_presentation::{
+    present_approval_resolution, present_missing_approval_resolution,
+};
+use capability_harness_presentation::{
+    hosted_harness_prompt_guard_error, present_capabilities, present_hosted_harness_profiles,
+    present_hosted_harness_prompt_packet,
+};
+use closeout_presentation::{present_closeout_report, present_closeout_review_record};
 use closeout_records::{
     build_closeout_decision_record, build_closeout_retire_record, build_closeout_review_record,
 };
@@ -36,16 +60,24 @@ use closeout_render::{
     render_closeout_plan_markdown, render_closeout_return_package, render_commercial_review_packet,
 };
 use closeout_report::build_closeout_report;
+use debug_bundle_presentation::{debug_bundle_export_error_context, present_debug_bundle};
 use decision_ingest::{ingest_telegram_decision, ingest_telegram_feedback};
 pub use decision_ingest::{DecisionIngestTelegramArgs, DecisionIngestTelegramFeedbackArgs};
+use decision_presentation::{present_decision, present_decisions};
 use deck::run_deck;
 pub use deck::DeckArgs;
 use hosted_harness::{
     build_harness_prompt_packet, hosted_harness_profile, hosted_harness_profiles,
     HarnessPromptRequest,
 };
+use maintenance_presentation::{present_maintenance_report, present_maintenance_request};
+use mutation_snapshot_presentation::{
+    mutation_snapshot_list_item, present_missing_mutation_snapshot, present_mutation_restore_plan,
+    present_mutation_snapshot_list, present_mutation_snapshot_verification,
+};
 use operator_control_presentation::{present_learning_scan_report, present_operator_pause_state};
 use parsing::*;
+use pending_approval_presentation::present_pending_approval_views;
 use plan_commands::{
     prepare_offdesk_plan_launch, record_offdesk_plan_review, register_offdesk_plan,
 };
@@ -56,25 +88,45 @@ use plan_presentation::{
     present_remote_operator_plans,
 };
 use plan_queries::{query_offdesk_plan_detail, query_offdesk_plans, OffdeskPlanListQuery};
+use provider_presentation::{present_provider_capacity, present_provider_fallback};
 use remote_operator_presentation::{
     present_remote_operator_pending, present_remote_operator_status,
+};
+use remote_session_presentation::{
+    present_remote_session_policy_inspection, present_remote_session_policy_resolution,
 };
 use runtime_recovery_presentation::{
     present_background_ack_report, present_background_poll_outcomes, present_background_statuses,
     present_resume_states,
 };
 use scheduler_launch_presentation::{
-    present_background_launch_outcome, present_scheduler_gate_outcome,
+    present_background_launch_outcome, present_scheduler_gate_outcome, present_tick_report,
+};
+use shift_commands::{
+    active_shift_tick_authority, arm_offdesk_shift, build_shift_council_packet,
+    claim_offdesk_shift_routine, complete_offdesk_shift_routine, disarm_offdesk_shift,
+    instantiate_offdesk_shift_template, prepare_offdesk_shift, recover_offdesk_shift_routine,
+    start_offdesk_shift_routine,
+};
+use shift_presentation::{
+    present_shift_arm_result, present_shift_council_packet, present_shift_disarm_result,
+    present_shift_enterprise_policy_report, present_shift_host_policy_report,
+    present_shift_prepare_result, present_shift_record, present_shift_retention_report,
+    present_shift_review, present_shift_routine_claim_result,
+    present_shift_routine_complete_result, present_shift_routine_recovery_result,
+    present_shift_routine_start_result, present_shift_status,
+    present_shift_template_instantiation_result,
 };
 use task_lifecycle_presentation::{
-    present_retry_task_lifecycle_report, present_task_lifecycle_report, task_status_label,
+    present_enqueued_task, present_retry_task_lifecycle_report, present_task_lifecycle_report,
+    present_task_termination_report, present_tasks,
 };
 use wiki_audit_presentation::{
     present_wiki_graph, present_wiki_lint, present_wiki_markdown_export,
 };
 use wiki_brief_presentation::{
-    build_wiki_brief_read_model, present_wiki_brief, present_wiki_brief_write_confirmation,
-    render_wiki_brief_markdown,
+    build_wiki_brief_failure_manifest, build_wiki_brief_read_model, present_wiki_brief,
+    present_wiki_brief_manifest, present_wiki_brief_write_confirmation, render_wiki_brief_markdown,
 };
 use wiki_catalog::{wiki_candidates, wiki_entries, wiki_show};
 pub use wiki_catalog::{WikiListArgs, WikiShowArgs};
@@ -85,7 +137,9 @@ use wiki_evidence_presentation::{
     present_wiki_correction_recurrence_report, present_wiki_episode_evaluation_report,
     present_wiki_live_episode_trace_report, present_wiki_promotion_chain_report,
 };
-use wiki_mutation_presentation::{present_wiki_mutation, WikiMutationResult};
+use wiki_mutation_presentation::{
+    present_wiki_candidate_recorded, present_wiki_mutation, WikiMutationResult,
+};
 use wiki_projection_presentation::{present_wiki_projection, present_wiki_projection_comparison};
 use wiki_proposal_handoff::wiki_proposal_handoff;
 pub use wiki_proposal_handoff::WikiProposalHandoffArgs;
@@ -100,7 +154,7 @@ use wiki_runtime_policy_ack_presentation::{
     WikiRuntimePolicyAckReportSummary,
 };
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use chrono::{DateTime, Duration, Utc};
 use clap::{Args, Subcommand, ValueEnum};
 use serde::Serialize;
@@ -110,22 +164,23 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Instant;
 use uuid::Uuid;
 
-use super::project_audit::{
-    audit_recommendations_for_project, AuditRecommendation, DocumentationAuditProfile,
-};
+use super::project_audit::{audit_for_project, AuditRecommendation, DocumentationAuditProfile};
 use crate::offdesk::{
     assess_implementation_packet_detail, assess_implementation_packet_goal, assess_offdesk_mode,
     assess_work_slice_receipt, build_closeout_implementation_packet_coverage,
     build_graph_export_files, build_usage_records_with_policy, default_capability_registry,
     implementation_packet_from_path, implementation_packet_record_from_path,
     latest_implementation_packet_for_project, launch_background_command, launch_background_run,
-    operator_safe_report, pending_approval_operator_views, poll_background_runs,
+    load_remote_session_policy_for_inspection, operator_safe_identity, operator_safe_report,
+    pending_approval_operator_views, poll_background_runs,
     receipt_decision_record as transition_receipt_decision_record, recommend_provider_fallback,
     reconcile_tasks_with_background_outcomes,
-    resolve_decision_record as transition_resolve_decision_record, run_offdesk_tick,
-    scan_and_emit_learning_signals, work_slice_execution_receipts_from_path, ActionApprovalRequest,
+    resolve_decision_record as transition_resolve_decision_record,
+    resolve_remote_session_policy_target, run_offdesk_tick, scan_and_emit_learning_signals,
+    terminate_offdesk_task, work_slice_execution_receipts_from_path, ActionApprovalRequest,
     AdaptiveWikiActivationMode, AdaptiveWikiAgentMode, AdaptiveWikiAgentModeFilter,
     AdaptiveWikiAuditAction, AdaptiveWikiAuditRecord, AdaptiveWikiCandidate,
     AdaptiveWikiCandidateInput, AdaptiveWikiConfidence, AdaptiveWikiEntry, AdaptiveWikiEntryEdit,
@@ -140,22 +195,18 @@ use crate::offdesk::{
     AdaptiveWikiUsageContext, ApprovalLedger, ApprovalStatus, BackgroundLaunchOutcome,
     BackgroundLaunchRequest, BackgroundProbe, BackgroundRecoveryAcknowledgement,
     BackgroundRecoveryDecision, BackgroundRunStore, BackgroundRunnerKind, BackgroundRunnerPhase,
-    CapabilityArtifactRef, CapabilityDescriptor,
-    CloseoutDecisionResolution as WorkflowCloseoutDecisionResolution,
+    CapabilityArtifactRef, CloseoutDecisionResolution as WorkflowCloseoutDecisionResolution,
     CloseoutImplementationPacketCoverage, CloseoutImplementationPacketCoverageInput,
-    CloseoutPacketCoverageDetail, CloseoutReviewRecord, CloseoutVerdict, DecisionLedger,
-    DecisionReceiptInput, DecisionRecord, DecisionRecordView, DecisionResolutionInput,
-    DecisionStatus, DecisionValidationIssue, ExecutionBrief, ImplementationPacket,
-    ImplementationPacketCoverageStatus, ImplementationPacketExecutionEvidence,
-    ImplementationPacketSummary, LatestImplementationPacket, LocalCommandLaunchSpec,
-    MutationRestoreOperation, MutationRestorePlan, MutationSnapshot, MutationSnapshotStore,
-    MutationSnapshotVerification, OffdeskModeAssessment, OffdeskModeLifecycle,
-    OffdeskNextSafeAction, OffdeskPendingApprovalView, OffdeskPlanReviewDecision, OffdeskTask,
+    CloseoutPacketCoverageDetail, CloseoutVerdict, DecisionLedger, DecisionReceiptInput,
+    DecisionRecord, DecisionResolutionInput, DecisionStatus, DecisionValidationIssue,
+    ExecutionBrief, ImplementationPacket, ImplementationPacketCoverageStatus,
+    ImplementationPacketExecutionEvidence, ImplementationPacketSummary, LatestImplementationPacket,
+    LocalCommandLaunchSpec, MutationSnapshotStore, OffdeskModeAssessment, OffdeskModeLifecycle,
+    OffdeskNextSafeAction, OffdeskPlanReviewDecision, OffdeskShiftStore, OffdeskTask,
     OffdeskTaskInput, OffdeskTaskStatus, OffdeskTaskStore, OffdeskTaskView, OffdeskTickOptions,
     OperatorPauseStore, PendingActionApproval, ProviderCapacityState, ProviderCapacityStore,
-    ProviderFallbackRecommendation, RiskLevel, SchedulerGate, SchedulerGateRequest,
-    TaskResumeState, TaskResumeStore, WorkSliceExecutionReceipt, WorkSliceExecutionStatus,
-    WORK_SLICE_EXECUTION_RECEIPTS_FILE,
+    RiskLevel, SchedulerGate, SchedulerGateRequest, TaskResumeState, TaskResumeStore,
+    WorkSliceExecutionReceipt, WorkSliceExecutionStatus, WORK_SLICE_EXECUTION_RECEIPTS_FILE,
 };
 use crate::session::{get_profile_dir, resolved_app_dir_path, DEFAULT_PROFILE};
 
@@ -188,6 +239,12 @@ pub enum OffdeskCommands {
         command: RemoteOperatorCommands,
     },
 
+    /// Inspect remote interactive-session policy without opening launch authority
+    RemoteSession {
+        #[command(subcommand)]
+        command: RemoteSessionCommands,
+    },
+
     /// List pending action approvals
     Pending(PendingArgs),
 
@@ -203,8 +260,17 @@ pub enum OffdeskCommands {
     /// Run one offdesk control-loop pass
     Tick(TickArgs),
 
+    /// Inspect bounded Offdesk shift authority and lifecycle
+    Shift {
+        #[command(subcommand)]
+        command: ShiftCommands,
+    },
+
     /// Show durable offdesk tasks
     Tasks(TasksArgs),
+
+    /// Inspect runtime release evidence without changing tasks or processes
+    TaskRecovery(TaskLifecycleArgs),
 
     /// List canonical Offdesk decision records
     Decisions(DecisionsArgs),
@@ -220,6 +286,9 @@ pub enum OffdeskCommands {
 
     /// Mark a durable task cancelled without stopping its background runner
     CancelTask(CancelTaskArgs),
+
+    /// Stop the verified local runtime and mark its durable task cancelled
+    TerminateTask(TerminateTaskArgs),
 
     /// Halt all new offdesk dispatch until resumed (existing runs keep polling)
     Pause(PauseArgs),
@@ -301,8 +370,630 @@ pub enum OffdeskCommands {
     /// Retire an evidence-incomplete historical closeout without accepting truth
     CloseoutRetire(CloseoutRetireArgs),
 
+    /// Inspect or explicitly record an exact existing-decision link to a completed runtime
+    ReviewLink(review_link_commands::ReviewLinkArgs),
+
     /// Inspect adaptive wiki candidates, entries, projections, and lint
     Wiki(WikiArgs),
+}
+
+impl OffdeskCommands {
+    pub(crate) fn is_profile_independent_read_only(&self) -> bool {
+        matches!(
+            self,
+            Self::RemoteSession {
+                command: RemoteSessionCommands::PolicyInspect(_)
+                    | RemoteSessionCommands::PolicyResolve(_)
+            } | Self::Shift {
+                command: ShiftCommands::ReadPolicyProbe(_)
+            }
+        )
+    }
+
+    pub(crate) fn is_migration_free_read_only(&self) -> bool {
+        matches!(self, Self::TaskRecovery(_) | Self::ReviewLink(_))
+            || matches!(self, Self::Wiki(args) if args.command.is_migration_free_read_only())
+            || matches!(
+                self,
+                Self::RemoteSession {
+                    command: RemoteSessionCommands::PolicyInspect(_)
+                        | RemoteSessionCommands::PolicyResolve(_)
+                }
+            )
+            || matches!(
+                self,
+                Self::Shift {
+                    command: ShiftCommands::Show(_)
+                        | ShiftCommands::Preview(_)
+                        | ShiftCommands::Candidates(_)
+                        | ShiftCommands::Propose(_)
+                        | ShiftCommands::EnterprisePolicies(_)
+                        | ShiftCommands::HostPolicyProbe(_)
+                        | ShiftCommands::ReadPolicyProbe(_)
+                        | ShiftCommands::Status(_)
+                        | ShiftCommands::Review(_)
+                        | ShiftCommands::RetentionReport(_)
+                        | ShiftCommands::CouncilPacket(_)
+                        | ShiftCommands::StartReview(_)
+                }
+            )
+    }
+}
+
+#[derive(Subcommand)]
+pub enum RemoteSessionCommands {
+    /// Validate and summarize one owner-only policy without reading profile state
+    #[command(name = "policy-inspect")]
+    PolicyInspect(RemoteSessionPolicyInspectArgs),
+
+    /// Resolve one exact root and executable without creating a request
+    #[command(name = "policy-resolve")]
+    PolicyResolve(RemoteSessionPolicyResolveArgs),
+}
+
+#[derive(Args)]
+pub struct RemoteSessionPolicyInspectArgs {
+    /// Owner-only remote session policy JSON file
+    #[arg(long)]
+    policy: PathBuf,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct RemoteSessionPolicyResolveArgs {
+    /// Owner-only remote session policy JSON file
+    #[arg(long)]
+    policy: PathBuf,
+
+    /// Explicit absolute parent boundary containing every allowed project root
+    #[arg(long)]
+    installation_boundary: PathBuf,
+
+    /// Exact root ID from the policy
+    #[arg(long)]
+    root_id: String,
+
+    /// Exact fixed launch profile ID authorized for the root
+    #[arg(long)]
+    launch_profile_id: String,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Subcommand)]
+pub enum ShiftCommands {
+    /// Review an already prepared shift and inert night preferences without writes
+    StartReview(ShiftStartReviewArgs),
+    /// Request only a pending arm approval for an exact local review; never arm or dispatch
+    RequestArmReview {
+        #[command(flatten)]
+        review: ShiftStartReviewArgs,
+        #[arg(long)]
+        expected_review_sha256: String,
+    },
+    /// Confirm an exact reviewed arm approval and activate its shift; never tick or dispatch
+    ConfirmArmReview {
+        #[command(flatten)]
+        review: ShiftStartReviewArgs,
+        #[arg(long)]
+        expected_review_sha256: String,
+        #[arg(long)]
+        approval_id: String,
+        #[arg(long)]
+        by: String,
+        /// Explicitly accept that child-task usage is unknown and no new spend cap is enforced
+        #[arg(long)]
+        acknowledge_unknown_task_usage: bool,
+    },
+    /// Inspect existing queued candidates in explicitly registered projects without writes
+    Candidates(ShiftCandidateArgs),
+    /// Propose an explicit serial selection with pinned owning TODOs, without writes
+    Propose(ShiftProposalArgs),
+    /// Read-only start preview for an exact reviewed plan and queued selection
+    Preview(ShiftPrepareArgs),
+    /// List canonical enterprise policy profiles without selecting one
+    EnterprisePolicies(JsonArgs),
+
+    /// Probe one supported host isolation policy without granting authority
+    HostPolicyProbe(ShiftHostPolicyProbeArgs),
+
+    /// Verify filesystem read restrictions without creating profile state or authority
+    ReadPolicyProbe(JsonArgs),
+
+    /// Bind one reviewed plan, exact tasks, roots, routines, window, and budget
+    Prepare(ShiftPrepareArgs),
+
+    /// Materialize one daily or weekly slot as a fresh inert shift manifest
+    InstantiateTemplate(ShiftTemplateInstantiateArgs),
+
+    /// Show one shift, or the latest shift when no ID is supplied
+    Show(ShiftShowArgs),
+
+    /// Create or consume a manifest-bound operator approval and arm the shift
+    Arm(ShiftArmArgs),
+
+    /// Summarize all bounded shifts without creating profile state
+    Status(JsonArgs),
+
+    /// Project one bounded shift into the shared read-only morning review
+    Review(ShiftReviewArgs),
+
+    /// Classify preserved shift records and derived evidence without mutating either
+    RetentionReport(ShiftRetentionReportArgs),
+
+    /// Build a review-only Council comparison of goal, evidence, drift, and budget
+    CouncilPacket(ShiftCouncilPacketArgs),
+
+    /// Terminate active shift authority without stopping already-running processes
+    Disarm(ShiftDisarmArgs),
+
+    /// Select and reserve the one manifest-bound handler for a fixed timer task
+    RoutineClaim(ShiftRoutineClaimArgs),
+
+    /// Reserve one due typed routine occurrence before executing it
+    RoutineStart(ShiftRoutineStartArgs),
+
+    /// Record the terminal outcome of one exact routine reservation
+    RoutineComplete(ShiftRoutineCompleteArgs),
+
+    /// Fail-safe close an unresolved routine after explicit operator acknowledgement
+    RoutineRecover(ShiftRoutineRecoverArgs),
+}
+
+#[derive(Args)]
+pub struct ShiftStartReviewArgs {
+    /// Exact already prepared shift ID
+    shift_id: String,
+    /// One-run project scope; omitted uses saved global/profile night preferences
+    #[arg(long = "project-key")]
+    project_keys: Vec<String>,
+    /// One-run validity for a newly requested shift-arm approval
+    #[arg(long)]
+    approval_ttl_minutes: Option<u64>,
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args, Clone)]
+pub struct ShiftPrepareArgs {
+    /// Registered Offdesk plan ID or registration/source path
+    plan_ref: String,
+
+    /// Use this approved plan review instead of the latest review
+    #[arg(long)]
+    review_id: Option<String>,
+
+    /// Stable shift ID. Generated when omitted; instantiate-template rejects this override.
+    #[arg(long)]
+    shift_id: Option<String>,
+
+    /// Inclusive shift start as RFC3339
+    #[arg(long)]
+    starts_at: DateTime<Utc>,
+
+    /// Inclusive shift stop as RFC3339, no more than 24 hours after start
+    #[arg(long)]
+    stops_at: DateTime<Utc>,
+
+    /// Display timezone recorded in the immutable manifest
+    #[arg(long, default_value = "Asia/Seoul")]
+    timezone: String,
+
+    /// Canonical enterprise policy bound into the immutable manifest
+    #[arg(long, value_enum, default_value_t = ShiftEnterprisePolicyArg::SingleOwnerLocal)]
+    enterprise_policy: ShiftEnterprisePolicyArg,
+
+    /// Require and bind one live-verified child-task host isolation policy
+    #[arg(long, value_enum)]
+    host_policy: Option<ShiftHostPolicyArg>,
+
+    /// Require filesystem read restrictions for every local-background or local-tmux task
+    #[arg(long, value_enum, conflicts_with = "host_policy")]
+    read_policy: Option<ShiftReadPolicyArg>,
+
+    /// Exact queued task to bind. May be repeated.
+    #[arg(long = "task-id")]
+    task_ids: Vec<String>,
+
+    /// Require the exact freshly revalidated serial-selection proposal
+    #[arg(long, requires = "serial_project_keys")]
+    serial_proposal_sha256: Option<String>,
+
+    /// Require an existing preparation control by ID; unsupported or unconfigured controls hold arm/launch. Repeat as needed.
+    #[arg(long = "require-preparation-control")]
+    required_preparation_controls: Vec<String>,
+
+    /// Existing guard state directly inside this profile; binds weekly baselines to this run
+    #[arg(long)]
+    weekly_usage_state: Option<PathBuf>,
+
+    /// Fresh normalized GPT weekly sample inside this profile, without automatic polling
+    #[arg(long, requires = "weekly_usage_state")]
+    weekly_gpt_sample: Option<PathBuf>,
+
+    /// Fresh normalized Claude weekly sample inside this profile
+    #[arg(long, requires = "weekly_usage_state")]
+    weekly_claude_sample: Option<PathBuf>,
+
+    /// Maximum age of manually supplied weekly samples, at most 300 seconds
+    #[arg(long, default_value_t = 300)]
+    weekly_max_age_seconds: u64,
+
+    /// Registered project scope used to produce the serial proposal; repeat in the same order
+    #[arg(long = "serial-project-key", requires = "serial_proposal_sha256")]
+    serial_project_keys: Vec<String>,
+
+    /// Add a dispatch-tick routine over the full shift window
+    #[arg(long)]
+    dispatch_interval_minutes: Option<u16>,
+
+    /// Project key for one candidate-only Wiki distillation routine
+    #[arg(long)]
+    wiki_project_key: Option<String>,
+
+    /// Wiki profile for the distillation routine
+    #[arg(long)]
+    wiki_profile: Option<String>,
+
+    /// Exact project root for the Wiki distillation routine
+    #[arg(long)]
+    wiki_root: Option<PathBuf>,
+
+    /// One-time Wiki distillation time as RFC3339
+    #[arg(long)]
+    wiki_at: Option<DateTime<Utc>>,
+
+    /// Add a one-time morning review brief routine at this RFC3339 time
+    #[arg(long)]
+    morning_review_at: Option<DateTime<Utc>>,
+
+    /// Maximum simultaneously running bound tasks. Defaults to one when tasks exist.
+    #[arg(long)]
+    max_concurrent_tasks: Option<u16>,
+
+    /// Maximum attempts per bound task
+    #[arg(long, default_value_t = 1)]
+    max_attempts_per_task: u16,
+
+    /// Maximum child processes started by fixed routine handlers
+    #[arg(long)]
+    max_routine_process_starts: Option<u64>,
+
+    /// Maximum network calls attempted by fixed routine handlers
+    #[arg(long)]
+    max_routine_external_calls: Option<u64>,
+
+    /// Maximum durable evidence bytes written by fixed routine handlers
+    #[arg(long, default_value_t = 32 * 1024 * 1024)]
+    max_routine_disk_bytes: u64,
+
+    /// Maximum total local-LLM prompt plus output tokens
+    #[arg(long)]
+    max_routine_llm_tokens: Option<u64>,
+
+    /// Maximum estimated routine cost in micro-US dollars
+    #[arg(long, default_value_t = 0)]
+    max_routine_cost_micro_usd: u64,
+
+    /// Manifest-bound LLM rate in micro-US dollars per million tokens
+    #[arg(long, default_value_t = 0)]
+    routine_llm_cost_rate_micro_usd_per_million_tokens: u64,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct ShiftCandidateArgs {
+    #[command(flatten)]
+    prepare: ShiftPrepareArgs,
+    /// Exact registered project keys to inspect. May be repeated.
+    #[arg(long = "project-key", required = true)]
+    project_keys: Vec<String>,
+}
+
+#[derive(Args)]
+pub struct ShiftProposalArgs {
+    #[command(flatten)]
+    prepare: ShiftPrepareArgs,
+    /// Exact registered projects in scope; repeated task IDs define the proposed serial order
+    #[arg(long = "project-key", required = true)]
+    project_keys: Vec<String>,
+    /// Refuse if the freshly inspected proposal differs from this previous version
+    #[arg(long)]
+    expected_proposal_sha256: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ShiftEnterprisePolicyArg {
+    SingleOwnerLocal,
+    MultiOperatorLocal,
+    AirgappedLocal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ShiftReadPolicyArg {
+    LinuxLandlockWorkdirAndRuntimeOnly,
+    LinuxLandlockMetadataBootIdentity,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ShiftHostPolicyArg {
+    LinuxBubblewrapExternalIpDeny,
+    LinuxBubblewrapExternalIpAndOutsideWorkdirWriteDeny,
+}
+
+impl From<ShiftHostPolicyArg> for crate::offdesk::OffdeskShiftHostPolicyProviderV1 {
+    fn from(value: ShiftHostPolicyArg) -> Self {
+        match value {
+            ShiftHostPolicyArg::LinuxBubblewrapExternalIpDeny => {
+                Self::LinuxBubblewrapExternalIpDeny
+            }
+            ShiftHostPolicyArg::LinuxBubblewrapExternalIpAndOutsideWorkdirWriteDeny => {
+                Self::LinuxBubblewrapExternalIpAndOutsideWorkdirWriteDeny
+            }
+        }
+    }
+}
+
+#[derive(Args)]
+pub struct ShiftHostPolicyProbeArgs {
+    /// Supported host policy provider to probe
+    #[arg(value_enum, default_value_t = ShiftHostPolicyArg::LinuxBubblewrapExternalIpDeny)]
+    provider: ShiftHostPolicyArg,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+impl From<ShiftEnterprisePolicyArg> for crate::offdesk::OffdeskShiftEnterpriseProfileKeyV1 {
+    fn from(value: ShiftEnterprisePolicyArg) -> Self {
+        match value {
+            ShiftEnterprisePolicyArg::SingleOwnerLocal => Self::SingleOwnerLocal,
+            ShiftEnterprisePolicyArg::MultiOperatorLocal => Self::MultiOperatorLocal,
+            ShiftEnterprisePolicyArg::AirgappedLocal => Self::AirgappedLocal,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ShiftTemplateCadenceArg {
+    Daily,
+    Weekly,
+}
+
+impl From<ShiftTemplateCadenceArg> for crate::offdesk::OffdeskShiftTemplateCadenceV1 {
+    fn from(value: ShiftTemplateCadenceArg) -> Self {
+        match value {
+            ShiftTemplateCadenceArg::Daily => Self::Daily,
+            ShiftTemplateCadenceArg::Weekly => Self::Weekly,
+        }
+    }
+}
+
+#[derive(Args)]
+pub struct ShiftTemplateInstantiateArgs {
+    /// Cadence label used only to derive this occurrence's UTC slot
+    #[arg(value_enum)]
+    cadence: ShiftTemplateCadenceArg,
+
+    /// Stable non-authorizing identity for this recurring template
+    #[arg(long)]
+    template_key: String,
+
+    /// Exact reviewed plan, tasks, routines, window, and resource budget to materialize
+    #[command(flatten)]
+    prepare: ShiftPrepareArgs,
+}
+
+#[derive(Args)]
+pub struct ShiftArmArgs {
+    /// Prepared shift ID. Defaults to the latest prepared shift.
+    shift_id: Option<String>,
+
+    /// Exact approved approval ID. Without it, an exact pending approval is reused or created.
+    #[arg(long)]
+    approval_id: Option<String>,
+
+    /// Time allowed to answer a newly created arm approval
+    #[arg(long, default_value_t = 30)]
+    approval_ttl_minutes: i64,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct ShiftDisarmArgs {
+    /// Active shift ID. Defaults to the one active shift.
+    shift_id: Option<String>,
+
+    /// Operator-safe reason recorded in the terminal transition
+    #[arg(long, default_value = "operator requested disarm")]
+    reason: String,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct ShiftShowArgs {
+    /// Exact shift ID. Defaults to the latest prepared or armed shift.
+    shift_id: Option<String>,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct ShiftReviewArgs {
+    /// Exact shift ID. Defaults to the active shift, then the latest shift.
+    shift_id: Option<String>,
+
+    /// Routine run currently generating this projection; it is not treated as abandoned.
+    #[arg(long)]
+    current_run_id: Option<String>,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct ShiftRetentionReportArgs {
+    /// Limit the report to one exact shift ID
+    #[arg(long)]
+    shift_id: Option<String>,
+
+    /// Age after which terminal morning-review views become compaction candidates
+    #[arg(long, default_value_t = 30)]
+    compact_after_days: u16,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct ShiftCouncilPacketArgs {
+    /// Exact shift ID. Defaults to the active shift, then the latest shift.
+    shift_id: Option<String>,
+
+    /// Morning routine currently producing evidence; it is not treated as abandoned.
+    #[arg(long)]
+    current_run_id: Option<String>,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct ShiftRoutineStartArgs {
+    /// Exact armed shift ID
+    shift_id: String,
+
+    /// Exact routine ID from the reviewed manifest
+    routine_id: String,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ShiftRoutineTaskArg {
+    Tick,
+    Distill,
+    Brief,
+}
+
+#[derive(Args)]
+pub struct ShiftRoutineClaimArgs {
+    /// Exact armed shift ID
+    shift_id: String,
+
+    /// Fixed timer task mapped to one manifest-bound routine handler by Rust policy
+    #[arg(long, value_enum)]
+    task: ShiftRoutineTaskArg,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ShiftRoutineOutcomeArg {
+    Succeeded,
+    Failed,
+    Skipped,
+    BudgetExhausted,
+    IdentityDrift,
+}
+
+#[derive(Args)]
+pub struct ShiftRoutineCompleteArgs {
+    /// Exact armed shift ID
+    shift_id: String,
+
+    /// Deterministic run ID returned by routine-start
+    run_id: String,
+
+    /// Terminal typed outcome
+    #[arg(long, value_enum)]
+    outcome: ShiftRoutineOutcomeArg,
+
+    /// Short operator-safe outcome summary
+    #[arg(long)]
+    summary: String,
+
+    /// Local regular evidence file to hash-bind. May be repeated.
+    #[arg(long = "evidence")]
+    evidence_paths: Vec<PathBuf>,
+
+    /// Assert that all routine-controlled resource usage was measured
+    #[arg(long)]
+    usage_complete: bool,
+
+    /// Child processes started by the fixed handler
+    #[arg(long, default_value_t = 0)]
+    process_starts: u64,
+
+    /// Network calls attempted by the fixed handler
+    #[arg(long, default_value_t = 0)]
+    external_calls: u64,
+
+    /// Prompt plus output tokens reported by the local LLM provider
+    #[arg(long, default_value_t = 0)]
+    llm_tokens: u64,
+
+    /// Estimated cost in micro-US dollars
+    #[arg(long, default_value_t = 0)]
+    cost_micro_usd: u64,
+
+    /// Cost rate used for the estimate, in micro-US dollars per million tokens
+    #[arg(long)]
+    cost_rate_micro_usd_per_million_tokens: Option<u64>,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
+pub struct ShiftRoutineRecoverArgs {
+    /// Exact shift ID that owns the unresolved reservation
+    shift_id: String,
+
+    /// Deterministic unresolved run ID returned by routine-start
+    run_id: String,
+
+    /// Why the operator is closing the uncertain execution as failed
+    #[arg(long)]
+    reason: String,
+
+    /// Confirm that the handler may or may not have run and no success is being asserted
+    #[arg(long)]
+    acknowledge_execution_unknown: bool,
+
+    /// Local regular evidence file to hash-bind. May be repeated.
+    #[arg(long = "evidence")]
+    evidence_paths: Vec<PathBuf>,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Args)]
@@ -583,6 +1274,10 @@ pub struct TickArgs {
     /// Maximum queued tasks to dispatch in this tick
     #[arg(long, default_value_t = 10)]
     limit: usize,
+
+    /// Consume one exact bounded shift. Defaults to the active shift when present.
+    #[arg(long)]
+    shift_id: Option<String>,
 
     /// Restrict this tick to one project key
     #[arg(long)]
@@ -1128,6 +1823,12 @@ pub struct MaintenanceRequestArgs {
 
 #[derive(Args)]
 pub struct CloseoutArgs {
+    /// Existing owning TODO relative to the declared project root
+    #[arg(long, requires = "workdir")]
+    owning_plan: Option<String>,
+    /// Existing logical subproject declaration, validated by project owner routing
+    #[arg(long, requires = "workdir")]
+    subproject_spec: Option<PathBuf>,
     /// Project key to close out. Defaults to all projects in the profile.
     #[arg(long)]
     project_key: Option<String>,
@@ -1230,6 +1931,14 @@ pub struct CloseoutDecisionArgs {
     #[arg(long, value_enum)]
     decision: CloseoutDecisionResolutionArg,
 
+    /// Exact latest review-file hash, required for administrative-only decisions
+    #[arg(long)]
+    expected_review_sha256: Option<String>,
+
+    /// Acknowledge an exact artifact read as ABSOLUTE_PATH=SHA256; never accepts its claims
+    #[arg(long)]
+    acknowledge_read: Vec<String>,
+
     /// Reviewer or operator label
     #[arg(long, default_value = "operator")]
     reviewer: String,
@@ -1288,12 +1997,20 @@ impl From<CloseoutReviewVerdict> for CloseoutVerdict {
 #[serde(rename_all = "snake_case")]
 enum CloseoutDecisionResolutionArg {
     PreserveInPlace,
+    PreserveInPlaceAdministrative,
+    NotApplicableAdministrative,
 }
 
 impl From<CloseoutDecisionResolutionArg> for WorkflowCloseoutDecisionResolution {
     fn from(decision: CloseoutDecisionResolutionArg) -> Self {
         match decision {
             CloseoutDecisionResolutionArg::PreserveInPlace => Self::PreserveInPlace,
+            CloseoutDecisionResolutionArg::PreserveInPlaceAdministrative => {
+                Self::PreserveInPlaceAdministrative
+            }
+            CloseoutDecisionResolutionArg::NotApplicableAdministrative => {
+                Self::NotApplicableAdministrative
+            }
         }
     }
 }
@@ -1384,6 +2101,24 @@ pub struct CancelTaskArgs {
 }
 
 #[derive(Args)]
+pub struct TerminateTaskArgs {
+    /// Offdesk task ID whose verified local runtime should be stopped
+    task_id: String,
+
+    /// Operator reason stored with the termination and task cancellation
+    #[arg(long)]
+    reason: Option<String>,
+
+    /// Actor requesting the termination
+    #[arg(long, default_value = "cli")]
+    by: String,
+
+    /// Output as JSON
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args)]
 pub struct PauseArgs {
     /// Reason to record for the pause
     #[arg(long)]
@@ -1411,7 +2146,7 @@ pub struct UnpauseArgs {
 
 #[derive(Args)]
 pub struct TaskLifecycleArgs {
-    /// Offdesk task ID to update
+    /// Exact Offdesk task ID
     task_id: String,
 
     /// Output as JSON
@@ -1664,6 +2399,48 @@ pub enum WikiCommands {
     UpdateRunbook(WikiRunbookArgs),
 }
 
+impl WikiCommands {
+    fn is_migration_free_read_only(&self) -> bool {
+        match self {
+            Self::Corrections(_)
+            | Self::ProposalEvents(_)
+            | Self::ProposalHandoff(_)
+            | Self::Candidates(_)
+            | Self::Entries(_)
+            | Self::Show(_)
+            | Self::Projection(_)
+            | Self::RuntimePolicyAcks(_)
+            | Self::RuntimePolicyAckReport(_)
+            | Self::ReviewAfterReport(_)
+            | Self::Lint(_) => true,
+            Self::ProposalReceipt(args) => !args.export && args.output.is_none(),
+            Self::Brief(args) => args.out.is_none(),
+            Self::ExportMarkdown(args) => args.dry_run,
+            Self::Graph(args) => args.dry_run || args.output.is_none(),
+            Self::Review(args) => args.dry_run,
+            Self::EvaluateEpisode(args) => args.dry_run,
+            Self::EpisodeTrace(args) => args.dry_run,
+            Self::EvaluateRecurrence(args) => args.dry_run,
+            Self::PromotionChain(args) => args.dry_run,
+            Self::RecordProposalEvent(_)
+            | Self::AcceptProposal(_)
+            | Self::RejectProposal(_)
+            | Self::SupersedeProposal(_)
+            | Self::AckRuntimePolicy(_)
+            | Self::RecordCandidate(_)
+            | Self::Promote(_)
+            | Self::Reject(_)
+            | Self::Rescope(_)
+            | Self::Edit(_)
+            | Self::AddTag(_)
+            | Self::Deprecate(_)
+            | Self::RenewReviewAfter(_)
+            | Self::AddCounterexample(_)
+            | Self::UpdateRunbook(_) => false,
+        }
+    }
+}
+
 #[derive(Args)]
 pub struct WikiBriefArgs {
     /// Project key scope to match
@@ -1689,6 +2466,11 @@ pub struct WikiBriefArgs {
     /// Output as JSON
     #[arg(long)]
     json: bool,
+
+    /// Suppress nested command presentation when another command owns the
+    /// operator-facing envelope.
+    #[arg(skip)]
+    quiet: bool,
 }
 
 #[derive(Args)]
@@ -2340,16 +3122,6 @@ struct BackgroundAckReport {
     status: BackgroundProbeStatus,
 }
 
-#[derive(Serialize)]
-struct MutationSnapshotListItem {
-    mutation_id: String,
-    target_path: String,
-    mutation_kind: String,
-    created_at: DateTime<Utc>,
-    rollback_available: bool,
-    blockers: Vec<String>,
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 struct DebugBundleRedactionSummary {
     text_fields_checked: usize,
@@ -2384,13 +3156,6 @@ struct OffdeskDebugBundle {
     adaptive_wiki_runtime_policy_ack_attention_summary: WikiRuntimePolicyAckReportSummary,
     adaptive_wiki_review_after_attention_summary: WikiReviewAfterReportSummary,
     redaction_summary: DebugBundleRedactionSummary,
-}
-
-#[derive(Serialize)]
-struct DebugBundleExportReceipt<'a> {
-    exported_to: String,
-    bytes_written: usize,
-    bundle: &'a OffdeskDebugBundle,
 }
 
 struct DebugBundleExport {
@@ -2583,6 +3348,7 @@ struct CloseoutPacketDetailGroups {
 
 #[derive(Serialize)]
 struct CloseoutTask {
+    review: Option<crate::offdesk::task_queue::TaskReviewProjection>,
     task_id: String,
     request_id: String,
     project_key: String,
@@ -2640,6 +3406,7 @@ struct CloseoutFileOperation {
     #[serde(skip_serializing_if = "Option::is_none")]
     destination: Option<String>,
     source: String,
+    source_refs: Vec<String>,
     risk: &'static str,
     reason: String,
     evidence_refs: Vec<String>,
@@ -2671,6 +3438,11 @@ struct CloseoutDecision {
 
 #[derive(Serialize)]
 struct CloseoutDocumentationGovernance {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    coverage: Option<Value>,
+    routing: Option<Value>,
+    scope: &'static str,
+    owner_status: &'static str,
     workdir: String,
     audit_profile: String,
     command: String,
@@ -2762,17 +3534,48 @@ pub async fn run(profile: &str, command: OffdeskCommands) -> Result<()> {
         OffdeskCommands::PlanReview(args) => plan_review(profile, args).await,
         OffdeskCommands::PlanLaunchPrep(args) => plan_launch_prep(profile, args).await,
         OffdeskCommands::RemoteOperator { command } => remote_operator(profile, command).await,
+        OffdeskCommands::RemoteSession { command } => remote_session(command),
         OffdeskCommands::Pending(args) => pending(profile, args).await,
         OffdeskCommands::Gate(args) => gate(profile, args).await,
         OffdeskCommands::Launch(args) => launch(profile, args).await,
         OffdeskCommands::Enqueue(args) => enqueue(profile, args).await,
         OffdeskCommands::Tick(args) => tick(profile, args).await,
+        OffdeskCommands::Shift { command } => shift(profile, command).await,
         OffdeskCommands::Tasks(args) => tasks(profile, args).await,
+        OffdeskCommands::TaskRecovery(args) => {
+            let root = crate::session::profile_dir_path(profile)?;
+            let tasks = OffdeskTaskStore::new(&root).load()?;
+            let matches: Vec<_> = tasks
+                .iter()
+                .filter(|task| task.task_id == args.task_id)
+                .collect();
+            ensure!(
+                matches.len() == 1,
+                "task recovery requires one exact task ID"
+            );
+            let report = crate::offdesk::runtime_occupancy::inspect(&root, matches[0])?;
+            let value = operator_safe_json_value(serde_json::json!({
+                "schema":report.schema,"task_id":args.task_id,"profile":profile,
+                "release_verified":report.release_verified,"reason":report.reason,
+                "next_action":report.next_action,"automatic_recovery":report.automatic_recovery,
+                "does_not_authorize":["signal","terminate","clear_ticket","retry","launch"]
+            }));
+            if args.json {
+                println!("{}", serde_json::to_string_pretty(&value)?);
+            } else {
+                println!(
+                    "{}: {}\n{}",
+                    value["task_id"], report.reason, report.next_action
+                );
+            }
+            Ok(())
+        }
         OffdeskCommands::Decisions(args) => decisions(profile, args).await,
         OffdeskCommands::Decision(args) => decision(profile, args).await,
         OffdeskCommands::ProviderCapacity(args) => provider_capacity(profile, args).await,
         OffdeskCommands::ProviderFallback(args) => provider_fallback(profile, args).await,
         OffdeskCommands::CancelTask(args) => cancel_task(profile, args).await,
+        OffdeskCommands::TerminateTask(args) => terminate_task(profile, args).await,
         OffdeskCommands::Pause(args) => pause_dispatch(profile, args).await,
         OffdeskCommands::Unpause(args) => unpause_dispatch(profile, args).await,
         OffdeskCommands::PauseStatus(args) => pause_status(profile, args).await,
@@ -2798,7 +3601,220 @@ pub async fn run(profile: &str, command: OffdeskCommands) -> Result<()> {
         OffdeskCommands::CloseoutReview(args) => closeout_review(profile, args).await,
         OffdeskCommands::CloseoutDecision(args) => closeout_decision(profile, args).await,
         OffdeskCommands::CloseoutRetire(args) => closeout_retire(profile, args).await,
+        OffdeskCommands::ReviewLink(args) => review_link_commands::run(profile, args),
         OffdeskCommands::Wiki(args) => wiki(profile, args).await,
+    }
+}
+
+fn remote_session(command: RemoteSessionCommands) -> Result<()> {
+    match command {
+        RemoteSessionCommands::PolicyInspect(args) => {
+            let loaded = load_remote_session_policy_for_inspection(&args.policy)?;
+            loaded.ensure_source_active()?;
+            present_remote_session_policy_inspection(&loaded.inspection(), args.json)
+        }
+        RemoteSessionCommands::PolicyResolve(args) => {
+            let resolved = resolve_remote_session_policy_target(
+                &args.policy,
+                &args.installation_boundary,
+                &args.root_id,
+                &args.launch_profile_id,
+            )?;
+            resolved.ensure_active()?;
+            present_remote_session_policy_resolution(resolved.report(), args.json)
+        }
+    }
+}
+
+async fn shift(profile: &str, command: ShiftCommands) -> Result<()> {
+    match command {
+        ShiftCommands::ConfirmArmReview {
+            review: args,
+            expected_review_sha256,
+            approval_id,
+            by,
+            acknowledge_unknown_task_usage,
+        } => {
+            let options = local_review::ReviewOptions {
+                project_keys: (!args.project_keys.is_empty()).then_some(args.project_keys),
+                approval_ttl_minutes: args.approval_ttl_minutes,
+            };
+            let result = local_review::confirm_arm(
+                profile,
+                &args.shift_id,
+                &options,
+                &expected_review_sha256,
+                &approval_id,
+                &by,
+                acknowledge_unknown_task_usage,
+            )?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&operator_safe_json_value(result))?
+            );
+            Ok(())
+        }
+        ShiftCommands::RequestArmReview {
+            review: args,
+            expected_review_sha256,
+        } => {
+            let options = local_review::ReviewOptions {
+                project_keys: (!args.project_keys.is_empty()).then_some(args.project_keys),
+                approval_ttl_minutes: args.approval_ttl_minutes,
+            };
+            let result = local_review::request_approval(
+                profile,
+                &args.shift_id,
+                &options,
+                &expected_review_sha256,
+            )?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&operator_safe_json_value(result))?
+            );
+            Ok(())
+        }
+        ShiftCommands::StartReview(args) => {
+            let options = local_review::ReviewOptions {
+                project_keys: (!args.project_keys.is_empty()).then_some(args.project_keys),
+                approval_ttl_minutes: args.approval_ttl_minutes,
+            };
+            let report = local_review::inspect(profile, &args.shift_id, &options)?;
+            let safe = operator_safe_json_value(report);
+            if args.json {
+                println!("{}", serde_json::to_string_pretty(&safe)?);
+            } else {
+                println!("{}", local_review::text(&safe));
+            }
+            Ok(())
+        }
+        ShiftCommands::EnterprisePolicies(args) => present_shift_enterprise_policy_report(
+            &crate::offdesk::build_offdesk_shift_enterprise_policy_report(),
+            args.json,
+        ),
+        ShiftCommands::HostPolicyProbe(args) => present_shift_host_policy_report(
+            &crate::offdesk::probe_offdesk_shift_host_policy(args.provider.into(), Utc::now()),
+            args.json,
+        ),
+        ShiftCommands::ReadPolicyProbe(args) => {
+            shift_presentation::present_shift_read_policy_report(
+                &crate::offdesk::read_policy::report(),
+                args.json,
+            )
+        }
+        ShiftCommands::Prepare(args) => {
+            let result = prepare_offdesk_shift(profile, &args)?;
+            present_shift_prepare_result(&result, args.json)
+        }
+        ShiftCommands::Preview(args) => {
+            let preview = shift_commands::preview_offdesk_shift(profile, &args)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&operator_safe_json_value(preview))?
+            );
+            Ok(())
+        }
+        ShiftCommands::Candidates(args) => {
+            let preview = shift_commands::preview_shift_candidates(profile, &args)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&operator_safe_json_value(preview))?
+            );
+            Ok(())
+        }
+        ShiftCommands::Propose(args) => {
+            let proposal = shift_commands::propose_offdesk_shift(profile, &args)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&operator_safe_json_value(proposal))?
+            );
+            Ok(())
+        }
+        ShiftCommands::InstantiateTemplate(args) => {
+            let result = instantiate_offdesk_shift_template(profile, &args)?;
+            present_shift_template_instantiation_result(&result, args.prepare.json)
+        }
+        ShiftCommands::Status(args) => {
+            let store = OffdeskShiftStore::read_only(profile)?;
+            let snapshot = store.snapshot()?;
+            present_shift_status(profile, &snapshot, args.json)
+        }
+        ShiftCommands::Show(args) => {
+            let store = OffdeskShiftStore::read_only(profile)?;
+            let record = if let Some(shift_id) = args.shift_id.as_deref() {
+                store.record(shift_id)?
+            } else {
+                store.snapshot()?.latest().cloned()
+            };
+            let record = record.with_context(|| {
+                args.shift_id
+                    .as_deref()
+                    .map(|shift_id| format!("bounded Offdesk shift not found: {shift_id}"))
+                    .unwrap_or_else(|| "no bounded Offdesk shift exists".to_string())
+            })?;
+            present_shift_record(&record, args.json)
+        }
+        ShiftCommands::Review(args) => {
+            let projection = crate::offdesk::build_offdesk_shift_review_projection(
+                profile,
+                args.shift_id.as_deref(),
+                args.current_run_id.as_deref(),
+                Utc::now(),
+            )?
+            .context("no bounded Offdesk shift exists")?;
+            present_shift_review(&projection, args.json)
+        }
+        ShiftCommands::RetentionReport(args) => {
+            ensure!(
+                args.compact_after_days <= 3650,
+                "shift retention window cannot exceed 3650 days"
+            );
+            let store = OffdeskShiftStore::read_only(profile)?;
+            let selected_shift_id = args.shift_id.as_deref();
+            let records = if let Some(shift_id) = selected_shift_id {
+                vec![store
+                    .record(shift_id)?
+                    .with_context(|| format!("bounded Offdesk shift not found: {shift_id}"))?]
+            } else {
+                store.snapshot()?.records
+            };
+            let report = crate::offdesk::build_offdesk_shift_retention_report(
+                profile,
+                &records,
+                selected_shift_id,
+                args.compact_after_days,
+                Utc::now(),
+            )?;
+            present_shift_retention_report(&report, args.json)
+        }
+        ShiftCommands::CouncilPacket(args) => {
+            let packet = build_shift_council_packet(profile, &args)?;
+            present_shift_council_packet(&packet, args.json)
+        }
+        ShiftCommands::Arm(args) => {
+            let result = arm_offdesk_shift(profile, &args)?;
+            present_shift_arm_result(&result, args.json)
+        }
+        ShiftCommands::Disarm(args) => {
+            let result = disarm_offdesk_shift(profile, &args)?;
+            present_shift_disarm_result(&result, args.json)
+        }
+        ShiftCommands::RoutineClaim(args) => {
+            let result = claim_offdesk_shift_routine(profile, &args)?;
+            present_shift_routine_claim_result(&result, args.json)
+        }
+        ShiftCommands::RoutineStart(args) => {
+            let result = start_offdesk_shift_routine(profile, &args)?;
+            present_shift_routine_start_result(&result, args.json)
+        }
+        ShiftCommands::RoutineComplete(args) => {
+            let result = complete_offdesk_shift_routine(profile, &args)?;
+            present_shift_routine_complete_result(&result, args.json)
+        }
+        ShiftCommands::RoutineRecover(args) => {
+            let result = recover_offdesk_shift_routine(profile, &args)?;
+            present_shift_routine_recovery_result(&result, args.json)
+        }
     }
 }
 
@@ -2806,6 +3822,12 @@ async fn enqueue(profile: &str, args: EnqueueArgs) -> Result<()> {
     let now = Utc::now();
     let brief = load_execution_brief(args.brief.as_ref())?;
     let profile_dir = get_profile_dir(profile)?;
+    let workdir = args.workdir.unwrap_or(std::env::current_dir()?);
+    let workdir = if workdir.is_absolute() {
+        workdir
+    } else {
+        std::env::current_dir()?.join(workdir)
+    };
     let implementation_packet = resolve_implementation_packet_context(
         &profile_dir,
         &args.project_key,
@@ -2813,6 +3835,18 @@ async fn enqueue(profile: &str, args: EnqueueArgs) -> Result<()> {
     )?;
     let mut artifact_refs = args.artifact_refs;
     attach_implementation_packet_artifact_refs(&mut artifact_refs, implementation_packet.as_ref());
+    for artifact in &mut artifact_refs {
+        if let Some(path) = artifact.path.as_deref() {
+            let path = Path::new(path);
+            let path = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                workdir.join(path)
+            };
+            artifact.present = path.exists();
+            artifact.path = Some(path.to_string_lossy().into_owned());
+        }
+    }
     let task = OffdeskTask::new(
         OffdeskTaskInput {
             task_id: args.task_id,
@@ -2821,11 +3855,7 @@ async fn enqueue(profile: &str, args: EnqueueArgs) -> Result<()> {
             capability_id: args.capability_id,
             runner_kind: args.runner,
             command: args.command,
-            workdir: args
-                .workdir
-                .unwrap_or(std::env::current_dir()?)
-                .to_string_lossy()
-                .into_owned(),
+            workdir: workdir.to_string_lossy().into_owned(),
             execution_brief: brief,
             not_before: parse_rfc3339(args.not_before.as_deref())?,
             mutation_class: args.mutation_class,
@@ -2851,63 +3881,41 @@ async fn enqueue(profile: &str, args: EnqueueArgs) -> Result<()> {
 
     task_store(profile)?.enqueue(task.clone())?;
 
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&task.operator_view())?);
-        return Ok(());
-    }
-
-    println!("Enqueued offdesk task {}", task.task_id);
-    println!("  capability: {}", task.capability_id);
-    println!("  runner:     {:?}", task.runner_kind);
-    if let Some(packet) = task.implementation_packet.as_ref() {
-        println!("  packet:     {} ({})", packet.packet_id, packet.outcome);
-    }
-    Ok(())
+    present_enqueued_task(&task, args.json)
 }
 
 async fn tick(profile: &str, args: TickArgs) -> Result<()> {
-    let mut options = OffdeskTickOptions::new(Utc::now());
-    options.limit = args.limit.max(1);
+    let now = Utc::now();
+    let mut options = OffdeskTickOptions::new(now);
+    options.limit = args.limit;
     options.project_key = args.project_key;
     options.task_id = args.task_id;
     options.lock_stale_after = Duration::minutes(args.lock_stale_minutes.max(1));
     options.notification_cooldown = args
         .notify_cooldown_minutes
         .map(|minutes| Duration::minutes(minutes.max(1)));
-    let report = run_offdesk_tick(get_profile_dir(profile)?, options)?;
+    let profile_dir = get_profile_dir(profile)?;
+    let mut shift_authority = active_shift_tick_authority(profile, args.shift_id.as_deref(), now)?;
+    let report = if let Some(authority) = shift_authority.as_mut() {
+        crate::offdesk::control_loop::run_offdesk_tick_with_shift(
+            &profile_dir,
+            options,
+            Some(authority),
+        )?
+    } else {
+        run_offdesk_tick(&profile_dir, options)?
+    };
 
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
-        return Ok(());
-    }
-
-    println!(
-        "Tick: {} launched, {} pending approval, {} completed, {} resume pending, {} failed",
-        report.launched,
-        report.pending_approval,
-        report.completed,
-        report.resume_pending,
-        report.failed
-    );
-    if report.provider_deferred > 0 {
-        println!("  provider deferred: {}", report.provider_deferred);
-    }
-    if report.provider_retargeted > 0 {
-        println!("  provider retargeted: {}", report.provider_retargeted);
-    }
-    if report.skipped > 0 {
-        println!("  skipped by limit: {}", report.skipped);
-    }
-    print_next_safe_actions(&report.next_safe_actions);
-    Ok(())
+    present_tick_report(&report, args.json)
 }
 
 async fn tasks(profile: &str, args: TasksArgs) -> Result<()> {
+    let profile_dir = read_only_profile_dir(profile)?;
     let mut task_views: Vec<OffdeskTaskView> = task_store(profile)?
         .load()?
         .into_iter()
         .filter(|task| task_matches_tasks_filter(task, &args))
-        .map(|task| task.operator_view())
+        .map(|task| task.operator_view_with_profile(&profile_dir))
         .collect();
     if args.latest {
         task_views.sort_by_key(|task| task.updated_at);
@@ -2916,18 +3924,7 @@ async fn tasks(profile: &str, args: TasksArgs) -> Result<()> {
         }
     }
 
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&task_views)?);
-        return Ok(());
-    }
-
-    if task_views.is_empty() {
-        println!("No offdesk tasks found.");
-        return Ok(());
-    }
-
-    print_tasks(&task_views);
-    Ok(())
+    present_tasks(&task_views, args.json)
 }
 
 fn task_matches_tasks_filter(task: &OffdeskTask, args: &TasksArgs) -> bool {
@@ -2952,20 +3949,7 @@ async fn decisions(profile: &str, args: DecisionsArgs) -> Result<()> {
     records.retain(|record| decision_matches_filter(record, &args));
     records.sort_by_key(|record| record.updated_at);
 
-    if args.json {
-        let views: Vec<DecisionRecordView> =
-            records.into_iter().map(DecisionRecordView::from).collect();
-        println!("{}", serde_json::to_string_pretty(&views)?);
-        return Ok(());
-    }
-
-    if records.is_empty() {
-        println!("No offdesk decisions found.");
-        return Ok(());
-    }
-
-    print_decisions(&records);
-    Ok(())
+    present_decisions(records, args.json)
 }
 
 fn decision_matches_filter(record: &DecisionRecord, args: &DecisionsArgs) -> bool {
@@ -3004,59 +3988,41 @@ async fn decision_show(profile: &str, args: DecisionShowArgs) -> Result<()> {
     let Some(record) =
         DecisionLedger::new(read_only_profile_dir(profile)?).find(&args.decision_id)?
     else {
-        bail!("decision not found: {}", args.decision_id);
+        bail!(
+            "decision not found: {}",
+            crate::offdesk::operator_safe_text(&args.decision_id)
+        );
     };
 
-    if args.json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&DecisionRecordView::from(record))?
-        );
-        return Ok(());
-    }
-
-    print_decision(&record);
-    Ok(())
+    present_decision(record, args.json)
 }
 
 async fn decision_resolve(profile: &str, args: DecisionResolveArgs) -> Result<()> {
     let ledger = DecisionLedger::new(get_profile_dir(profile)?);
     let Some(record) = ledger.find(&args.decision_id)? else {
-        bail!("decision not found: {}", args.decision_id);
+        bail!(
+            "decision not found: {}",
+            crate::offdesk::operator_safe_text(&args.decision_id)
+        );
     };
     let updated = resolve_decision_record(record, &args)?;
     ledger.append(&updated)?;
 
-    if args.json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&DecisionRecordView::from(updated))?
-        );
-        return Ok(());
-    }
-
-    print_decision(&updated);
-    Ok(())
+    present_decision(updated, args.json)
 }
 
 async fn decision_receipt(profile: &str, args: DecisionReceiptArgs) -> Result<()> {
     let ledger = DecisionLedger::new(get_profile_dir(profile)?);
     let Some(record) = ledger.find(&args.decision_id)? else {
-        bail!("decision not found: {}", args.decision_id);
+        bail!(
+            "decision not found: {}",
+            crate::offdesk::operator_safe_text(&args.decision_id)
+        );
     };
     let updated = receipt_decision_record(record, &args)?;
     ledger.append(&updated)?;
 
-    if args.json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&DecisionRecordView::from(updated))?
-        );
-        return Ok(());
-    }
-
-    print_decision(&updated);
-    Ok(())
+    present_decision(updated, args.json)
 }
 
 fn resolve_decision_record(
@@ -3091,20 +4057,7 @@ fn receipt_decision_record(
 
 async fn provider_capacity(profile: &str, args: JsonArgs) -> Result<()> {
     let states = ProviderCapacityStore::new(read_only_profile_dir(profile)?).load()?;
-
-    if args.json {
-        let value = operator_safe_json_value(serde_json::to_value(&states)?);
-        println!("{}", serde_json::to_string_pretty(&value)?);
-        return Ok(());
-    }
-
-    if states.is_empty() {
-        println!("No provider capacity state found.");
-        return Ok(());
-    }
-
-    print_provider_capacity(&states);
-    Ok(())
+    present_provider_capacity(&states, args.json)
 }
 
 async fn provider_fallback(profile: &str, args: ProviderFallbackArgs) -> Result<()> {
@@ -3118,14 +4071,7 @@ async fn provider_fallback(profile: &str, args: ProviderFallbackArgs) -> Result<
         Utc::now(),
     )?;
 
-    if args.json {
-        let value = operator_safe_json_value(serde_json::to_value(&recommendation)?);
-        println!("{}", serde_json::to_string_pretty(&value)?);
-        return Ok(());
-    }
-
-    print_provider_fallback(&recommendation);
-    Ok(())
+    present_provider_fallback(&recommendation, args.json)
 }
 
 async fn wiki(profile: &str, args: WikiArgs) -> Result<()> {
@@ -3153,7 +4099,7 @@ async fn wiki(profile: &str, args: WikiArgs) -> Result<()> {
         WikiCommands::Entries(args) => wiki_entries(profile, args).await,
         WikiCommands::Show(args) => wiki_show(profile, args).await,
         WikiCommands::Projection(args) => wiki_projection(profile, args).await,
-        WikiCommands::Brief(args) => wiki_brief(profile, args).await,
+        WikiCommands::Brief(args) => wiki_brief(profile, args).await.map(|_| ()),
         WikiCommands::RuntimePolicyAcks(args) => wiki_runtime_policy_acks(profile, args).await,
         WikiCommands::RuntimePolicyAckReport(args) => {
             wiki_runtime_policy_ack_report(profile, args).await
@@ -3184,7 +4130,10 @@ async fn wiki(profile: &str, args: WikiArgs) -> Result<()> {
 async fn wiki_proposal_events(profile: &str, args: WikiProposalEventsArgs) -> Result<()> {
     let mut events = wiki_store(profile)?.load_review_proposal_events()?;
     if let Some(proposal_id) = args.proposal_id.as_deref() {
-        events.retain(|event| event.proposal_id == proposal_id);
+        let selector = crate::offdesk::operator_safe_identity_selector(proposal_id);
+        events.retain(|event| {
+            crate::offdesk::operator_safe_identity_selector(&event.proposal_id) == selector
+        });
     }
 
     present_wiki_proposal_events(&events, args.json)
@@ -3204,11 +4153,11 @@ async fn wiki_record_proposal_event(
         .collect();
     let event = AdaptiveWikiReviewProposalEventRecord {
         id: format!("wiki_review_event_{}", Uuid::new_v4()),
-        proposal_id: crate::offdesk::operator_safe_text(args.proposal_id.trim()),
+        proposal_id: crate::offdesk::operator_safe_identity_selector(&args.proposal_id),
         decision: args.decision,
         proposal_action: args.proposal_action,
         subject_kind: crate::offdesk::operator_safe_text(args.subject_kind.trim()),
-        subject_id: crate::offdesk::operator_safe_text(args.subject_id.trim()),
+        subject_id: crate::offdesk::operator_safe_identity_selector(&args.subject_id),
         actor: crate::offdesk::operator_safe_text(args.by.trim()),
         reason: crate::offdesk::operator_safe_text(args.reason.trim()),
         evidence_refs,
@@ -3217,7 +4166,7 @@ async fn wiki_record_proposal_event(
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .map(crate::offdesk::operator_safe_text),
+            .map(operator_safe_identity),
         created_at: Utc::now(),
     };
     writable_wiki_store(profile)?.append_review_proposal_event(&event)?;
@@ -3239,7 +4188,9 @@ async fn wiki_close_proposal(
     let proposal = report
         .proposals
         .iter()
-        .find(|proposal| proposal.id == args.proposal_id)
+        .find(|proposal| {
+            proposal.id == crate::offdesk::operator_safe_identity_selector(args.proposal_id.trim())
+        })
         .ok_or_else(|| {
             anyhow::anyhow!(
                 "Adaptive wiki review proposal not found: {}",
@@ -3255,11 +4206,11 @@ async fn wiki_close_proposal(
 
     let event = AdaptiveWikiReviewProposalEventRecord {
         id: format!("wiki_review_event_{}", Uuid::new_v4()),
-        proposal_id: crate::offdesk::operator_safe_text(&proposal.id),
+        proposal_id: proposal.id.clone(),
         decision,
         proposal_action: Some(proposal.action),
         subject_kind: crate::offdesk::operator_safe_text(&proposal.subject_kind),
-        subject_id: crate::offdesk::operator_safe_text(&proposal.subject_id),
+        subject_id: proposal.subject_id.clone(),
         actor: crate::offdesk::operator_safe_text(args.by.trim()),
         reason: crate::offdesk::operator_safe_text(args.reason.trim()),
         evidence_refs: proposal_decision_evidence_refs(proposal, &args.evidence_refs),
@@ -3268,7 +4219,7 @@ async fn wiki_close_proposal(
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .map(crate::offdesk::operator_safe_text),
+            .map(operator_safe_identity),
         created_at: now,
     };
     store.append_review_proposal_event(&event)?;
@@ -3306,20 +4257,45 @@ impl WikiBriefArgs {
     /// Brief scoped to one project plane, written to a file. Used by
     /// `forager go` to refresh `.wiki-brief.md` before launching an agent.
     pub(crate) fn scoped_to_file(project_key: String, out: std::path::PathBuf) -> Self {
+        Self::scoped_to_file_with_mode(project_key, out, None)
+    }
+
+    pub(crate) fn scoped_to_file_with_mode(
+        project_key: String,
+        out: std::path::PathBuf,
+        agent_mode: Option<AdaptiveWikiAgentMode>,
+    ) -> Self {
         Self {
             project_key: Some(project_key),
             artifact_kind: None,
-            agent_mode: None,
+            agent_mode,
             max_entries: 12,
             out: Some(out),
             json: false,
+            quiet: true,
         }
     }
 }
 
-pub(crate) async fn wiki_brief(profile: &str, args: WikiBriefArgs) -> Result<()> {
+pub(crate) async fn wiki_brief(
+    profile: &str,
+    args: WikiBriefArgs,
+) -> Result<Option<crate::offdesk::WikiContextManifestV1>> {
+    const MAX_BUILD_ELAPSED: std::time::Duration = std::time::Duration::from_secs(5);
+
+    ensure!(
+        (1..=crate::offdesk::wiki_context::MAX_CONTEXT_ENTRIES).contains(&args.max_entries),
+        "wiki brief max_entries must be between 1 and {}",
+        crate::offdesk::wiki_context::MAX_CONTEXT_ENTRIES
+    );
+    let started = Instant::now();
+    let output_boundary = args
+        .out
+        .as_deref()
+        .map(crate::offdesk::wiki_context_file::WikiBriefOutputBoundary::open)
+        .transpose()?;
     let store = wiki_store(profile)?;
-    let query = wiki_query(
+    let query = runtime_wiki_query(
         &None,
         &args.project_key,
         &args.artifact_kind,
@@ -3329,30 +4305,68 @@ pub(crate) async fn wiki_brief(profile: &str, args: WikiBriefArgs) -> Result<()>
         max_entries: args.max_entries,
         ..Default::default()
     };
-    let report = store.ai_projection_report(&query, budget)?;
-    let entries_state = store.load_entries()?;
+    let entries_state = store.load_entries_bounded_for_context()?;
+    let report = crate::offdesk::build_ai_projection_report(&entries_state.entries, &query, budget);
+    ensure!(
+        started.elapsed() <= MAX_BUILD_ELAPSED,
+        "wiki brief projection exceeded the elapsed-time budget"
+    );
     let now = Utc::now();
     let scope_label = args
         .project_key
         .clone()
         .unwrap_or_else(|| "user_global".to_string());
-    let brief =
-        build_wiki_brief_read_model(profile, &scope_label, now, &report, &entries_state.entries);
+    let brief = build_wiki_brief_read_model(
+        profile,
+        &scope_label,
+        args.agent_mode,
+        now,
+        &report,
+        &entries_state.entries,
+    )?;
+    let body = render_wiki_brief_markdown(&brief);
+    ensure!(
+        body.len() <= crate::offdesk::wiki_context_file::MAX_WIKI_BRIEF_RENDERED_BYTES,
+        "wiki brief rendered bytes exceed the output budget"
+    );
+    ensure!(
+        started.elapsed() <= MAX_BUILD_ELAPSED,
+        "wiki brief build exceeded the elapsed-time budget"
+    );
 
-    if args.json {
-        return present_wiki_brief(&brief, true);
-    }
-    if let Some(out) = &args.out {
-        let body = render_wiki_brief_markdown(&brief);
-        if let Some(parent) = out.parent() {
-            std::fs::create_dir_all(parent)?;
+    if let (Some(out), Some(boundary)) = (&args.out, output_boundary) {
+        let write = match boundary.write(body.as_bytes()) {
+            Ok(write) => write,
+            Err(error) => {
+                if args.json {
+                    let failure = build_wiki_brief_failure_manifest(
+                        profile,
+                        &scope_label,
+                        boundary.project_root_identity(),
+                        now,
+                        &error,
+                    )?;
+                    present_wiki_brief_manifest(&failure)?;
+                }
+                return Err(error);
+            }
+        };
+        ensure!(
+            started.elapsed() <= MAX_BUILD_ELAPSED,
+            "wiki brief write exceeded the elapsed-time budget"
+        );
+        let manifest = brief.build_manifest(&write)?;
+        if args.json && !args.quiet {
+            present_wiki_brief_manifest(&manifest)?;
+        } else if !args.quiet {
+            present_wiki_brief_write_confirmation(&brief, out, write.status);
         }
-        std::fs::write(out, format!("{body}\n"))?;
-        present_wiki_brief_write_confirmation(&brief, out);
-    } else {
-        present_wiki_brief(&brief, false)?;
+        return Ok(Some(manifest));
     }
-    Ok(())
+    if !args.quiet {
+        present_wiki_brief(&brief, args.json)?;
+    }
+    Ok(None)
 }
 
 async fn wiki_projection(profile: &str, args: WikiProjectionArgs) -> Result<()> {
@@ -3789,22 +4803,7 @@ async fn wiki_record_candidate(profile: &str, args: WikiRecordCandidateArgs) -> 
 
     let store = writable_wiki_store(profile)?;
     let candidate = store.record_candidate(input, Utc::now())?;
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&candidate)?);
-    } else {
-        println!("Recorded candidate {}", candidate.id);
-        println!(
-            "  {:?} · {:?}:{} · confidence {:?}",
-            candidate.kind, candidate.scope, candidate.scope_ref, candidate.confidence
-        );
-        println!("  claim: {}", candidate.claim);
-        println!("  occurrences: {}", candidate.occurrence_count);
-        println!(
-            "  promote: forager -p {profile} offdesk wiki promote {} --activation-mode context_only",
-            candidate.id
-        );
-    }
-    Ok(())
+    present_wiki_candidate_recorded(&candidate, profile, args.json)
 }
 
 async fn wiki_promote(profile: &str, args: WikiPromoteArgs) -> Result<()> {
@@ -4014,12 +5013,13 @@ async fn wiki_edit(profile: &str, args: WikiEditArgs) -> Result<()> {
             now,
         )?
         .ok_or_else(|| anyhow::anyhow!("Adaptive wiki entry not found: {}", args.entry_id))?;
+    let entry_id = entry.id.clone();
     let entry_snapshot = human_entry(entry);
     let audit = wiki_audit_record(WikiAuditRecordInput {
         action: AdaptiveWikiAuditAction::Edit,
-        subject_id: &entry_snapshot.id,
+        subject_id: &entry_id,
         candidate_id: None,
-        entry_id: Some(&entry_snapshot.id),
+        entry_id: Some(&entry_id),
         actor: &args.by,
         reason: &args.reason,
         evidence_ref: None,
@@ -4232,6 +5232,17 @@ async fn cancel_task(profile: &str, args: CancelTaskArgs) -> Result<()> {
     present_task_lifecycle_report(&report, args.json)
 }
 
+async fn terminate_task(profile: &str, args: TerminateTaskArgs) -> Result<()> {
+    let report = terminate_offdesk_task(
+        get_profile_dir(profile)?,
+        &args.task_id,
+        args.reason.as_deref(),
+        &args.by,
+        Utc::now(),
+    )?;
+    present_task_termination_report(&report, args.json)
+}
+
 async fn pause_dispatch(profile: &str, args: PauseArgs) -> Result<()> {
     let state = OperatorPauseStore::new(get_profile_dir(profile)?).pause(
         args.reason.as_deref(),
@@ -4406,6 +5417,7 @@ async fn poll(profile: &str, args: PollArgs) -> Result<()> {
         notification_cooldown,
     )?;
     reconcile_tasks_with_background_outcomes(get_profile_dir(profile)?, &outcomes, now)?;
+    shift_commands::reconcile_polled_shift_tasks(profile, &outcomes, now)?;
     present_background_poll_outcomes(&outcomes, args.json)
 }
 
@@ -4420,18 +5432,7 @@ async fn pending(profile: &str, args: PendingArgs) -> Result<()> {
         .collect();
     let approval_views = pending_approval_operator_views(approvals, now);
 
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&approval_views)?);
-        return Ok(());
-    }
-
-    if approval_views.is_empty() {
-        println!("No offdesk approvals found.");
-        return Ok(());
-    }
-
-    print_approval_views(&approval_views);
-    Ok(())
+    present_pending_approval_views(&approval_views, args.json)
 }
 
 async fn resolve(profile: &str, args: ResolveArgs, approve: bool) -> Result<()> {
@@ -4444,28 +5445,14 @@ async fn resolve(profile: &str, args: ResolveArgs, approve: bool) -> Result<()> 
     };
 
     let Some(resolved) = resolved else {
-        if let Some(approval_id) = args.approval_id {
-            bail!("Pending offdesk approval not found: {}", approval_id);
-        }
-        println!("No pending offdesk approvals.");
-        return Ok(());
+        return present_missing_approval_resolution(args.approval_id.as_deref());
     };
 
     if !approve {
         record_approval_denial_candidate(profile, &resolved, now)?;
     }
 
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&resolved)?);
-        return Ok(());
-    }
-
-    let verb = if approve { "Approved" } else { "Denied" };
-    println!(
-        "{} offdesk approval {}: {} ({:?})",
-        verb, resolved.approval_id, resolved.action, resolved.risk_level
-    );
-    Ok(())
+    present_approval_resolution(&resolved, args.json)
 }
 
 fn record_approval_denial_candidate(
@@ -4600,7 +5587,9 @@ fn background_mode_lifecycle(
         | BackgroundRunnerPhase::StaleNoAck
         | BackgroundRunnerPhase::StaleLostCallback
         | BackgroundRunnerPhase::Reconstructable => OffdeskModeLifecycle::Blocked,
-        BackgroundRunnerPhase::RecoveryAcknowledged => OffdeskModeLifecycle::Cancelled,
+        BackgroundRunnerPhase::RecoveryAcknowledged | BackgroundRunnerPhase::Terminated => {
+            OffdeskModeLifecycle::Cancelled
+        }
         BackgroundRunnerPhase::Launched
         | BackgroundRunnerPhase::HandoffEmitted
         | BackgroundRunnerPhase::PickupAcknowledged => OffdeskModeLifecycle::Running,
@@ -4762,52 +5751,11 @@ fn background_ack_does_not_authorize() -> Vec<String> {
 async fn capabilities(args: JsonArgs) -> Result<()> {
     let registry = default_capability_registry();
     let capabilities = registry.all();
-
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(capabilities)?);
-        return Ok(());
-    }
-
-    print_capabilities(capabilities);
-    Ok(())
+    present_capabilities(capabilities, args.json)
 }
 
 async fn harnesses(args: JsonArgs) -> Result<()> {
-    if args.json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(hosted_harness_profiles())?
-        );
-        return Ok(());
-    }
-
-    println!("Hosted harness agent profiles");
-    println!("Current support target: Codex CLI and Claude Code");
-    println!();
-    for profile in hosted_harness_profiles() {
-        let command = profile.launch_command.unwrap_or("manual integration");
-        println!(
-            "- {} ({}) [{}]",
-            profile.display_name, profile.id, profile.support_status
-        );
-        println!("  launch:  {}", command);
-        println!("  runner:  {}", profile.runner);
-        println!("  scope:   {}", profile.mutation_scope);
-        println!(
-            "  prompt:  {} (inline <= {} bytes, first-read <= {} bytes total)",
-            profile.prompt_contract.strategy,
-            profile.prompt_contract.inline_context_budget_bytes,
-            profile.prompt_contract.first_read_total_budget_bytes
-        );
-        println!(
-            "  reads:   {}",
-            profile.prompt_contract.preferred_first_reads.join(", ")
-        );
-        println!("  result:  {}", profile.result_artifact);
-        println!("  failure: {}", profile.failure_signal);
-        println!("  note:    {}", profile.notes);
-    }
-    Ok(())
+    present_hosted_harness_profiles(hosted_harness_profiles(), args.json)
 }
 
 async fn harness_prompt(args: HarnessPromptArgs) -> Result<()> {
@@ -4828,10 +5776,7 @@ async fn harness_prompt(args: HarnessPromptArgs) -> Result<()> {
     )?;
 
     if strict && packet.first_read_budget_status != "ok" {
-        bail!(
-            "first-read budget guard failed: {}",
-            packet.warnings.join("; ")
-        );
+        bail!("{}", hosted_harness_prompt_guard_error(&packet.warnings));
     }
 
     if let Some(output_path) = packet.output_path.as_deref() {
@@ -4844,20 +5789,7 @@ async fn harness_prompt(args: HarnessPromptArgs) -> Result<()> {
             .with_context(|| format!("write harness prompt {}", path.display()))?;
     }
 
-    if json {
-        println!("{}", serde_json::to_string_pretty(&packet)?);
-        return Ok(());
-    }
-
-    if let Some(output_path) = packet.output_path.as_deref() {
-        println!("Wrote hosted harness prompt: {output_path}");
-    } else {
-        println!("{}", packet.prompt_markdown);
-    }
-    for warning in &packet.warnings {
-        println!("warning: {warning}");
-    }
-    Ok(())
+    present_hosted_harness_prompt_packet(&packet, json)
 }
 
 async fn plan(profile: &str, args: PlanArgs) -> Result<()> {
@@ -4931,53 +5863,30 @@ async fn snapshots(profile: &str, args: JsonArgs) -> Result<()> {
         .into_iter()
         .map(|snapshot| {
             let verification = store.verify_snapshot(&snapshot.mutation_id, now)?;
-            Ok(snapshot_list_item(snapshot, verification))
+            Ok(mutation_snapshot_list_item(snapshot, verification))
         })
         .collect::<Result<Vec<_>>>()?;
 
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&items)?);
-        return Ok(());
-    }
-
-    if items.is_empty() {
-        println!("No mutation snapshots found.");
-        return Ok(());
-    }
-
-    print_snapshot_list(&items);
-    Ok(())
+    present_mutation_snapshot_list(&items, args.json)
 }
 
 async fn snapshot(profile: &str, args: MutationSnapshotArgs) -> Result<()> {
     let verification =
         mutation_snapshot_store(profile)?.verify_snapshot(&args.mutation_id, Utc::now())?;
     if !verification.snapshot_present {
-        bail!("Mutation snapshot not found: {}", args.mutation_id);
+        return present_missing_mutation_snapshot(&args.mutation_id);
     }
 
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&verification)?);
-        return Ok(());
-    }
-
-    print_snapshot_verification(&verification);
-    Ok(())
+    present_mutation_snapshot_verification(&verification, args.json)
 }
 
 async fn restore_plan(profile: &str, args: MutationSnapshotArgs) -> Result<()> {
     let plan = mutation_snapshot_store(profile)?.restore_plan(&args.mutation_id, Utc::now())?;
     if plan.target_path.is_empty() {
-        bail!("Mutation snapshot not found: {}", args.mutation_id);
+        return present_missing_mutation_snapshot(&args.mutation_id);
     }
 
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&plan)?);
-        return Ok(());
-    }
-
-    print_restore_plan(&plan);
-    Ok(())
+    present_mutation_restore_plan(&plan, args.json)
 }
 
 async fn debug_bundle(profile: &str, args: DebugBundleArgs) -> Result<()> {
@@ -4992,29 +5901,7 @@ async fn debug_bundle(profile: &str, args: DebugBundleArgs) -> Result<()> {
         None
     };
 
-    if args.json {
-        if let Some(export) = export.as_ref() {
-            let receipt = DebugBundleExportReceipt {
-                exported_to: operator_safe_report(export.path.to_string_lossy().as_ref()).text,
-                bytes_written: export.bytes_written,
-                bundle: &bundle,
-            };
-            println!("{}", serde_json::to_string_pretty(&receipt)?);
-        } else {
-            println!("{}", serde_json::to_string_pretty(&bundle)?);
-        }
-        return Ok(());
-    }
-
-    print_debug_bundle_summary(&bundle);
-    if let Some(export) = export.as_ref() {
-        println!(
-            "  exported_to:        {}",
-            operator_safe_report(export.path.to_string_lossy().as_ref()).text
-        );
-        println!("  bytes_written:      {}", export.bytes_written);
-    }
-    Ok(())
+    present_debug_bundle(&bundle, export.as_ref(), args.json)
 }
 
 fn build_debug_bundle(profile: &str) -> Result<OffdeskDebugBundle> {
@@ -5029,7 +5916,7 @@ fn build_debug_bundle(profile: &str) -> Result<OffdeskDebugBundle> {
     let task_views = OffdeskTaskStore::new(&profile_dir)
         .load()?
         .into_iter()
-        .map(|task| task.operator_view())
+        .map(|task| task.operator_view_with_profile(&profile_dir))
         .collect::<Vec<_>>();
     let tasks = redactor.value(serde_json::to_value(task_views)?);
 
@@ -5120,79 +6007,37 @@ fn build_debug_bundle(profile: &str) -> Result<OffdeskDebugBundle> {
 
 async fn maintenance_report(profile: &str, args: MaintenanceReportArgs) -> Result<()> {
     let report = build_maintenance_report(profile, &args)?;
-
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
-        return Ok(());
-    }
-
-    print_maintenance_report(&report);
-    Ok(())
+    present_maintenance_report(&report, args.json)
 }
 
 async fn maintenance_request(profile: &str, args: MaintenanceRequestArgs) -> Result<()> {
     let json = args.json;
     let report = build_maintenance_request(profile, args)?;
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
-        return Ok(());
-    }
-
-    print_maintenance_request_report(&report);
-    Ok(())
+    present_maintenance_request(&report, json)
 }
 
 async fn closeout(profile: &str, args: CloseoutArgs) -> Result<()> {
     let json = args.json;
     let report = build_closeout_report(profile, &args)?;
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
-        return Ok(());
-    }
-
-    print_closeout_report(&report);
-    Ok(())
+    present_closeout_report(&report, json)
 }
 
 async fn closeout_review(profile: &str, args: CloseoutReviewArgs) -> Result<()> {
     let json = args.json;
     let record = build_closeout_review_record(profile, &args)?;
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(&record)?);
-        return Ok(());
-    }
-
-    print_closeout_review_record(&record);
-    Ok(())
+    present_closeout_review_record(&record, json)
 }
 
 async fn closeout_decision(profile: &str, args: CloseoutDecisionArgs) -> Result<()> {
     let json = args.json;
     let record = build_closeout_decision_record(profile, &args)?;
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(&record)?);
-        return Ok(());
-    }
-
-    print_closeout_review_record(&record);
-    Ok(())
+    present_closeout_review_record(&record, json)
 }
 
 async fn closeout_retire(profile: &str, args: CloseoutRetireArgs) -> Result<()> {
     let json = args.json;
     let record = build_closeout_retire_record(profile, &args)?;
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(&record)?);
-        return Ok(());
-    }
-
-    print_closeout_review_record(&record);
-    Ok(())
+    present_closeout_review_record(&record, json)
 }
 
 fn closeout_task_matches(task: &OffdeskTask, args: &CloseoutArgs) -> bool {
@@ -5221,10 +6066,11 @@ fn option_matches(filter: Option<&str>, value: &str) -> bool {
     }
 }
 
-fn closeout_task_summary(task: &OffdeskTask) -> CloseoutTask {
-    let view = task.operator_view();
+fn closeout_task_summary(task: &OffdeskTask, profile_dir: &Path) -> CloseoutTask {
+    let view = task.operator_view_with_profile(profile_dir);
     let receipt_search_dirs = closeout_receipt_search_dirs_for_task(task);
     CloseoutTask {
+        review: view.review,
         task_id: view.task_id,
         request_id: view.request_id,
         project_key: view.project_key,
@@ -5234,19 +6080,29 @@ fn closeout_task_summary(task: &OffdeskTask) -> CloseoutTask {
         workdir: crate::offdesk::operator_safe_text(&view.workdir),
         agent_mode: view.agent_mode,
         background_ticket_id: view.background_ticket_id,
-        result_artifact_path: view
-            .result_artifact_path
-            .as_deref()
-            .map(crate::offdesk::operator_safe_text),
-        log_artifact_path: view
-            .log_artifact_path
-            .as_deref()
-            .map(crate::offdesk::operator_safe_text),
+        result_artifact_path: task.result_artifact_path.as_deref().map(|path| {
+            crate::offdesk::operator_safe_text(&closeout_task_artifact_path(task, path))
+        }),
+        log_artifact_path: task.log_artifact_path.as_deref().map(|path| {
+            crate::offdesk::operator_safe_text(&closeout_task_artifact_path(task, path))
+        }),
         artifact_refs: view.artifact_refs,
         implementation_packet: view.implementation_packet,
         receipt_search_dirs,
         preview: view.preview,
         reason: view.reason,
+    }
+}
+
+fn closeout_task_artifact_path(task: &OffdeskTask, path: &str) -> String {
+    let path = Path::new(path);
+    if path.is_absolute() {
+        path.to_string_lossy().into_owned()
+    } else {
+        Path::new(&task.workdir)
+            .join(path)
+            .to_string_lossy()
+            .into_owned()
     }
 }
 
@@ -5352,6 +6208,7 @@ fn closeout_file_operation(input: CloseoutFileOperationInput<'_>) -> CloseoutFil
             .destination
             .map(|value| crate::offdesk::operator_safe_text(&value)),
         source: crate::offdesk::operator_safe_text(&input.source),
+        source_refs: vec![crate::offdesk::operator_safe_text(&input.source)],
         risk: input.risk,
         reason: crate::offdesk::operator_safe_text(input.reason),
         evidence_refs: input
@@ -5374,39 +6231,42 @@ fn closeout_file_operations(
     for task in tasks {
         let evidence = vec![format!("task:{}", task.task_id)];
         if let Some(path) = task.result_artifact_path.as_deref() {
+            let path = closeout_task_artifact_path(task, path);
             operations.push(closeout_file_operation(CloseoutFileOperationInput {
                 operation: "keep",
-                path,
+                path: &path,
                 destination: None,
                 source: format!("task:{} result_artifact", task.task_id),
                 risk: "low",
                 reason: "Result artifacts are provenance anchors for Ondesk return.",
                 evidence_refs: evidence.clone(),
-                present: path_present(path, None),
+                present: path_present(&path, None),
                 requires_commercial_review: false,
                 requires_human_approval: false,
             }));
         }
         if let Some(path) = task.log_artifact_path.as_deref() {
+            let path = closeout_task_artifact_path(task, path);
             operations.push(closeout_file_operation(CloseoutFileOperationInput {
                 operation: "archive_candidate",
-                path,
-                destination: archive_destination_for(path),
+                path: &path,
+                destination: archive_destination_for(&path),
                 source: format!("task:{} log_artifact", task.task_id),
                 risk: "medium",
                 reason:
                     "Raw logs should be preserved or archived before any deletion is considered.",
                 evidence_refs: evidence.clone(),
-                present: path_present(path, None),
+                present: path_present(&path, None),
                 requires_commercial_review: true,
                 requires_human_approval: true,
             }));
         }
         for artifact in &task.artifact_refs {
             if let Some(path) = artifact.path.as_deref() {
+                let path = closeout_task_artifact_path(task, path);
                 operations.push(closeout_file_operation(CloseoutFileOperationInput {
                     operation: "keep",
-                    path,
+                    path: &path,
                     destination: None,
                     source: format!(
                         "task:{} artifact_ref:{}",
@@ -5418,7 +6278,7 @@ fn closeout_file_operations(
                         format!("task:{}", task.task_id),
                         format!("artifact:{}", artifact.artifact_id),
                     ],
-                    present: path_present(path, Some(artifact.present)),
+                    present: path_present(&path, Some(artifact.present)),
                     requires_commercial_review: false,
                     requires_human_approval: false,
                 }));
@@ -5429,6 +6289,8 @@ fn closeout_file_operations(
     for probe in background_runs {
         let evidence = vec![format!("background:{}", probe.ticket_id)];
         if let Some(path) = probe.result_artifact_path.as_deref() {
+            let path = closeout_background_artifact_path(probe, path);
+            let path = path.as_str();
             operations.push(closeout_file_operation(CloseoutFileOperationInput {
                 operation: "keep",
                 path,
@@ -5443,6 +6305,8 @@ fn closeout_file_operations(
             }));
         }
         if let Some(path) = probe.log_artifact_path.as_deref() {
+            let path = closeout_background_artifact_path(probe, path);
+            let path = path.as_str();
             operations.push(closeout_file_operation(CloseoutFileOperationInput {
                 operation: "archive_candidate",
                 path,
@@ -5458,7 +6322,84 @@ fn closeout_file_operations(
         }
     }
 
-    operations
+    merge_closeout_file_references(operations)
+}
+
+fn closeout_background_artifact_path(probe: &BackgroundProbe, path: &str) -> String {
+    let path = Path::new(path);
+    if path.is_absolute() {
+        path.to_string_lossy().into_owned()
+    } else if let Some(root) = probe.working_dir.as_deref() {
+        Path::new(root).join(path).to_string_lossy().into_owned()
+    } else {
+        path.to_string_lossy().into_owned()
+    }
+}
+
+fn merge_closeout_file_references(
+    operations: Vec<CloseoutFileOperation>,
+) -> Vec<CloseoutFileOperation> {
+    let mut merged: Vec<CloseoutFileOperation> = Vec::new();
+    let mut identities = BTreeMap::new();
+    for operation in operations {
+        let identity = (|| {
+            let path = Path::new(&operation.path);
+            if !path.is_absolute()
+                || path.ancestors().any(|ancestor| {
+                    fs::symlink_metadata(ancestor).is_ok_and(|meta| meta.is_symlink())
+                })
+            {
+                return None;
+            }
+            let before = fs::symlink_metadata(path).ok()?;
+            if !before.is_file() || before.file_type().is_symlink() {
+                return None;
+            }
+            let canonical = path.canonicalize().ok()?;
+            let after = fs::symlink_metadata(path).ok()?;
+            if crate::process::FilesystemObjectSnapshot::from_metadata(&before)
+                != crate::process::FilesystemObjectSnapshot::from_metadata(&after)
+            {
+                return None;
+            }
+            Some((
+                operation.operation,
+                operation.destination.clone(),
+                operation.risk,
+                canonical,
+                format!(
+                    "{:?}",
+                    crate::process::FilesystemObjectSnapshot::from_metadata(&after)
+                ),
+                crate::process::filesystem_file_identity(&after)?,
+            ))
+        })();
+        if let Some(index) = identity
+            .as_ref()
+            .and_then(|key| identities.get(key))
+            .copied()
+        {
+            let existing: &mut CloseoutFileOperation = &mut merged[index];
+            for source in operation.source_refs {
+                if !existing.source_refs.contains(&source) {
+                    existing.source_refs.push(source);
+                }
+            }
+            for reference in operation.evidence_refs {
+                if !existing.evidence_refs.contains(&reference) {
+                    existing.evidence_refs.push(reference);
+                }
+            }
+            existing.requires_commercial_review |= operation.requires_commercial_review;
+            existing.requires_human_approval |= operation.requires_human_approval;
+        } else {
+            if let Some(identity) = identity {
+                identities.insert(identity, merged.len());
+            }
+            merged.push(operation);
+        }
+    }
+    merged
 }
 
 fn path_present(path: &str, explicit: Option<bool>) -> bool {
@@ -6045,7 +6986,8 @@ fn closeout_implementation_packet_coverage(
             | BackgroundRunnerPhase::StaleNoAck
             | BackgroundRunnerPhase::StaleLostCallback
             | BackgroundRunnerPhase::Reconstructable
-            | BackgroundRunnerPhase::RecoveryAcknowledged => entry.has_failed_evidence = true,
+            | BackgroundRunnerPhase::RecoveryAcknowledged
+            | BackgroundRunnerPhase::Terminated => entry.has_failed_evidence = true,
             BackgroundRunnerPhase::Launched
             | BackgroundRunnerPhase::HandoffEmitted
             | BackgroundRunnerPhase::PickupAcknowledged => entry.has_active_evidence = true,
@@ -6695,6 +7637,7 @@ fn closeout_background_phase_label(phase: BackgroundRunnerPhase) -> &'static str
         BackgroundRunnerPhase::StaleLostCallback => "stale_lost_callback",
         BackgroundRunnerPhase::Reconstructable => "reconstructable",
         BackgroundRunnerPhase::RecoveryAcknowledged => "recovery_acknowledged",
+        BackgroundRunnerPhase::Terminated => "terminated",
     }
 }
 
@@ -6873,27 +7816,80 @@ fn closeout_documentation_governance(
     tasks: &[OffdeskTask],
 ) -> Option<CloseoutDocumentationGovernance> {
     let workdir = closeout_project_workdir(args, tasks)?;
+    let key = args
+        .project_key
+        .as_deref()
+        .or_else(|| tasks.first().map(|task| task.project_key.as_str()))
+        .unwrap_or("unknown");
+    let selected_scope = super::project::closeout_documentation_scope(
+        &workdir,
+        key,
+        args.owning_plan.as_deref(),
+        args.subproject_spec.as_deref(),
+    );
+    let (workdir, routing, routing_error) = match selected_scope {
+        Ok((path, preview)) => (path, Some(preview), None),
+        Err(error) => (
+            workdir,
+            None,
+            Some(crate::offdesk::operator_safe_text(&error.to_string())),
+        ),
+    };
     let workdir_label = crate::offdesk::operator_safe_text(workdir.to_string_lossy().as_ref());
     let command = format!(
         "forager project audit-docs {} --audit-profile standard --json",
         shell_arg(&workdir_label)
     );
-    if !workdir.exists() {
+    let declared =
+        args.workdir.is_some() || closeout_project_workdir_from_task_artifacts(tasks).is_some();
+    let packet = !declared
+        && (workdir.join("INPUT_MANIFEST.json").exists()
+            || tasks.iter().any(|task| {
+                task.result_artifact_path.as_deref().is_some_and(|path| {
+                    let path = Path::new(path);
+                    (if path.is_absolute() {
+                        path.to_owned()
+                    } else {
+                        Path::new(&task.workdir).join(path)
+                    })
+                    .parent()
+                        == Some(workdir.as_path())
+                })
+            }));
+    if packet || (args.workdir.is_none() && closeout_owner_roots(tasks).len() > 1) {
         return Some(CloseoutDocumentationGovernance {
+            coverage: None,
+            routing: None,
+            scope: "packet", owner_status: "unresolved_explicit_owner_required",
+            workdir: workdir_label, audit_profile: "packet_only".to_string(),
+            command: "Inspect the existing project/subproject owner declaration; rerun closeout with --workdir <declared-root>.".into(),
+            recommendation_count: 0, recommendations: vec![],
+            error: Some("Packet completeness is reported in artifact observations; project governance awaits an explicit owning root.".into()),
+        });
+    }
+    if !workdir.exists() || routing_error.is_some() {
+        return Some(CloseoutDocumentationGovernance {
+            coverage: None,
+            routing: routing.clone(),
+            scope: "project",
+            owner_status: if declared { "declared" } else { "task_workdir" },
             workdir: workdir_label,
             audit_profile: "standard".to_string(),
             command,
             recommendation_count: 0,
             recommendations: Vec::new(),
-            error: Some("workdir does not exist".to_string()),
+            error: routing_error.or_else(|| Some("workdir does not exist".to_string())),
         });
     }
 
-    match audit_recommendations_for_project(&workdir, DocumentationAuditProfile::Standard, 100_000)
-    {
-        Ok(recommendations) => {
+    match audit_for_project(&workdir, DocumentationAuditProfile::Standard, 100_000) {
+        Ok((recommendations, coverage)) => {
             let recommendation_count = recommendations.len();
             Some(CloseoutDocumentationGovernance {
+                coverage: Some(coverage),
+                routing: routing.clone(),
+                scope: "project",
+                owner_status: if declared { "declared" } else { "task_workdir" },
                 workdir: workdir_label,
                 audit_profile: "standard".to_string(),
                 command,
@@ -6907,6 +7903,10 @@ fn closeout_documentation_governance(
             })
         }
         Err(error) => Some(CloseoutDocumentationGovernance {
+            coverage: None,
+            routing: routing.clone(),
+            scope: "project",
+            owner_status: if declared { "declared" } else { "task_workdir" },
             workdir: workdir_label,
             audit_profile: "standard".to_string(),
             command,
@@ -6924,25 +7924,38 @@ fn closeout_project_workdir(args: &CloseoutArgs, tasks: &[OffdeskTask]) -> Optio
         .or_else(|| tasks.first().map(|task| PathBuf::from(&task.workdir)))
 }
 
-fn closeout_project_workdir_from_task_artifacts(tasks: &[OffdeskTask]) -> Option<PathBuf> {
-    tasks.iter().find_map(|task| {
-        task.result_artifact_path
-            .as_deref()
-            .and_then(closeout_project_workdir_from_artifact_path)
-            .or_else(|| {
-                task.log_artifact_path
-                    .as_deref()
-                    .and_then(closeout_project_workdir_from_artifact_path)
-            })
-            .or_else(|| {
-                task.artifact_refs.iter().find_map(|artifact| {
-                    artifact
-                        .path
-                        .as_deref()
-                        .and_then(closeout_project_workdir_from_artifact_path)
+fn closeout_owner_roots(tasks: &[OffdeskTask]) -> BTreeSet<PathBuf> {
+    tasks
+        .iter()
+        .flat_map(|task| {
+            task.result_artifact_path
+                .iter()
+                .chain(task.log_artifact_path.iter())
+                .map(String::as_str)
+                .chain(
+                    task.artifact_refs
+                        .iter()
+                        .filter_map(|artifact| artifact.path.as_deref()),
+                )
+                .filter_map(|path| {
+                    let path = Path::new(path);
+                    let path = if path.is_absolute() {
+                        path.to_path_buf()
+                    } else {
+                        Path::new(&task.workdir).join(path)
+                    };
+                    closeout_project_workdir_from_artifact_path(path.to_str()?)
                 })
-            })
-    })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn closeout_project_workdir_from_task_artifacts(tasks: &[OffdeskTask]) -> Option<PathBuf> {
+    let roots = closeout_owner_roots(tasks);
+    (roots.len() == 1)
+        .then(|| roots.into_iter().next())
+        .flatten()
 }
 
 fn closeout_project_workdir_from_artifact_path(path: &str) -> Option<PathBuf> {
@@ -7049,110 +8062,6 @@ fn summarize_closeout(
         }
     }
     summary
-}
-
-fn print_closeout_report(report: &OffdeskCloseoutReport) {
-    println!("Offdesk closeout plan");
-    println!("  generated_at: {}", report.generated_at);
-    println!("  closeout_id:  {}", report.closeout_id);
-    println!("  profile:      {}", report.profile);
-    println!("  artifact_dir: {}", report.artifact_dir);
-    println!(
-        "  tasks:        scanned={} completed={} active_or_blocked={}",
-        report.summary.tasks_scanned,
-        report.summary.completed_tasks,
-        report.summary.active_or_blocked_tasks
-    );
-    println!(
-        "  operations:   keep={} archive={} delete={} review_required={}",
-        report.summary.keep_operations,
-        report.summary.archive_candidates,
-        report.summary.delete_candidates,
-        report.summary.operations_requiring_commercial_review
-    );
-    if report.summary.implementation_packets_scanned > 0 {
-        println!(
-            "  packets:      scanned={} completed={} deferred={} missing={} drifted={}",
-            report.summary.implementation_packets_scanned,
-            report.summary.packet_goals_completed,
-            report.summary.packet_goals_deferred,
-            report.summary.packet_goals_missing,
-            report.summary.packet_goals_drifted
-        );
-        if report.summary.packet_detail_items > 0 {
-            println!(
-                "  packet items: completed={} deferred={} missing={} drifted={} total={}",
-                report.summary.packet_detail_items_completed,
-                report.summary.packet_detail_items_deferred,
-                report.summary.packet_detail_items_missing,
-                report.summary.packet_detail_items_drifted,
-                report.summary.packet_detail_items
-            );
-        }
-    }
-    println!("  dry_run:      true (no project files moved or deleted)");
-    println!("Artifacts:");
-    println!("  plan:         {}", report.artifacts.closeout_plan_json);
-    println!(
-        "  markdown:     {}",
-        report.artifacts.closeout_plan_markdown
-    );
-    println!(
-        "  review:       {}",
-        report.artifacts.commercial_review_packet
-    );
-    println!(
-        "  return:       {}",
-        report.artifacts.return_package_markdown
-    );
-    if !report.open_decisions.is_empty() {
-        println!("Open decisions:");
-        for decision in &report.open_decisions {
-            println!("  - {}: {}", decision.kind, decision.detail);
-        }
-    }
-}
-
-fn print_closeout_review_record(record: &CloseoutReviewRecord) {
-    println!("Offdesk closeout review");
-    println!("  reviewed_at:  {}", record.reviewed_at);
-    println!("  review_id:    {}", record.review_id);
-    println!("  closeout_id:  {}", record.closeout_id);
-    println!("  verdict:      {}", record.verdict.as_str());
-    println!(
-        "  acceptance:   {}",
-        record.closeout_receipt.acceptance_status
-    );
-    println!("  reviewer:     {}", record.reviewer);
-    if let Some(provider) = record.review_provider.as_deref() {
-        println!("  provider:     {provider}");
-    }
-    if let Some(resolution) = record.decision_resolution.as_ref() {
-        println!("  decision:     {}", resolution.kind);
-        println!("  resolution:   {}", resolution.decision);
-        println!("  reason:       {}", resolution.reason);
-    }
-    println!("  project file mutations: none");
-    println!("Artifacts:");
-    println!("  plan:         {}", record.artifacts.closeout_plan_json);
-    println!("  review:       {}", record.artifacts.review_record_json);
-    println!("  receipt:      {}", record.artifacts.closeout_receipt_json);
-    println!(
-        "  return:       {}",
-        record.artifacts.return_package_markdown
-    );
-    if !record.unsafe_operations.is_empty() {
-        println!("Unsafe operations:");
-        for operation in &record.unsafe_operations {
-            println!("  - {operation}");
-        }
-    }
-    if !record.missing_evidence.is_empty() {
-        println!("Missing evidence:");
-        for evidence in &record.missing_evidence {
-            println!("  - {evidence}");
-        }
-    }
 }
 
 fn truncate_closeout_text(value: &str, max_chars: usize) -> String {
@@ -7334,7 +8243,7 @@ fn build_maintenance_report(
     let tasks = OffdeskTaskStore::new(&profile_dir)
         .load()?
         .into_iter()
-        .map(|task| task.operator_view())
+        .map(|task| task.operator_view_with_profile(&profile_dir))
         .collect::<Vec<_>>();
     let task_summary = summarize_maintenance_tasks(&tasks);
 
@@ -7675,11 +8584,12 @@ fn write_debug_bundle_export(
             .filter(|parent| !parent.as_os_str().is_empty())
         {
             fs::create_dir_all(parent).with_context(|| {
-                format!("create debug bundle export directory {}", parent.display())
+                debug_bundle_export_error_context("create debug bundle export directory", parent)
             })?;
         }
-        let bytes_written = write_new_file(path, &bytes)
-            .with_context(|| format!("write debug bundle export {}", path.display()))?;
+        let bytes_written = write_new_file(path, &bytes).with_context(|| {
+            debug_bundle_export_error_context("write debug bundle export", path)
+        })?;
         return Ok(DebugBundleExport {
             path: path.clone(),
             bytes_written,
@@ -7688,10 +8598,7 @@ fn write_debug_bundle_export(
 
     let export_dir = read_only_profile_dir(profile)?.join("debug_bundles");
     fs::create_dir_all(&export_dir).with_context(|| {
-        format!(
-            "create debug bundle export directory {}",
-            export_dir.display()
-        )
+        debug_bundle_export_error_context("create debug bundle export directory", &export_dir)
     })?;
     let timestamp = bundle.generated_at.format("%Y%m%dT%H%M%SZ");
     for attempt in 0..1000 {
@@ -7710,15 +8617,19 @@ fn write_debug_bundle_export(
             }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(error) => {
-                return Err(error)
-                    .with_context(|| format!("write debug bundle export {}", path.display()));
+                return Err(error).with_context(|| {
+                    debug_bundle_export_error_context("write debug bundle export", &path)
+                });
             }
         }
     }
 
     bail!(
-        "could not allocate debug bundle export path in {}",
-        export_dir.display()
+        "{}",
+        debug_bundle_export_error_context(
+            "could not allocate debug bundle export path in",
+            &export_dir
+        )
     )
 }
 
@@ -7736,7 +8647,12 @@ fn operator_safe_json_value(value: Value) -> Value {
         }
         Value::Object(map) => Value::Object(
             map.into_iter()
-                .map(|(key, value)| (key, operator_safe_json_value(value)))
+                .map(|(key, value)| {
+                    (
+                        crate::offdesk::operator_safe_text(&key),
+                        operator_safe_json_value(value),
+                    )
+                })
                 .collect(),
         ),
         other => other,
@@ -7903,19 +8819,46 @@ fn find_wiki_candidate(
     store: &AdaptiveWikiStore,
     candidate_id: &str,
 ) -> Result<Option<AdaptiveWikiCandidate>> {
-    Ok(store
-        .load_candidates()?
-        .candidates
-        .into_iter()
-        .find(|candidate| candidate.id == candidate_id))
+    resolve_wiki_identity(
+        store.load_candidates()?.candidates,
+        candidate_id,
+        |candidate| candidate.id.as_str(),
+    )
 }
 
 fn find_wiki_entry(store: &AdaptiveWikiStore, entry_id: &str) -> Result<Option<AdaptiveWikiEntry>> {
-    Ok(store
-        .load_entries()?
-        .entries
-        .into_iter()
-        .find(|entry| entry.id == entry_id))
+    resolve_wiki_identity(store.load_entries()?.entries, entry_id, |entry| {
+        entry.id.as_str()
+    })
+}
+
+fn resolve_wiki_identity<T, F>(items: Vec<T>, selector: &str, identity: F) -> Result<Option<T>>
+where
+    F: Fn(&T) -> &str,
+{
+    let alias_count = items
+        .iter()
+        .filter(|item| operator_safe_identity(identity(item)) == selector)
+        .count();
+    ensure!(
+        alias_count <= 1,
+        "adaptive wiki public identity selector is ambiguous"
+    );
+    if alias_count == 1 {
+        return Ok(items
+            .into_iter()
+            .find(|item| operator_safe_identity(identity(item)) == selector));
+    }
+
+    let exact_count = items
+        .iter()
+        .filter(|item| identity(item) == selector)
+        .count();
+    ensure!(
+        exact_count <= 1,
+        "adaptive wiki identity selector is ambiguous"
+    );
+    Ok(items.into_iter().find(|item| identity(item) == selector))
 }
 
 fn human_entry(entry: AdaptiveWikiEntry) -> AdaptiveWikiHumanEntry {
@@ -7968,9 +8911,9 @@ fn wiki_audit_record(input: WikiAuditRecordInput<'_>) -> AdaptiveWikiAuditRecord
     AdaptiveWikiAuditRecord {
         id: format!("wiki_audit_{}", uuid::Uuid::new_v4()),
         action: input.action,
-        subject_id: crate::offdesk::operator_safe_text(input.subject_id),
-        candidate_id: input.candidate_id.map(crate::offdesk::operator_safe_text),
-        entry_id: input.entry_id.map(crate::offdesk::operator_safe_text),
+        subject_id: input.subject_id.trim().to_string(),
+        candidate_id: input.candidate_id.map(|value| value.trim().to_string()),
+        entry_id: input.entry_id.map(|value| value.trim().to_string()),
         actor: crate::offdesk::operator_safe_text(input.actor.trim()),
         reason: crate::offdesk::operator_safe_text(input.reason.trim()),
         evidence_ref: input
@@ -8043,435 +8986,6 @@ fn wiki_scope_label(scope: AdaptiveWikiScope, scope_ref: &str) -> String {
     format!("{:?}:{}", scope, scope_ref).to_lowercase()
 }
 
-fn print_approval_views(approvals: &[OffdeskPendingApprovalView]) {
-    println!(
-        "{:<44} {:<44} {:<10} {:<18} {:<24} ACTION",
-        "APPROVAL ID", "ACTION ID", "STATUS", "RISK", "TASK"
-    );
-    for approval_view in approvals {
-        let approval = &approval_view.approval;
-        println!(
-            "{:<44} {:<44} {:<10} {:<18} {:<24} {}",
-            approval.approval_id,
-            approval.action_id(),
-            format!("{:?}", approval.status).to_lowercase(),
-            format!("{:?}", approval.risk_level).to_lowercase(),
-            approval.task_id,
-            approval.action
-        );
-        if !approval.preview.trim().is_empty() {
-            println!("  preview: {}", approval.preview);
-        }
-        if !approval.reason.trim().is_empty() {
-            println!("  reason:  {}", approval.reason);
-        }
-        if let Some(brief) = approval
-            .metadata
-            .as_ref()
-            .and_then(crate::offdesk::ActionApprovalMetadata::approval_brief)
-        {
-            println!(
-                "  prompt: {} recommendation for {}",
-                brief.recommendation, brief.subject
-            );
-            for line in brief.summary_lines.iter().take(3) {
-                println!("    {}", line);
-            }
-            println!("  question: {}", brief.question);
-            println!("  scope: {}", brief.scope);
-        }
-        if let Some(metadata) = approval
-            .metadata
-            .as_ref()
-            .and_then(crate::offdesk::ActionApprovalMetadata::as_provider_fallback)
-        {
-            println!(
-                "  fallback target: {} model {} ({})",
-                metadata.current_provider_id,
-                metadata.current_model.as_deref().unwrap_or("-"),
-                format!("{:?}", metadata.apply_scope).to_lowercase()
-            );
-            for candidate in metadata.candidates.iter().take(metadata.candidate_limit) {
-                println!(
-                    "    - {} {} ({:?})",
-                    candidate.provider_id,
-                    candidate.model.as_deref().unwrap_or("-"),
-                    candidate.source
-                );
-            }
-        }
-        if let Some(metadata) = approval
-            .metadata
-            .as_ref()
-            .and_then(crate::offdesk::ActionApprovalMetadata::as_artifact_retention)
-        {
-            println!(
-                "  artifact: {} [{} / {}]",
-                metadata.label, metadata.retention_class, metadata.review_status
-            );
-            println!(
-                "  requested: {} recommended: {}",
-                metadata.requested_action, metadata.recommended_action
-            );
-        }
-        print_next_safe_action(&approval_view.next_safe_action);
-    }
-}
-
-fn print_tasks(tasks: &[OffdeskTaskView]) {
-    let open = tasks
-        .iter()
-        .filter(|task| !is_terminal_task_status(task.status))
-        .collect::<Vec<_>>();
-    let terminal = tasks
-        .iter()
-        .filter(|task| is_terminal_task_status(task.status))
-        .collect::<Vec<_>>();
-
-    if !open.is_empty() {
-        println!("Open tasks:");
-        print_task_rows(&open);
-    }
-    if !terminal.is_empty() {
-        if !open.is_empty() {
-            println!();
-        }
-        println!("Terminal tasks:");
-        print_task_rows(&terminal);
-    }
-}
-
-fn print_decisions(records: &[DecisionRecord]) {
-    println!(
-        "{:<28} {:<16} {:<10} {:<18} {:<10} {:<18} SUBJECT",
-        "DECISION", "STATUS", "MATERIAL", "EVAL", "TARGET", "TASK"
-    );
-    for record in records {
-        let evaluator = record
-            .judgment_route
-            .as_ref()
-            .map(|route| route.evaluator.as_str())
-            .unwrap_or("-");
-        let target = record
-            .route
-            .as_ref()
-            .map(|route| route.target.as_str())
-            .unwrap_or("-");
-        let subject = record
-            .approval_brief
-            .as_ref()
-            .map(|brief| brief.subject.as_str())
-            .unwrap_or(record.decision_request.kind.as_str());
-        println!(
-            "{:<28} {:<16} {:<10} {:<18} {:<10} {:<18} {}",
-            record.decision_id,
-            record.status.as_str(),
-            record.materiality.as_str(),
-            evaluator,
-            target,
-            record.task_id,
-            subject
-        );
-        if !record.decision_request.summary.trim().is_empty() {
-            println!("  summary: {}", record.decision_request.summary);
-        }
-        if let Some(judgment) = record.judgment_route.as_ref() {
-            println!(
-                "  judgment: {} ({})",
-                judgment.evaluator.as_str(),
-                judgment.reason
-            );
-        }
-        if let Some(route) = record.route.as_ref() {
-            println!("  route:   {} ({})", route.target.as_str(), route.reason);
-        }
-        let issue_count = record.validation_issues().len();
-        if issue_count > 0 {
-            println!("  validation_issues: {}", issue_count);
-        }
-    }
-}
-
-fn print_decision(record: &DecisionRecord) {
-    println!("decision: {}", record.decision_id);
-    println!("status:   {}", record.status.as_str());
-    println!("material: {}", record.materiality.as_str());
-    println!("project:  {}", record.project_key);
-    println!("request:  {}", record.request_id);
-    println!("task:     {}", record.task_id);
-    println!("raised:   {}", record.raised_by.as_str());
-    println!("source:   {}", record.source_surface);
-    println!("updated:  {}", record.updated_at);
-    println!();
-    println!("Decision request:");
-    println!("  kind:     {}", record.decision_request.kind);
-    println!("  summary:  {}", record.decision_request.summary);
-    println!("  needed:   {}", record.decision_request.decision_needed);
-    println!("  scope:    {}", record.decision_request.current_scope);
-    if !record.decision_request.non_authorized_scope.is_empty() {
-        println!(
-            "  not authorized: {}",
-            record.decision_request.non_authorized_scope.join(", ")
-        );
-    }
-    if let Some(council) = record.council_review.as_ref() {
-        println!();
-        println!("Council:");
-        println!("  recommendation: {}", council.recommendation);
-        if let Some(agreement) = council.agreement {
-            println!("  agreement:      {}", agreement);
-        }
-        if !council.reviewer_decisions.is_empty() {
-            println!("  reviewers:");
-            for (reviewer, decision) in &council.reviewer_decisions {
-                println!("    - {}: {}", reviewer, decision);
-            }
-        }
-    }
-    if let Some(judgment) = record.judgment_route.as_ref() {
-        println!();
-        println!("Judgment route:");
-        println!("  evaluator: {}", judgment.evaluator.as_str());
-        println!("  reason:    {}", judgment.reason);
-        println!(
-            "  selected:  {} by {}",
-            judgment.selected_at, judgment.selected_by
-        );
-        if let Some(default) = judgment.default_if_no_reply.as_deref() {
-            println!("  default:   {}", default);
-        }
-        if !judgment.policy_basis.is_empty() {
-            println!("  policy:");
-            for basis in &judgment.policy_basis {
-                println!("    - {}", basis);
-            }
-        }
-    }
-    if let Some(route) = record.route.as_ref() {
-        println!();
-        println!("Delivery route:");
-        println!("  target:  {}", route.target.as_str());
-        println!("  reason:  {}", route.reason);
-        if let Some(default) = route.default_if_no_reply.as_deref() {
-            println!("  default: {}", default);
-        }
-    }
-    if let Some(brief) = record.approval_brief.as_ref() {
-        println!();
-        println!("Approval brief:");
-        println!("  recommendation: {}", brief.recommendation);
-        println!("  subject:        {}", brief.subject);
-        println!("  question:       {}", brief.question);
-        println!("  scope:          {}", brief.scope);
-    }
-    if let Some(handoff) = record.execution_handoff.as_ref() {
-        println!();
-        println!("Execution handoff:");
-        println!("  handoff_id: {}", handoff.handoff_id);
-        println!("  target:     {}", handoff.target);
-        println!("  direction:  {}", handoff.approved_direction);
-        println!("  scope:      {}", handoff.approved_scope);
-    }
-    if let Some(receipt) = record.decision_receipt.as_ref() {
-        println!();
-        println!("Decision receipt:");
-        println!("  receipt_id: {}", receipt.receipt_id);
-        println!("  decision:   {}", receipt.final_decision);
-        println!(
-            "  resolved:   {} by {}",
-            receipt.resolved_at, receipt.resolved_by
-        );
-        println!("  result:     {}", receipt.result_status);
-    }
-    let validation_issues = record.validation_issues();
-    if !validation_issues.is_empty() {
-        println!();
-        println!("Validation issues:");
-        for issue in validation_issues {
-            println!(
-                "  - {:?}: {} ({})",
-                issue.severity, issue.code, issue.detail
-            );
-        }
-    }
-}
-
-fn print_task_rows(tasks: &[&OffdeskTaskView]) {
-    println!(
-        "{:<24} {:<18} {:<18} {:<14} TICKET",
-        "TASK", "STATUS", "CAPABILITY", "RUNNER"
-    );
-    for task in tasks {
-        println!(
-            "{:<24} {:<18} {:<18} {:<14} {}",
-            task.task_id,
-            task_status_label(task.status),
-            task.capability_id,
-            format!("{:?}", task.runner_kind).to_lowercase(),
-            task.background_ticket_id.as_deref().unwrap_or("-")
-        );
-        if !task.preview.trim().is_empty() {
-            println!("  preview: {}", task.preview);
-        }
-        if let Some(last_error) = task.last_error.as_deref() {
-            println!("  error:   {}", last_error);
-        }
-        if !task.last_adaptive_wiki_entry_ids.is_empty() {
-            println!(
-                "  adaptive_wiki: {}",
-                task.last_adaptive_wiki_entry_ids.join(", ")
-            );
-        }
-        if let Some(agent_mode) = task.agent_mode {
-            println!(
-                "  agent_mode: {}",
-                adaptive_wiki_agent_mode_cli_value(agent_mode)
-            );
-        }
-        print_mode_assessment(&task.mode_assessment);
-        if task.provider_id.is_some() || task.model.is_some() {
-            println!(
-                "  provider: {} model: {}",
-                task.provider_id.as_deref().unwrap_or("-"),
-                task.model.as_deref().unwrap_or("-")
-            );
-        }
-        if let Some(artifact_kind) = task.artifact_kind.as_deref() {
-            println!("  artifact_kind: {}", artifact_kind);
-        }
-        if let Some(fallback) = task.last_provider_fallback.as_ref() {
-            let recommended = fallback
-                .candidates
-                .iter()
-                .filter(|candidate| candidate.recommended)
-                .count();
-            println!(
-                "  fallback: {} candidates, {} recommended",
-                fallback.candidates.len(),
-                recommended
-            );
-            for candidate in fallback
-                .candidates
-                .iter()
-                .filter(|candidate| candidate.recommended)
-                .take(3)
-            {
-                println!(
-                    "    - {} {} ({:?})",
-                    candidate.provider_id,
-                    candidate.model.as_deref().unwrap_or("-"),
-                    candidate.source
-                );
-            }
-        }
-        if let Some(not_before) = task.not_before {
-            println!("  not_before: {not_before}");
-        }
-        if let Some(last_gate_status) = task.last_gate_status {
-            println!(
-                "  gate:    {}",
-                format!("{:?}", last_gate_status).to_lowercase()
-            );
-        }
-        print_next_safe_action(&task.next_safe_action);
-    }
-}
-
-fn print_next_safe_actions(actions: &[OffdeskNextSafeAction]) {
-    if actions.is_empty() {
-        return;
-    }
-    println!("Next safe actions:");
-    for action in actions {
-        print_next_safe_action(action);
-    }
-}
-
-fn print_next_safe_action(action: &OffdeskNextSafeAction) {
-    println!("  next:    {}", action.detail);
-    if !action.commands.is_empty() {
-        println!("  command: {}", action.commands.join(" | "));
-    }
-    if action.requires_operator_review {
-        println!("  review:  operator review required");
-    }
-}
-
-fn print_mode_assessment(assessment: &OffdeskModeAssessment) {
-    println!(
-        "  mode_verdict: {} risk: {}",
-        assessment.mode_verdict.label(),
-        assessment.mode_risk.label()
-    );
-    println!("  mode_risk_detail: {}", assessment.mode_risk_detail);
-    if assessment.review_stage_required {
-        println!("  review_stage_required: true");
-    }
-}
-
-fn print_provider_fallback(recommendation: &ProviderFallbackRecommendation) {
-    println!(
-        "Provider fallback for {} model {}",
-        recommendation.current_provider_id,
-        recommendation.current_model.as_deref().unwrap_or("-")
-    );
-    println!("  trigger: {}", recommendation.trigger_reason);
-    if recommendation.candidates.is_empty() {
-        println!("  no fallback candidates found");
-        return;
-    }
-    println!(
-        "{:<20} {:<28} {:<30} {:<14} {:<14} RECOMMENDED",
-        "PROVIDER", "MODEL", "SOURCE", "AUTH", "CAPACITY"
-    );
-    for candidate in &recommendation.candidates {
-        println!(
-            "{:<20} {:<28} {:<30} {:<14} {:<14} {}",
-            candidate.provider_id,
-            candidate.model.as_deref().unwrap_or("-"),
-            format!("{:?}", candidate.source).to_lowercase(),
-            format!("{:?}", candidate.auth_status).to_lowercase(),
-            format!("{:?}", candidate.capacity_status).to_lowercase(),
-            if candidate.recommended { "yes" } else { "no" }
-        );
-        println!("  reason: {}", candidate.reason);
-    }
-}
-
-fn print_provider_capacity(states: &[ProviderCapacityState]) {
-    println!(
-        "{:<20} {:<24} {:<14} {:<16} COOLDOWN_UNTIL",
-        "PROVIDER", "MODEL", "STATUS", "REASON"
-    );
-    for state in states {
-        println!(
-            "{:<20} {:<24} {:<14} {:<16} {}",
-            crate::offdesk::operator_safe_text(&state.provider_id),
-            state
-                .model
-                .as_deref()
-                .map(crate::offdesk::operator_safe_text)
-                .unwrap_or_else(|| "-".to_string()),
-            format!("{:?}", state.status).to_lowercase(),
-            format!("{:?}", state.reason).to_lowercase(),
-            state
-                .cooldown_until
-                .map(|cooldown_until| cooldown_until.to_string())
-                .unwrap_or_else(|| "-".to_string())
-        );
-        if let Some(summary) = state.last_error_summary.as_deref() {
-            println!("  summary: {}", crate::offdesk::operator_safe_text(summary));
-        }
-    }
-}
-
-fn is_terminal_task_status(status: OffdeskTaskStatus) -> bool {
-    matches!(
-        status,
-        OffdeskTaskStatus::Completed | OffdeskTaskStatus::Cancelled
-    )
-}
-
 fn parse_offdesk_task_status(value: &str) -> std::result::Result<OffdeskTaskStatus, String> {
     match value.trim().to_ascii_lowercase().replace('_', "-").as_str() {
         "queued" => Ok(OffdeskTaskStatus::Queued),
@@ -8483,301 +8997,5 @@ fn parse_offdesk_task_status(value: &str) -> std::result::Result<OffdeskTaskStat
         "resume-pending" => Ok(OffdeskTaskStatus::ResumePending),
         "cancelled" => Ok(OffdeskTaskStatus::Cancelled),
         _ => Err("expected one of: queued, pending-approval, launched, running, completed, failed, resume-pending, cancelled".to_string()),
-    }
-}
-
-fn print_capabilities(capabilities: &[CapabilityDescriptor]) {
-    println!(
-        "{:<24} {:<20} {:<18} {:<8} LABEL",
-        "CAPABILITY", "OWNER", "RISK", "OFFDESK"
-    );
-    for capability in capabilities {
-        println!(
-            "{:<24} {:<20} {:<18} {:<8} {}",
-            capability.capability_id,
-            capability.owner_module,
-            format!("{:?}", capability.risk_level).to_lowercase(),
-            if capability.offdesk_allowed {
-                "yes"
-            } else {
-                "no"
-            },
-            capability.dashboard_label
-        );
-    }
-}
-
-fn print_debug_bundle_summary(bundle: &OffdeskDebugBundle) {
-    println!("Offdesk debug bundle");
-    println!("  generated_at:       {}", bundle.generated_at);
-    println!("  profile:            {}", bundle.profile);
-    println!("  profile_dir:        {}", bundle.profile_dir);
-    println!("  read_only:          {}", bundle.read_only);
-    println!(
-        "  approvals:          {}",
-        json_array_len(&bundle.approvals)
-    );
-    println!("  tasks:              {}", json_array_len(&bundle.tasks));
-    println!(
-        "  resume_states:      {}",
-        json_array_len(&bundle.resume_states)
-    );
-    println!(
-        "  background_runs:    {}",
-        json_array_len(&bundle.background_runs)
-    );
-    println!(
-        "  provider_capacity:  {}",
-        json_array_len(&bundle.provider_capacity)
-    );
-    println!(
-        "  wiki_usage:         {}",
-        json_array_len(&bundle.adaptive_wiki_usage)
-    );
-    println!(
-        "  wiki_corrections:   {}",
-        json_array_len(&bundle.adaptive_wiki_corrections)
-    );
-    println!(
-        "  wiki_review_events: {}",
-        json_array_len(&bundle.adaptive_wiki_review_events)
-    );
-    println!(
-        "  wiki_runtime_acks:  {}",
-        json_array_len(&bundle.adaptive_wiki_runtime_policy_acknowledgements)
-    );
-    println!(
-        "  wiki_ack_attention: expired={} near_expiry={} suggested_actions={}",
-        bundle
-            .adaptive_wiki_runtime_policy_ack_attention_summary
-            .expired,
-        bundle
-            .adaptive_wiki_runtime_policy_ack_attention_summary
-            .near_expiry,
-        bundle
-            .adaptive_wiki_runtime_policy_ack_attention_summary
-            .suggested_actions
-    );
-    println!(
-        "  wiki_review_after:  expired={} near_expiry={} missing_review_after={}",
-        bundle.adaptive_wiki_review_after_attention_summary.expired,
-        bundle
-            .adaptive_wiki_review_after_attention_summary
-            .near_expiry,
-        bundle
-            .adaptive_wiki_review_after_attention_summary
-            .missing_review_after
-    );
-    println!(
-        "  redaction:          {} changed fields, {} context blocks, {} secrets",
-        bundle.redaction_summary.changed_text_fields,
-        bundle.redaction_summary.runner_context_removed,
-        bundle.redaction_summary.secrets_redacted
-    );
-}
-
-fn print_maintenance_report(report: &OffdeskMaintenanceReport) {
-    println!("Offdesk maintenance report");
-    println!("  generated_at:       {}", report.generated_at);
-    println!("  profile:            {}", report.profile);
-    println!("  profile_dir:        {}", report.profile_dir);
-    println!("  read_only:          {}", report.read_only);
-    println!(
-        "  tasks:              total={} status=[{}] risk=[{}]",
-        report.tasks.total,
-        format_counts(&report.tasks.by_status),
-        format_counts(&report.tasks.mode.by_risk)
-    );
-    println!(
-        "  task_modes:         agent=[{}] review_required={}",
-        format_counts(&report.tasks.by_agent_mode),
-        report.tasks.mode.review_stage_required
-    );
-    println!(
-        "  background_runs:    total={} phase=[{}] risk=[{}]",
-        report.background_runs.total,
-        format_counts(&report.background_runs.by_phase),
-        format_counts(&report.background_runs.mode.by_risk)
-    );
-    println!(
-        "  approvals:          total={} pending={} status=[{}]",
-        report.approvals.total,
-        report.approvals.pending,
-        format_counts(&report.approvals.by_status)
-    );
-    println!(
-        "  resume_states:      total={} status=[{}]",
-        report.resume_states.total,
-        format_counts(&report.resume_states.by_status)
-    );
-    println!(
-        "  provider_capacity:  total={} attention={} status=[{}]",
-        report.provider_capacity.total,
-        report.provider_capacity.attention,
-        format_counts(&report.provider_capacity.by_status)
-    );
-    println!(
-        "  wiki_ack_attention: expired={} near_expiry={} suggested_actions={}",
-        report
-            .adaptive_wiki_runtime_policy_ack_attention_summary
-            .expired,
-        report
-            .adaptive_wiki_runtime_policy_ack_attention_summary
-            .near_expiry,
-        report
-            .adaptive_wiki_runtime_policy_ack_attention_summary
-            .suggested_actions
-    );
-    println!(
-        "  wiki_review_after:  expired={} near_expiry={} missing_review_after={}",
-        report.adaptive_wiki_review_after_attention_summary.expired,
-        report
-            .adaptive_wiki_review_after_attention_summary
-            .near_expiry,
-        report
-            .adaptive_wiki_review_after_attention_summary
-            .missing_review_after
-    );
-    if report.recommended_actions.is_empty() {
-        println!("No maintenance actions recommended.");
-    } else {
-        println!("Recommended actions:");
-        for action in &report.recommended_actions {
-            println!("  - {}: {}", action.kind, action.detail);
-            println!("    command: {}", action.command);
-        }
-    }
-    print_next_safe_actions(&report.next_safe_actions);
-}
-
-fn print_maintenance_request_report(report: &MaintenanceApprovalRequestReport) {
-    println!("Offdesk maintenance approval request");
-    println!("  generated_at: {}", report.generated_at);
-    println!("  action:       {}", report.action);
-    println!("  kind:         {}", report.action_kind.cli_value());
-    println!("  risk:         {}", enum_label(report.risk_level));
-    println!("  status:       {}", report.status);
-    println!("  detail:       {}", report.detail);
-    println!("  project_key:  {}", report.project_key);
-    println!("  request_id:   {}", report.request_id);
-    println!("  task_id:      {}", report.task_id);
-    if let Some(target_id) = &report.target_id {
-        println!("  target_id:    {}", target_id);
-    }
-    if let Some(approval) = &report.approval {
-        if let Some(approval_id) = approval["approval_id"].as_str() {
-            println!("  approval_id:  {}", approval_id);
-        }
-    }
-    if !report.next_commands.is_empty() {
-        println!("Next commands:");
-        for command in &report.next_commands {
-            println!("  - {}", command);
-        }
-    }
-}
-
-fn format_counts(counts: &BTreeMap<String, usize>) -> String {
-    if counts.is_empty() {
-        return "-".to_string();
-    }
-    counts
-        .iter()
-        .map(|(key, value)| format!("{key}={value}"))
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-fn json_array_len(value: &Value) -> usize {
-    value.as_array().map_or(0, Vec::len)
-}
-
-fn snapshot_list_item(
-    snapshot: MutationSnapshot,
-    verification: MutationSnapshotVerification,
-) -> MutationSnapshotListItem {
-    MutationSnapshotListItem {
-        mutation_id: snapshot.mutation_id,
-        target_path: snapshot.target_path,
-        mutation_kind: snapshot.mutation_kind,
-        created_at: snapshot.created_at,
-        rollback_available: verification.rollback_available,
-        blockers: verification.blockers,
-    }
-}
-
-fn print_snapshot_list(items: &[MutationSnapshotListItem]) {
-    println!(
-        "{:<44} {:<14} {:<9} TARGET",
-        "MUTATION ID", "KIND", "ROLLBACK"
-    );
-    for item in items {
-        println!(
-            "{:<44} {:<14} {:<9} {}",
-            item.mutation_id,
-            item.mutation_kind,
-            if item.rollback_available { "yes" } else { "no" },
-            item.target_path
-        );
-        if !item.blockers.is_empty() {
-            println!("  blockers: {}", item.blockers.join("; "));
-        }
-    }
-}
-
-fn print_snapshot_verification(verification: &MutationSnapshotVerification) {
-    let Some(snapshot) = verification.snapshot.as_ref() else {
-        println!("Mutation snapshot not found: {}", verification.mutation_id);
-        return;
-    };
-    println!("Snapshot {}", snapshot.mutation_id);
-    println!("  target:              {}", snapshot.target_path);
-    println!("  mutation_kind:       {}", snapshot.mutation_kind);
-    println!("  rollback_available:  {}", verification.rollback_available);
-    println!(
-        "  target_exists_now:   {}",
-        verification
-            .target_exists_now
-            .map(|exists| exists.to_string())
-            .unwrap_or_else(|| "-".to_string())
-    );
-    println!(
-        "  target_matches_before: {}",
-        verification
-            .target_current_matches_before
-            .map(|matches| matches.to_string())
-            .unwrap_or_else(|| "-".to_string())
-    );
-    if let Some(path) = verification.before_snapshot_path.as_deref() {
-        println!("  before_snapshot:     {path}");
-    }
-    if !verification.blockers.is_empty() {
-        println!(
-            "  blockers:            {}",
-            verification.blockers.join("; ")
-        );
-    }
-}
-
-fn print_restore_plan(plan: &MutationRestorePlan) {
-    println!("Restore plan {}", plan.mutation_id);
-    println!("  target:             {}", plan.target_path);
-    println!("  operation:          {:?}", plan.operation);
-    println!("  rollback_available: {}", plan.rollback_available);
-    match plan.operation {
-        MutationRestoreOperation::RestoreFile => {
-            if let Some(path) = plan.before_snapshot_path.as_deref() {
-                println!("  source:             {path}");
-            } else {
-                println!("  source:             empty file");
-            }
-        }
-        MutationRestoreOperation::DeleteFile => {
-            println!("  source:             target did not exist before mutation");
-        }
-        MutationRestoreOperation::Unavailable => {}
-    }
-    if !plan.blockers.is_empty() {
-        println!("  blockers:           {}", plan.blockers.join("; "));
     }
 }

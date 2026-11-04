@@ -1,0 +1,65 @@
+{
+  "schema": "document_lifecycle_event.v1",
+  "payload": {
+    "sequence": 1,
+    "event_id": "document_event_11111111-1111-4111-8111-111111111111",
+    "event_kind": "mint_document",
+    "recorded_at": "2026-08-20T00:10:00Z",
+    "previous_event_sha256": null,
+    "project_key": "phase2a-project",
+    "root_id": "root_phase2a",
+    "root_path_identity_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "root_instance_identity_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "document_id": "document_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "expected_document_head_event_id": null,
+    "observation": {
+      "observation_id": "doc_observation_971af5ef9b50147546a37d09",
+      "relative_path": "docs/report.md",
+      "size_bytes": 123,
+      "modified_at": "2026-08-20T00:00:00Z",
+      "content_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "before": null,
+    "after": {
+      "activity_state": "active",
+      "retention_disposition": "unclassified",
+      "successor_document_id": null,
+      "active_owner_document_id": null,
+      "summary_document_id": null,
+      "review_after": null
+    },
+    "proposal_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "approval_source": {
+      "schema": "document_lifecycle_approval_source.v1",
+      "approval_id": "approval_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "action_id": "action_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "scope": "once",
+      "project_key": "phase2a-project",
+      "request_id": "request_phase2a",
+      "task_id": "task_phase2a",
+      "action": "document.lifecycle.transition",
+      "risk_level": "canonical_mutation",
+      "approval_mode": "operator_required",
+      "created_at": "2026-08-20T00:00:00Z",
+      "expires_at": "2026-08-20T01:00:00Z",
+      "status": "approved",
+      "resolved_at": "2026-08-20T00:05:00Z",
+      "resolved_by": "telegram:owner",
+      "source_surface": "telegram",
+      "preview_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "reason_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "metadata_schema": "document_lifecycle_approval_metadata.v1",
+      "metadata_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "proposal_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "target_identity": {
+        "kind": "mint",
+        "observation_id": "doc_observation_971af5ef9b50147546a37d09"
+      }
+    },
+    "approval_source_sha256": "a844bc9d7187a5a13f07e28e2171cb4694dce11b5fd43c17d5f52dd587711772",
+    "reason": "Establish the reviewed current report.",
+    "idempotency_key": "lifecycle_apply_one"
+  },
+  "payload_sha256": "2997425e3ed2b0a8c0f269e102a9e7ea654c2fe5ab6a18fe7fe8b78c3f8250ca",
+  "event_sha256": "80805aeaa6215671158ac3e41ebb2a2e7fb0410c2ab90382d434f3237cf4555c"
+}

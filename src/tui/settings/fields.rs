@@ -11,6 +11,7 @@ use super::SettingsScope;
 /// Categories of settings
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsCategory {
+    Night,
     General,
     Updates,
     Worktree,
@@ -26,6 +27,7 @@ pub enum SettingsCategory {
 impl SettingsCategory {
     pub fn label(&self) -> &'static str {
         match self {
+            Self::Night => "Night review",
             Self::General => "General",
             Self::Updates => "Updates",
             Self::Worktree => "Worktree",
@@ -43,6 +45,8 @@ impl SettingsCategory {
 /// Type-safe field identifiers (prevents typos in string matching)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldKey {
+    NightProjects,
+    NightApprovalTtl,
     // General
     DefaultProfile,
     // Updates
@@ -187,6 +191,21 @@ pub struct SettingField {
 impl SettingField {
     pub fn validate(&self) -> Result<(), String> {
         match (&self.key, &self.value) {
+            (FieldKey::NightApprovalTtl, FieldValue::Number(n)) if !(1..=1440).contains(n) => {
+                Err("Approval TTL must be between 1 and 1440 minutes".to_string())
+            }
+            (FieldKey::NightProjects, FieldValue::List(keys)) => {
+                let unique: std::collections::HashSet<_> = keys.iter().collect();
+                if keys
+                    .iter()
+                    .any(|key| key.trim().is_empty() || key != key.trim())
+                    || unique.len() != keys.len()
+                {
+                    Err("Project keys must be nonempty, trimmed and unique".to_string())
+                } else {
+                    Ok(())
+                }
+            }
             (FieldKey::CheckIntervalHours, FieldValue::Number(n)) => {
                 validate_check_interval(*n)?;
                 Ok(())
@@ -227,6 +246,7 @@ pub fn build_fields_for_category(
     profile: &ProfileConfig,
 ) -> Vec<SettingField> {
     match category {
+        SettingsCategory::Night => build_night_fields(scope, global, profile),
         SettingsCategory::General => build_general_fields(global),
         SettingsCategory::Updates => build_updates_fields(scope, global, profile),
         SettingsCategory::Worktree => build_worktree_fields(scope, global, profile),
@@ -238,6 +258,28 @@ pub fn build_fields_for_category(
         SettingsCategory::Sound => build_sound_fields(scope, global, profile),
         SettingsCategory::Hooks => build_hooks_fields(scope, global, profile),
     }
+}
+
+fn build_night_fields(
+    scope: SettingsScope,
+    global: &Config,
+    profile: &ProfileConfig,
+) -> Vec<SettingField> {
+    let night = profile.night.as_ref();
+    let (keys, keys_override) = resolve_value(
+        scope,
+        global.night.project_keys.clone(),
+        night.and_then(|n| n.project_keys.clone()),
+    );
+    let (ttl, ttl_override) = resolve_value(
+        scope,
+        global.night.approval_ttl_minutes,
+        night.and_then(|n| n.approval_ttl_minutes),
+    );
+    vec![
+        SettingField { key: FieldKey::NightProjects, label: "Review project scope", description: "Exact registered project keys for night review; empty requires one-run selection. Saving never schedules work.", value: FieldValue::List(keys), category: SettingsCategory::Night, has_override: keys_override },
+        SettingField { key: FieldKey::NightApprovalTtl, label: "Arm request TTL (minutes)", description: "Validity of a newly requested shift-arm approval, 1 to 1440 minutes. Does not change the shift window or approve task dispatch.", value: FieldValue::Number(ttl), category: SettingsCategory::Night, has_override: ttl_override },
+    ]
 }
 
 fn build_general_fields(global: &Config) -> Vec<SettingField> {
@@ -793,6 +835,10 @@ pub fn apply_field_to_config(
 
 fn apply_field_to_global(field: &SettingField, config: &mut Config) {
     match (&field.key, &field.value) {
+        (FieldKey::NightProjects, FieldValue::List(v)) => config.night.project_keys = v.clone(),
+        (FieldKey::NightApprovalTtl, FieldValue::Number(v)) => {
+            config.night.approval_ttl_minutes = *v
+        }
         // General
         (FieldKey::DefaultProfile, FieldValue::Select { selected, options }) => {
             if let Some(profile) = options.get(*selected) {
@@ -892,6 +938,18 @@ fn apply_field_to_global(field: &SettingField, config: &mut Config) {
 /// If the value matches the global config, the override is cleared instead of set.
 fn apply_field_to_profile(field: &SettingField, global: &Config, config: &mut ProfileConfig) {
     match (&field.key, &field.value) {
+        (FieldKey::NightProjects, FieldValue::List(v)) => set_or_clear_override(
+            v.clone(),
+            &global.night.project_keys,
+            &mut config.night,
+            |s, val| s.project_keys = val,
+        ),
+        (FieldKey::NightApprovalTtl, FieldValue::Number(v)) => set_or_clear_override(
+            *v,
+            &global.night.approval_ttl_minutes,
+            &mut config.night,
+            |s, val| s.approval_ttl_minutes = val,
+        ),
         // Updates
         (FieldKey::CheckEnabled, FieldValue::Bool(v)) => {
             set_or_clear_override(
@@ -1488,5 +1546,71 @@ mod tests {
         assert!(effective.session.default_tool.is_none());
         assert!(effective.diff.default_branch.is_none());
         assert!(effective.claude.config_dir.is_none());
+    }
+}
+
+#[cfg(test)]
+mod night_tests {
+    use super::*;
+
+    #[test]
+    fn night_fields_roundtrip_merge_and_inert_empty_scope() {
+        let mut global = Config::default();
+        let mut profile = ProfileConfig::default();
+        let mut fields = build_fields_for_category(
+            SettingsCategory::Night,
+            SettingsScope::Global,
+            &global,
+            &profile,
+        );
+        assert_eq!(fields.len(), 2);
+        assert!(global.night.project_keys.is_empty());
+        fields[0].value = FieldValue::List(vec!["first".into(), "second".into()]);
+        fields[1].value = FieldValue::Number(20);
+        for field in &fields {
+            assert!(field.validate().is_ok());
+            apply_field_to_global(field, &mut global);
+        }
+        fields[0].value = FieldValue::List(Vec::new());
+        fields[1].value = FieldValue::Number(10);
+        for field in &fields {
+            apply_field_to_profile(field, &global, &mut profile);
+        }
+        assert!(crate::session::profile_config::profile_has_overrides(
+            &profile
+        ));
+        let profile: ProfileConfig = toml::from_str(&toml::to_string(&profile).unwrap()).unwrap();
+        let effective = crate::session::merge_configs(global.clone(), &profile);
+        assert!(effective.night.project_keys.is_empty());
+        assert_eq!(effective.night.approval_ttl_minutes, 10);
+        for field in build_fields_for_category(
+            SettingsCategory::Night,
+            SettingsScope::Profile,
+            &global,
+            &profile,
+        ) {
+            assert!(field.has_override);
+        }
+        for field in build_fields_for_category(
+            SettingsCategory::Night,
+            SettingsScope::Global,
+            &global,
+            &profile,
+        ) {
+            assert!(!field.has_override);
+        }
+        fields[0].value = FieldValue::List(vec!["duplicate".into(), "duplicate".into()]);
+        assert!(fields[0].validate().is_err());
+        fields[1].value = FieldValue::Number(0);
+        assert!(fields[1].validate().is_err());
+        fields[1].value = FieldValue::Number(1441);
+        assert!(fields[1].validate().is_err());
+        assert_eq!(
+            toml::from_str::<Config>("")
+                .unwrap()
+                .night
+                .approval_ttl_minutes,
+            30
+        );
     }
 }

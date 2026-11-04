@@ -13,9 +13,11 @@ pub enum PreviewKind {
 
 pub struct PreviewRequest {
     pub instance: Instance,
+    pub profile: String,
     pub kind: PreviewKind,
     pub width: u16,
     pub height: u16,
+    pub refresh_wiki_context: bool,
 }
 
 #[derive(Debug)]
@@ -25,6 +27,7 @@ pub struct PreviewUpdate {
     pub content: String,
     pub dimensions: (u16, u16),
     pub terminal_running: bool,
+    pub wiki_context_summary: Option<String>,
 }
 
 pub struct PreviewPoller {
@@ -72,6 +75,12 @@ impl Default for PreviewPoller {
 fn capture_preview(request: PreviewRequest) -> PreviewUpdate {
     let session_id = request.instance.id.clone();
     let dimensions = (request.width, request.height);
+    let wiki_context_summary = request.refresh_wiki_context.then(|| {
+        crate::cli::session::wiki_context::context_summary_for_tui(
+            &request.profile,
+            &request.instance,
+        )
+    });
 
     let (content, terminal_running) = match request.kind {
         PreviewKind::Agent => (
@@ -98,5 +107,6 @@ fn capture_preview(request: PreviewRequest) -> PreviewUpdate {
         content,
         dimensions,
         terminal_running,
+        wiki_context_summary,
     }
 }

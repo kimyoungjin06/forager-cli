@@ -42,6 +42,17 @@ pub struct ProfileConfig {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sound: Option<crate::sound::SoundConfigOverride>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub night: Option<NightConfigOverride>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct NightConfigOverride {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_keys: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval_ttl_minutes: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -182,6 +193,7 @@ pub fn profile_has_overrides(config: &ProfileConfig) -> bool {
         || config.diff.is_some()
         || config.hooks.is_some()
         || config.sound.is_some()
+        || config.night.is_some()
 }
 
 /// Load effective config for a profile (global + profile overrides merged)
@@ -338,6 +350,15 @@ pub fn merge_configs(mut global: Config, profile: &ProfileConfig) -> Config {
 
     if let Some(ref sound_override) = profile.sound {
         crate::sound::apply_sound_overrides(&mut global.sound, sound_override);
+    }
+
+    if let Some(ref night) = profile.night {
+        if let Some(ref keys) = night.project_keys {
+            global.night.project_keys = keys.clone();
+        }
+        if let Some(ttl) = night.approval_ttl_minutes {
+            global.night.approval_ttl_minutes = ttl;
+        }
     }
 
     global

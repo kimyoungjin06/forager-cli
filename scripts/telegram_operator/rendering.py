@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
+import hashlib
 import html
+import json
 import re
 from typing import Any
 
-from .routing import BUTTON_COMMAND_ALIASES, COMMAND_SURFACE, CORE_BUTTON_LABELS
+from .routing import BUTTON_COMMAND_ALIASES, COMMAND_SURFACE
 
 
 MOBILE_CARD_CONTRACT_SCHEMA = "telegram_mobile_card_contract.v1"
 CHOICE_SURFACE_CONTRACT_SCHEMA = "telegram_choice_surface_contract.v1"
 REMOTE_PLAN_SESSION_CONTEXT_KIND = "remote_plan_project_selection"
 REMOTE_PLAN_INIT_CONTEXT_KIND = "remote_plan_init_review"
+DECISION_CHOICE_COMMAND_RE = re.compile(
+    r"^/decision ([A-Za-z0-9._-]{1,40}) (continue|stop|deny|defer)$"
+)
 MOBILE_CARD_MAX_LINES = 5
 MOBILE_CARD_MAX_CHARS = 360
 # The /guide reference sheet is deliberately not a glanceable card: it is the
@@ -37,6 +42,66 @@ MOBILE_CARD_FORBIDDEN_TERMS = (
     "launch-prep",
     "runtime_handle_alive",
 )
+
+
+def plan_context_choice_labels(context: dict[str, Any]) -> list[str]:
+    labels = context.get("choice_labels")
+    values = (
+        [str(label or "").strip() for label in labels]
+        if isinstance(labels, list)
+        else []
+    )
+    if str(context.get("context_kind") or "") == REMOTE_PLAN_SESSION_CONTEXT_KIND:
+        values.extend(["다시 스캔", "보류"])
+    result: list[str] = []
+    for label in values:
+        if label and label not in result:
+            result.append(label)
+    return result
+
+
+def plan_context_identity(context: dict[str, Any]) -> str:
+    """Bind a Plan card to one session, workflow stage, and choice set."""
+
+    payload = {
+        "context_kind": str(context.get("context_kind") or ""),
+        "session_id": str(context.get("focus_ref") or ""),
+        "workflow_stage": str(context.get("workflow_stage") or ""),
+        "choice_labels": plan_context_choice_labels(context),
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:16]
+
+
+def plan_session_callback_id(session_id: Any) -> str:
+    """Return a bounded, non-semantic identifier for one Plan session."""
+
+    return hashlib.sha256(str(session_id or "").encode("utf-8")).hexdigest()[:8]
+
+
+def plan_choice_display_label(label: Any) -> str:
+    """Hide integrity tokens that are carried by the Plan action itself."""
+
+    value = str(label or "").strip()
+    match = re.fullmatch(
+        r"(계획 승인|수정 요청|계획 거절|게이트 승인|게이트 거절) [0-9a-f]{16}",
+        value,
+    )
+    return match.group(1) if match else value
+
+
+def decision_choice_button(command: Any) -> dict[str, str] | None:
+    """Translate one bounded decision command into a message-local action."""
+
+    match = DECISION_CHOICE_COMMAND_RE.fullmatch(str(command or "").strip())
+    if not match:
+        return None
+    decision_id, action = match.groups()
+    return {
+        "text": action,
+        "callback_data": f"fg1:v:{decision_id}:{action}",
+    }
 
 
 def sanitize_text(text: str, *, max_chars: int = 1200) -> str:
@@ -433,94 +498,70 @@ def mobile_card_contract(
     }
 
 
-def choice_keyboard(context: dict[str, Any] | None = None) -> dict[str, Any]:
-    rows: list[list[str]] = []
-    seen: set[str] = set()
+def choice_keyboard(context: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Return message-local inline controls only for an actionable response.
 
-    def add_row(*labels: str) -> None:
-        row: list[str] = []
-        for label in labels:
-            text = str(label or "").strip()
-            if not text or text in seen:
-                continue
-            seen.add(text)
-            row.append(text)
-        if row:
-            rows.append(row)
+    Passive chat, status, help, and error cards must not install a Telegram
+    reply keyboard. Telegram keeps reply keyboards after the message that
+    created them, so a generic navigation keyboard on every response becomes
+    misleading long after the originating context has changed.
 
-    context_kind = str(context.get("context_kind") or "") if isinstance(context, dict) else ""
-    next_command = str(context.get("next_command") or "").strip() if isinstance(context, dict) else ""
-    if context_kind == REMOTE_PLAN_SESSION_CONTEXT_KIND:
-        choice_labels = context.get("choice_labels") if isinstance(context, dict) else []
-        labels = [str(label or "").strip() for label in choice_labels if str(label or "").strip()] if isinstance(choice_labels, list) else []
+    Plan, confirmation, and decision-list actions use message-local inline
+    buttons. No ordinary response installs a Telegram reply keyboard.
+    """
+
+    if not isinstance(context, dict):
+        return None
+    context_kind = str(context.get("context_kind") or "")
+    if context_kind in {
+        REMOTE_PLAN_SESSION_CONTEXT_KIND,
+        REMOTE_PLAN_INIT_CONTEXT_KIND,
+    }:
+        session_id = str(context.get("focus_ref") or "").strip()
+        labels = plan_context_choice_labels(context)
+        if not session_id or not labels:
+            return None
+        sid = plan_session_callback_id(session_id)
+        context_hash = plan_context_identity(context)
+        inline_rows: list[list[dict[str, str]]] = []
         for index in range(0, len(labels), 2):
-            add_row(*labels[index : index + 2])
-        add_row("다시 스캔", "보류")
-        add_row("상태", "계획")
-        return {
-            "keyboard": rows,
-            "resize_keyboard": True,
-            "one_time_keyboard": False,
-            "input_field_placeholder": "번호/프로젝트명 입력 · 질문은 채팅",
-        }
-    if context_kind == REMOTE_PLAN_INIT_CONTEXT_KIND:
-        choice_labels = context.get("choice_labels") if isinstance(context, dict) else []
-        labels = [str(label or "").strip() for label in choice_labels if str(label or "").strip()] if isinstance(choice_labels, list) else []
-        if labels:
-            add_row(*labels[:2])
-            add_row(*labels[2:4])
-        else:
-            add_row("초기화 검토", "다시 선택")
-            add_row("보류")
-        add_row("상태", "계획")
-        return {
-            "keyboard": rows,
-            "resize_keyboard": True,
-            "one_time_keyboard": False,
-            "input_field_placeholder": "작업 버튼/경로 입력 · 질문은 채팅",
-        }
+            inline_rows.append(
+                [
+                    {
+                        "text": plan_choice_display_label(label),
+                        "callback_data": f"fg1:p:{sid}:{context_hash}:{choice_index}",
+                    }
+                    for choice_index, label in enumerate(
+                        labels[index : index + 2], start=index
+                    )
+                ]
+            )
+        inline_rows.append([{"text": "상태", "callback_data": "fg1:s"}])
+        return {"inline_keyboard": inline_rows}
     if context_kind == "dispatch_confirm":
-        # Confirm cards get one-tap 확인/취소 buttons so the operator does not
-        # have to type /confirm <token>.
-        add_row("확인", "취소")
-    choice_commands = context.get("choice_commands") if isinstance(context, dict) else None
+        token = str(context.get("confirmation_token") or "").strip()
+        if not re.fullmatch(r"[0-9a-f]{12}", token):
+            return None
+        return {
+            "inline_keyboard": [
+                [
+                    {"text": "확인", "callback_data": f"fg1:x:c:{token}"},
+                    {"text": "취소", "callback_data": f"fg1:x:d:{token}"},
+                ]
+            ]
+        }
+    choice_commands = context.get("choice_commands")
     if isinstance(choice_commands, list):
-        # Each command is a complete slash command (e.g. "/decision <id> revise").
-        # Tapping the button sends that text, so the operator dispatches the
-        # decision action in one tap instead of typing the id and action.
-        commands = [str(command or "").strip() for command in choice_commands if str(command or "").strip()]
-        for index in range(0, len(commands), 2):
-            add_row(*commands[index : index + 2])
-    if next_command and next_command not in {"/status", "/pending", "/plans --latest", "/help"}:
-        add_row(next_command)
-    if context_kind == "status_attention":
-        add_row("승인 대기", "계획")
-        add_row("상태", "도움말")
-    elif context_kind == "approval_attention":
-        add_row("전체 승인", "상태")
-        add_row("승인 대기", "계획")
-        add_row("도움말")
-    elif context_kind == "plan_attention":
-        add_row("계획", "상태")
-        add_row("승인 대기", "도움말")
-    elif context_kind == "plan_detail":
-        add_row("계획", "상태")
-        add_row("승인 대기", "도움말")
-    elif context_kind == "decisions_actions":
-        add_row("승인 대기", "상태")
-        add_row("계획", "도움말")
-    else:
-        add_row("상태", "승인 대기")
-        add_row("계획", "도움말")
-    for label in CORE_BUTTON_LABELS:
-        if label not in seen:
-            add_row(label)
-    return {
-        "keyboard": rows,
-        "resize_keyboard": True,
-        "one_time_keyboard": False,
-        "input_field_placeholder": "평문은 채팅 · /feedback은 기록",
-    }
+        buttons = [
+            button
+            for command in choice_commands
+            if (button := decision_choice_button(command)) is not None
+        ]
+        if buttons:
+            return {
+                "inline_keyboard": [buttons[index : index + 2] for index in range(0, len(buttons), 2)]
+            }
+    return None
 
 
 def button_resolves_to(button_text: str, command_text: str) -> bool:
@@ -535,9 +576,13 @@ def choice_surface_contract(
 ) -> dict[str, Any]:
     warnings: list[str] = []
     keyboard = reply_markup.get("keyboard") if isinstance(reply_markup, dict) else None
+    inline_keyboard = (
+        reply_markup.get("inline_keyboard") if isinstance(reply_markup, dict) else None
+    )
     button_texts: list[str] = []
-    if isinstance(keyboard, list):
-        for row in keyboard:
+    rows = keyboard if isinstance(keyboard, list) else inline_keyboard
+    if isinstance(rows, list):
+        for row in rows:
             if not isinstance(row, list):
                 continue
             for button in row:
@@ -545,41 +590,58 @@ def choice_surface_contract(
                     button_texts.append(button)
                 elif isinstance(button, dict):
                     button_texts.append(str(button.get("text") or ""))
-    else:
-        warnings.append("missing_keyboard")
+    surface_kind = (
+        "reply"
+        if isinstance(keyboard, list)
+        else "inline"
+        if isinstance(inline_keyboard, list)
+        else "remove"
+        if isinstance(reply_markup, dict) and reply_markup.get("remove_keyboard") is True
+        else "none"
+    )
     context_kind = str(context.get("context_kind") or "") if isinstance(context, dict) else ""
-    if context_kind in {REMOTE_PLAN_SESSION_CONTEXT_KIND, REMOTE_PLAN_INIT_CONTEXT_KIND}:
-        required_buttons = ("상태", "계획")
-    else:
-        required_buttons = CORE_BUTTON_LABELS
-    for label in required_buttons:
-        if label not in button_texts:
-            warnings.append(f"missing_button:{label}")
     placeholder = ""
     if isinstance(reply_markup, dict):
         placeholder = str(reply_markup.get("input_field_placeholder") or "")
-    if not any(marker in placeholder for marker in ("채팅", "의견", "직접 입력")):
+    if surface_kind == "reply" and not any(
+        marker in placeholder for marker in ("채팅", "의견", "직접 입력")
+    ):
         warnings.append("missing_freeform_placeholder")
     next_command = str(context.get("next_command") or "").strip() if isinstance(context, dict) else ""
     has_contextual_choice = False
     choice_labels = context.get("choice_labels") if isinstance(context, dict) else None
     if isinstance(choice_labels, list) and choice_labels:
         expected = [str(label or "").strip() for label in choice_labels if str(label or "").strip()]
+        if context_kind in {
+            REMOTE_PLAN_SESSION_CONTEXT_KIND,
+            REMOTE_PLAN_INIT_CONTEXT_KIND,
+        }:
+            expected = [plan_choice_display_label(label) for label in expected]
         has_contextual_choice = any(label in button_texts for label in expected)
         if not has_contextual_choice:
             warnings.append("missing_contextual_choice:choice_labels")
     choice_commands = context.get("choice_commands") if isinstance(context, dict) else None
     if isinstance(choice_commands, list) and choice_commands:
-        expected_commands = [str(command or "").strip() for command in choice_commands if str(command or "").strip()]
-        has_contextual_choice = any(command in button_texts for command in expected_commands)
+        expected_commands = [
+            str((decision_choice_button(command) or {}).get("text") or "")
+            for command in choice_commands
+        ]
+        has_contextual_choice = any(
+            command and command in button_texts for command in expected_commands
+        )
         if not has_contextual_choice:
             warnings.append("missing_contextual_choice:choice_commands")
-    if next_command:
+    if context_kind == "dispatch_confirm":
+        has_contextual_choice = all(label in button_texts for label in ("확인", "취소"))
+        if not has_contextual_choice:
+            warnings.append("missing_contextual_choice:dispatch_confirm")
+    if next_command and surface_kind in {"reply", "inline"}:
         has_contextual_choice = any(button_resolves_to(button, next_command) for button in button_texts)
         if not has_contextual_choice:
             warnings.append(f"missing_contextual_choice:{next_command}")
     return {
         "schema": CHOICE_SURFACE_CONTRACT_SCHEMA,
+        "surface_kind": surface_kind,
         "button_texts": button_texts,
         "has_freeform_placeholder": any(marker in placeholder for marker in ("채팅", "의견", "직접 입력")),
         "context_kind": context.get("context_kind") if isinstance(context, dict) else None,
@@ -787,7 +849,7 @@ def render_attention_summary_message(*, profile: Any, generated_at: Any, summary
 
 
 def render_pause_result_message(*, profile: Any, generated_at: Any, result: dict[str, Any]) -> str:
-    lines = [title_with_profile("전면 정지", profile)]
+    lines = [title_with_profile("신규 실행 일시정지", profile)]
     if result.get("ok") and result.get("paused"):
         lines.append("신규 작업 시작을 전면 중단했습니다.")
         reason = str(result.get("reason") or "")
@@ -806,7 +868,7 @@ def render_pause_result_message(*, profile: Any, generated_at: Any, result: dict
 def render_resume_confirm_message(*, profile: Any, generated_at: Any, token: str) -> str:
     return "\n".join(
         [
-            title_with_profile("정지 해제 확인", profile),
+            title_with_profile("신규 실행 재개 확인", profile),
             "자율 실행을 다시 시작합니다.",
             "신규 작업이 다시 dispatch됩니다.",
             f"다음 조치: /confirm {html.escape(str(token))} 또는 취소",
@@ -815,9 +877,9 @@ def render_resume_confirm_message(*, profile: Any, generated_at: Any, token: str
 
 
 def render_resume_result_message(*, profile: Any, generated_at: Any, result: dict[str, Any]) -> str:
-    lines = [title_with_profile("정지 해제 결과", profile)]
+    lines = [title_with_profile("신규 실행 재개 결과", profile)]
     if result.get("ok") and not result.get("paused"):
-        lines.append("전면 정지를 해제했습니다.")
+        lines.append("신규 실행 일시정지를 해제했습니다.")
         lines.append("신규 작업 dispatch가 다시 진행됩니다.")
     else:
         lines.append("해제에 실패했습니다.")
@@ -840,7 +902,9 @@ def render_tasks_message(*, profile: Any, generated_at: Any, tasks: list[dict[st
             task_id = task_id[:37] + "..."
         status = str(task.get("status") or "")
         lines.append(f"{html.escape(task_id)} · {html.escape(status)}")
-    lines.append("다음 조치: /cancel-task &lt;task-id&gt; [사유]")
+    lines.append(
+        "다음 조치: 상태만 /cancel-task &lt;id&gt; · 러너까지 /terminate-task &lt;id&gt;"
+    )
     return "\n".join(lines)
 
 
@@ -852,7 +916,7 @@ def render_cancel_task_confirm_message(
     reason: str,
     token: str,
 ) -> str:
-    lines = [title_with_profile("작업 취소 확인", profile)]
+    lines = [title_with_profile("작업 상태 취소 확인", profile)]
     lines.append(f"작업 {html.escape(str(task_id))}")
     if reason:
         lines.append(f"사유: {html.escape(sanitize_text(reason, max_chars=120))}")
@@ -862,12 +926,16 @@ def render_cancel_task_confirm_message(
 
 
 def render_cancel_task_result_message(*, profile: Any, generated_at: Any, result: dict[str, Any]) -> str:
-    lines = [title_with_profile("작업 취소 결과", profile)]
+    lines = [title_with_profile("작업 상태 취소 결과", profile)]
     task_id = str(result.get("task_id") or "")
+    next_action = "다음 조치: /tasks · /status"
     if result.get("ok"):
         if result.get("changed"):
             lines.append(f"작업 {html.escape(task_id)} 취소 표시됨.")
             lines.append("백그라운드 러너는 계속 실행 중일 수 있습니다.")
+            next_action = (
+                f"다음 조치: /terminate-task {html.escape(task_id)} 또는 /status"
+            )
         else:
             lines.append(f"작업 {html.escape(task_id)}: 변경 없음.")
             detail = str(result.get("message") or "")
@@ -875,6 +943,47 @@ def render_cancel_task_result_message(*, profile: Any, generated_at: Any, result
                 lines.append(html.escape(dispatch_safe_detail(detail)))
     else:
         lines.append(f"취소 실패: {html.escape(task_id)}")
+        error = str(result.get("error") or "")
+        if error:
+            lines.append(html.escape(dispatch_safe_detail(error)))
+    lines.append(next_action)
+    return "\n".join(lines)
+
+
+def render_terminate_task_confirm_message(
+    *,
+    profile: Any,
+    generated_at: Any,
+    task_id: str,
+    reason: str,
+    token: str,
+) -> str:
+    lines = [title_with_profile("로컬 러너 종료 확인", profile)]
+    lines.append(f"작업 {html.escape(str(task_id))}")
+    if reason:
+        lines.append(f"사유: {html.escape(sanitize_text(reason, max_chars=120))}")
+    lines.append("확인 시 검증된 로컬 프로세스 또는 tmux 세션을 종료합니다.")
+    lines.append("저장되지 않은 러너 상태는 유실될 수 있습니다.")
+    lines.append(f"다음 조치: /confirm {html.escape(str(token))} 또는 취소")
+    return "\n".join(lines)
+
+
+def render_terminate_task_result_message(
+    *, profile: Any, generated_at: Any, result: dict[str, Any]
+) -> str:
+    lines = [title_with_profile("로컬 러너 종료 결과", profile)]
+    task_id = str(result.get("task_id") or "")
+    if result.get("ok"):
+        if result.get("runtime_terminated"):
+            lines.append(f"작업 {html.escape(task_id)}의 로컬 러너를 종료했습니다.")
+        else:
+            lines.append(f"작업 {html.escape(task_id)}의 로컬 러너는 이미 정지 상태였습니다.")
+        lines.append("durable 작업 상태는 cancelled입니다.")
+        evidence = str(result.get("evidence") or "")
+        if evidence:
+            lines.append(html.escape(dispatch_safe_detail(evidence)))
+    else:
+        lines.append(f"종료 거부: {html.escape(task_id)}")
         error = str(result.get("error") or "")
         if error:
             lines.append(html.escape(dispatch_safe_detail(error)))
@@ -1000,6 +1109,84 @@ def render_dispatch_error_message(*, profile: Any, generated_at: Any, headline: 
             html.escape(sanitize_text(headline, max_chars=120)),
             html.escape(dispatch_safe_detail(detail)),
             "다음 조치: /decisions · /status",
+        ]
+    )
+
+
+def render_command_envelope_refusal_message(*, profile: Any, reason: str) -> str:
+    labels = {
+        "command_expired": "명령 유효 시간이 지났습니다.",
+        "message_timestamp_missing": "명령 전송 시간을 확인할 수 없습니다.",
+        "message_timestamp_in_future": "명령 전송 시간이 현재 시각과 맞지 않습니다.",
+        "invalid_command_ttl": "명령 유효 시간 설정이 올바르지 않습니다.",
+    }
+    detail = labels.get(reason, "명령의 무결성 정보를 확인할 수 없습니다.")
+    return "\n".join(
+        [
+            title_with_profile("명령 거부", profile),
+            detail,
+            "로컬 상태는 변경하지 않았습니다.",
+            "같은 명령을 새 메시지로 다시 보내 주세요.",
+            "다음 조치: /status · /help",
+        ]
+    )
+
+
+RECEIPT_STAGE_LABELS = {
+    "project_init_preview": "프로젝트 초기화 검토",
+    "project_init_run": "프로젝트 초기화",
+    "plan_draft": "계획 초안",
+    "plan_registration": "계획 등록",
+    "plan_review": "계획 검토",
+    "plan_launch_prep": "실행 준비",
+    "plan_gate_request": "게이트 요청",
+    "plan_gate_resolution": "게이트 결정",
+    "plan_execution_brief": "실행 브리프",
+    "plan_enqueue_handoff": "큐 검토 인계",
+    "plan_workload_binding": "워크로드 연결",
+    "plan_enqueue_run": "큐 등록",
+    "plan_runtime_start": "실행 시작",
+    "plan_runtime_monitor": "실행 관찰",
+    "plan_closeout_packet": "마무리 패킷",
+    "plan_closeout_review_handoff": "마무리 검토",
+    "plan_closeout_verdict": "마무리 판정",
+}
+
+
+def render_receipt_inspection_message(*, profile: Any, report: dict[str, Any]) -> str:
+    status = str(report.get("status") or "unknown")
+    if status == "no_plan_session":
+        return "\n".join(
+            [
+                title_with_profile("영수증 체인", profile),
+                "연결된 Plan 세션을 찾지 못했습니다.",
+                "세션 ID를 지정하거나 먼저 /plan을 시작해 주세요.",
+                "다음 조치: /plans · /plan <요청>",
+            ]
+        )
+    session_id = sanitize_text(str(report.get("session_id") or ""), max_chars=32)
+    available = int(report.get("available_receipt_count") or 0)
+    total = int(report.get("total_receipt_stage_count") or 0)
+    invalid = int(report.get("invalid_receipt_count") or 0)
+    command_count = int(report.get("command_update_count") or 0)
+    refused = int(report.get("refused_command_count") or 0)
+    latest = RECEIPT_STAGE_LABELS.get(
+        str(report.get("latest_available_stage") or ""), "아직 생성된 영수증 없음"
+    )
+    state_label = {
+        "complete": "완료",
+        "review_closed": "검토 종료",
+        "in_progress": "진행 중",
+        "empty": "시작 전",
+        "invalid": "검증 필요",
+    }.get(status, "확인 필요")
+    return "\n".join(
+        [
+            title_with_profile("영수증 체인", profile),
+            f"세션: {html.escape(session_id)} · {state_label}",
+            f"영수증: {available}/{total} · 무효 {invalid} · 최근 {html.escape(latest)}",
+            f"명령 증거: {command_count}개 · 거부 {refused}개",
+            "다음 조치: 같은 세션 다시 조회 · /status",
         ]
     )
 
@@ -1244,16 +1431,25 @@ def render_project_portfolio_message(
             )
         counts = selected.get("session_counts") or {}
         path_label = "접근 가능" if selected.get("workspace_status") == "available" else "경로 확인 필요"
+        readiness_label = {
+            "ready": "준비됨",
+            "needs_review": "검토 필요",
+            "not_git": "Git 아님",
+            "path_missing": "경로 없음",
+        }.get(str(selected.get("readiness") or ""), "확인 필요")
+        risk_label = {"low": "낮음", "medium": "중간", "high": "높음"}.get(
+            str(selected.get("risk_level") or ""), "확인 필요"
+        )
         return "\n".join(
             [
                 title_with_profile(f"프로젝트 · {selected.get('display_name')}", profile),
-                f"작업공간: {path_label}",
+                f"작업공간: {path_label} · {readiness_label}",
                 "세션: "
                 + " · ".join(
                     f"{state} {int(counts.get(state) or 0)}"
                     for state in ("running", "waiting", "idle", "stopped")
                 ),
-                f"현재 포커스: {html.escape(str(selected.get('key') or ''))}",
+                f"비교 순위 {int(selected.get('comparison_rank') or 0)} · 위험 {risk_label}",
                 "다음 조치: 평문으로 상태 질문 또는 /wiki "
                 + html.escape(str(selected.get("key") or "")),
             ]
@@ -1262,22 +1458,22 @@ def render_project_portfolio_message(
         title_with_profile("프로젝트", profile),
         f"등록 {int(summary.get('registered_count') or 0)} · 접근 가능 {int(summary.get('available_count') or 0)} · 활성 {int(summary.get('active_count') or 0)}",
     ]
-    active = [row for row in rows if int(row.get("active_sessions") or 0) > 0]
-    lines.append(
-        "활성: "
-        + (
-            " · ".join(
-                f"{html.escape(str(row.get('key') or ''))}({int(row.get('active_sessions') or 0)})"
-                for row in active[:4]
-            )
-            if active
-            else "없음"
+    for row in rows[:2]:
+        readiness_label = {
+            "ready": "준비됨",
+            "needs_review": "검토 필요",
+            "not_git": "Git 아님",
+            "path_missing": "경로 없음",
+        }.get(str(row.get("readiness") or ""), "확인 필요")
+        risk_label = {"low": "낮음", "medium": "중간", "high": "높음"}.get(
+            str(row.get("risk_level") or ""), "확인 필요"
         )
-    )
-    available = [row for row in rows if row.get("workspace_status") == "available"]
-    shown = " · ".join(html.escape(str(row.get("key") or "")) for row in available[:4])
-    remainder = max(0, len(available) - 4)
-    lines.append(f"접근: {shown}" + (f" · +{remainder}" if remainder else ""))
+        lines.append(
+            f"{int(row.get('comparison_rank') or 0)}. "
+            f"{html.escape(str(row.get('key') or ''))} · {readiness_label} · 위험 {risk_label}"
+        )
+    if not rows:
+        lines.append("비교 가능한 등록 프로젝트가 없습니다.")
     lines.append("다음 조치: /projects &lt;project&gt;")
     return "\n".join(lines)
 

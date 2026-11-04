@@ -28,16 +28,16 @@ pub(super) fn present_wiki_proposal_events(
     for event in events {
         println!(
             "{} {:?} proposal={} action={} subject={}:{} by={} {}",
-            event.id,
+            operator_safe_text(&event.id),
             event.decision,
-            event.proposal_id,
+            operator_safe_text(&event.proposal_id),
             event
                 .proposal_action
                 .map(|action| format!("{action:?}"))
                 .unwrap_or_else(|| "-".to_string()),
-            empty_dash(&event.subject_kind),
-            empty_dash(&event.subject_id),
-            empty_dash(&event.actor),
+            operator_safe_or_dash(Some(&event.subject_kind)),
+            operator_safe_or_dash(Some(&event.subject_id)),
+            operator_safe_or_dash(Some(&event.actor)),
             operator_safe_text(&event.reason)
         );
     }
@@ -56,7 +56,9 @@ pub(super) fn present_wiki_proposal_event(
 
     println!(
         "Recorded adaptive wiki proposal event {} for {} ({:?})",
-        event.id, event.proposal_id, event.decision
+        operator_safe_text(&event.id),
+        operator_safe_text(&event.proposal_id),
+        event.decision
     );
     Ok(())
 }
@@ -78,21 +80,20 @@ pub(super) fn present_wiki_corrections(
     for correction in corrections {
         println!(
             "{} {:?} task={} request={} entry={} {}",
-            correction.id,
+            operator_safe_text(&correction.id),
             correction.correction_kind,
-            correction.task_id.as_deref().unwrap_or("-"),
-            correction.request_id.as_deref().unwrap_or("-"),
-            correction.entry_id.as_deref().unwrap_or("-"),
+            operator_safe_or_dash(correction.task_id.as_deref()),
+            operator_safe_or_dash(correction.request_id.as_deref()),
+            operator_safe_or_dash(correction.entry_id.as_deref()),
             operator_safe_text(&correction.summary)
         );
     }
     Ok(())
 }
 
-fn empty_dash(value: &str) -> &str {
-    if value.trim().is_empty() {
-        "-"
-    } else {
-        value
-    }
+fn operator_safe_or_dash(value: Option<&str>) -> String {
+    value
+        .map(operator_safe_text)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "-".to_string())
 }

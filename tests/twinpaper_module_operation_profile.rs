@@ -563,7 +563,7 @@ fn prepare_twinpaper_offdesk_task_requires_module_preflight() -> Result<()> {
     let telegram_env = temp.path().join("telegram.env");
     write_file(
         &telegram_env,
-        "TELEGRAM_BOT_TOKEN=fake-token-for-test\nTELEGRAM_OWNER_CHAT_ID=123456789\n",
+        "TELEGRAM_BOT_TOKEN=fake-token-for-test\nTELEGRAM_OWNER_CHAT_ID=123456789\nTELEGRAM_OWNER_USER_ID=987654321\n",
     )?;
     let relay_output = Command::new("python3")
         .env("HOME", temp.path())
@@ -638,7 +638,7 @@ fn telegram_decision_relay_accepts_request_id_scoped_decision_without_leaking_se
     let env_path = temp.path().join("telegram.env");
     write_file(
         &env_path,
-        "TELEGRAM_BOT_TOKEN=fake-token-for-test\nTELEGRAM_OWNER_CHAT_ID=123456789\n",
+        "TELEGRAM_BOT_TOKEN=fake-token-for-test\nTELEGRAM_OWNER_CHAT_ID=123456789\nTELEGRAM_OWNER_USER_ID=987654321\n",
     )?;
     let request_path = temp.path().join("request.json");
     let episode_path = temp.path().join("episode.json");
@@ -1544,7 +1544,7 @@ sys.modules[spec.name] = relay
 spec.loader.exec_module(relay)
 
 env_path = root / "failure_cleanup.env"
-env_path.write_text("TELEGRAM_BOT_TOKEN=fake-token-for-test\nTELEGRAM_OWNER_CHAT_ID=123456789\n", encoding="utf-8")
+env_path.write_text("TELEGRAM_BOT_TOKEN=fake-token-for-test\nTELEGRAM_OWNER_CHAT_ID=123456789\nTELEGRAM_OWNER_USER_ID=987654321\n", encoding="utf-8")
 request_path = root / "failure_cleanup_request.json"
 out_path = root / "failure_cleanup_result.json"
 registry = root / "failure_cleanup_active_requests.json"
@@ -1826,7 +1826,7 @@ fn telegram_ondesk_handoff_uses_webui_link_without_path_dump() -> Result<()> {
     let env_path = temp.path().join("telegram.env");
     write_file(
         &env_path,
-        "TELEGRAM_BOT_TOKEN=fake-token-for-test\nTELEGRAM_OWNER_CHAT_ID=123456789\n",
+        "TELEGRAM_BOT_TOKEN=fake-token-for-test\nTELEGRAM_OWNER_CHAT_ID=123456789\nTELEGRAM_OWNER_USER_ID=987654321\n",
     )?;
     let closeout_dir = temp.path().join("closeout");
     write_file(

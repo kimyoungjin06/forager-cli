@@ -37,7 +37,6 @@ from offdesk_wiki_distiller import (  # noqa: E402
     call_ollama,
     normalize,
     parse_candidates,
-    repo_root,
 )
 
 VERDICTS = {"supported", "inverted", "unsupported", "unclear"}
@@ -74,6 +73,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-ctx", type=int, default=16384)
     parser.add_argument("--num-predict", type=int, default=2048)
     parser.add_argument("--timeout-sec", type=int, default=600)
+    parser.add_argument(
+        "--max-output-bytes",
+        type=int,
+        default=32 * 1024 * 1024,
+        help="Hard cap for the combined packet and JSON report bytes.",
+    )
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
     from forager_bin import resolve_forager_bin
 
@@ -84,6 +89,8 @@ def parse_args() -> argparse.Namespace:
     import os
     args.base_url = args.base_url or os.environ.get("OFFDESK_LLM_BASE_URL", "http://127.0.0.1:11434")
     args.model = args.model or os.environ.get("OFFDESK_LLM_MODEL", "qwen3-coder:30b")
+    if args.max_output_bytes < 1:
+        parser.error("--max-output-bytes must be at least 1")
     return args
 
 
@@ -128,7 +135,6 @@ def main() -> int:
     candidates = load_candidates(args)
     if not candidates:
         print("no candidates to review")
-        return 0
     items = []
     for i, c in enumerate(candidates, 1):
         items.append({
@@ -227,8 +233,8 @@ def main() -> int:
         print(f"llm cost: {LLM_USAGE['calls']} call(s), {LLM_USAGE['prompt_tokens']}+{LLM_USAGE['output_tokens']} tokens, "
               f"{LLM_USAGE['duration_ms']/1000:.1f}s wall")
 
+    packet_text = None
     if args.packet:
-        args.packet.parent.mkdir(parents=True, exist_ok=True)
         order = {"inverted": 0, "unsupported": 1, "unclear": 2, "supported": 3}
         lines = [f"# Wiki candidate review packet -- {args.profile}", "",
                  "Pre-filtered by a local model (tier 2). Flags are advisory; you decide.",
@@ -246,18 +252,37 @@ def main() -> int:
             if item["reason"]:
                 lines.append(f"- pre-filter note: {item['reason']}")
             lines.append("")
-        args.packet.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        print(f"packet: {args.packet}")
+        packet_text = "\n".join(lines) + "\n"
 
+    report_text = None
     if args.out:
+        report_text = (
+            json.dumps(
+                {
+                    "schema": "wiki_prereview_report.v1",
+                    "profile": args.profile,
+                    "model": args.model,
+                    "items": items,
+                    "llm_usage": dict(LLM_USAGE),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n"
+        )
+    output_bytes = sum(
+        len(text.encode("utf-8")) for text in (packet_text, report_text) if text is not None
+    )
+    if output_bytes > args.max_output_bytes:
+        print("Wiki prereview output exceeds --max-output-bytes", file=sys.stderr)
+        return 2
+    if args.packet and packet_text is not None:
+        args.packet.parent.mkdir(parents=True, exist_ok=True)
+        args.packet.write_text(packet_text, encoding="utf-8")
+        print(f"packet: {args.packet}")
+    if args.out and report_text is not None:
         args.out.parent.mkdir(parents=True, exist_ok=True)
-        args.out.write_text(json.dumps({
-            "schema": "wiki_prereview_report.v1",
-            "profile": args.profile,
-            "model": args.model,
-            "items": items,
-            "llm_usage": dict(LLM_USAGE),
-        }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        args.out.write_text(report_text, encoding="utf-8")
         print(f"report: {args.out}")
     return 0
 

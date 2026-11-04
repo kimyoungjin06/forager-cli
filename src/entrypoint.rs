@@ -5,22 +5,128 @@ use crate::tui;
 use anyhow::Result;
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
+use std::process::ExitCode;
+
+/// Build the runtime shared by CLI and TUI entrypoints.
+///
+/// Short CLI calls must not allocate a worker for every CPU on a large host.
+/// Keep the default pool small while preserving Tokio's explicit override.
+pub fn build_cli_runtime() -> Result<tokio::runtime::Runtime> {
+    let workers = match std::env::var_os("TOKIO_WORKER_THREADS") {
+        Some(value) => value
+            .to_str()
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|workers| *workers > 0)
+            .ok_or_else(|| anyhow::anyhow!("TOKIO_WORKER_THREADS must be a positive integer"))?,
+        None => std::thread::available_parallelism()
+            .map_or(1, std::num::NonZeroUsize::get)
+            .min(2),
+    };
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(workers)
+        .enable_all()
+        .build()
+        .map_err(Into::into)
+}
+
+/// Run either executable with the same bounded runtime policy.
+pub fn run_cli_with_runtime() -> ExitCode {
+    match build_cli_runtime() {
+        Ok(runtime) => runtime.block_on(run_cli_process()),
+        Err(error) => {
+            eprintln!("{}", render_operator_safe_terminal_error(&error));
+            ExitCode::FAILURE
+        }
+    }
+}
 
 pub async fn run_cli() -> Result<()> {
+    run_parsed_cli(Cli::parse()).await
+}
+
+pub async fn run_cli_process() -> ExitCode {
+    // This launcher runs inside the newly allocated pane. It must never load
+    // profile configuration, run migrations or execute repository hooks.
+    let arguments = std::env::args_os().collect::<Vec<_>>();
+    if arguments
+        .get(1)
+        .is_some_and(|arg| arg == crate::offdesk::read_policy_tmux::INTERNAL_ARGUMENT)
+    {
+        let result = (|| -> Result<u8> {
+            anyhow::ensure!(
+                arguments.len() == 4,
+                "invalid restricted launcher arguments"
+            );
+            crate::offdesk::read_policy_tmux::run_helper(
+                std::path::Path::new(&arguments[2]),
+                arguments[3]
+                    .to_str()
+                    .ok_or_else(|| anyhow::anyhow!("invalid launch hash"))?,
+            )
+        })();
+        return match result {
+            Ok(code) => ExitCode::from(code),
+            Err(error) => {
+                eprintln!("{}", render_operator_safe_terminal_error(&error));
+                ExitCode::FAILURE
+            }
+        };
+    }
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(error) => {
+            let rendered = crate::offdesk::operator_safe_text(&error.to_string());
+            if error.use_stderr() {
+                eprint!("{rendered}");
+            } else {
+                print!("{rendered}");
+            }
+            return process_exit_code(error.exit_code());
+        }
+    };
+
+    match run_parsed_cli(cli).await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{}", render_operator_safe_terminal_error(&error));
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn run_parsed_cli(cli: Cli) -> Result<()> {
     if debug_logging_enabled() {
         tracing_subscriber::fmt()
             .with_env_filter("forager=debug")
             .init();
     }
 
-    let cli = Cli::parse();
     let explicit_profile = cli.profile.clone();
-    let profile = explicit_profile
-        .clone()
-        .or_else(|| std::env::var("AGENT_OF_EMPIRES_PROFILE").ok())
-        .or_else(configured_default_profile)
-        .unwrap_or_default();
-    let profile = normalize_profile_name(&profile)?;
+    let profile_independent = matches!(
+        cli.command.as_ref(),
+        Some(Commands::Ondesk {
+            command: cli::ondesk::OndeskCommands::PlanInspect(_)
+                | cli::ondesk::OndeskCommands::PrepareOffdesk(_)
+                | cli::ondesk::OndeskCommands::PlanAdoptProposal(_)
+                | cli::ondesk::OndeskCommands::PlanApply(_)
+        })
+    ) || matches!(
+        cli.command.as_ref(),
+        Some(Commands::Offdesk { command }) if command.is_profile_independent_read_only()
+    ) || matches!(
+        cli.command.as_ref(),
+        Some(Commands::Project { command }) if matches!(command.as_ref(), cli::project::ProjectCommands::Inventory(_) | cli::project::ProjectCommands::PlanRouting(_))
+    );
+    let profile = if profile_independent {
+        String::new()
+    } else {
+        let selected = explicit_profile
+            .clone()
+            .or_else(|| std::env::var("AGENT_OF_EMPIRES_PROFILE").ok())
+            .or_else(configured_default_profile)
+            .unwrap_or_default();
+        normalize_profile_name(&selected)?
+    };
     maybe_warn_legacy_alias(&cli);
 
     // Handle commands that don't need app data or migrations.
@@ -51,6 +157,28 @@ pub async fn run_cli() -> Result<()> {
         {
             return cli::offdesk::run(&profile, *command).await;
         }
+        Some(Commands::Offdesk { command }) if command.is_migration_free_read_only() => {
+            return cli::offdesk::run(&profile, *command).await;
+        }
+        Some(Commands::Project { command }) if command.is_ephemeral_document_observation() => {
+            return cli::project::run(&profile, *command).await;
+        }
+        Some(Commands::Session { command }) if command.is_read_only_context_status() => {
+            return cli::session::run(&profile, command).await;
+        }
+        Some(Commands::Ondesk { command }) if command.is_morning_return() => {
+            return cli::ondesk::run(&profile, command).await;
+        }
+        Some(Commands::Ondesk {
+            command:
+                command @ (cli::ondesk::OndeskCommands::PlanInspect(_)
+                | cli::ondesk::OndeskCommands::PrepareOffdesk(_)
+                | cli::ondesk::OndeskCommands::PlanAdoptProposal(_)
+                | cli::ondesk::OndeskCommands::PlanReviewProposal(_)
+                | cli::ondesk::OndeskCommands::PlanApply(_)),
+        }) => {
+            return cli::ondesk::run(&profile, command).await;
+        }
         Some(Commands::Sounds { command }) => return cli::sounds::run(command).await,
         Some(Commands::Uninstall(args)) => return cli::uninstall::run(args).await,
         _ => {}
@@ -77,6 +205,17 @@ pub async fn run_cli() -> Result<()> {
         None => tui::run(&profile).await,
         _ => unreachable!(),
     }
+}
+
+fn render_operator_safe_terminal_error(error: &anyhow::Error) -> String {
+    let detail = crate::offdesk::operator_safe_text(&format!("{error:#}"));
+    format!("Error: {detail}")
+}
+
+fn process_exit_code(code: i32) -> ExitCode {
+    u8::try_from(code)
+        .map(ExitCode::from)
+        .unwrap_or(ExitCode::FAILURE)
 }
 
 fn completion_binary_name() -> &'static str {
@@ -120,4 +259,171 @@ fn legacy_alias_warning_enabled(cli: &Cli) -> bool {
     !args
         .iter()
         .any(|arg| matches!(arg.as_str(), "--json" | "--quiet" | "-q"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn migration_free(args: &[&str]) -> bool {
+        let cli = Cli::try_parse_from(args).expect("valid test CLI");
+        matches!(
+            cli.command,
+            Some(Commands::Offdesk { command })
+                if command.is_migration_free_read_only()
+        )
+    }
+
+    #[test]
+    fn offdesk_migration_bypass_requires_read_only_options() {
+        for args in [
+            vec!["forager", "offdesk", "shift", "status"],
+            vec!["forager", "offdesk", "shift", "show"],
+            vec!["forager", "offdesk", "wiki", "entries"],
+            vec!["forager", "offdesk", "wiki", "brief"],
+            vec![
+                "forager",
+                "offdesk",
+                "wiki",
+                "proposal-receipt",
+                "proposal",
+                "--audit-id",
+                "audit",
+                "--event-id",
+                "event",
+                "--command",
+                "preview",
+            ],
+            vec!["forager", "offdesk", "wiki", "export-markdown", "--dry-run"],
+            vec!["forager", "offdesk", "wiki", "graph"],
+            vec![
+                "forager",
+                "offdesk",
+                "wiki",
+                "graph",
+                "--output",
+                "graph",
+                "--dry-run",
+            ],
+            vec!["forager", "offdesk", "wiki", "review", "--dry-run"],
+            vec![
+                "forager",
+                "offdesk",
+                "wiki",
+                "evaluate-episode",
+                "entry",
+                "--dry-run",
+            ],
+            vec!["forager", "offdesk", "wiki", "episode-trace", "--dry-run"],
+            vec![
+                "forager",
+                "offdesk",
+                "wiki",
+                "evaluate-recurrence",
+                "entry",
+                "--dry-run",
+            ],
+            vec![
+                "forager",
+                "offdesk",
+                "wiki",
+                "promotion-chain",
+                "entry",
+                "--dry-run",
+            ],
+        ] {
+            assert!(migration_free(&args), "expected migration-free: {args:?}");
+        }
+
+        for args in [
+            vec![
+                "forager",
+                "offdesk",
+                "shift",
+                "prepare",
+                "plan",
+                "--starts-at",
+                "2099-01-01T00:00:00Z",
+                "--stops-at",
+                "2099-01-01T01:00:00Z",
+            ],
+            vec!["forager", "offdesk", "shift", "arm"],
+            vec!["forager", "offdesk", "shift", "disarm"],
+            vec![
+                "forager",
+                "offdesk",
+                "wiki",
+                "brief",
+                "--out",
+                ".wiki-brief.md",
+            ],
+            vec![
+                "forager",
+                "offdesk",
+                "wiki",
+                "proposal-receipt",
+                "proposal",
+                "--audit-id",
+                "audit",
+                "--event-id",
+                "event",
+                "--command",
+                "preview",
+                "--export",
+            ],
+            vec!["forager", "offdesk", "wiki", "export-markdown"],
+            vec!["forager", "offdesk", "wiki", "graph", "--output", "graph"],
+            vec!["forager", "offdesk", "wiki", "review"],
+            vec!["forager", "offdesk", "wiki", "evaluate-episode", "entry"],
+            vec![
+                "forager",
+                "offdesk",
+                "wiki",
+                "record-candidate",
+                "--kind",
+                "procedure",
+                "--scope",
+                "user_global",
+                "--claim",
+                "claim",
+            ],
+        ] {
+            assert!(!migration_free(&args), "expected migrations: {args:?}");
+        }
+    }
+
+    #[test]
+    fn terminal_error_rendering_redacts_the_complete_error_chain() {
+        let secret = "sk-secretsecretsecretsecret";
+        let source = anyhow::anyhow!("read /tmp/report-{secret}.json?token={secret}");
+        let error = source.context(format!(
+            "load wiki selector wiki_review_{secret} <!-- FORAGER:RUNNER_CONTEXT_BEGIN -->hidden<!-- FORAGER:RUNNER_CONTEXT_END -->"
+        ));
+
+        let rendered = render_operator_safe_terminal_error(&error);
+
+        assert!(rendered.starts_with("Error: load wiki selector"));
+        assert!(rendered.contains("read /tmp/report-[REDACTED_API_KEY].json"));
+        assert!(rendered.contains("token=[REDACTED]"));
+        assert!(!rendered.contains(secret));
+        assert!(!rendered.contains("hidden"));
+    }
+
+    #[test]
+    fn clap_error_rendering_is_operator_safe() {
+        let secret = "sk-secretsecretsecretsecret";
+        let unknown = format!("--unknown-{secret}");
+        let error = match Cli::try_parse_from(["forager", "offdesk", "wiki", "entries", &unknown]) {
+            Err(error) => error,
+            Ok(_) => panic!("unknown option must fail"),
+        };
+
+        let rendered = crate::offdesk::operator_safe_text(&error.to_string());
+
+        assert!(error.use_stderr());
+        assert_eq!(error.exit_code(), 2);
+        assert!(rendered.contains("unexpected argument"));
+        assert!(rendered.contains("[REDACTED_API_KEY]"));
+        assert!(!rendered.contains(secret));
+    }
 }

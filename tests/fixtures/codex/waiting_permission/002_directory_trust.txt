@@ -1,0 +1,17 @@
+# FIXTURE: Codex - Waiting on directory trust
+# Sanitized from a live local pane on 2026-09-01.
+#
+# Expected status: Waiting
+# Expected Telegram interaction: permission, never task_ready
+# Key indicators: explicit trust question followed by a numbered selection.
+#
+> You are in /workspace/project
+
+  Do you trust the contents of this directory? Working with untrusted contents
+  comes with higher risk of prompt injection. Trusting the directory allows
+  project-local config, hooks, and exec policies to load.
+
+› 1. Yes, continue
+  2. No, quit
+
+  Press enter to continue

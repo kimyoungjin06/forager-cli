@@ -342,6 +342,7 @@ impl SettingsView {
                 if let Some(input) = input {
                     let text = input.value().to_string();
                     if !text.is_empty() {
+                        let previous = self.fields[self.selected_field].value.clone();
                         if let FieldValue::List(ref mut items) =
                             self.fields[self.selected_field].value
                         {
@@ -353,6 +354,11 @@ impl SettingsView {
                             } else if selected_idx < items.len() {
                                 items[selected_idx] = text;
                             }
+                        }
+                        if let Err(error) = self.fields[self.selected_field].validate() {
+                            self.fields[self.selected_field].value = previous;
+                            self.error_message = Some(error);
+                            return SettingsAction::Continue;
                         }
                         self.apply_field_to_config(self.selected_field);
                     }
@@ -383,6 +389,16 @@ impl SettingsView {
         };
 
         match key {
+            FieldKey::NightProjects => {
+                if let Some(ref mut night) = config.night {
+                    night.project_keys = None;
+                }
+            }
+            FieldKey::NightApprovalTtl => {
+                if let Some(ref mut night) = config.night {
+                    night.approval_ttl_minutes = None;
+                }
+            }
             FieldKey::DefaultProfile => {}
             // Updates
             FieldKey::CheckEnabled => {
@@ -569,5 +585,42 @@ impl SettingsView {
         self.has_changes = false;
         self.rebuild_fields();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod night_tests {
+    use super::*;
+
+    #[test]
+    #[serial_test::serial]
+    fn night_profile_clear_returns_to_global_and_repo_does_not_offer_it() {
+        let temp = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", temp.path());
+        #[cfg(target_os = "linux")]
+        std::env::set_var("XDG_CONFIG_HOME", temp.path().join(".config"));
+        let mut view = SettingsView::new("night-test", None).unwrap();
+        view.global_config.night.project_keys = vec!["global-project".into()];
+        view.global_config.night.approval_ttl_minutes = 40;
+        view.profile_config.night = Some(crate::session::profile_config::NightConfigOverride {
+            project_keys: Some(Vec::new()),
+            approval_ttl_minutes: Some(10),
+        });
+        view.scope = SettingsScope::Profile;
+        view.rebuild_fields();
+        view.selected_category = view
+            .categories
+            .iter()
+            .position(|c| *c == crate::tui::settings::SettingsCategory::Night)
+            .unwrap();
+        view.rebuild_fields();
+        view.clear_profile_override(0);
+        view.clear_profile_override(1);
+        let effective =
+            crate::session::merge_configs(view.global_config.clone(), &view.profile_config);
+        assert_eq!(effective.night.project_keys, ["global-project"]);
+        assert_eq!(effective.night.approval_ttl_minutes, 40);
+        assert!(!SettingsView::categories_for_scope(SettingsScope::Repo)
+            .contains(&crate::tui::settings::SettingsCategory::Night));
     }
 }

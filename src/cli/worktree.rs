@@ -5,6 +5,7 @@ use clap::Subcommand;
 use std::path::{Path, PathBuf};
 
 use crate::git::GitWorktree;
+use crate::offdesk::operator_safe_text;
 use crate::session::Storage;
 
 #[derive(Subcommand)]
@@ -253,7 +254,11 @@ async fn cleanup_orphaned(profile: &str, force: bool) -> Result<()> {
                     removed_count += 1;
                 }
                 Err(e) => {
-                    eprintln!("✗ Failed to remove {}: {}", wt.path.display(), e);
+                    eprintln!(
+                        "✗ Failed to remove {}: {}",
+                        operator_safe_text(&wt.path.to_string_lossy()),
+                        operator_safe_text(&e.to_string())
+                    );
                 }
             }
         }

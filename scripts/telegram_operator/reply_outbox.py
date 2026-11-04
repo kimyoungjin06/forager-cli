@@ -11,7 +11,7 @@ from .persistence import RemoteOperatorStateError
 
 
 REPLY_OUTBOX_SCHEMA = "remote_operator_telegram_reply_outbox.v1"
-VALID_STATUSES = {"queued", "failed", "delivered"}
+VALID_STATUSES = {"queued", "failed", "delivered", "revoked"}
 PENDING_STATUSES = {"queued", "failed"}
 
 
@@ -68,12 +68,16 @@ def pending_deliveries(path: pathlib.Path) -> list[dict[str, Any]]:
             record
             for record in latest_delivery_records(path).values()
             if record.get("status") in PENDING_STATUSES
+            and not record.get("delivery_unconfirmed")
         ),
         key=lambda record: (str(record.get("queued_at") or ""), record["delivery_id"]),
     )
 
 
 def outbox_health_issue(path: pathlib.Path) -> str | None:
+    if any(record.get("delivery_unconfirmed") and record.get("status") in PENDING_STATUSES
+           for record in latest_delivery_records(path).values()):
+        return "reply_delivery_unconfirmed"
     return "reply_delivery_pending" if pending_deliveries(path) else None
 
 
@@ -100,6 +104,10 @@ def outbox_inspection(path: pathlib.Path) -> dict[str, Any]:
         "delivery_count": len(latest),
         "status_counts": status_counts,
         "pending_count": len(pending),
+        "unconfirmed_count": sum(
+            bool(record.get("delivery_unconfirmed")) and record.get("status") in PENDING_STATUSES
+            for record in latest.values()
+        ),
         "pending": pending,
     }
 
@@ -129,6 +137,7 @@ def queue_reply(
     message: str,
     reply_markup: dict[str, Any] | None,
     result: dict[str, Any],
+    control_generation_sha256: str,
 ) -> dict[str, Any]:
     delivery_id = f"telegram_update:{update_id}"
     payload_hash = _payload_hash(
@@ -158,7 +167,23 @@ def queue_reply(
         "reply_markup": reply_markup,
         "result_status": str(result.get("status") or "unknown"),
         "effect": result.get("effect") if isinstance(result.get("effect"), dict) else None,
+        "action_outcome": (
+            result.get("action_outcome")
+            if isinstance(result.get("action_outcome"), dict)
+            else None
+        ),
+        "response_card": (
+            result.get("response_card")
+            if isinstance(result.get("response_card"), dict)
+            else None
+        ),
+        "feedback_workflow": (
+            result.get("feedback_workflow")
+            if isinstance(result.get("feedback_workflow"), dict)
+            else None
+        ),
         "attempt_count": 0,
+        "control_generation_sha256": str(control_generation_sha256),
     }
     try:
         append_jsonl(path, record, durable=True)
@@ -176,18 +201,27 @@ def _append_transition(
     status: str,
     message_id: int | None = None,
     error: str | None = None,
+    inflight: bool = False,
 ) -> dict[str, Any]:
     transitioned = dict(record)
     transitioned.update(
         {
             "recorded_at": utc_now(),
             "status": status,
-            "attempt_count": int(record.get("attempt_count") or 0) + 1,
+            "attempt_count": int(record.get("attempt_count") or 0) + (0 if record.get("delivery_inflight") else 1),
+            "delivery_inflight": inflight,
         }
     )
     if status == "delivered":
+        transitioned.pop("delivery_unconfirmed", None)
         transitioned["delivered_at"] = utc_now()
         transitioned["sent_message_id"] = message_id
+        transitioned.pop("last_error", None)
+    elif status == "revoked":
+        transitioned["revoked_at"] = utc_now()
+        transitioned["revocation_reason"] = str(
+            error or "control_generation_changed"
+        )
         transitioned.pop("last_error", None)
     else:
         transitioned["last_error"] = str(error or "delivery failed")
@@ -204,7 +238,28 @@ def _append_transition(
 def mark_delivery_failed(
     path: pathlib.Path, record: dict[str, Any], *, error: str
 ) -> dict[str, Any]:
-    return _append_transition(path, record, status="failed", error=error)
+    retryable = dict(record)
+    retryable.pop("delivery_unconfirmed", None)
+    return _append_transition(path, retryable, status="failed", error=error)
+
+
+def mark_delivery_started(
+    path: pathlib.Path, record: dict[str, Any]
+) -> dict[str, Any]:
+    # Persist uncertainty before network I/O so process death cannot replay it.
+    return _append_transition(
+        path, {**record, "delivery_unconfirmed": True}, status="failed",
+        error="delivery started; acknowledgement not yet recorded", inflight=True,
+    )
+
+
+def mark_delivery_unconfirmed(
+    path: pathlib.Path, record: dict[str, Any]
+) -> dict[str, Any]:
+    return _append_transition(
+        path, {**record, "delivery_unconfirmed": True}, status="failed",
+        error="delivery acknowledgement unconfirmed; automatic retry held",
+    )
 
 
 def mark_delivery_delivered(
@@ -213,6 +268,29 @@ def mark_delivery_delivered(
     return _append_transition(
         path, record, status="delivered", message_id=message_id
     )
+
+
+def revoke_mismatched_deliveries(
+    path: pathlib.Path, *, current_generation_sha256: str
+) -> list[dict[str, Any]]:
+    """Make replies from any prior or unknown controller generation inert."""
+
+    current = str(current_generation_sha256 or "").strip()
+    revoked: list[dict[str, Any]] = []
+    for record in latest_delivery_records(path).values():
+        if record.get("status") not in PENDING_STATUSES:
+            continue
+        if str(record.get("control_generation_sha256") or "").strip() == current:
+            continue
+        revoked.append(
+            _append_transition(
+                path,
+                record,
+                status="revoked",
+                error="control_generation_changed",
+            )
+        )
+    return revoked
 
 
 def compact_reply_outbox(

@@ -4,24 +4,31 @@
 The listener can only report failures while it is still alive. This watchdog is
 intentionally separate: it reads the listener loop-status file, checks the user
 systemd service when available, and sends one short emergency Telegram message
-when remote operation is not currently reliable.
+when a sustained connection failure or unavailable listener needs attention.
+Successful recovery follows a delivered failure alert once.
 """
 
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+import http.client
+import fcntl
 import json
 import os
 import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 from typing import Any
 
 from telegram_operator.config import default_telegram_env_file
+from telegram_operator.transport_health import (
+    TRANSPORT_FAILURE_COUNT, TRANSPORT_FAILURE_SECONDS, classify_transport_issues, failure_age,
+)
 
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -34,6 +41,10 @@ MAX_ALERT_CHARS = 360
 
 
 class WatchdogError(RuntimeError):
+    pass
+
+
+class WatchdogDeliveryUnconfirmed(WatchdogError):
     pass
 
 
@@ -73,7 +84,17 @@ def parse_args() -> argparse.Namespace:
 
 def write_json(path: pathlib.Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    staged = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as stream:
+            staged = pathlib.Path(stream.name)
+            stream.write(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(staged, path)
+    finally:
+        if staged is not None:
+            staged.unlink(missing_ok=True)
 
 
 def load_json(path: pathlib.Path) -> Any:
@@ -183,6 +204,9 @@ def listener_probe(args: argparse.Namespace) -> dict[str, Any]:
         issues.append("last_send_transport_error")
     if last_result_status == "loop_error":
         issues.append("last_loop_internal_error")
+    if last_result_status == "state_error":
+        issues.append("last_loop_state_error")
+    failure_age_sec = failure_age(loop_status, dt.datetime.now(dt.timezone.utc))
     return {
         "status_file": str(path),
         "status_file_exists": path.exists(),
@@ -192,8 +216,17 @@ def listener_probe(args: argparse.Namespace) -> dict[str, Any]:
         "handled_result_count": loop_status.get("handled_result_count"),
         "last_poll_age_sec": last_poll_age_sec,
         "last_result_status": last_result.get("status"),
+        "consecutive_error_count": loop_status.get("consecutive_error_count"),
+        "last_success_at": loop_status.get("last_success_at"),
+        "failure_age_sec": failure_age_sec if last_result_status == "poll_error" else None,
+        "last_error": sanitize_text(last_result.get("error")) if last_result_status == "poll_error" else None,
         "issues": issues,
     }
+
+
+def classify_listener_issues(listener: dict[str, Any]) -> tuple[list[str], list[str]]:
+    return classify_transport_issues(listener["issues"],
+        count=listener.get("consecutive_error_count"), age=listener.get("failure_age_sec"))
 
 
 def systemd_probe(args: argparse.Namespace) -> dict[str, Any]:
@@ -263,7 +296,14 @@ def load_watchdog_state(path: pathlib.Path) -> dict[str, Any]:
         loaded = load_json(path)
     except (OSError, json.JSONDecodeError):
         return {"schema": STATE_SCHEMA, "state_error": "watchdog_state_unreadable"}
-    return loaded if isinstance(loaded, dict) else {"schema": STATE_SCHEMA}
+    if (
+        not isinstance(loaded, dict)
+        or loaded.get("schema", STATE_SCHEMA) != STATE_SCHEMA
+        or any(loaded.get(key) is not None and not isinstance(loaded[key], dict)
+               for key in ("active_incident", "delivery_attempt"))
+    ):
+        return {"schema": STATE_SCHEMA, "state_error": "watchdog_state_unreadable"}
+    return loaded
 
 
 def is_rate_limited(state: dict[str, Any], key: str, min_interval_sec: int) -> tuple[bool, int | None]:
@@ -287,6 +327,7 @@ def issue_label(issues: list[str]) -> str:
         ("last_poll_transport_error", "telegram transport error"),
         ("last_send_transport_error", "telegram send failed"),
         ("last_loop_internal_error", "listener internal error"),
+        ("last_loop_state_error", "listener state error"),
         ("telegram_bot_token_missing", "telegram token missing"),
         ("telegram_target_chat_missing", "telegram chat missing"),
         ("listener_not_polling", "listener not polling"),
@@ -312,17 +353,30 @@ def recovery_commands(args: argparse.Namespace) -> list[str]:
 
 def alert_message(issues: list[str], args: argparse.Namespace) -> str:
     label = issue_label(issues)
-    next_action = f"systemctl --user restart {args.service_name}"
+    stopped = any(issue in issues for issue in ("systemd_service_failed", "systemd_service_inactive"))
+    next_action = (
+        f"systemctl --user restart {args.service_name}"
+        if stopped else "로컬에서 listener health와 통신 상태 확인"
+    )
     lines = [
         "Remote Operator 고장",
         f"상태: {label}",
-        "야간주행: 불가",
+        "원격 제어: 확인 필요",
         f"다음: {next_action}",
     ]
     message = "\n".join(lines)
     if len(message) > MAX_ALERT_CHARS:
         lines[-1] = "다음: 로컬에서 listener health 확인"
     return "\n".join(lines[:MAX_ALERT_LINES])[:MAX_ALERT_CHARS]
+
+
+def recovery_message(systemd: dict[str, Any]) -> str:
+    service_state = str(systemd.get("active_state") or "미확인")
+    return "\n".join([
+        "Remote Operator 복구",
+        f"상태: 수신 정상 (서비스: {service_state})",
+        "야간 작업 실행·승인 상태는 별도 확인",
+    ])
 
 
 def telegram_api(token: str, method: str, payload: dict[str, Any], timeout_sec: int) -> dict[str, Any]:
@@ -336,18 +390,21 @@ def telegram_api(token: str, method: str, payload: dict[str, Any], timeout_sec: 
         with urllib.request.urlopen(request, timeout=timeout_sec) as response:
             data = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as error:
-        detail = error.read().decode("utf-8", errors="replace") if hasattr(error, "read") else str(error)
-        raise WatchdogError(f"Telegram API HTTP error ({method}): {sanitize_text(detail)}") from error
-    except urllib.error.URLError as error:
-        raise WatchdogError(f"Telegram API URL error ({method}): {sanitize_text(error)}") from error
-    except json.JSONDecodeError as error:
-        raise WatchdogError(f"Telegram API invalid JSON ({method})") from error
-    if not data.get("ok"):
-        raise WatchdogError(f"Telegram API error ({method}): {sanitize_text(data)}")
+        if error.code >= 500:
+            raise WatchdogDeliveryUnconfirmed("Telegram alert delivery unconfirmed: HTTP 5xx") from error
+        raise WatchdogError(f"Telegram API HTTP error ({method}): {error.code}") from error
+    except (OSError, http.client.HTTPException, ValueError) as error:
+        raise WatchdogDeliveryUnconfirmed(
+            f"Telegram alert delivery unconfirmed: {type(error).__name__}"
+        ) from error
+    if not isinstance(data, dict) or type(data.get("ok")) is not bool:
+        raise WatchdogDeliveryUnconfirmed("Telegram alert delivery unconfirmed: invalid envelope")
+    if data["ok"] is False:
+        raise WatchdogError(f"Telegram API refused alert ({method})")
     return data
 
 
-def send_alert(config: dict[str, Any], message: str, args: argparse.Namespace) -> int | None:
+def send_alert(config: dict[str, Any], message: str, args: argparse.Namespace) -> int:
     if not config.get("token") or not config.get("target_chat_id"):
         raise WatchdogError("telegram alert target is not configured")
     data = telegram_api(
@@ -361,21 +418,22 @@ def send_alert(config: dict[str, Any], message: str, args: argparse.Namespace) -
         timeout_sec=max(1, int(args.api_timeout_sec)),
     )
     result = data.get("result")
-    if isinstance(result, dict) and isinstance(result.get("message_id"), int):
+    if isinstance(result, dict) and type(result.get("message_id")) is int and result["message_id"] > 0:
         return int(result["message_id"])
-    return None
+    raise WatchdogDeliveryUnconfirmed("Telegram alert delivery unconfirmed: missing receipt")
 
 
 def build_report(args: argparse.Namespace) -> dict[str, Any]:
     config = resolve_telegram_config(args.env_file, required=False)
     listener = listener_probe(args)
     systemd = systemd_probe(args)
+    listener_issues, listener_warnings = classify_listener_issues(listener)
     issues = [
         *config_issues(config),
-        *listener["issues"],
+        *listener_issues,
         *systemd["issues"],
     ]
-    warnings = list(systemd.get("warnings") or [])
+    warnings = [*listener_warnings, *systemd.get("warnings", [])]
     if issues:
         health_status = "unhealthy"
     elif warnings:
@@ -386,10 +444,26 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     key = alert_key(issues)
     state = load_watchdog_state(args.state_file)
     suppressed, last_alert_age_sec = is_rate_limited(state, key, int(args.alert_min_interval_sec))
-    alert_needed = health_status == "unhealthy"
-    message = alert_message(issues, args) if alert_needed else ""
+    incident = state.get("active_incident")
+    incident = incident if isinstance(incident, dict) else {}
+    recovery_needed = health_status == "healthy" and incident.get("delivered") is True
+    alert_needed = health_status == "unhealthy" or recovery_needed
+    kind = "recovery" if recovery_needed else "failure" if health_status == "unhealthy" else None
+    message = recovery_message(systemd) if recovery_needed else alert_message(issues, args) if alert_needed else ""
+    if recovery_needed:
+        suppressed = False
+    attempt = state.get("delivery_attempt")
+    attempt = attempt if isinstance(attempt, dict) else {}
+    same_attempt = attempt.get("kind") == kind and attempt.get("key") == key
+    delivery_held = same_attempt and attempt.get("status") in {"sending", "unconfirmed"}
+    attempt_limited, _ = is_rate_limited(
+        {"last_alert_key": key, "last_alert_at": attempt.get("at")},
+        key, int(args.alert_min_interval_sec),
+    )
+    suppressed = bool(suppressed or delivery_held or (same_attempt and attempt_limited))
     alert: dict[str, Any] = {
         "needed": alert_needed,
+        "kind": kind,
         "sent": False,
         "suppressed": bool(alert_needed and suppressed),
         "reason": None,
@@ -401,30 +475,49 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         "max_lines": MAX_ALERT_LINES,
         "max_chars": MAX_ALERT_CHARS,
     }
-    if alert_needed and suppressed:
-        alert["reason"] = "rate_limited"
+    if alert_needed and state.get("state_error"):
+        alert["suppressed"] = True
+        alert["reason"] = "watchdog_state_unreadable"
+    elif alert_needed and suppressed:
+        alert["reason"] = "delivery_unconfirmed_hold" if delivery_held else "rate_limited"
     elif alert_needed and args.dry_run:
         alert["reason"] = "dry_run"
     elif alert_needed:
+        # Persist before I/O so interruption or an uncertain delivery does not
+        # automatically send a second card. It needs local receipt inspection.
+        state.setdefault("schema", STATE_SCHEMA)
+        state["delivery_attempt"] = {"at": utc_now(), "status": "sending", "kind": kind, "key": key}
+        write_json(args.state_file, state)
         try:
             alert["message_id"] = send_alert(config, message, args)
             alert["sent"] = True
             alert["reason"] = "sent"
-            write_json(
-                args.state_file,
-                {
+            if recovery_needed:
+                state["active_incident"] = None
+                state["last_recovery_at"] = utc_now()
+                state["last_health_status"] = "healthy"
+            else:
+                state.update({
                     "schema": STATE_SCHEMA,
                     "last_alert_at": utc_now(),
                     "last_alert_key": key,
                     "last_health_status": health_status,
                     "last_issues": issues,
-                },
-            )
+                    "active_incident": {"delivered": True, "opened_at": utc_now(), "key": key},
+                })
+            state["delivery_attempt"]["status"] = "delivered"
+            state["delivery_attempt"]["message_id"] = alert["message_id"]
+            write_json(args.state_file, state)
         except WatchdogError as error:
-            alert["reason"] = "send_failed"
+            uncertain = isinstance(error, WatchdogDeliveryUnconfirmed)
+            alert["reason"] = "delivery_unconfirmed" if uncertain else "send_failed"
             alert["error"] = sanitize_text(str(error), max_chars=240)
+            state["delivery_attempt"]["status"] = "unconfirmed" if uncertain else "failed"
+            write_json(args.state_file, state)
     else:
-        alert["reason"] = "healthy"
+        alert["reason"] = "transient_transport_error" if listener_warnings else "healthy"
+    attempt = state.get("delivery_attempt")
+    attempt = attempt if isinstance(attempt, dict) else {}
     return {
         "schema": WATCHDOG_SCHEMA,
         "generated_at": utc_now(),
@@ -432,6 +525,19 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         "health_status": health_status,
         "issues": issues,
         "warnings": warnings,
+        "transport_failure_policy": {
+            "minimum_consecutive_errors": TRANSPORT_FAILURE_COUNT,
+            "minimum_seconds_without_success": TRANSPORT_FAILURE_SECONDS,
+        },
+        "last_delivered_alert": {
+            "historical": True, "health_status_at_delivery": state.get("last_health_status"),
+            "at": state.get("last_alert_at"), "key": state.get("last_alert_key"),
+        },
+        "delivery_attention": (
+            "watchdog_state_unreadable" if state.get("state_error")
+            else "delivery_unconfirmed_hold" if attempt.get("status") in {"sending", "unconfirmed"}
+            else None
+        ),
         "listener": listener,
         "systemd": systemd,
         "recovery_commands": commands,
@@ -451,10 +557,20 @@ def emit_result(args: argparse.Namespace, report: dict[str, Any]) -> None:
 def main() -> int:
     args = parse_args()
     try:
-        report = build_report(args)
+        if args.dry_run:
+            report = build_report(args)
+        else:
+            args.state_file.parent.mkdir(parents=True, exist_ok=True)
+            lock_path = args.state_file.with_suffix(args.state_file.suffix + ".lock")
+            fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                report = build_report(args)
+            finally:
+                os.close(fd)
         emit_result(args, report)
-        return 0 if report.get("health_status") == "healthy" else 1
-    except WatchdogError as error:
+        return 0 if report.get("health_status") in {"healthy", "degraded"} else 1
+    except (WatchdogError, OSError) as error:
         report = {
             "schema": WATCHDOG_SCHEMA,
             "generated_at": utc_now(),

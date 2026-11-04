@@ -3,6 +3,7 @@
 pub mod agents;
 pub mod cli;
 pub mod containers;
+pub mod document_lifecycle;
 pub mod entrypoint;
 pub mod git;
 pub mod migrations;

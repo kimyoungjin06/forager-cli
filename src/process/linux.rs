@@ -1,11 +1,470 @@
 //! Linux-specific process utilities
 
-use std::fs;
-use std::path::Path;
+pub mod cgroup;
+pub mod landlock;
 
+use std::collections::BTreeSet;
+use std::ffi::OsString;
+use std::fs::{self, File, Metadata};
+use std::io;
+use std::os::fd::{AsFd, OwnedFd};
+use std::os::unix::ffi::OsStringExt;
+use std::os::unix::fs::MetadataExt;
+use std::path::{Component, Path, PathBuf};
+use std::time::Instant;
+
+use nix::dir::Dir;
+use nix::errno::Errno;
+use nix::fcntl::{open, openat, openat2, renameat, AtFlags, OFlag, OpenHow, ResolveFlag};
 use nix::sys::signal::{kill, Signal};
-use nix::unistd::Pid;
+use nix::sys::stat::{mkdirat, Mode};
+use nix::unistd::{linkat, unlinkat, Pid, UnlinkatFlags};
 use tracing::debug;
+
+use super::{BoundedDirectoryRead, DirectoryReadLimit, FilesystemObjectSnapshot};
+
+/// The receipt is emitted only after all adopted descendants have been reaped.
+/// Python runs isolated from user site packages; failure to enable subreaping
+/// exits before launching the user command and produces no release evidence.
+pub fn local_supervisor_command(
+    source: &str,
+    receipt: &Path,
+    nonce: &str,
+    scope: &str,
+) -> std::process::Command {
+    const SUPERVISOR: &str = r#"
+import ctypes, json, os, subprocess, sys
+libc = ctypes.CDLL(None, use_errno=True)
+if libc.prctl(36, 1, 0, 0, 0) != 0:
+    raise OSError(ctypes.get_errno(), 'child subreaper unavailable')
+enabled = ctypes.c_int()
+if libc.prctl(37, ctypes.byref(enabled), 0, 0, 0) != 0 or enabled.value != 1:
+    raise RuntimeError('child subreaper verification failed')
+child = subprocess.Popen(['/bin/sh', '-c', sys.argv[1]])
+status = None
+while True:
+    try:
+        pid, raw = os.waitpid(-1, 0)
+    except InterruptedError:
+        continue
+    except ChildProcessError:
+        break
+    if pid == child.pid:
+        child.returncode = os.waitstatus_to_exitcode(raw)
+        status = child.returncode if child.returncode >= 0 else 128 - child.returncode
+if status is None:
+    raise RuntimeError('primary child exit missing')
+record = {'nonce': sys.argv[3], 'status': status, 'wait_scope': sys.argv[4]}
+fd = os.open(sys.argv[2], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+with os.fdopen(fd, 'w') as stream:
+    json.dump(record, stream)
+    stream.flush()
+    os.fsync(stream.fileno())
+sys.exit(status)
+"#;
+    let mut command = std::process::Command::new("/usr/bin/python3");
+    command
+        .args(["-I", "-S", "-c", SUPERVISOR])
+        .arg(source)
+        .arg(receipt)
+        .arg(nonce)
+        .arg(scope);
+    command
+}
+
+pub fn open_bounded_root(root: &Path) -> io::Result<File> {
+    if !root.is_absolute() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "bounded root must be an absolute path",
+        ));
+    }
+    let descriptor = open(
+        Path::new("/"),
+        OFlag::O_PATH | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
+        Mode::empty(),
+    )
+    .map_err(errno_to_io)?;
+    let mut directory = File::from(descriptor);
+    for component in root.components() {
+        let name = match component {
+            Component::RootDir => continue,
+            Component::Normal(name) => name,
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "bounded root must contain only normal absolute components",
+                ));
+            }
+        };
+        let descriptor = openat(
+            &directory,
+            name,
+            OFlag::O_PATH | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
+            Mode::empty(),
+        )
+        .map_err(errno_to_io)?;
+        directory = File::from(descriptor);
+    }
+    // Traversing ancestors does not require reading their directory entries.
+    // Reopen only the held target with read access so callers can sync it.
+    let descriptor = openat(
+        &directory,
+        Path::new("."),
+        OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
+        Mode::empty(),
+    )
+    .map_err(errno_to_io)?;
+    Ok(File::from(descriptor))
+}
+
+pub fn open_bounded_regular_file(root: &File, relative_path: &Path) -> io::Result<File> {
+    validate_relative_path(relative_path)?;
+    let how = OpenHow::new()
+        .flags(OFlag::O_RDONLY | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW | OFlag::O_NONBLOCK)
+        .resolve(
+            ResolveFlag::RESOLVE_BENEATH
+                | ResolveFlag::RESOLVE_NO_SYMLINKS
+                | ResolveFlag::RESOLVE_NO_XDEV,
+        );
+    match openat2(root, relative_path, how) {
+        Ok(descriptor) => regular_file_from_descriptor(root, descriptor),
+        Err(Errno::ENOSYS) => Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "openat2 is required for no-cross-device bounded reads",
+        )),
+        Err(error) => Err(errno_to_io(error)),
+    }
+}
+
+pub fn open_bounded_subdirectory(root: &File, relative_path: &Path) -> io::Result<File> {
+    validate_relative_path(relative_path)?;
+    open_bounded_directory(root, relative_path).map(File::from)
+}
+
+pub fn ensure_bounded_directory(root: &File, relative_path: &Path) -> io::Result<File> {
+    validate_relative_path(relative_path)?;
+    let mut directory = root.try_clone()?;
+    for component in relative_path.components() {
+        let Component::Normal(name) = component else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "bounded path must contain only normal relative components",
+            ));
+        };
+        match mkdirat(&directory, name, Mode::from_bits_truncate(0o700)) {
+            Ok(()) => directory.sync_all()?,
+            Err(Errno::EEXIST) => {}
+            Err(error) => return Err(errno_to_io(error)),
+        }
+        let descriptor = openat(
+            &directory,
+            name,
+            OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
+            Mode::empty(),
+        )
+        .map_err(errno_to_io)?;
+        let opened = File::from(descriptor);
+        ensure_same_device(root, &opened)?;
+        let metadata = opened.metadata()?;
+        if !metadata.is_dir() || metadata.mode() & 0o077 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "bounded lifecycle component is not an owner-only directory",
+            ));
+        }
+        directory = opened;
+    }
+    Ok(directory)
+}
+
+pub fn open_or_create_bounded_regular_file(root: &File, relative_path: &Path) -> io::Result<File> {
+    open_bounded_writable_file(root, relative_path, false)
+}
+
+pub fn create_new_bounded_regular_file(root: &File, relative_path: &Path) -> io::Result<File> {
+    open_bounded_writable_file(root, relative_path, true)
+}
+
+pub fn finalize_bounded_file_noreplace(
+    root: &File,
+    directory: &Path,
+    partial_name: &Path,
+    final_name: &Path,
+) -> io::Result<()> {
+    validate_single_name(partial_name)?;
+    validate_single_name(final_name)?;
+    let directory = File::from(open_bounded_directory(root, directory)?);
+    linkat(
+        &directory,
+        partial_name,
+        &directory,
+        final_name,
+        AtFlags::empty(),
+    )
+    .map_err(errno_to_io)?;
+    unlinkat(&directory, partial_name, UnlinkatFlags::NoRemoveDir).map_err(errno_to_io)?;
+    directory.sync_all()
+}
+
+pub fn replace_bounded_root_file(
+    root: &File,
+    temporary_name: &Path,
+    final_name: &Path,
+) -> io::Result<()> {
+    validate_single_name(temporary_name)?;
+    validate_single_name(final_name)?;
+    renameat(root, temporary_name, root, final_name).map_err(errno_to_io)?;
+    root.sync_all()
+}
+
+pub fn rename_bounded_root_file_unsynced(
+    root: &File,
+    source_name: &Path,
+    target_name: &Path,
+) -> io::Result<()> {
+    validate_single_name(source_name)?;
+    validate_single_name(target_name)?;
+    renameat(root, source_name, root, target_name).map_err(errno_to_io)
+}
+
+pub fn link_bounded_root_file_noreplace_unsynced(
+    root: &File,
+    source_name: &Path,
+    target_name: &Path,
+) -> io::Result<()> {
+    validate_single_name(source_name)?;
+    validate_single_name(target_name)?;
+    linkat(root, source_name, root, target_name, AtFlags::empty()).map_err(errno_to_io)
+}
+
+pub fn remove_bounded_root_file(root: &File, name: &Path) -> io::Result<()> {
+    validate_single_name(name)?;
+    unlinkat(root, name, UnlinkatFlags::NoRemoveDir).map_err(errno_to_io)?;
+    root.sync_all()
+}
+
+pub fn remove_bounded_root_file_unsynced(root: &File, name: &Path) -> io::Result<()> {
+    validate_single_name(name)?;
+    unlinkat(root, name, UnlinkatFlags::NoRemoveDir).map_err(errno_to_io)
+}
+
+pub fn create_bounded_root_directory_unsynced(root: &File, name: &Path) -> io::Result<()> {
+    validate_single_name(name)?;
+    mkdirat(root, name, Mode::from_bits_truncate(0o700)).map_err(errno_to_io)
+}
+
+pub fn remove_bounded_root_directory_unsynced(root: &File, name: &Path) -> io::Result<()> {
+    validate_single_name(name)?;
+    unlinkat(root, name, UnlinkatFlags::RemoveDir).map_err(errno_to_io)
+}
+
+fn open_bounded_writable_file(
+    root: &File,
+    relative_path: &Path,
+    create_new: bool,
+) -> io::Result<File> {
+    validate_relative_path(relative_path)?;
+    let parent = relative_path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty());
+    let directory = match parent {
+        Some(parent) => File::from(open_bounded_directory(root, parent)?),
+        None => root.try_clone()?,
+    };
+    let name = relative_path.file_name().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "bounded file name is missing")
+    })?;
+    let mut flags = OFlag::O_RDWR | OFlag::O_CREAT | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW;
+    if create_new {
+        flags |= OFlag::O_EXCL;
+    }
+    let descriptor =
+        openat(&directory, name, flags, Mode::from_bits_truncate(0o600)).map_err(errno_to_io)?;
+    regular_file_from_descriptor(root, descriptor)
+}
+
+fn validate_single_name(path: &Path) -> io::Result<()> {
+    if path.is_absolute()
+        || path.components().count() != 1
+        || !matches!(path.components().next(), Some(Component::Normal(_)))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "bounded finalization names must be one normal component",
+        ));
+    }
+    Ok(())
+}
+
+pub fn read_bounded_directory(
+    root: &File,
+    relative_path: &Path,
+    max_entries: u64,
+    scan_started: Instant,
+    max_elapsed_ms: u64,
+) -> io::Result<BoundedDirectoryRead> {
+    let descriptor = open_bounded_directory(root, relative_path)?;
+    let descriptor_file = File::from(descriptor);
+    let snapshot = FilesystemObjectSnapshot::from_metadata(&descriptor_file.metadata()?);
+    let descriptor = OwnedFd::from(descriptor_file);
+    let mut directory = Dir::from_fd(descriptor).map_err(errno_to_io)?;
+    let mut names = Vec::new();
+    let mut entries_observed = 0_u64;
+    let mut limit = None;
+    let mut entries = directory.iter();
+    loop {
+        if scan_started.elapsed().as_millis() as u64 >= max_elapsed_ms {
+            limit = Some(DirectoryReadLimit::ElapsedTime);
+            break;
+        }
+        let Some(entry) = entries.next() else {
+            break;
+        };
+        let entry = entry.map_err(errno_to_io)?;
+        let name = entry.file_name().to_bytes();
+        if name == b"." || name == b".." {
+            continue;
+        }
+        if entries_observed >= max_entries {
+            limit = Some(DirectoryReadLimit::EntryCount);
+            break;
+        }
+        names.push(OsString::from_vec(name.to_vec()));
+        entries_observed += 1;
+    }
+    drop(entries);
+    let final_file = File::from(directory.as_fd().try_clone_to_owned()?);
+    let final_snapshot = FilesystemObjectSnapshot::from_metadata(&final_file.metadata()?);
+    let current_snapshot = bounded_directory_snapshot(root, relative_path).ok();
+    let stable = snapshot == final_snapshot && current_snapshot.as_ref() == Some(&snapshot);
+    if limit.is_some() || !stable {
+        names.clear();
+    }
+    names.sort();
+    Ok(BoundedDirectoryRead {
+        names,
+        snapshot,
+        entries_observed,
+        limit,
+        stable,
+    })
+}
+
+pub fn bounded_directory_snapshot(
+    root: &File,
+    relative_path: &Path,
+) -> io::Result<FilesystemObjectSnapshot> {
+    let descriptor = open_bounded_directory(root, relative_path)?;
+    let directory = File::from(descriptor);
+    Ok(FilesystemObjectSnapshot::from_metadata(
+        &directory.metadata()?,
+    ))
+}
+
+pub fn filesystem_link_count(metadata: &Metadata) -> u64 {
+    metadata.nlink()
+}
+
+pub fn filesystem_file_identity(metadata: &Metadata) -> (u64, u64) {
+    (metadata.dev(), metadata.ino())
+}
+
+pub fn filesystem_change_time(metadata: &Metadata) -> (i64, i64) {
+    (metadata.ctime(), metadata.ctime_nsec())
+}
+
+pub fn known_mount_points() -> BTreeSet<PathBuf> {
+    fs::read_to_string("/proc/self/mountinfo")
+        .ok()
+        .into_iter()
+        .flat_map(|mountinfo| {
+            mountinfo
+                .lines()
+                .filter_map(|line| line.split_whitespace().nth(4).map(decode_mountinfo_path))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn open_bounded_directory(root: &File, relative_path: &Path) -> io::Result<OwnedFd> {
+    if relative_path.as_os_str().is_empty() {
+        return Ok(OwnedFd::from(root.try_clone()?));
+    }
+    validate_relative_path(relative_path)?;
+    let how = OpenHow::new()
+        .flags(OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW)
+        .resolve(
+            ResolveFlag::RESOLVE_BENEATH
+                | ResolveFlag::RESOLVE_NO_SYMLINKS
+                | ResolveFlag::RESOLVE_NO_XDEV,
+        );
+    match openat2(root, relative_path, how) {
+        Ok(descriptor) => Ok(descriptor),
+        Err(Errno::ENOSYS) => Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "openat2 is required for no-cross-device bounded reads",
+        )),
+        Err(error) => Err(errno_to_io(error)),
+    }
+}
+
+fn regular_file_from_descriptor(root: &File, descriptor: std::os::fd::OwnedFd) -> io::Result<File> {
+    let file = File::from(descriptor);
+    ensure_same_device(root, &file)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "bounded document descriptor is not a regular file",
+        ));
+    }
+    Ok(file)
+}
+
+fn ensure_same_device(root: &File, opened: &File) -> io::Result<()> {
+    if root.metadata()?.dev() != opened.metadata()?.dev() {
+        return Err(io::Error::from_raw_os_error(nix::libc::EXDEV));
+    }
+    Ok(())
+}
+
+fn validate_relative_path(path: &Path) -> io::Result<()> {
+    if path.as_os_str().is_empty()
+        || path.is_absolute()
+        || !path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "bounded path must contain only normal relative components",
+        ));
+    }
+    Ok(())
+}
+
+fn decode_mountinfo_path(value: &str) -> PathBuf {
+    let source = value.as_bytes();
+    let mut decoded = Vec::with_capacity(source.len());
+    let mut index = 0;
+    while index < source.len() {
+        if source[index] == b'\\' && index + 3 < source.len() {
+            let octal = &source[index + 1..index + 4];
+            if octal.iter().all(|byte| matches!(byte, b'0'..=b'7')) {
+                decoded.push((octal[0] - b'0') * 64 + (octal[1] - b'0') * 8 + octal[2] - b'0');
+                index += 4;
+                continue;
+            }
+        }
+        decoded.push(source[index]);
+        index += 1;
+    }
+    PathBuf::from(OsString::from_vec(decoded))
+}
+
+fn errno_to_io(error: Errno) -> io::Error {
+    io::Error::from_raw_os_error(error as i32)
+}
 
 /// Kill a process and all its descendants
 /// Uses SIGTERM first, then SIGKILL after a short delay for stragglers
@@ -78,6 +537,22 @@ fn process_exists(pid: u32) -> bool {
     Path::new(&format!("/proc/{}", pid)).exists()
 }
 
+/// Return a stable identity for a live process, including its kernel start tick.
+///
+/// A persisted PID alone is unsafe for later termination because the kernel can
+/// reuse it. The start tick lets callers fail closed when a PID now belongs to
+/// a different process.
+pub fn process_identity(pid: u32) -> Option<String> {
+    let stat = fs::read_to_string(Path::new("/proc").join(pid.to_string()).join("stat")).ok()?;
+    let close_paren = stat.rfind(')')?;
+    let state = stat[close_paren + 1..].split_whitespace().next()?;
+    if state == "Z" {
+        return None;
+    }
+    let start_tick = parse_stat_field(&stat, 21)?;
+    Some(format!("linux:{pid}:{start_tick}"))
+}
+
 /// Get the foreground process group leader for a shell PID
 /// Walks the process tree to find the actual foreground process
 pub fn get_foreground_pid(shell_pid: u32) -> Option<u32> {
@@ -105,8 +580,8 @@ fn find_process_in_group(pgrp: u32) -> Option<u32> {
         return None;
     }
 
-    for entry in fs::read_dir(proc_dir).ok()? {
-        let entry = entry.ok()?;
+    let mut candidates = Vec::new();
+    for entry in fs::read_dir(proc_dir).ok()?.flatten() {
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
 
@@ -122,13 +597,29 @@ fn find_process_in_group(pgrp: u32) -> Option<u32> {
             // Field 5 (0-indexed 4) is the process group ID
             if let Some(proc_pgrp) = parse_stat_field(&content, 4) {
                 if proc_pgrp as u32 == pgrp {
-                    return Some(pid);
+                    candidates.push(pid);
                 }
             }
         }
     }
 
-    None
+    select_group_process(pgrp, candidates)
+}
+
+fn select_group_process(pgrp: u32, candidates: Vec<u32>) -> Option<u32> {
+    // /proc enumeration order is not a process identity. Prefer the leader;
+    // if it has exited, use a deterministic surviving group member.
+    candidates
+        .into_iter()
+        .min_by_key(|pid| (*pid != pgrp, *pid))
+}
+
+#[test]
+fn foreground_group_selection_is_order_independent() {
+    assert_eq!(select_group_process(20, vec![30, 20, 10]), Some(20));
+    assert_eq!(select_group_process(20, vec![10, 30, 20]), Some(20));
+    assert_eq!(select_group_process(20, vec![30, 10]), Some(10));
+    assert_eq!(select_group_process(20, vec![]), None);
 }
 
 /// Parse a specific field from /proc/[pid]/stat
@@ -148,6 +639,80 @@ fn parse_stat_field(content: &str, field_idx: usize) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
+    use std::os::unix::fs::symlink;
+
+    #[test]
+    fn bounded_root_opens_inside_landlock_without_parent_reads() {
+        const CHILD: &str = "FORAGER_BOUNDED_ROOT_LANDLOCK_CHILD";
+        if let Ok(outside) = std::env::var(CHILD) {
+            let root = std::env::current_dir().expect("child root");
+            let handle = open_bounded_root(&root).expect("allowed bounded root");
+            let mut file = create_new_bounded_regular_file(&handle, Path::new("written.txt"))
+                .expect("allowed bounded create");
+            std::io::Write::write_all(&mut file, b"written").expect("write");
+            file.sync_all().expect("sync file");
+            handle.sync_all().expect("sync held directory");
+            assert_eq!(
+                fs::read(root.join("written.txt")).expect("read"),
+                b"written"
+            );
+            assert_eq!(
+                fs::read(&outside)
+                    .expect_err("outside read denied")
+                    .raw_os_error(),
+                Some(nix::libc::EACCES)
+            );
+            assert_eq!(
+                open_bounded_root(Path::new(&outside).parent().expect("parent"))
+                    .expect_err("outside directory denied")
+                    .raw_os_error(),
+                Some(nix::libc::EACCES)
+            );
+            assert!(open_bounded_regular_file(&handle, Path::new("escape")).is_err());
+            return;
+        }
+        if super::super::landlock_abi().is_err() {
+            return;
+        }
+        let fixture = tempfile::tempdir().expect("fixture");
+        let root = fixture.path().join("task");
+        fs::create_dir(&root).expect("task root");
+        let outside = fixture.path().join("outside.txt");
+        fs::write(&outside, b"preserved").expect("outside canary");
+        symlink(&outside, root.join("escape")).expect("escape symlink");
+        let executable = root.join("test-child");
+        fs::copy(
+            std::env::current_exe().expect("test executable"),
+            &executable,
+        )
+        .expect("independent executable copy");
+        let mut command = std::process::Command::new(executable);
+        command.args([
+            "--exact",
+            "process::linux::tests::bounded_root_opens_inside_landlock_without_parent_reads",
+            "--nocapture",
+        ]);
+        crate::offdesk::read_policy::apply_to_command(
+            &crate::offdesk::read_policy::ReadPolicy::canonical(),
+            &mut command,
+            &root,
+        )
+        .expect("canonical restriction");
+        command.env(CHILD, &outside);
+        let output = command.output().expect("restricted child");
+        assert!(
+            output.status.success(),
+            "stdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            fs::read(root.join("written.txt")).expect("child ran"),
+            b"written"
+        );
+        assert_eq!(fs::read(outside).expect("preserved canary"), b"preserved");
+    }
 
     #[test]
     fn test_parse_stat_field() {
@@ -158,5 +723,82 @@ mod tests {
         assert_eq!(parse_stat_field(stat, 3), Some(1233)); // ppid
         assert_eq!(parse_stat_field(stat, 4), Some(1234)); // pgrp
         assert_eq!(parse_stat_field(stat, 7), Some(1234)); // tpgid
+    }
+
+    #[test]
+    fn current_process_has_stable_identity() {
+        let identity = process_identity(std::process::id()).expect("current process identity");
+        assert!(identity.starts_with(&format!("linux:{}:", std::process::id())));
+        assert_eq!(process_identity(std::process::id()), Some(identity));
+    }
+
+    #[test]
+    fn bounded_open_rejects_final_and_intermediate_symlinks() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().join("root");
+        let outside = temp.path().join("outside");
+        fs::create_dir_all(root.join("docs")).expect("root docs");
+        fs::create_dir_all(&outside).expect("outside");
+        fs::write(root.join("docs/regular.md"), "regular").expect("regular document");
+        fs::write(outside.join("secret.md"), "secret").expect("outside document");
+        symlink(outside.join("secret.md"), root.join("docs/final.md")).expect("final symlink");
+        symlink(&outside, root.join("alias")).expect("directory symlink");
+
+        let root_handle = open_bounded_root(&root).expect("bounded root");
+        let mut regular = open_bounded_regular_file(&root_handle, Path::new("docs/regular.md"))
+            .expect("regular bounded file");
+        let mut contents = String::new();
+        regular.read_to_string(&mut contents).expect("read regular");
+        assert_eq!(contents, "regular");
+        assert!(open_bounded_regular_file(&root_handle, Path::new("docs/final.md")).is_err());
+        assert!(open_bounded_regular_file(&root_handle, Path::new("alias/secret.md")).is_err());
+        assert!(read_bounded_directory(
+            &root_handle,
+            Path::new("alias"),
+            100,
+            Instant::now(),
+            1_000,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn bounded_open_and_mount_table_reject_cross_device_descent() {
+        if Path::new("/proc/version").exists() {
+            let root_handle = open_bounded_root(Path::new("/")).expect("filesystem root");
+            assert!(open_bounded_regular_file(&root_handle, Path::new("proc/version")).is_err());
+            assert!(known_mount_points().contains(Path::new("/proc")));
+        }
+        assert_eq!(
+            decode_mountinfo_path("/tmp/with\\040space"),
+            PathBuf::from("/tmp/with space")
+        );
+    }
+
+    #[test]
+    fn bounded_directory_read_limits_entries_and_detects_replacement() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().join("root");
+        fs::create_dir_all(root.join("docs")).expect("docs");
+        for name in ["a.md", "b.md", "c.md"] {
+            fs::write(root.join("docs").join(name), name).expect("document");
+        }
+        let root_handle = open_bounded_root(&root).expect("bounded root");
+        let limited =
+            read_bounded_directory(&root_handle, Path::new("docs"), 1, Instant::now(), 1_000)
+                .expect("bounded enumeration");
+        assert_eq!(limited.limit, Some(DirectoryReadLimit::EntryCount));
+        assert_eq!(limited.entries_observed, 1);
+        assert!(limited.names.is_empty());
+
+        let complete =
+            read_bounded_directory(&root_handle, Path::new("docs"), 100, Instant::now(), 1_000)
+                .expect("complete enumeration");
+        assert!(complete.stable);
+        fs::rename(root.join("docs"), root.join("docs-old")).expect("replace old docs");
+        fs::create_dir(root.join("docs")).expect("replacement docs");
+        let current = bounded_directory_snapshot(&root_handle, Path::new("docs"))
+            .expect("replacement snapshot");
+        assert_ne!(current, complete.snapshot);
     }
 }

@@ -16,12 +16,13 @@ impl Preview {
         instance: &Instance,
         terminal_running: bool,
         cached_output: &str,
+        wiki_context_summary: &str,
         theme: &Theme,
     ) {
         let info_height = if instance.sandbox_info.as_ref().is_some_and(|s| s.enabled) {
-            5
+            6
         } else {
-            4
+            5
         };
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -58,6 +59,10 @@ impl Preview {
                         theme.dimmed
                     }),
                 ),
+            ]),
+            Line::from(vec![
+                Span::styled("Context: ", Style::default().fg(theme.dimmed)),
+                Span::styled(wiki_context_summary, Style::default().fg(theme.accent)),
             ]),
         ];
         if let Some(sandbox) = &instance.sandbox_info {
@@ -119,13 +124,14 @@ impl Preview {
         area: Rect,
         instance: &Instance,
         cached_output: &str,
+        wiki_context_summary: &str,
         theme: &Theme,
     ) {
         // Adjust height based on whether worktree info is present
         let info_height = if instance.worktree_info.is_some() {
-            10 // Expanded to show worktree details
+            11 // Expanded to show worktree details
         } else {
-            6 // Standard height
+            7 // Standard height
         };
 
         let summary = build_preview_summary(instance, cached_output);
@@ -141,7 +147,7 @@ impl Preview {
                 ])
                 .split(area);
 
-            Self::render_info(frame, chunks[0], instance, theme);
+            Self::render_info(frame, chunks[0], instance, wiki_context_summary, theme);
             Self::render_summary(frame, chunks[1], summary.as_ref().unwrap(), theme);
             Self::render_output_cached(frame, chunks[2], instance, cached_output, theme);
         } else {
@@ -153,12 +159,18 @@ impl Preview {
                 ])
                 .split(area);
 
-            Self::render_info(frame, chunks[0], instance, theme);
+            Self::render_info(frame, chunks[0], instance, wiki_context_summary, theme);
             Self::render_output_cached(frame, chunks[1], instance, cached_output, theme);
         }
     }
 
-    fn render_info(frame: &mut Frame, area: Rect, instance: &Instance, theme: &Theme) {
+    fn render_info(
+        frame: &mut Frame,
+        area: Rect,
+        instance: &Instance,
+        wiki_context_summary: &str,
+        theme: &Theme,
+    ) {
         let mut info_lines = vec![
             Line::from(vec![
                 Span::styled("Title:   ", Style::default().fg(theme.dimmed)),
@@ -200,6 +212,10 @@ impl Preview {
                     },
                     Style::default().fg(theme.group),
                 ),
+            ]),
+            Line::from(vec![
+                Span::styled("Context: ", Style::default().fg(theme.dimmed)),
+                Span::styled(wiki_context_summary, Style::default().fg(theme.accent)),
             ]),
         ];
 
@@ -579,6 +595,7 @@ mod tests {
                     frame.area(),
                     instance,
                     cached_output,
+                    "brief ready · not presented",
                     &Theme::default(),
                 )
             })
@@ -651,6 +668,7 @@ mod tests {
         assert!(rendered.contains("Review outage before retry"));
         assert!(rendered.contains("closeout receipt packet"));
         assert!(rendered.contains("raw terminal line"));
+        assert!(rendered.contains("brief ready · not presented"));
     }
 
     #[test]

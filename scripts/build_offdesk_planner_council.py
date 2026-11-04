@@ -973,6 +973,7 @@ def main() -> int:
         "schema": COUNCIL_SCHEMA,
         "created_at": utc_now(),
         "mode": args.mode,
+        "objective": synthesized.get("objective") if isinstance(synthesized, dict) else None,
         "profile_key": profiles.profile_key(profile),
         "profile_name": profile.get("profile_name"),
         "source_evidence_bundle": str(source),

@@ -12,9 +12,9 @@ use std::path::{Path, PathBuf};
 
 use super::status::current_status_json_value;
 use crate::offdesk::{
-    load_offdesk_status_summary, operator_safe_text, DecisionLedger, DecisionRecord,
-    DecisionStatus, OffdeskStatusSummary, OffdeskTask, OffdeskTaskStatus, OffdeskTaskStore,
-    SchedulerGateStatus,
+    build_offdesk_shift_review_projection, load_offdesk_status_summary, operator_safe_text,
+    DecisionLedger, DecisionRecord, DecisionStatus, OffdeskShiftReviewProjectionV1,
+    OffdeskStatusSummary, OffdeskTask, OffdeskTaskStatus, OffdeskTaskStore, SchedulerGateStatus,
 };
 use crate::session::get_profile_dir;
 
@@ -48,6 +48,14 @@ const TELEGRAM_LOOP_STATUS_MAX_AGE_SECONDS: i64 = 180;
 
 #[derive(Args)]
 pub struct WorkstationSurfaceArgs {
+    /// Exact bounded shift to project. Defaults to the active shift, then latest.
+    #[arg(long)]
+    pub shift_id: Option<String>,
+
+    /// Routine run currently generating this projection.
+    #[arg(long)]
+    pub current_run_id: Option<String>,
+
     /// Emit compact JSON. Without this flag, a human summary is printed.
     #[arg(long)]
     pub json: bool,
@@ -70,6 +78,8 @@ struct WorkstationSurface {
     decision_inbox: DecisionInboxSurface,
     runtime_dispatch: RuntimeDispatchSurface,
     accepted_truth_recovery: AcceptedTruthRecoverySurface,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    offdesk_shift_review: Option<OffdeskShiftReviewProjectionV1>,
     chat_context: ChatContextSurface,
     decisions: Vec<DecisionItem>,
     graph_focus: GraphFocus,
@@ -122,6 +132,8 @@ struct ProjectRow {
 
 #[derive(Debug, Clone, Serialize)]
 struct ProjectTaskItem {
+    attention_version: String,
+    review: Option<crate::offdesk::task_queue::TaskReviewProjection>,
     kind: &'static str,
     task_id: String,
     request_id: String,
@@ -674,6 +686,7 @@ struct ProjectAccumulator {
 }
 
 struct TaskReceiptContext<'a> {
+    profile_dir: &'a Path,
     profile: &'a str,
     generated_at: DateTime<Utc>,
     decisions: &'a [DecisionRecord],
@@ -684,7 +697,7 @@ struct TaskReceiptContext<'a> {
 }
 
 pub async fn run(profile: &str, args: WorkstationSurfaceArgs) -> Result<()> {
-    let surface = build_workstation_surface(profile)?;
+    let surface = build_workstation_surface(profile, &args)?;
     if args.json {
         println!("{}", serde_json::to_string(&surface)?);
     } else {
@@ -694,7 +707,10 @@ pub async fn run(profile: &str, args: WorkstationSurfaceArgs) -> Result<()> {
     Ok(())
 }
 
-fn build_workstation_surface(profile: &str) -> Result<WorkstationSurface> {
+fn build_workstation_surface(
+    profile: &str,
+    args: &WorkstationSurfaceArgs,
+) -> Result<WorkstationSurface> {
     let generated_at = Utc::now();
     let profile_dir = get_profile_dir(profile)?;
     let status_json = current_status_json_value(profile)?;
@@ -716,6 +732,12 @@ fn build_workstation_surface(profile: &str) -> Result<WorkstationSurface> {
         .iter()
         .filter(|record| decision_is_open(record.status))
         .collect::<Vec<_>>();
+    let offdesk_shift_review = build_offdesk_shift_review_projection(
+        profile,
+        args.shift_id.as_deref(),
+        args.current_run_id.as_deref(),
+        generated_at,
+    )?;
     let next_safe_actions = dashboard_actions_from_status(&status_json);
     let decision_items = decision_items(
         &open_decisions,
@@ -728,6 +750,7 @@ fn build_workstation_surface(profile: &str) -> Result<WorkstationSurface> {
         &status_json,
         &offdesk_summary,
         open_decisions.len(),
+        offdesk_shift_review.as_ref(),
         next_safe_actions.first(),
     );
     let runtime_dispatch = runtime_dispatch_surface(
@@ -747,6 +770,7 @@ fn build_workstation_surface(profile: &str) -> Result<WorkstationSurface> {
         &tasks,
         &latest_decisions,
         &TaskReceiptContext {
+            profile_dir: &profile_dir,
             profile,
             generated_at,
             decisions: &latest_decisions,
@@ -765,6 +789,14 @@ fn build_workstation_surface(profile: &str) -> Result<WorkstationSurface> {
         &projects,
     );
 
+    let mut attention_counts = attention_counts(&status_json, open_decisions.len());
+    attention_counts.insert(
+        "shift_review_reasons".to_string(),
+        offdesk_shift_review
+            .as_ref()
+            .map_or(0, |review| review.attention_reasons.len()),
+    );
+
     Ok(WorkstationSurface {
         schema: WORKSTATION_SURFACE_SCHEMA,
         generated_at,
@@ -774,13 +806,14 @@ fn build_workstation_surface(profile: &str) -> Result<WorkstationSurface> {
         workspace_roots: workspace_roots(&tasks),
         health: health_items(&profile_dir, &status_json, &offdesk_summary, generated_at),
         capacity: capacity_counts(&status_json),
-        attention_counts: attention_counts(&status_json, open_decisions.len()),
+        attention_counts,
         top_attention,
         next_safe_actions: ensure_dashboard_actions(next_safe_actions),
         projects,
         decision_inbox,
         runtime_dispatch,
         accepted_truth_recovery,
+        offdesk_shift_review,
         chat_context,
         decisions: decision_items,
         graph_focus: graph_focus(),
@@ -862,6 +895,35 @@ fn human_summary_from_value(surface: &Value) -> String {
         "  truth recovery: {}\n",
         number_at(surface, "/accepted_truth_recovery/candidate_count").unwrap_or_default()
     ));
+    if let Some(shift_id) = text_at(surface, "/offdesk_shift_review/shift_id") {
+        output.push_str(&format!(
+            "  shift review: {shift_id} ({})\n",
+            text_at(surface, "/offdesk_shift_review/review_status").unwrap_or("unknown")
+        ));
+        output.push_str(&format!(
+            "  shift evidence: task {}/{} terminal, routine {}/{} terminal\n",
+            number_at(
+                surface,
+                "/offdesk_shift_review/summary/task_attempts_terminal"
+            )
+            .unwrap_or_default(),
+            number_at(
+                surface,
+                "/offdesk_shift_review/summary/task_attempts_reserved"
+            )
+            .unwrap_or_default(),
+            number_at(
+                surface,
+                "/offdesk_shift_review/summary/routine_runs_terminal"
+            )
+            .unwrap_or_default(),
+            number_at(
+                surface,
+                "/offdesk_shift_review/summary/routine_runs_reserved"
+            )
+            .unwrap_or_default()
+        ));
+    }
     if let Some(command) = text_at(surface, "/next_safe_actions/0/command") {
         if !command.is_empty() {
             output.push_str(&format!("  next command: {command}\n"));
@@ -875,6 +937,7 @@ fn build_top_attention(
     status_json: &Value,
     summary: &OffdeskStatusSummary,
     open_decisions: usize,
+    shift_review: Option<&OffdeskShiftReviewProjectionV1>,
     next_action: Option<&DashboardAction>,
 ) -> TopAttention {
     if value_usize(status_json, "failed_offdesk_tasks") > 0 || summary.background_failed > 0 {
@@ -896,6 +959,20 @@ fn build_top_attention(
             project_key: None,
             summary: format!("{open_decisions} decision item(s) require operator review."),
             action_label: "Open decision inbox".to_string(),
+        };
+    }
+    if let Some(review) = shift_review.filter(|review| !review.attention_reasons.is_empty()) {
+        return TopAttention {
+            kind: "shift_review_required".to_string(),
+            title: "Bounded shift review required".to_string(),
+            severity: "attention",
+            project_key: None,
+            summary: format!(
+                "Shift {} has {} review reason(s); inspect the shared morning projection before acceptance or revision.",
+                review.shift_id,
+                review.attention_reasons.len()
+            ),
+            action_label: "Open shift review".to_string(),
         };
     }
     if summary.closeout_required > 0 {
@@ -1165,9 +1242,11 @@ fn project_rows(
             OffdeskTaskStatus::Cancelled => project.cancelled += 1,
         }
         let receipt_links = project_task_receipt_links(task, receipt_context);
-        project
-            .task_items
-            .push(project_task_item(task, receipt_links));
+        project.task_items.push(project_task_item(
+            task,
+            receipt_links,
+            receipt_context.profile_dir,
+        ));
         update_latest(&mut project.last_activity, task.updated_at);
     }
     for record in decisions
@@ -1211,6 +1290,13 @@ fn project_row(project: ProjectAccumulator) -> ProjectRow {
     });
     task_items.truncate(6);
 
+    let recorded_nonaccepted = !task_items.is_empty()
+        && task_items.iter().all(|item| {
+            matches!(
+                item.next_safe_action_kind.as_str(),
+                "recorded_rework" | "recorded_partial" | "recorded_defer"
+            )
+        });
     let severity = if project.failed > 0 {
         "critical"
     } else if project.resume_pending > 0 {
@@ -1250,12 +1336,16 @@ fn project_row(project: ProjectAccumulator) -> ProjectRow {
         },
         runtime: runtime.to_string(),
         decisions: project.open_decisions,
-        closeout: if project.completed > 0 {
+        closeout: if recorded_nonaccepted {
+            "disposition_recorded_receipts_separate".to_string()
+        } else if project.completed > 0 {
             "review_required_if_no_receipt".to_string()
         } else {
             "not_ready".to_string()
         },
-        truth: if project.completed > 0 {
+        truth: if recorded_nonaccepted {
+            "recorded_nonaccepted".to_string()
+        } else if project.completed > 0 {
             "unknown".to_string()
         } else {
             "not_applicable".to_string()
@@ -1271,8 +1361,9 @@ fn project_row(project: ProjectAccumulator) -> ProjectRow {
 fn project_task_item(
     task: &OffdeskTask,
     receipt_links: Vec<ProjectTaskReceiptLink>,
+    profile_dir: &Path,
 ) -> ProjectTaskItem {
-    let view = task.operator_view();
+    let view = task.operator_view_with_profile(profile_dir);
     let runner_kind = background_runner_kind_label(task.runner_kind);
     let command = view
         .next_safe_action
@@ -1288,7 +1379,9 @@ fn project_task_item(
     } else {
         format!("{} task", view.capability_id)
     };
-    let summary = if !view.reason.is_empty() {
+    let summary = if view.review.is_some() {
+        view.next_safe_action.detail.clone()
+    } else if !view.reason.is_empty() {
         view.reason.clone()
     } else {
         view.next_safe_action.detail.clone()
@@ -1312,6 +1405,8 @@ fn project_task_item(
         .collect();
 
     ProjectTaskItem {
+        attention_version: crate::offdesk::workflow::review_link::attention_version(task),
+        review: view.review,
         kind: project_task_kind(task.status),
         task_id: view.task_id.clone(),
         request_id: view.request_id,
@@ -2441,6 +2536,7 @@ fn accepted_truth_recovery_surface(
         }
         if let Some(item) = accepted_truth_recovery_item_from_dir(
             &entry.path(),
+            profile_dir,
             profile,
             generated_at,
             action_receipts,
@@ -2481,7 +2577,11 @@ fn accepted_truth_recovery_surface_from_items(
         "blocked"
     } else if followup_count > 0 {
         "attention"
-    } else if retired_count > 0 {
+    } else if retired_count > 0
+        || items
+            .iter()
+            .any(|item| item.stage == "recorded_nonaccepted")
+    {
         "info"
     } else {
         "clear"
@@ -2529,6 +2629,7 @@ fn accepted_truth_recovery_surface_from_items(
 
 fn accepted_truth_recovery_item_from_dir(
     artifact_dir: &Path,
+    profile_dir: &Path,
     profile: &str,
     generated_at: DateTime<Utc>,
     action_receipts: &[StoredAcceptedTruthRecoveryActionReceipt],
@@ -2544,7 +2645,13 @@ fn accepted_truth_recovery_item_from_dir(
     else {
         return Ok(None);
     };
-    let receipt = review.get("closeout_receipt");
+    let tasks = OffdeskTaskStore::new(profile_dir).load()?;
+    let effective_receipt = crate::offdesk::workflow::review_link::effective_closeout_receipt(
+        profile_dir,
+        &tasks,
+        &review,
+    );
+    let receipt = (!effective_receipt.is_null()).then_some(&effective_receipt);
     let acceptance_status = receipt
         .and_then(|receipt| receipt.get("acceptance_status"))
         .and_then(Value::as_str)
@@ -2583,7 +2690,16 @@ fn accepted_truth_recovery_item_from_dir(
         .and_then(Value::as_array)
         .map(Vec::len)
         .unwrap_or_default();
-    let stage = accepted_truth_recovery_stage(&acceptance_status);
+    let reviewed_nonaccepted = crate::offdesk::workflow::review_link::reviewed_nonaccepted_receipt(
+        profile_dir,
+        &tasks,
+        &review,
+    );
+    let stage = if reviewed_nonaccepted {
+        "recorded_nonaccepted"
+    } else {
+        accepted_truth_recovery_stage(&acceptance_status)
+    };
     let severity = accepted_truth_recovery_severity(stage);
     let evidence_status = receipt_text_field(receipt, "evidence_status", "unknown");
     let retention_review = receipt_text_field(receipt, "retention_review", "unknown");
@@ -2598,18 +2714,24 @@ fn accepted_truth_recovery_item_from_dir(
         .and_then(Value::as_str)
         .map(operator_safe_text)
         .unwrap_or_else(|| "Review the latest closeout record before accepting truth.".to_string());
+    let next_safe_action = if reviewed_nonaccepted {
+        "Operator disposition is already recorded; follow existing owning-plan work. Historical evidence limits remain, with no accepted truth.".to_string()
+    } else {
+        next_safe_action
+    };
     let project_key = accepted_truth_recovery_project_key(&plan, &review);
-    let resolve_command = open_decision_kinds.first().map(|kind| {
+    let resolve_command = open_decision_kinds.first().filter(|_| !reviewed_nonaccepted).map(|kind| {
         format!(
             "forager offdesk closeout-decision --closeout-id {} --kind {} --decision preserve-in-place --reason <reason> --json",
             closeout_id, kind
         )
     });
-    let retire_command = (acceptance_status != "retired_incomplete").then(|| {
-        format!(
+    let retire_command =
+        (acceptance_status != "retired_incomplete" && !reviewed_nonaccepted).then(|| {
+            format!(
             "forager offdesk closeout-retire --closeout-id {closeout_id} --reason <reason> --json"
         )
-    });
+        });
     let target_ref = AcceptedTruthRecoveryTargetRef {
         kind: "accepted_truth_recovery.v1",
         closeout_id: closeout_id.clone(),

@@ -101,6 +101,12 @@ fn offdesk_plan_harness_runs_without_domain_profile() -> Result<()> {
     let council_result: Value = serde_json::from_slice(&council.stdout)?;
     assert_eq!(council_result["schema"], "offdesk_planner_council.v1");
     assert_eq!(council_result["profile_key"], "generic");
+    assert!(council_result["objective"]
+        .as_str()
+        .is_some_and(|objective| !objective.trim().is_empty()));
+    let council_plan: Value =
+        serde_json::from_slice(&fs::read(council_dir.join("COUNCIL_PLAN.json"))?)?;
+    assert_eq!(council_result["objective"], council_plan["objective"]);
     assert_eq!(
         council_result["consensus"]["ready_for_operator_review"],
         true

@@ -43,6 +43,9 @@ pub struct Config {
     pub sound: crate::sound::SoundConfig,
 
     #[serde(default)]
+    pub night: NightConfig,
+
+    #[serde(default)]
     pub app_state: AppStateConfig,
 
     /// Top-level tables this struct does not model (e.g. the harness scripts'
@@ -50,6 +53,28 @@ pub struct Config {
     /// saving from the settings TUI round-trips them instead of deleting them.
     #[serde(flatten)]
     pub extra: toml::Table,
+}
+
+/// Inert preferences for reviewing already prepared shifts. Saving never schedules work.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NightConfig {
+    #[serde(default)]
+    pub project_keys: Vec<String>,
+    #[serde(default = "default_night_approval_ttl")]
+    pub approval_ttl_minutes: u64,
+}
+
+fn default_night_approval_ttl() -> u64 {
+    30
+}
+
+impl Default for NightConfig {
+    fn default() -> Self {
+        Self {
+            project_keys: Vec::new(),
+            approval_ttl_minutes: default_night_approval_ttl(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

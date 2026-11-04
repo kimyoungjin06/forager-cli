@@ -4,13 +4,17 @@
 This adapter is intentionally narrow. It maps a small Telegram command surface
 to read-only projections, remote Plan Mode receipts, exact gate resolution,
 reviewed enqueue, and task-scoped runtime start/monitor receipts. It never
-executes arbitrary shell text, starts unbound work, closes out completed work,
-accepts runtime output as truth, or mutates project files directly.
+executes operator-supplied shell text directly in the adapter, starts unbound
+work, closes out completed work, accepts runtime output as truth, or mutates
+project files directly. Opt-in runtime dispatch queues receipted work for the
+Offdesk tick launcher.
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
+import datetime as dt
 import hashlib
 import html
 import json
@@ -40,23 +44,36 @@ from telegram_operator.common import (
     utc_now,
     write_json,
 )
+from telegram_operator.behavior_core import (
+    InboundEvent,
+    finalize_action_outcome,
+    finalize_response_card,
+    route_inbound_event,
+    validate_action_candidate,
+)
+from telegram_operator.command_envelope import build_command_envelope
 from telegram_operator.allowlist import (
     dispatch_templates,
     find_dispatch_template,
     load_dispatch_allowlist,
 )
-from telegram_operator.config import default_telegram_env_file, resolve_telegram_config
+from telegram_operator.config import (
+    TelegramControlRevokedError,
+    assert_telegram_config_current,
+    default_telegram_env_file,
+    public_control_generation_id,
+    resolve_telegram_config,
+)
 from telegram_operator.health import listener_health
 from telegram_operator.redaction import public_remote_plan_session
 from telegram_operator.base import attach_choice_surface, result_base
 from telegram_operator.plan_workflow import (
     active_remote_plan_session,
     handle_remote_plan_session_input,
+    remote_plan_init_context,
     remote_plan_selection_context,
     remote_plan_session_should_handle_text,
-    store_remote_plan_session,
 )
-from telegram_operator.receipts import create_remote_plan_session
 from telegram_operator.schemas import (
     FORBIDDEN_REMOTE_INTENTS,
     INTERACTION_CONTEXT_SCHEMA,
@@ -65,6 +82,7 @@ from telegram_operator.schemas import (
 from telegram_operator.plan_messages import render_project_selection_message
 from telegram_operator.dispatch import (
     apply_cancel_task,
+    apply_terminate_task,
     apply_session_input,
     apply_session_text_input,
     apply_decision_action,
@@ -77,6 +95,7 @@ from telegram_operator.dispatch import (
     build_confirmation,
     cancellable_tasks_from_surface,
     clear_confirmation,
+    classify_session_interaction,
     confirmation_is_fresh,
     export_workstation_surface,
     find_action_envelope,
@@ -90,14 +109,24 @@ from telegram_operator.dispatch import (
     store_confirmation,
 )
 from telegram_operator.effects import annotate_result_effect
+from telegram_operator.feedback_workflow import (
+    FeedbackWorkflowOutcome,
+    process_feedback_workflow,
+)
 from telegram_operator.reply_outbox import (
     compact_reply_outbox,
     latest_delivery_records,
     mark_delivery_delivered,
     mark_delivery_failed,
+    mark_delivery_started,
+    mark_delivery_unconfirmed,
     outbox_inspection,
     pending_deliveries,
     queue_reply,
+    revoke_mismatched_deliveries,
+)
+from telegram_operator.remote_session_identity import (
+    identity_issue as remote_session_identity_issue,
 )
 from telegram_operator.update_journal import (
     begin_update,
@@ -108,10 +137,21 @@ from telegram_operator.update_journal import (
     mark_effect_committed,
     reconcile_update,
 )
+from telegram_operator.receipt_inspector import inspect_remote_receipts
 from telegram_operator.notifier import (
     attention_summary,
     build_attention_notification,
+    commit_attention_notification,
     render_attention_message,
+)
+from telegram_operator.notification_policy import (
+    NotificationCandidate,
+    NotificationCycle,
+    NotificationPriority,
+)
+from telegram_operator.session_lifecycle import (
+    mark_stop_alert,
+    observe_session_lifecycle,
 )
 from telegram_operator.project_candidates import (
     discover_project_paths,
@@ -137,6 +177,7 @@ from telegram_operator.projects import (
 from telegram_operator.persistence import (
     RemoteOperatorStateError,
     append_chat_history,
+    bind_control_generation,
     chat_history_for_chat_hash,
     clear_session_focus_for_chat_hash,
     last_context_for_chat_hash,
@@ -149,14 +190,19 @@ from telegram_operator.persistence import (
 )
 from telegram_operator.rendering import (
     choice_keyboard,
+    choice_surface_contract,
     render_decisions_message,
     render_dispatch_cancel_message,
+    render_command_envelope_refusal_message,
+    render_receipt_inspection_message,
     render_dispatch_confirm_message,
     render_dispatch_error_message,
     render_dispatch_result_message,
     render_attention_summary_message,
     render_cancel_task_confirm_message,
     render_cancel_task_result_message,
+    render_terminate_task_confirm_message,
+    render_terminate_task_result_message,
     render_pause_result_message,
     render_recovery_confirm_message,
     render_recovery_message,
@@ -192,9 +238,15 @@ from telegram_operator.rendering import (
 )
 from telegram_operator.routing import (
     parse_remote_command,
-    remote_plan_session_command_payload,
 )
-from telegram_operator.transport import edit_message, get_updates, send_message
+from telegram_operator.transport import (
+    TelegramDeliveryUnconfirmed,
+    answer_callback_query,
+    clear_inline_keyboard,
+    edit_message,
+    get_updates,
+    send_message,
+)
 from telegram_operator.wiki import record_remember_candidate
 
 
@@ -273,6 +325,10 @@ DEFAULT_LISTENER_LOCK_FILE = pathlib.Path(
 # setup can allow named commands without allowing free-form ones.
 _DISPATCH_ALLOWLIST_ENV = os.environ.get("OFFDESK_REMOTE_OPERATOR_DISPATCH_ALLOWLIST", "").strip()
 DEFAULT_DISPATCH_ALLOWLIST_FILE = pathlib.Path(_DISPATCH_ALLOWLIST_ENV) if _DISPATCH_ALLOWLIST_ENV else None
+SESSION_CONTINUE_MESSAGE = (
+    "현재 계획과 마지막 응답을 기준으로 다음 미완료 작업을 바로 진행해. "
+    "다음 작업이 명확하지 않거나 새 권한이 필요하면 실행하지 말고 질문해."
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -303,6 +359,15 @@ def parse_args() -> argparse.Namespace:
         help="Inspect durable update and reply-delivery state, then exit.",
     )
     parser.add_argument(
+        "--receipt-inspect",
+        action="store_true",
+        help="Inspect one remote Plan receipt chain without changing state.",
+    )
+    parser.add_argument(
+        "--receipt-session-id",
+        help="Plan session selected by --receipt-inspect; defaults to the latest artifact session.",
+    )
+    parser.add_argument(
         "--journal-reconcile",
         choices=("retry", "complete"),
         help="Resolve one ambiguous started update after local evidence review.",
@@ -315,7 +380,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--journal-update-id",
         type=int,
-        help="Telegram update id selected by --journal-inspect or --journal-reconcile.",
+        help="Telegram update id selected by journal tools or --receipt-inspect.",
     )
     parser.add_argument(
         "--journal-reason",
@@ -340,6 +405,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out", type=pathlib.Path, help="Optional JSON result path.")
     parser.add_argument("--command-text", help="Deterministic command text, for tests or manual dry-runs.")
     parser.add_argument("--send-command-text", help="Render a read-only command and send it to the configured target chat.")
+    parser.add_argument(
+        "--shift-review-id",
+        help="Exact bounded shift used only to ground a read-only review projection.",
+    )
+    parser.add_argument(
+        "--shift-review-current-run-id",
+        help="Exact reserved routine currently producing the read-only review projection.",
+    )
     parser.add_argument("--replay-update-file", type=pathlib.Path, help="Dry-run only: process local Telegram update JSON through the poller.")
     parser.add_argument("--projection-file", type=pathlib.Path, help="Dry-run only: render this read-only projection instead of invoking forager.")
     parser.add_argument("--dry-run", action="store_true", help="Do not call the Telegram API.")
@@ -363,6 +436,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_DISPATCH_CONFIRM_TTL_SEC", "300")),
         help="Lifetime of a pending Telegram execution confirmation token.",
+    )
+    parser.add_argument(
+        "--remote-command-ttl-sec",
+        type=int,
+        default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_COMMAND_TTL_SEC", "300")),
+        help="Maximum age of a Telegram command that can reach a state-changing handler.",
     )
     parser.add_argument(
         "--enable-runtime-dispatch",
@@ -395,15 +474,13 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         default=os.environ.get("OFFDESK_REMOTE_OPERATOR_AUTONOMY_PROPOSE", "").strip().lower()
         in {"1", "true", "yes", "on"},
-        help="When the workstation goes idle, propose starting the armed overnight autonomy "
-        "window via a Telegram confirm card. The operator's tap is the approval; nothing arms itself.",
+        help="When the workstation goes idle, propose arming the latest reviewed bounded shift "
+        "via a Telegram confirm card. The operator's tap resolves only that exact manifest.",
     )
     parser.add_argument("--autonomy-idle-min", type=int, default=30,
                         help="Idle minutes across watch paths before proposing.")
     parser.add_argument("--autonomy-propose-from-hour", type=int, default=17,
                         help="Do not propose before this local hour (avoids lunch-break proposals).")
-    parser.add_argument("--autonomy-until-hour", type=int, default=9,
-                        help="Local hour when an approved autonomy window closes.")
     parser.add_argument("--autonomy-backoff-sec", type=int, default=7200,
                         help="Minimum seconds between proposals (unanswered or declined).")
     parser.add_argument("--autonomy-watch-path", action="append", type=pathlib.Path, default=[],
@@ -579,81 +656,6 @@ def run_projection(forager_bin: str, profile: str, parsed: dict[str, Any]) -> di
         raise RemoteOperatorTelegramError("forager projection did not return JSON") from error
     validate_projection(projection, expected_command=parsed.get("command"))
     return projection
-
-
-def decision_feedback_ingest_command(
-    args: argparse.Namespace,
-    feedback_path: pathlib.Path,
-) -> list[str]:
-    argv = [args.forager_bin]
-    if args.profile:
-        argv.extend(["--profile", args.profile])
-    argv.extend(
-        [
-            "offdesk",
-            "decision",
-            "ingest-telegram-feedback",
-            "--feedback",
-            str(feedback_path),
-            "--json",
-        ]
-    )
-    return argv
-
-
-def ingest_feedback_decision(
-    args: argparse.Namespace,
-    feedback_record: dict[str, Any],
-) -> dict[str, Any]:
-    if not args.decision_feedback_ingest:
-        return {"decision_feedback_ingest_status": "disabled"}
-    fingerprint = hashlib.sha256(
-        json.dumps(feedback_record, ensure_ascii=False, sort_keys=True).encode("utf-8")
-    ).hexdigest()[:16]
-    message_id = feedback_record.get("message_id")
-    suffix = str(message_id) if message_id is not None else fingerprint
-    feedback_path = args.feedback_ingest_dir / f"telegram_feedback_{suffix}_{fingerprint}.json"
-    write_json(feedback_path, feedback_record)
-    command = decision_feedback_ingest_command(args, feedback_path)
-    try:
-        process = subprocess.run(
-            command,
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-    except OSError as error:
-        return {
-            "decision_feedback_ingest_status": "error",
-            "decision_feedback_ingest_file": str(feedback_path),
-            "decision_feedback_ingest_error": sanitize_text(str(error), max_chars=300),
-        }
-    if process.returncode != 0:
-        return {
-            "decision_feedback_ingest_status": "error",
-            "decision_feedback_ingest_file": str(feedback_path),
-            "decision_feedback_ingest_error": sanitize_text(
-                process.stderr.strip() or process.stdout.strip(),
-                max_chars=300,
-            ),
-        }
-    try:
-        report = json.loads(process.stdout)
-    except json.JSONDecodeError:
-        return {
-            "decision_feedback_ingest_status": "error",
-            "decision_feedback_ingest_file": str(feedback_path),
-            "decision_feedback_ingest_error": "decision ingest did not return JSON",
-        }
-    return {
-        "decision_feedback_ingest_status": "recorded"
-        if report.get("appended") is True
-        else "existing",
-        "decision_feedback_ingest_file": str(feedback_path),
-        "decision_feedback_decision_id": report.get("decision_id"),
-        "decision_feedback_appended": bool(report.get("appended")),
-    }
 
 
 def load_projection_file(path: pathlib.Path, parsed: dict[str, Any]) -> dict[str, Any]:
@@ -1086,10 +1088,15 @@ def decision_action_choice_context(decisions: list[dict[str, Any]]) -> dict[str,
         if not decision_id or not isinstance(actions, list) or not actions:
             continue
         commands: list[str] = []
-        for action in actions[:3]:
+        for action in actions:
             action_kind = str(action.get("action_kind") or "").strip()
-            if action_kind:
+            # revise/block require a bounded note. A one-tap callback cannot
+            # supply that operator-authored direction, so those actions remain
+            # explicit text commands instead of creating an invalid confirm.
+            if action_kind in {"continue", "stop", "deny", "defer"}:
                 commands.append(f"/decision {decision_id} {action_kind}")
+            if len(commands) >= 3:
+                break
         if commands:
             return {"context_kind": "decisions_actions", "choice_commands": commands}
     return None
@@ -1102,8 +1109,12 @@ def finalize_dispatch_result(
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     # A card that stashed a pending confirmation gets one-tap 확인/취소 buttons.
-    if context is None and isinstance(result.get("pending_dispatch_confirmation"), dict):
-        context = {"context_kind": "dispatch_confirm"}
+    confirmation = result.get("pending_dispatch_confirmation")
+    if context is None and isinstance(confirmation, dict):
+        context = {
+            "context_kind": "dispatch_confirm",
+            "confirmation_token": str(confirmation.get("token") or ""),
+        }
     attach_choice_surface(result, context)
     result.update(
         {
@@ -1123,7 +1134,11 @@ def render_session_message_delivery(
     session_id: str,
     message: str,
     expected_hash: str = "",
+    expected_prompt_identity: str = "",
+    expected_interaction_kind: str = "",
     require_exact_id: bool = False,
+    expected_identity: dict[str, Any] | None = None,
+    require_remote_identity: bool = False,
 ) -> dict[str, Any]:
     if result.get("mode") == "dry_run":
         message_preview = "\n".join(
@@ -1148,7 +1163,11 @@ def render_session_message_delivery(
             message,
             status_file=args.session_status_file,
             expected_hash=expected_hash,
+            expected_prompt_identity=expected_prompt_identity,
+            expected_interaction_kind=expected_interaction_kind,
             require_exact_id=require_exact_id,
+            expected_identity=expected_identity,
+            require_remote_identity=require_remote_identity,
         )
     except Exception as error:  # noqa: BLE001 - poll loop must never crash here
         dispatch_result = {
@@ -1197,6 +1216,16 @@ def render_session_message_delivery(
                 "텍스트 전송 후에도 화면이 바뀌지 않아 성공으로 기록하지 않았습니다.",
             ]
         )
+    elif str(dispatch_result.get("error") or "").startswith(
+        ("session_identity_changed:", "session_identity_missing")
+    ):
+        message_preview = "\n".join(
+            [
+                "<b>에이전트 세션이 교체되어 전달하지 않았습니다</b>",
+                html.escape(target or session_id),
+                "새 세션 상태를 확인하고 다시 지시해 주세요.",
+            ]
+        )
     else:
         message_preview = render_dispatch_error_message(
             profile=args.profile,
@@ -1212,6 +1241,8 @@ def render_dispatch_command(
     config: dict[str, Any],
     parsed: dict[str, Any],
     result: dict[str, Any],
+    *,
+    session_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Render the read-only part of a dispatch command.
 
@@ -1494,7 +1525,12 @@ def render_dispatch_command(
     if command == "attention":
         attention_context = None
         try:
-            surface = export_workstation_surface(args.forager_bin, args.profile)
+            surface = export_workstation_surface(
+                args.forager_bin,
+                args.profile,
+                shift_id=args.shift_review_id,
+                current_run_id=args.shift_review_current_run_id,
+            )
             summary = attention_summary(surface)
             wiki = build_wiki_portfolio_summary(args.forager_bin, load_registry())
             wiki_candidate_count = int(wiki.get("candidate_count") or 0)
@@ -1538,12 +1574,40 @@ def render_dispatch_command(
                 ]
             )
             return finalize_dispatch_result(result, message_preview)
+        if (
+            not isinstance(session_context, dict)
+            or session_context.get("source") != "waiting_card"
+            or not isinstance(session_context.get("remote_session_identity"), dict)
+        ):
+            dispatch_result = {
+                "ok": False,
+                "kind": "session_input",
+                "error": "waiting_card_context_missing_or_changed",
+            }
+            result["dispatch_result"] = dispatch_result
+            return finalize_dispatch_result(
+                result,
+                render_dispatch_error_message(
+                    profile=args.profile,
+                    generated_at=generated_at,
+                    headline="세션 입력을 보내지 않았습니다",
+                    detail=(
+                        "현재 identity-bound waiting card가 없거나 startup gate가 "
+                        "백그라운드 상태로 전환되었습니다."
+                    ),
+                ),
+            )
         try:
             dispatch_result = apply_session_input(
                 args.forager_bin, args.profile, session_id, action,
                 status_file=args.session_status_file,
-                expected_hash=str(parsed.get("session_input_hash") or ""),
+                expected_prompt_identity=str(parsed.get("session_input_hash") or ""),
+                expected_interaction_kind=str(
+                    (session_context or {}).get("interaction_kind") or ""
+                ),
                 option_key=str(parsed.get("session_input_option") or ""),
+                expected_identity=(session_context or {}).get("remote_session_identity"),
+                require_remote_identity=True,
             )
         except Exception as error:  # noqa: BLE001 - poll loop must never crash here
             dispatch_result = {"ok": False, "kind": "session_input", "error": sanitize_text(str(error), max_chars=200)}
@@ -1571,24 +1635,25 @@ def render_dispatch_command(
                 ]
             )
         elif str(dispatch_result.get("error") or "") == "prompt_changed":
-            new_hash = str(dispatch_result.get("new_hash") or "")
-            sid8 = session_id[:8]
             message_preview = "\n".join(
                 [
                     "<b>프롬프트가 바뀌어 중단했습니다</b>",
                     f"현재: {html.escape(str(dispatch_result.get('prompt_line') or ''))}",
-                    "지금 화면 기준으로 다시 선택하세요.",
-                    "다음 조치: 아래 버튼",
+                    "새 identity-bound waiting card를 다시 확인하세요.",
+                    "다음 조치: /status",
                 ]
             )
-            result["reply_markup_preview"] = {
-                "keyboard": [
-                    [f"/session_approve {sid8} {new_hash}", f"/session_deny {sid8} {new_hash}"],
-                    ["상태", "도움말"],
-                ],
-                "resize_keyboard": True,
-                "one_time_keyboard": False,
-            }
+        elif str(dispatch_result.get("error") or "").startswith(
+            ("session_identity_changed:", "session_identity_missing")
+        ):
+            message_preview = "\n".join(
+                [
+                    "<b>세션 대상이 교체되어 입력하지 않았습니다</b>",
+                    "프로젝트, worktree, agent process 중 하나가 카드 생성 후 바뀌었습니다.",
+                    "새 상태와 waiting card를 다시 확인해 주세요.",
+                    "다음 조치: /status",
+                ]
+            )
         else:
             message_preview = render_dispatch_error_message(
                 profile=args.profile,
@@ -1603,7 +1668,60 @@ def render_dispatch_command(
             result,
             session_id=str(parsed.get("session_message_session_id") or ""),
             message=str(parsed.get("session_message_text") or ""),
-            expected_hash=str(parsed.get("session_message_hash") or ""),
+            expected_prompt_identity=str(parsed.get("session_message_hash") or ""),
+            expected_interaction_kind=str(
+                (session_context or {}).get("interaction_kind") or ""
+            ),
+            expected_identity=(session_context or {}).get("remote_session_identity"),
+            require_remote_identity=bool(
+                session_context
+                and str(session_context.get("source") or "")
+                in {"reply_card", "waiting_card"}
+            ),
+        )
+    if command == "session_continue":
+        selector = str(parsed.get("session_continue_session_id") or "")
+        expected_hash = str(parsed.get("session_continue_hash") or "")
+        context = session_context if isinstance(session_context, dict) else {}
+        if context.get("already_processed"):
+            result["dispatch_result"] = {
+                "ok": False, "kind": "session_message", "action": "continue_next_task",
+                "error": "already_processed",
+            }
+            return finalize_dispatch_result(result, "<b>이미 처리된 버튼입니다</b>\n추가 입력을 보내지 않았습니다.")
+        context_session_id = str(context.get("session_id") or "")
+        context_hash = str(context.get("prompt_hash") or "")
+        if (
+            context.get("source") != "waiting_card"
+            or context.get("interaction_kind") != "task_ready"
+            or not context_session_id.startswith(selector)
+            or context_hash != expected_hash
+            or not isinstance(context.get("remote_session_identity"), dict)
+        ):
+            message_preview = "\n".join(
+                [
+                    "<b>다음 작업을 시작하지 않았습니다</b>",
+                    "현재 카드가 완료 후 다음 지시 대기 상태로 검증되지 않았습니다.",
+                    "새 상태 카드를 확인해 주세요.",
+                ]
+            )
+            result["dispatch_result"] = {
+                "ok": False,
+                "kind": "session_message",
+                "action": "continue_next_task",
+                "error": "task_ready_context_missing_or_changed",
+            }
+            return finalize_dispatch_result(result, message_preview)
+        return render_session_message_delivery(
+            args,
+            result,
+            session_id=context_session_id,
+            message=SESSION_CONTINUE_MESSAGE,
+            expected_prompt_identity=context_hash,
+            expected_interaction_kind="task_ready",
+            require_exact_id=True,
+            expected_identity=context.get("remote_session_identity"),
+            require_remote_identity=True,
         )
     if command == "cancel_task":
         task_id = str(parsed.get("cancel_task_id") or "")
@@ -1619,6 +1737,27 @@ def render_dispatch_command(
         )
         result["pending_dispatch_confirmation"] = confirmation
         message_preview = render_cancel_task_confirm_message(
+            profile=args.profile,
+            generated_at=generated_at,
+            task_id=task_id,
+            reason=reason,
+            token=confirmation["token"],
+        )
+        return finalize_dispatch_result(result, message_preview)
+    if command == "terminate_task":
+        task_id = str(parsed.get("terminate_task_id") or "")
+        reason = str(parsed.get("terminate_reason") or "")
+        confirmation = build_confirmation(
+            kind="terminate_task",
+            target_id=task_id,
+            action_kind="terminate",
+            observed_hash="",
+            note=reason,
+            chat_hash=None,
+            ttl_sec=args.dispatch_confirm_ttl_sec,
+        )
+        result["pending_dispatch_confirmation"] = confirmation
+        message_preview = render_terminate_task_confirm_message(
             profile=args.profile,
             generated_at=generated_at,
             task_id=task_id,
@@ -1642,10 +1781,9 @@ def render_dispatch_command(
             profile=args.profile, generated_at=generated_at, token=confirmation["token"]
         )
         return finalize_dispatch_result(result, message_preview)
-    # pause is an immediate emergency stop resolved in run_once; confirm, cancel,
+    # pause immediately blocks new dispatch in run_once; confirm, cancel,
     # and resume are resolved against persisted state there too. This placeholder
     # is only visible on non-live probe paths.
-    # this placeholder is only visible on non-live probe paths.
     message_preview = render_dispatch_error_message(
         profile=args.profile,
         generated_at=generated_at,
@@ -1657,13 +1795,16 @@ def render_dispatch_command(
 
 def resolve_dispatch_confirmation(
     args: argparse.Namespace,
+    config: dict[str, Any],
     state: dict[str, Any],
     chat_hash: str,
+    user_hash: str,
     rendered: dict[str, Any],
     parsed_command: dict[str, Any],
 ) -> None:
     """Apply the state-touching part of a dispatch command inside run_once."""
 
+    assert_telegram_config_current(config, required=not args.dry_run)
     command = parsed_command.get("command")
     generated_at = rendered["generated_at"]
     if command == "pause":
@@ -1683,11 +1824,20 @@ def resolve_dispatch_confirmation(
         rendered["message_preview"] = message_preview
         rendered["mobile_card_contract"] = mobile_card_contract(message_preview)
         return
-    if command in {"decision", "recover", "dispatch", "run", "cancel_task", "resume"}:
+    if command in {
+        "decision",
+        "recover",
+        "dispatch",
+        "run",
+        "cancel_task",
+        "terminate_task",
+        "resume",
+    }:
         confirmation = rendered.get("pending_dispatch_confirmation")
         if isinstance(confirmation, dict):
             confirmation["chat_id_hash"] = chat_hash
-            previous = store_confirmation(state, chat_hash, confirmation)
+            confirmation["user_id_hash"] = user_hash
+            previous = store_confirmation(state, chat_hash, user_hash, confirmation)
             if previous is not None:
                 # A new request invalidates the old token. The card stays within
                 # its line budget; the old /confirm already fails clearly, and
@@ -1695,7 +1845,12 @@ def resolve_dispatch_confirmation(
                 rendered["superseded_pending_confirmation"] = True
         return
     if command == "cancel":
-        cleared = clear_confirmation(state, chat_hash)
+        cleared = clear_confirmation(
+            state,
+            chat_hash,
+            user_hash,
+            token=str(parsed_command.get("cancel_token") or ""),
+        )
         message_preview = render_dispatch_cancel_message(
             profile=args.profile, generated_at=generated_at, cleared=cleared
         )
@@ -1706,7 +1861,7 @@ def resolve_dispatch_confirmation(
         return
 
     token = str(parsed_command.get("confirm_token") or "")
-    confirmation = pop_confirmation(state, chat_hash, token)
+    confirmation = pop_confirmation(state, chat_hash, user_hash, token)
     message_preview = None
     if confirmation is None:
         message_preview = render_dispatch_error_message(
@@ -1800,6 +1955,28 @@ def resolve_dispatch_confirmation(
                 headline="작업 취소에 실패했습니다",
                 detail=str(error),
             )
+    elif str(confirmation.get("kind") or "") == "terminate_task":
+        try:
+            dispatch_result = apply_terminate_task(
+                args.forager_bin,
+                args.profile,
+                str(confirmation.get("target_id") or ""),
+                reason=str(confirmation.get("note") or ""),
+                terminated_by=f"telegram:{user_hash}",
+            )
+            rendered["dispatch_result"] = dispatch_result
+            message_preview = render_terminate_task_result_message(
+                profile=args.profile,
+                generated_at=generated_at,
+                result=dispatch_result,
+            )
+        except Exception as error:  # noqa: BLE001 - poll loop must never crash here
+            message_preview = render_dispatch_error_message(
+                profile=args.profile,
+                generated_at=generated_at,
+                headline="로컬 러너 종료에 실패했습니다",
+                detail=str(error),
+            )
     elif str(confirmation.get("kind") or "") == "plan_capture":
         rendered["captured_plan_text"] = str(confirmation.get("note") or "")
         message_preview = "\n".join([
@@ -1810,28 +1987,20 @@ def resolve_dispatch_confirmation(
         ])
     elif str(confirmation.get("kind") or "") == "autonomy_start":
         try:
-            proc = subprocess.run(
-                [sys.executable, str(AUTONOMY_RUNNER), "--arm",
-                 "--until-hour", str(int(args.autonomy_until_hour)),
-                 "--by", "telegram", "--profile", args.profile,
-                 "--reason", str(confirmation.get("note") or "")],
-                capture_output=True, text=True, timeout=30,
+            dispatch_result = arm_confirmed_shift(
+                args.forager_bin,
+                args.profile,
+                str(confirmation.get("target_id") or ""),
+                str(confirmation.get("observed_hash") or ""),
             )
-            ok = proc.returncode == 0
-            rendered["dispatch_result"] = {"ok": ok, "kind": "autonomy_start"}
-            if ok:
-                message_preview = "\n".join([
-                    "<b>자율주행 시작</b>",
-                    f"{int(args.autonomy_until_hour):02d}:00까지 armed: tick · 야간 증류 · 아침 브리핑.",
-                    "이미 승인된 작업만 실행됩니다.",
-                    "다음 조치: /status · /pause",
-                ])
-            else:
-                message_preview = render_dispatch_error_message(
-                    profile=args.profile, generated_at=generated_at,
-                    headline="자율주행 시작에 실패했습니다",
-                    detail=sanitize_text((proc.stderr or proc.stdout or "")[:200], max_chars=200),
-                )
+            rendered["dispatch_result"] = dispatch_result
+            message_preview = "\n".join([
+                "<b>검토된 자율주행 시작</b>",
+                f"shift: {html.escape(sanitize_text(str(dispatch_result.get('shift_id') or ''), max_chars=64))}",
+                "각 타이머는 exact shift ID와 due routine receipt를 사용합니다.",
+                "이미 승인된 작업만 실행됩니다.",
+                "다음 조치: /status · /pause",
+            ])
         except Exception as error:  # noqa: BLE001 - poll loop must never crash here
             message_preview = render_dispatch_error_message(
                 profile=args.profile, generated_at=generated_at,
@@ -1941,7 +2110,12 @@ def build_chat_operator_snapshot(
             focus_source,
         )
     try:
-        surface = export_workstation_surface(args.forager_bin, args.profile)
+        surface = export_workstation_surface(
+            args.forager_bin,
+            args.profile,
+            shift_id=args.shift_review_id,
+            current_run_id=args.shift_review_current_run_id,
+        )
         snapshot["workstation"] = {
             "generated_at": surface.get("generated_at"),
             "attention_counts": surface.get("attention_counts"),
@@ -1956,6 +2130,20 @@ def build_chat_operator_snapshot(
                 for item in open_decision_actions(surface)[:5]
             ],
         }
+        shift_review = surface.get("offdesk_shift_review")
+        if isinstance(shift_review, dict):
+            shift_summary = shift_review.get("summary")
+            snapshot["workstation"]["offdesk_shift_review"] = {
+                "shift_id": shift_review.get("shift_id"),
+                "review_status": shift_review.get("review_status"),
+                "lifecycle_status": shift_review.get("lifecycle_status"),
+                "attention_reasons": [
+                    sanitize_text(str(reason), max_chars=80)
+                    for reason in (shift_review.get("attention_reasons") or [])[:8]
+                ],
+                "summary": shift_summary if isinstance(shift_summary, dict) else {},
+                "authority": shift_review.get("authority"),
+            }
     except (OSError, RemoteOperatorTelegramError) as error:
         snapshot["workstation"] = {
             "status": "unavailable",
@@ -1978,6 +2166,11 @@ def build_chat_operator_snapshot(
                 "tool": sanitize_text(str(row.get("tool") or ""), max_chars=24),
                 "project": sanitize_text(str(row.get("project") or ""), max_chars=60),
                 "status": str(row.get("status") or ""),
+                "remote_session_identity_sha256": (
+                    row.get("remote_session_identity") or {}
+                ).get("binding_sha256")
+                if remote_session_identity_issue(row.get("remote_session_identity")) is None
+                else None,
             }
             for row in session_status.get("sessions") or []
             if isinstance(row, dict)
@@ -2011,7 +2204,7 @@ def build_chat_operator_snapshot(
     except (OSError, json.JSONDecodeError, RemoteOperatorTelegramError) as error:
         snapshot["live_agent_sessions"] = []
         snapshot["agent_session_error"] = sanitize_text(str(error), max_chars=120)
-    snapshot["autonomy_armed"] = autonomy_is_armed(args.profile)
+    snapshot["autonomy_armed"] = autonomy_is_armed(args.forager_bin, args.profile)
     registry = load_registry()
     if registry:
         snapshot["registered_projects"] = registry_summary(registry)
@@ -2169,6 +2362,8 @@ def record_conversation_event(
             "send_status": rendered.get("send_status"),
             "sent_message_id": rendered.get("sent_message_id"),
             "effect": rendered.get("effect"),
+            "remote_command_envelope": rendered.get("remote_command_envelope"),
+            "remote_plan_session_id": rendered.get("remote_plan_session_id"),
         },
     )
 
@@ -2183,6 +2378,7 @@ def render_command_result(
     chat_history: list[dict[str, Any]] | None = None,
     sticky_focus_key: str | None = None,
     session_context: dict[str, Any] | None = None,
+    remote_plan_session_id: str | None = None,
 ) -> dict[str, Any]:
     result = result_base(args, config, mode)
     result["command_text"] = sanitize_text(command_text, max_chars=400)
@@ -2195,6 +2391,53 @@ def render_command_result(
             {
                 "status": "unsupported",
                 "reason": parsed.get("reason"),
+                "projection": None,
+                "message_preview": message_preview,
+                "mobile_card_contract": mobile_card_contract(message_preview),
+            }
+        )
+        return result
+    if parsed.get("command") == "receipts":
+        selected_session_id = (
+            str(parsed.get("receipt_session_id") or "").strip()
+            or str(remote_plan_session_id or "").strip()
+            or None
+        )
+        try:
+            report = inspect_remote_receipts(
+                args.remote_plan_artifact_dir,
+                args.update_journal_file,
+                requested_session_id=selected_session_id,
+            )
+        except RemoteOperatorStateError:
+            report = {
+                "schema": "remote_operator_receipt_inspection.v1",
+                "status": "invalid" if selected_session_id else "no_plan_session",
+                "session_id": selected_session_id,
+                "session_issues": ["receipt_inspection_unavailable"],
+                "available_receipt_count": 0,
+                "invalid_receipt_count": 1,
+                "total_receipt_stage_count": 17,
+                "command_update_count": 0,
+                "refused_command_count": 0,
+                "read_only": True,
+                "mutation_authorized": False,
+                "approval_authorized": False,
+                "execution_authorized": False,
+                "accepted_truth_authorized": False,
+            }
+        result["parsed_command"] = parsed
+        result["remote_receipt_inspection"] = report
+        if report.get("session_id"):
+            result["remote_plan_session_id"] = report.get("session_id")
+        message_preview = render_receipt_inspection_message(
+            profile=args.profile,
+            report=report,
+        )
+        attach_choice_surface(result, None)
+        result.update(
+            {
+                "status": "rendered",
                 "projection": None,
                 "message_preview": message_preview,
                 "mobile_card_contract": mobile_card_contract(message_preview),
@@ -2603,8 +2846,10 @@ def render_command_result(
         "run",
         "tasks",
         "cancel_task",
+        "terminate_task",
         "session_approve",
         "session_deny",
+        "session_continue",
         "session_send",
         "pause",
         "resume",
@@ -2612,7 +2857,13 @@ def render_command_result(
         "confirm",
         "cancel",
     }:
-        return render_dispatch_command(args, config, parsed, result)
+        return render_dispatch_command(
+            args,
+            config,
+            parsed,
+            result,
+            session_context=session_context,
+        )
     result["parsed_command"] = parsed
     if args.projection_file:
         projection = load_projection_file(args.projection_file, parsed)
@@ -2641,9 +2892,181 @@ def render_command_result(
     return result
 
 
+SESSION_CALLBACK_RE = re.compile(
+    r"^fg1:(c|a|d):([A-Za-z0-9_-]{4,32}):([0-9a-f]{8}|[0-9a-f]{16})(?::([1-4]))?$"
+)
+CONFIRMATION_CALLBACK_RE = re.compile(r"^fg1:x:(c|d):([0-9a-f]{12})$")
+DECISION_CALLBACK_RE = re.compile(
+    r"^fg1:v:([A-Za-z0-9._-]{1,40}):(continue|stop|deny|defer)$"
+)
+PLAN_CALLBACK_RE = re.compile(
+    r"^fg1:p:([0-9a-f]{8}):([0-9a-f]{16}):([0-9]{1,2})$"
+)
+
+
+def command_from_callback_data(data: str) -> str:
+    """Decode only bounded callback payloads emitted by this adapter."""
+
+    value = str(data or "").strip()
+    if value == "fg1:s":
+        return "/status"
+    confirmation = CONFIRMATION_CALLBACK_RE.fullmatch(value)
+    if confirmation:
+        action, token = confirmation.groups()
+        return f"/confirm {token}" if action == "c" else f"/cancel {token}"
+    decision = DECISION_CALLBACK_RE.fullmatch(value)
+    if decision:
+        decision_id, action = decision.groups()
+        return f"/decision {decision_id} {action}"
+    plan = PLAN_CALLBACK_RE.fullmatch(value)
+    if plan:
+        session_id, context_hash, choice_index = plan.groups()
+        return f"/plan_input @{session_id}:{context_hash}:{choice_index}"
+    match = SESSION_CALLBACK_RE.fullmatch(value)
+    if not match:
+        return ""
+    action, session_id, prompt_hash, option = match.groups()
+    if action == "c" and option is None:
+        return f"/session_continue {session_id} {prompt_hash}"
+    if action == "a":
+        suffix = f" {option}" if option else ""
+        return f"/session_approve {session_id} {prompt_hash}{suffix}"
+    if action == "d" and option is None:
+        return f"/session_deny {session_id} {prompt_hash}"
+    return ""
+
+
+def callback_query_from_update(update: dict[str, Any]) -> dict[str, Any] | None:
+    callback = update.get("callback_query")
+    return callback if isinstance(callback, dict) else None
+
+
+def callback_query_id_for(update: dict[str, Any]) -> str:
+    callback = callback_query_from_update(update)
+    return str((callback or {}).get("id") or "").strip()
+
+
+def callback_data_for(update: dict[str, Any]) -> str:
+    callback = callback_query_from_update(update)
+    return str((callback or {}).get("data") or "").strip()
+
+
+def callback_consumes_card(data: str) -> bool:
+    value = str(data or "").strip()
+    return value != "fg1:s" and bool(
+        SESSION_CALLBACK_RE.fullmatch(value)
+        or CONFIRMATION_CALLBACK_RE.fullmatch(value)
+        or DECISION_CALLBACK_RE.fullmatch(value)
+        or PLAN_CALLBACK_RE.fullmatch(value)
+    )
+
+
+def callback_outcome_text(rendered: dict[str, Any]) -> str:
+    """Return a truthful callback toast after validation and handling."""
+
+    effect = rendered.get("effect") if isinstance(rendered.get("effect"), dict) else {}
+    dispatch = (
+        rendered.get("dispatch_result")
+        if isinstance(rendered.get("dispatch_result"), dict)
+        else {}
+    )
+    if effect.get("status") == "applied" or dispatch.get("ok") is True:
+        return "요청을 처리했습니다."
+    error = str(dispatch.get("error") or rendered.get("reason") or "")
+    if error == "already_processed":
+        return "이미 처리된 버튼입니다. 추가 입력은 보내지 않았습니다."
+    if error == "prompt_changed":
+        return "화면이 변경되어 처리하지 않았습니다."
+    if error.startswith("plan_"):
+        return "계획 카드가 변경되어 처리하지 않았습니다."
+    if error.startswith(("session_identity_", "remote_session_identity_")):
+        return "세션이 변경되어 처리하지 않았습니다."
+    if str(rendered.get("status") or "") == "command_refused":
+        return "만료되었거나 유효하지 않은 요청입니다."
+    parsed = rendered.get("parsed_command")
+    if isinstance(parsed, dict) and parsed.get("command") == "status":
+        return "최신 상태를 보냈습니다."
+    if (
+        isinstance(parsed, dict)
+        and parsed.get("command") == "remote_plan_selection"
+        and str(rendered.get("status") or "") == "rendered"
+    ):
+        return "계획 선택을 처리했습니다."
+    if (
+        isinstance(parsed, dict)
+        and parsed.get("command") == "decision"
+        and isinstance(rendered.get("pending_dispatch_confirmation"), dict)
+    ):
+        return "확인 카드를 만들었습니다."
+    if effect.get("status") == "refused" or error:
+        return "요청을 처리하지 않았습니다."
+    return "요청 결과를 보냈습니다."
+
+
+def render_remote_plan_callback_refusal(
+    args: argparse.Namespace,
+    config: dict[str, Any],
+    *,
+    mode: str,
+    session: dict[str, Any] | None,
+    reason: str,
+) -> dict[str, Any]:
+    result = result_base(args, config, mode)
+    message_preview = "\n".join(
+        [
+            "<b>계획 선택 카드가 변경되었습니다</b>",
+            "이전 버튼은 적용하지 않았습니다.",
+            "아래의 현재 선택지를 다시 확인해 주세요."
+            if isinstance(session, dict)
+            else "새 계획 요청에서 다시 시작해 주세요.",
+        ]
+    )
+    result.update(
+        {
+            "status": "rendered",
+            "reason": reason,
+            "parsed_command": {
+                "supported": True,
+                "command": "remote_plan_callback",
+                "reason": reason,
+            },
+            "dispatch_result": {
+                "ok": False,
+                "kind": "remote_plan_session",
+                "error": reason,
+            },
+            "projection": None,
+            "message_preview": message_preview,
+            "mobile_card_contract": mobile_card_contract(message_preview),
+        }
+    )
+    if isinstance(session, dict):
+        result["remote_plan_session"] = public_remote_plan_session(session)
+        context = (
+            remote_plan_selection_context(session)
+            if str(session.get("stage") or "") == "project_selection"
+            else remote_plan_init_context(session)
+        )
+        attach_choice_surface(result, context)
+    else:
+        attach_choice_surface(result, None)
+    return result
+
+
 def message_from_update(update: dict[str, Any]) -> dict[str, Any] | None:
     message = update.get("message")
-    return message if isinstance(message, dict) else None
+    if isinstance(message, dict):
+        return message
+    callback = callback_query_from_update(update)
+    callback_message = (callback or {}).get("message")
+    command = command_from_callback_data(str((callback or {}).get("data") or ""))
+    if not isinstance(callback_message, dict) or not command:
+        return None
+    synthetic = dict(callback_message)
+    synthetic["from"] = (callback or {}).get("from")
+    synthetic["text"] = command
+    synthetic["date"] = int(time.time())
+    return synthetic
 
 
 def update_text(message: dict[str, Any]) -> str:
@@ -2667,9 +3090,21 @@ def user_id_for(message: dict[str, Any]) -> str:
     return str(value or "").strip()
 
 
+def chat_type_for(message: dict[str, Any]) -> str:
+    chat = message.get("chat")
+    if not isinstance(chat, dict):
+        return ""
+    return str(chat.get("type") or "").strip().lower()
+
+
 def message_id_for(message: dict[str, Any]) -> int | None:
     value = message.get("message_id")
     return int(value) if isinstance(value, int) else None
+
+
+def message_date_for(message: dict[str, Any]) -> int | None:
+    value = message.get("date")
+    return int(value) if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def replied_message_id_for(message: dict[str, Any]) -> int | None:
@@ -2699,72 +3134,191 @@ def replied_session_context(
     if len(matches) != 1:
         return None
     session_id, entry = matches[0]
-    return {
+    context = {
         "session_id": session_id,
         "project": str(entry.get("project") or ""),
         "title": str(entry.get("title") or ""),
         "tool": str(entry.get("tool") or ""),
-        "prompt_hash": str(entry.get("prompt_hash") or ""),
+        "prompt_hash": str(entry.get("prompt_identity") or entry.get("prompt_hash") or ""),
+        "prompt_identity": str(
+            entry.get("prompt_identity") or entry.get("prompt_hash") or ""
+        ),
+        "prompt_observation_hash": str(entry.get("prompt_observation_hash") or ""),
         "source": "reply_card",
         "updated_at": utc_now(),
+        "interaction_kind": str(entry.get("interaction_kind") or "unknown"),
     }
+    identity = entry.get("remote_session_identity")
+    if isinstance(identity, dict):
+        context["remote_session_identity"] = identity
+    return context
 
 
-def record_feedback(
+def consumed_continue_key(parsed: dict[str, Any], chat_hash: str, user_hash: str, card_id: int | None = None) -> str | None:
+    if parsed.get("command") != "session_continue":
+        return None
+    if type(card_id) is not int or card_id <= 0:
+        return None
+    selector = str(parsed.get("session_continue_session_id") or "")
+    prompt = str(parsed.get("session_continue_hash") or "")
+    if not selector or not prompt:
+        return None
+    return hashlib.sha256(json.dumps([chat_hash, user_hash, card_id, selector, prompt]).encode()).hexdigest()
+
+
+def pending_session_action_context(
+    state: dict[str, Any], parsed: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Resolve one waiting-card action to its exact stored session identity."""
+
+    if parsed.get("command") not in {
+        "session_approve",
+        "session_deny",
+        "session_continue",
+        "session_send",
+    }:
+        return None
+    selector = str(
+        parsed.get("session_input_session_id")
+        or parsed.get("session_continue_session_id")
+        or parsed.get("session_message_session_id")
+        or ""
+    )
+    prompt_hash = str(
+        parsed.get("session_input_hash")
+        or parsed.get("session_continue_hash")
+        or parsed.get("session_message_hash")
+        or ""
+    )
+    if not selector:
+        return None
+    notified = state.get("waiting_notified_by_session")
+    if not isinstance(notified, dict):
+        return None
+    matches = [
+        (str(session_id), entry)
+        for session_id, entry in notified.items()
+        if isinstance(entry, dict)
+        and not entry.get("resolved")
+        and not entry.get("bootstrap_suppressed")
+        and str(session_id).startswith(selector)
+        and (
+            not prompt_hash
+            or str(entry.get("prompt_identity") or entry.get("prompt_hash") or "")
+            == prompt_hash
+        )
+        and (
+            parsed.get("command") != "session_continue"
+            or entry.get("interaction_kind") == "task_ready"
+        )
+    ]
+    if len(matches) != 1:
+        return None
+    session_id, entry = matches[0]
+    context = {
+        "session_id": session_id,
+        "project": str(entry.get("project") or ""),
+        "title": str(entry.get("title") or ""),
+        "tool": str(entry.get("tool") or ""),
+        "prompt_hash": str(entry.get("prompt_identity") or entry.get("prompt_hash") or ""),
+        "prompt_identity": str(
+            entry.get("prompt_identity") or entry.get("prompt_hash") or ""
+        ),
+        "prompt_observation_hash": str(entry.get("prompt_observation_hash") or ""),
+        "source": "waiting_card",
+        "updated_at": utc_now(),
+        "interaction_kind": str(entry.get("interaction_kind") or "unknown"),
+    }
+    identity = entry.get("remote_session_identity")
+    if isinstance(identity, dict):
+        context["remote_session_identity"] = identity
+    return context
+
+
+def apply_feedback_workflow_presentation(
     args: argparse.Namespace,
-    config: dict[str, Any],
-    message: dict[str, Any],
-    text: str,
+    rendered: dict[str, Any],
+    outcome: FeedbackWorkflowOutcome,
     *,
-    feedback_context: dict[str, Any] | None = None,
-    parsed_command: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    feedback_kind = classify_feedback_kind(text)
-    agent_intent = None
-    if isinstance(parsed_command, dict):
-        parsed_kind = str(parsed_command.get("feedback_kind") or "").strip()
-        if parsed_kind in {"freeform_feedback", "planning_request"}:
-            feedback_kind = parsed_kind
-        parsed_agent = parsed_command.get("agent_intent")
-        if isinstance(parsed_agent, dict):
-            agent_intent = parsed_agent
-    record = {
-        "schema": "remote_operator_telegram_feedback.v1",
-        "received_at": utc_now(),
-        "profile": args.profile,
-        "chat_id_hash": sha256_short(chat_id_for(message)),
-        "user_id_hash": sha256_short(user_id_for(message)),
-        "message_id": message_id_for(message),
-        "feedback_text": sanitize_text(text, max_chars=2000),
-        "feedback_kind": feedback_kind,
-        "target_chat_id_hash": config.get("target_chat_id_hash"),
-        "feedback_context": feedback_context,
-    }
-    if agent_intent:
-        record["agent_intent"] = agent_intent
-    append_jsonl(args.feedback_file, record)
-    return {
-        "feedback_recorded": True,
-        "feedback_file": str(args.feedback_file),
-        "feedback_text_chars": len(str(text or "")),
-        "feedback_context": feedback_context,
-        "feedback_record": record,
-    }
+    feedback_text: str,
+    parsed_command: dict[str, Any],
+    feedback_context: dict[str, Any] | None,
+) -> None:
+    """Apply one domain outcome and render its Telegram presentation."""
+
+    rendered.update(outcome.result_fields())
+    if isinstance(outcome.plan_session, dict):
+        message_preview = render_project_selection_message(
+            profile=args.profile,
+            session=outcome.plan_session,
+        )
+        choice_context = remote_plan_selection_context(outcome.plan_session)
+    else:
+        message_preview = render_feedback_message(
+            profile=args.profile,
+            generated_at=rendered["generated_at"],
+            feedback_text=feedback_text,
+            feedback_kind=str(
+                parsed_command.get("feedback_kind") or "freeform_feedback"
+            ),
+            feedback_context=feedback_context,
+            inbox_status=str(
+                outcome.ingest_result.get("decision_feedback_ingest_status") or ""
+            ),
+            agent_intent=(
+                parsed_command.get("agent_intent")
+                if isinstance(parsed_command.get("agent_intent"), dict)
+                else None
+            ),
+        )
+        choice_context = feedback_context
+    rendered["message_preview"] = message_preview
+    rendered["mobile_card_contract"] = mobile_card_contract(message_preview)
+    attach_choice_surface(rendered, choice_context)
 
 
 def update_is_allowed(config: dict[str, Any], message: dict[str, Any]) -> tuple[bool, str]:
     chat_id = chat_id_for(message)
     user_id = user_id_for(message)
-    allowed_chat_ids = config.get("allowed_chat_ids") or set()
-    allowed_user_ids = config.get("allowed_user_ids") or set()
-    if allowed_chat_ids and chat_id not in allowed_chat_ids:
-        return False, "chat_not_allowed"
-    if allowed_user_ids and user_id not in allowed_user_ids:
-        return False, "user_not_allowed"
-    return True, "allowed"
+    if not config.get("operator_identity_configured"):
+        return False, "operator_identity_not_configured"
+    if config.get("operator_mode") == "single_owner":
+        if chat_type_for(message) != "private":
+            return False, "single_owner_private_chat_required"
+        if chat_id != str(config.get("owner_chat_id") or ""):
+            return False, "chat_not_owner"
+        if user_id != str(config.get("owner_user_id") or ""):
+            return False, "user_not_owner"
+        return True, "owner_allowed"
+    if config.get("operator_mode") != "multi_operator":
+        return False, "operator_mode_not_supported"
+    if chat_type_for(message) != "private":
+        return False, "multi_operator_private_chat_required"
+    if (chat_id, user_id) not in (config.get("operator_members") or set()):
+        return False, "operator_pair_not_allowed"
+    return True, "operator_allowed"
 
 
-AUTONOMY_RUNNER = pathlib.Path(__file__).resolve().parent / "offdesk_autonomy_run.py"
+def operator_identity_for(
+    config: dict[str, Any], *, chat_hash: str, user_hash: str
+) -> dict[str, Any]:
+    owner_chat_hash = sha256_short(str(config.get("owner_chat_id") or ""))
+    owner_user_hash = sha256_short(str(config.get("owner_user_id") or ""))
+    role = (
+        "owner"
+        if chat_hash == owner_chat_hash and user_hash == owner_user_hash
+        else "operator"
+    )
+    return {
+        "schema": "remote_operator_identity.v1",
+        "operator_id": f"telegram:{user_hash}",
+        "operator_mode": str(config.get("operator_mode") or ""),
+        "role": role,
+        "chat_id_hash": chat_hash,
+        "user_id_hash": user_hash,
+    }
+
+
 DEFAULT_AUTONOMY_WATCH = [
     pathlib.Path.home() / ".claude" / "projects",
     pathlib.Path.home() / ".codex" / "sessions",
@@ -2791,20 +3345,196 @@ def latest_activity_epoch(paths: list[pathlib.Path], max_depth: int = 3) -> floa
     return newest
 
 
-def autonomy_is_armed(profile: str) -> bool:
+def run_shift_forager_json(
+    forager_bin: str,
+    profile: str,
+    argv: list[str],
+    *,
+    timeout: int = 30,
+) -> Any:
+    command = [forager_bin, "-p", profile, *argv, "--json"]
+    process = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    if process.returncode != 0:
+        detail = sanitize_text(process.stderr or process.stdout or "", max_chars=300)
+        raise RemoteOperatorTelegramError(f"forager command failed: {detail}")
     try:
-        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-        from offdesk_autonomy_run import is_armed  # noqa: PLC0415
+        return json.loads(process.stdout)
+    except json.JSONDecodeError as error:
+        raise RemoteOperatorTelegramError("forager command returned invalid JSON") from error
 
-        return bool(is_armed(profile))
+
+def bounded_shift_status(forager_bin: str, profile: str) -> dict[str, Any]:
+    value = run_shift_forager_json(
+        forager_bin,
+        profile,
+        ["offdesk", "shift", "status"],
+    )
+    if not isinstance(value, dict) or value.get("schema") != "offdesk_shift_status_report.v1":
+        raise RemoteOperatorTelegramError("bounded shift status schema is invalid")
+    return value
+
+
+def autonomy_is_armed(forager_bin: str, profile: str) -> bool:
+    try:
+        status = bounded_shift_status(forager_bin, profile)
+        active_shift_id = str(status.get("active_shift_id") or "")
+        return any(
+            isinstance(shift, dict)
+            and shift.get("shift_id") == active_shift_id
+            and shift.get("status") in {"armed", "running"}
+            for shift in status.get("shifts") or []
+        )
     except Exception:  # noqa: BLE001 - probe must never break the loop
         return False
+
+
+def latest_prepared_shift(status: dict[str, Any]) -> dict[str, Any] | None:
+    shifts = status.get("shifts")
+    if not isinstance(shifts, list):
+        return None
+    now = dt.datetime.now(dt.timezone.utc)
+    for shift in reversed(shifts):
+        if not isinstance(shift, dict) or shift.get("status") is not None:
+            continue
+        try:
+            stops_at = dt.datetime.fromisoformat(str(shift.get("stops_at") or "").replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if stops_at >= now:
+            return shift
+    return None
+
+
+def arm_confirmed_shift(
+    forager_bin: str,
+    profile: str,
+    shift_id: str,
+    manifest_sha256: str,
+) -> dict[str, Any]:
+    status = bounded_shift_status(forager_bin, profile)
+    item = next(
+        (
+            shift
+            for shift in status.get("shifts") or []
+            if isinstance(shift, dict) and shift.get("shift_id") == shift_id
+        ),
+        None,
+    )
+    if not item or item.get("manifest_sha256") != manifest_sha256:
+        raise RemoteOperatorTelegramError(
+            "confirmed bounded shift no longer matches the reviewed manifest"
+        )
+    weekly = item.get("weekly_usage") or {}
+    if weekly.get("runtime_weekly_limit") and weekly.get("allowed") is not True:
+        raise RemoteOperatorTelegramError("weekly allowance is held; fresh bound samples and review required")
+    if status.get("active_shift_id") == shift_id:
+        return {"ok": True, "kind": "autonomy_start", "shift_id": shift_id, "reconciled": True}
+    if status.get("active_shift_id"):
+        raise RemoteOperatorTelegramError("another bounded shift is already active")
+    arm_result = run_shift_forager_json(
+        forager_bin,
+        profile,
+        ["offdesk", "shift", "arm", shift_id],
+    )
+    if isinstance(arm_result, dict) and arm_result.get("schema") == "offdesk_shift_arm_report.v1":
+        return {"ok": True, "kind": "autonomy_start", "shift_id": shift_id, "reconciled": True}
+    if not isinstance(arm_result, list) or len(arm_result) != 1:
+        raise RemoteOperatorTelegramError("shift arm did not return one exact approval")
+    approval_id = str(arm_result[0].get("approval_id") or "")
+    if not approval_id:
+        raise RemoteOperatorTelegramError("shift arm approval ID is missing")
+    run_shift_forager_json(
+        forager_bin,
+        profile,
+        ["offdesk", "ok", approval_id, "--by", "telegram"],
+    )
+    armed = run_shift_forager_json(
+        forager_bin,
+        profile,
+        [
+            "offdesk",
+            "shift",
+            "arm",
+            shift_id,
+            "--approval-id",
+            approval_id,
+        ],
+    )
+    if not isinstance(armed, dict) or armed.get("schema") != "offdesk_shift_arm_report.v1":
+        raise RemoteOperatorTelegramError("shift arm receipt was not durably reconciled")
+    return {
+        "ok": True,
+        "kind": "autonomy_start",
+        "shift_id": shift_id,
+        "approval_id": approval_id,
+    }
+
+
+def _standalone_notification_cycle(
+    args: argparse.Namespace,
+    config: dict[str, Any],
+    state: dict[str, Any],
+) -> NotificationCycle:
+    """Build the delivery adapter used by direct scanner calls and tests."""
+
+    def send(candidate: NotificationCandidate) -> int | None:
+        return send_message(
+            config,
+            str(config.get("target_chat_id") or ""),
+            candidate.message,
+            args,
+            reply_markup=candidate.reply_markup,
+        )
+
+    holds = state.setdefault("notification_unconfirmed_events", {})
+    if not isinstance(holds, dict):
+        raise RemoteOperatorTelegramError("invalid notification uncertainty ledger")
+    return NotificationCycle(
+        send, dry_run=bool(getattr(args, "dry_run", False)), unconfirmed_events=holds,
+        persist=lambda: save_state(args.state_file, state),
+    )
+
+
+def _close_notification_scan(
+    cycle: NotificationCycle,
+    own_cycle: bool,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    """Close a direct scanner cycle while leaving shared cycles to run_once."""
+
+    if own_cycle:
+        result["notification_cycle"] = cycle.deliver()
+    return result
+
+
+def _attention_priority(item: dict[str, Any]) -> NotificationPriority:
+    kind = str(item.get("kind") or "")
+    if kind in {"recovery", "task"}:
+        return NotificationPriority.RECOVERY
+    if kind == "decision":
+        return NotificationPriority.DECISION
+    return NotificationPriority.STATUS
+
+
+def _session_priority(interaction_kind: str) -> NotificationPriority:
+    if interaction_kind in {"permission", "question", "selection", "startup_trust"}:
+        return NotificationPriority.INTERACTION
+    if interaction_kind == "task_ready":
+        return NotificationPriority.TASK_READY
+    return NotificationPriority.STATUS
 
 
 def scan_and_propose_autonomy(
     args: argparse.Namespace,
     config: dict[str, Any],
     state: dict[str, Any],
+    *,
+    cycle: NotificationCycle | None = None,
 ) -> dict[str, Any] | None:
     """Offer (never start) overnight autonomy when the workstation goes idle.
 
@@ -2815,33 +3545,42 @@ def scan_and_propose_autonomy(
 
     if not getattr(args, "autonomy_propose", False):
         return None
+    own_cycle = cycle is None
+    cycle = cycle or _standalone_notification_cycle(args, config, state)
     try:
         target_chat_id = str(config.get("target_chat_id") or "").strip()
         chat_hash = str(config.get("target_chat_id_hash") or "").strip()
-        if not target_chat_id or not chat_hash:
+        owner_user_id = str(config.get("owner_user_id") or "").strip()
+        if not target_chat_id or not chat_hash or not owner_user_id:
             return {"status": "no_target_chat"}
+        user_hash = sha256_short(owner_user_id)
         now = time.time()
         local_hour = time.localtime(now).tm_hour
         if not (local_hour >= int(args.autonomy_propose_from_hour) or local_hour < 2):
             return {"status": "outside_window"}
-        if autonomy_is_armed(args.profile):
+        shift_status = bounded_shift_status(args.forager_bin, args.profile)
+        if shift_status.get("active_shift_id"):
             return {"status": "already_armed"}
-        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-        from offdesk_autonomy_run import profile_dir as autonomy_profile_dir  # noqa: PLC0415
-
-        pause_file = autonomy_profile_dir(args.profile) / "offdesk_operator_pause.json"
         try:
-            if pause_file.exists() and json.loads(pause_file.read_text()).get("paused"):
+            pause = run_shift_forager_json(
+                args.forager_bin,
+                args.profile,
+                ["offdesk", "pause-status"],
+            )
+            if isinstance(pause, dict) and pause.get("paused"):
                 return {"status": "paused"}
-        except (OSError, ValueError):
+        except (OSError, ValueError, RemoteOperatorTelegramError):
             pass
+        prepared = latest_prepared_shift(shift_status)
+        if not prepared:
+            return {"status": "no_prepared_shift"}
         pending = (state.get("pending_dispatch_confirmations_by_chat") or {}).get(chat_hash)
         if isinstance(pending, dict):
             if confirmation_is_fresh(pending):
                 return {"status": "confirmation_already_pending"}
             # An expired confirmation (e.g. last night's unanswered proposal)
             # must not block proposals forever.
-            clear_confirmation(state, chat_hash)
+            clear_confirmation(state, chat_hash, user_hash)
         last = float(state.get("autonomy_proposal_at") or 0)
         if now - last < int(args.autonomy_backoff_sec):
             return {"status": "backoff"}
@@ -2853,50 +3592,84 @@ def scan_and_propose_autonomy(
 
         confirmation = build_confirmation(
             kind="autonomy_start",
-            target_id="overnight",
+            target_id=str(prepared.get("shift_id") or ""),
             action_kind="arm",
-            observed_hash="",
+            observed_hash=str(prepared.get("manifest_sha256") or ""),
             note=f"idle {idle_min}m",
             chat_hash=chat_hash,
+            user_hash=user_hash,
             ttl_sec=1800,
         )
-        store_confirmation(state, chat_hash, confirmation)
         message = "\n".join(
             [
                 "<b>자율주행 제안</b>",
                 f"{idle_min}분째 활동이 없습니다.",
-                f"승인 시 {int(args.autonomy_until_hour):02d}:00까지: tick 심장박동 · 야간 증류 · 아침 브리핑.",
+                f"검토된 shift: {sanitize_text(str(prepared.get('shift_id') or ''), max_chars=64)}",
+                f"창: {prepared.get('starts_at')} → {prepared.get('stops_at')}",
+                f"범위: task {int(prepared.get('task_count') or 0)} · routine {int(prepared.get('routine_count') or 0)}",
+                (f"{'야간 시작 주간 사용률 대비 예산' if prepared['weekly_usage']['binding']['contract'].get('nightly') else '승인 기준 주간 사용률 대비 실행 예산'}: 제공자별 {prepared['weekly_usage']['binding']['contract']['limit_percentage_points']}%p · 최신 측정값 검사 · 실행 중 초과 가능"
+                 if (prepared.get("weekly_usage") or {}).get("runtime_weekly_limit") else "주간 허용량 제한: 이 실행에 연결되지 않음"),
                 "이미 승인된 작업만 실행되며 /pause 로 즉시 중단됩니다.",
                 "다음 조치: 확인 또는 취소",
             ]
         )
-        send_status = "sent"
-        try:
-            send_message(
-                config, target_chat_id, message, args,
-                reply_markup=choice_keyboard({"context_kind": "dispatch_confirm"}),
-            )
-            send_status = "dry_run" if args.dry_run else "sent"
-        except RemoteOperatorTelegramError:
-            send_status = "failed"
-        state["autonomy_proposal_at"] = now
-        return {
-            "status": "proposed",
+        report = {
+            "status": "deferred",
             "idle_min": idle_min,
-            "send_status": send_status,
+            "attempted_count": 0,
+            "notified_count": 0,
             "message_preview": message,
             "mobile_card_contract": mobile_card_contract(message),
         }
+        event_key = "autonomy_start:" + ":".join(
+            [
+                str(prepared.get("shift_id") or ""),
+                str(prepared.get("manifest_sha256") or ""),
+            ]
+        )
+
+        def on_delivered(message_id: int | None) -> None:
+            store_confirmation(state, chat_hash, user_hash, confirmation)
+            state["autonomy_proposal_at"] = now
+            report.update(
+                {
+                    "status": "proposed",
+                    "send_status": "dry_run" if args.dry_run else "sent",
+                    "attempted_count": 1,
+                    "notified_count": 1,
+                    "sent_message_id": message_id,
+                }
+            )
+
+        cycle.add(
+            NotificationCandidate(
+                event_key=event_key,
+                source="autonomy",
+                priority=NotificationPriority.AUTONOMY,
+                message=message,
+                reply_markup=choice_keyboard(
+                    {
+                        "context_kind": "dispatch_confirm",
+                        "confirmation_token": str(confirmation.get("token") or ""),
+                    }
+                ),
+                report=report,
+                on_delivered=on_delivered,
+            )
+        )
+        return _close_notification_scan(cycle, own_cycle, report)
+    except TelegramControlRevokedError:
+        raise
     except Exception as error:  # noqa: BLE001 - poll loop must never crash here
         return {"status": "scan_failed", "error": sanitize_text(str(error), max_chars=240)}
 
 
 def summarize_waiting_prompt(args: argparse.Namespace, tail: str) -> str:
-    """One-line summary of what a waiting session is asking, for the card.
+    """One-line summary of the latest agent response or request.
 
     Captures the tmux pane tail (read-only) and asks the local model to
-    compress it; degrades to the last visible prompt lines, then to empty.
-    Never raises into the poll loop.
+    compress it. This output is presentation only: deterministic terminal
+    markers separately decide which actions a card may expose.
     """
 
     from telegram_operator.agent import (  # noqa: PLC0415
@@ -2916,8 +3689,9 @@ def summarize_waiting_prompt(args: argparse.Namespace, tail: str) -> str:
             return fallback
         prompt = "\n".join(
             [
-                "An AI coding agent inside a terminal is paused on a permission prompt.",
-                "From the terminal tail below, state in ONE short Korean line what the agent is asking permission to do (the exact command/file if visible).",
+                "This is a terminal observation, not proof that operator input is required.",
+                "In ONE short Korean line, summarize its latest completed result, question, selection, or permission request.",
+                "Preserve any no-action-required guidance. Do not invent a request, authorization, or next task.",
                 'Return exactly one JSON object: {"summary": "<one line>"}. No markdown.',
                 "Terminal tail:",
                 tail[-3000:],
@@ -2928,6 +3702,58 @@ def summarize_waiting_prompt(args: argparse.Namespace, tail: str) -> str:
         return summary or fallback
     except Exception:  # noqa: BLE001 - poll loop must never crash here
         return ""
+
+
+def session_interaction_markup(
+    interaction: dict[str, Any], *, session_id: str, prompt_hash: str
+) -> dict[str, Any]:
+    """Build a bounded inline keyboard for one exact prompt identity."""
+
+    sid = session_id[:8]
+    kind = str(interaction.get("kind") or "unknown")
+    keyboard: list[list[dict[str, str]]] = []
+    if prompt_hash and kind in {"permission", "selection", "startup_trust"}:
+        options = [
+            option
+            for option in interaction.get("options") or []
+            if isinstance(option, dict)
+        ]
+        if options:
+            for option in options[:4]:
+                key = str(option.get("key") or "")
+                label = sanitize_text(str(option.get("label") or key), max_chars=40)
+                keyboard.append(
+                    [
+                        {
+                            "text": f"{key}. {label}",
+                            "callback_data": f"fg1:a:{sid}:{prompt_hash}:{key}",
+                        }
+                    ]
+                )
+        else:
+            keyboard.append(
+                [
+                    {
+                        "text": "승인",
+                        "callback_data": f"fg1:a:{sid}:{prompt_hash}",
+                    },
+                    {
+                        "text": "거부",
+                        "callback_data": f"fg1:d:{sid}:{prompt_hash}",
+                    },
+                ]
+            )
+    elif prompt_hash and kind == "task_ready":
+        keyboard.append(
+            [
+                {
+                    "text": "다음 작업 바로 진행",
+                    "callback_data": f"fg1:c:{sid}:{prompt_hash}",
+                }
+            ]
+        )
+    keyboard.append([{"text": "상태", "callback_data": "fg1:s"}])
+    return {"inline_keyboard": keyboard}
 
 
 def in_quiet_hours(from_hour: int, to_hour: int, *, local_hour: int) -> bool:
@@ -2956,6 +3782,150 @@ def session_notify_threshold(args: argparse.Namespace, cards_sent: int) -> int:
     base = int(args.session_notify_backoff_sec)
     ceiling = int(args.session_notify_max_backoff_sec)
     return min(base * (2 ** max(0, cards_sent - 1)), ceiling)
+
+
+def is_unattended_orchestrator_startup_gate(
+    session: dict[str, Any], interaction_kind: str
+) -> bool:
+    """Keep auto-created coordinator bootstrap UI out of urgent action cards.
+
+    New Forager status rows carry explicit provenance. The default title is a
+    bounded legacy fallback for coordinators stored before that field existed.
+    Only startup trust and self-update UI are suppressed; real runtime
+    permission requests remain visible.
+    """
+
+    is_orchestrator = bool(session.get("auto_orchestrator")) or str(
+        session.get("title") or ""
+    ).strip().casefold() == "orchestrator"
+    return is_orchestrator and interaction_kind in {
+        "startup_trust",
+        "maintenance_update",
+    }
+
+
+def update_orchestrator_bootstrap_digest(
+    args: argparse.Namespace,
+    config: dict[str, Any],
+    state: dict[str, Any],
+    blocked: list[dict[str, str]],
+    *,
+    cycle: NotificationCycle | None = None,
+) -> dict[str, Any] | None:
+    """Collect one status-only digest when the blocked bootstrap set changes."""
+
+    target_chat_id = str(config.get("target_chat_id") or "").strip()
+    previous = state.get("orchestrator_bootstrap_digest")
+    previous = previous if isinstance(previous, dict) else {}
+    if not blocked:
+        message_id = previous.get("message_id")
+        if message_id and not previous.get("resolved"):
+            edit_message(
+                config,
+                target_chat_id,
+                int(message_id),
+                "<b>백그라운드 Orchestrator 준비 상태 - 해결됨</b>\n"
+                "현재 보류 중인 startup gate가 없습니다.",
+                args,
+            )
+        state.pop("orchestrator_bootstrap_digest", None)
+        return None
+
+    canonical = sorted(
+        (
+            str(item.get("session_id") or ""),
+            str(item.get("prompt_hash") or ""),
+            str(item.get("interaction_kind") or ""),
+        )
+        for item in blocked
+    )
+    fingerprint = hashlib.sha256(
+        json.dumps(canonical, ensure_ascii=False, separators=(",", ":")).encode()
+    ).hexdigest()
+    if previous.get("fingerprint") == fingerprint:
+        return {
+            "status": "unchanged",
+            "count": len(blocked),
+            "fingerprint": fingerprint,
+        }
+
+    old_message_id = previous.get("message_id")
+
+    labels = {
+        "startup_trust": "프로젝트 신뢰 확인",
+        "maintenance_update": "Codex 업데이트 안내",
+    }
+    lines = [
+        f"<b>백그라운드 Orchestrator 준비 필요 · {len(blocked)}개</b>",
+        "개별 승인 버튼은 보내지 않았습니다.",
+    ]
+    for item in sorted(
+        blocked,
+        key=lambda value: (
+            str(value.get("project") or ""),
+            str(value.get("session_id") or ""),
+        ),
+    )[:6]:
+        project = html.escape(sanitize_text(item.get("project") or "미등록", max_chars=40))
+        kind = str(item.get("interaction_kind") or "")
+        lines.append(f"• {project}: {labels.get(kind, '시작 확인 필요')}")
+    if len(blocked) > 6:
+        lines.append(f"• 그 외 {len(blocked) - 6}개")
+    lines.append("On-desk에서 검토하거나 해당 세션을 재시작하세요.")
+    own_cycle = cycle is None
+    cycle = cycle or _standalone_notification_cycle(args, config, state)
+    report = {
+        "status": "deferred",
+        "count": len(blocked),
+        "fingerprint": fingerprint,
+    }
+    message = "\n".join(lines)
+
+    def on_delivered(message_id: int | None) -> None:
+        state["orchestrator_bootstrap_digest"] = {
+            "fingerprint": fingerprint,
+            "message_id": message_id,
+            "count": len(blocked),
+            "at": time.time(),
+            "resolved": False,
+        }
+        if old_message_id and not previous.get("resolved"):
+            try:
+                edit_message(
+                    config,
+                    target_chat_id,
+                    int(old_message_id),
+                    "<b>백그라운드 Orchestrator 준비 상태 - 갱신됨</b>\n"
+                    "새 상태 요약이 전송되었습니다.",
+                    args,
+                )
+            except TelegramControlRevokedError:
+                raise
+            except RemoteOperatorTelegramError:
+                pass
+        report.update(
+            {
+                "status": "notified",
+                "send_status": "dry_run" if args.dry_run else "sent",
+                "message_id": message_id,
+                "notified_count": 1,
+            }
+        )
+
+    cycle.add(
+        NotificationCandidate(
+            event_key=f"bootstrap:{fingerprint}",
+            source="session",
+            priority=NotificationPriority.STATUS,
+            message=message,
+            reply_markup={
+                "inline_keyboard": [[{"text": "상태", "callback_data": "fg1:s"}]]
+            },
+            report=report,
+            on_delivered=on_delivered,
+        )
+    )
+    return _close_notification_scan(cycle, own_cycle, report)
 
 
 def session_input_dead_keys(state: dict[str, Any]) -> dict[str, Any]:
@@ -2999,8 +3969,10 @@ def scan_and_notify_waiting_sessions(
     args: argparse.Namespace,
     config: dict[str, Any],
     state: dict[str, Any],
+    *,
+    cycle: NotificationCycle | None = None,
 ) -> dict[str, Any] | None:
-    """Push one card per waiting-episode of a supervised agent session.
+    """Collect cards for waiting sessions for the shared notification cycle.
 
     A session that flips to waiting gets a card once, then again on a doubling
     backoff up to a card cap. Sessions that leave the waiting state are cleared
@@ -3014,12 +3986,64 @@ def scan_and_notify_waiting_sessions(
     target_chat_id = str(config.get("target_chat_id") or "").strip()
     if not target_chat_id:
         return {"status": "no_target_chat"}
+    own_cycle = cycle is None
+    cycle = cycle or _standalone_notification_cycle(args, config, state)
     try:
+        keyboard_cleanup = None
+        if (
+            not args.dry_run
+            and state.get("telegram_session_keyboard_schema") != "inline_v3"
+        ):
+            result = {
+                "status": "deferred",
+                "keyboard_cleanup": "pending",
+                "notified_count": 0,
+                "attempted_count": 0,
+            }
+            report = result
+            message = (
+                "<b>입력창 고정 버튼을 정리했습니다</b>\n"
+                "이제 일반 응답에는 버튼이 없고 필요한 선택지만 카드에 표시됩니다."
+            )
+
+            def on_delivered(message_id: int | None) -> None:
+                state["telegram_session_keyboard_schema"] = "inline_v3"
+                # Reply-keyboard cards cannot be edited into inline cards and
+                # may already have exhausted their reminder cap. Forget only
+                # that rebuildable notification registry so every still-live
+                # interaction receives one freshly classified inline card.
+                state["waiting_notified_by_session"] = {}
+                state["waiting_ids_last_scan"] = []
+                report.update(
+                    {
+                        "status": "notified",
+                        "keyboard_cleanup": "removed",
+                        "send_status": "dry_run" if args.dry_run else "sent",
+                        "attempted_count": 1,
+                        "notified_count": 1,
+                        "sent_message_id": message_id,
+                    }
+                )
+
+            cycle.add(
+                NotificationCandidate(
+                    event_key="keyboard_cleanup:inline_v3",
+                    source="session",
+                    priority=NotificationPriority.KEYBOARD_CLEANUP,
+                    message=message,
+                    reply_markup={"remove_keyboard": True},
+                    report=report,
+                    on_delivered=on_delivered,
+                )
+            )
+            # Cleanup is an exclusive prerequisite. Do not inspect or mutate
+            # waiting cards after staging it in this cycle.
+            return _close_notification_scan(cycle, own_cycle, result)
         if args.session_status_file is not None:
             status = json.loads(args.session_status_file.read_text())
         else:
             process = subprocess.run(
-                [args.forager_bin, "-p", args.profile, "status", "--json"],
+                [args.forager_bin, "-p", args.profile, "status", "--json", "--notification-capture"],
                 capture_output=True, text=True, timeout=30,
             )
             if process.returncode != 0:
@@ -3035,6 +4059,7 @@ def scan_and_notify_waiting_sessions(
             notified = {}
             state["waiting_notified_by_session"] = notified
         now = time.time()
+        stopped_pending = observe_session_lifecycle(state, sessions, now=now)
         waiting_ids = {str(s.get("id") or "") for s in waiting}
         chat_hash = config.get("target_chat_id_hash")
         if len(waiting) > 1:
@@ -3064,7 +4089,19 @@ def scan_and_notify_waiting_sessions(
         for session_id in list(notified):
             entry = notified[session_id]
             if session_id in waiting_ids:
+                entry.pop("task_ready_running_scans", None)
                 continue
+            if entry.get("interaction_kind") == "task_ready":
+                observed = next((s for s in sessions if str(s.get("id") or "") == session_id), {})
+                if observed.get("status") == "running":
+                    entry["task_ready_running_scans"] = int(entry.get("task_ready_running_scans") or 0) + 1
+                else:
+                    entry.pop("task_ready_running_scans", None)
+                if int(entry.get("task_ready_running_scans") or 0) >= 2:
+                    entry["task_ready_rearmed"] = True
+                if not entry.get("task_ready_rearmed"):
+                    # Missing/idle observations are not proof of another task.
+                    continue
             clear_session_focus_for_chat_hash(
                 state,
                 chat_hash,
@@ -3087,20 +4124,88 @@ def scan_and_notify_waiting_sessions(
                 del notified[session_id]
         prev_waiting = {str(x) for x in state.get("waiting_ids_last_scan") or []}
         state["waiting_ids_last_scan"] = sorted(waiting_ids)
-        # Cards go silent overnight. Nothing is dropped: a session still
-        # waiting when the window ends is carded then, because its registry
-        # entry was never advanced.
-        if in_quiet_hours(
+        # Ordinary cards go silent overnight. Startup gates are still
+        # classified so an older actionable card can be invalidated, but the
+        # compact digest waits until quiet hours end.
+        quiet_hours = in_quiet_hours(
             int(args.session_notify_quiet_from_hour),
             int(args.session_notify_quiet_to_hour),
             local_hour=time.localtime(now).tm_hour,
-        ):
-            return {"status": "quiet_hours", "waiting_count": len(waiting)}
+        )
         sent = []
+        candidate_count = 0
         muted = []
+        result: dict[str, Any] = {
+            "status": "deferred",
+            "waiting_count": len(waiting),
+            "stopped_pending_count": len(stopped_pending),
+            "sent": sent,
+        }
+        if not quiet_hours:
+            for stop_event in stopped_pending:
+                session_id = stop_event["session_id"]
+                project = html.escape(sanitize_text(stop_event["project"], max_chars=40))
+                title = html.escape(sanitize_text(stop_event["title"], max_chars=60))
+                tool = html.escape(sanitize_text(stop_event["tool"], max_chars=24))
+                message = (
+                    "<b>세션 중단 감지</b>\n"
+                    f"□ {project} · {title} ({tool})\n"
+                    "살아 있던 세션의 실행이 사라졌습니다. 종료 원인은 확인되지 않았습니다.\n"
+                    "On-desk에서 상태와 마지막 작업을 확인한 뒤 필요하면 재시작하세요."
+                )
+
+                def on_stop_delivered(
+                    message_id: int | None, *, _event: dict[str, Any] = stop_event
+                ) -> None:
+                    if not args.dry_run:
+                        mark_stop_alert(
+                            state, _event, status="delivered", now=time.time(),
+                            message_id=message_id,
+                        )
+                    result.update({
+                        "status": "notified",
+                        "stopped_session_id": _event["session_id"],
+                        "stopped_alert_message_id": message_id,
+                    })
+
+                def on_stop_unconfirmed(*, _event: dict[str, Any] = stop_event) -> None:
+                    mark_stop_alert(
+                        state, _event, status="delivery_unconfirmed", now=time.time()
+                    )
+
+                cycle.add(NotificationCandidate(
+                    event_key=f"session-stopped:{session_id}:{stop_event['observed_at']}",
+                    source="session",
+                    priority=NotificationPriority.RECOVERY,
+                    message=message,
+                    reply_markup=None,
+                    report=result,
+                    on_delivered=on_stop_delivered,
+                    on_unconfirmed=on_stop_unconfirmed,
+                ))
+        bootstrap_blocked: list[dict[str, str]] = []
         for session in waiting:
             session_id = str(session.get("id") or "")
             if not session_id:
+                continue
+            remote_identity = session.get("remote_session_identity")
+            identity_error = remote_session_identity_issue(remote_identity)
+            if identity_error:
+                muted.append(
+                    {
+                        "session_id": session_id,
+                        "reason": "remote_session_identity_unavailable",
+                        "identity_error": identity_error,
+                    }
+                )
+                continue
+            if str(remote_identity.get("session_id") or "") != session_id:
+                muted.append(
+                    {
+                        "session_id": session_id,
+                        "reason": "remote_session_identity_mismatch",
+                    }
+                )
                 continue
             entry = notified.get(session_id) or {}
             last = float(entry.get("at") or 0)
@@ -3109,16 +4214,151 @@ def scan_and_notify_waiting_sessions(
             tool = sanitize_text(str(session.get("tool") or "agent"), max_chars=24)
             project = sanitize_text(str(session.get("project") or "미등록"), max_chars=40)
             from telegram_operator.dispatch import (  # noqa: PLC0415
-                capture_session_tail,
-                find_tmux_session_name,
                 pane_prompt_hash,
-                parse_prompt_options,
+                session_prompt_identity,
+            )
+            from telegram_operator.remote_session_identity import notification_capture_tail
+            from telegram_operator.notification_evidence import (
+                payload_evidence, phrase_flags, record_delivery,
             )
 
-            tmux_name = find_tmux_session_name(session_id)
-            tail = capture_session_tail(tmux_name, lines=15) if tmux_name else ""
-            prompt_hash = pane_prompt_hash(tail)
-            previous_prompt_hash = str(entry.get("prompt_hash") or "")
+            tail = notification_capture_tail(session)
+            if not tail:
+                muted.append({"session_id": session_id, "reason": "capture_unavailable"})
+                continue
+            interaction = classify_session_interaction(tail, tool)
+            if interaction.get("kind") in {"passive_wait", "unknown"}:
+                muted.append({
+                    "session_id": session_id,
+                    "reason": "no_verified_input_request",
+                    "interaction_kind": interaction.get("kind"),
+                    "interaction_reason": interaction.get("reason"),
+                    "observed_phrase_flags": phrase_flags(tail),
+                })
+                continue
+            prompt_observation_hash = pane_prompt_hash(tail)
+            prompt_hash = session_prompt_identity(
+                tail, tool, interaction=interaction
+            )
+            previous_prompt_hash = str(
+                entry.get("prompt_identity") or entry.get("prompt_hash") or ""
+            )
+            previous_identity_hash = str(
+                (entry.get("remote_session_identity") or {}).get("binding_sha256") or ""
+            )
+            identity_changed = previous_identity_hash != str(
+                remote_identity.get("binding_sha256") or ""
+            )
+            if (entry.get("delivery_unconfirmed") and not identity_changed
+                    and previous_prompt_hash == prompt_hash):
+                muted.append({"session_id": session_id, "reason": "delivery_unconfirmed_hold"})
+                continue
+            if previous_identity_hash and identity_changed:
+                dead_keys.pop(f"{session_id[:8]}:{prompt_hash}", None)
+            interaction_kind = str(interaction.get("kind") or "unknown")
+            if is_unattended_orchestrator_startup_gate(
+                session, interaction_kind
+            ):
+                bootstrap_blocked.append(
+                    {
+                        "session_id": session_id,
+                        "project": project,
+                        "interaction_kind": interaction_kind,
+                        "prompt_hash": prompt_hash,
+                        "prompt_identity": prompt_hash,
+                        "prompt_observation_hash": prompt_observation_hash,
+                    }
+                )
+                if (
+                    not entry.get("bootstrap_suppressed")
+                    or previous_prompt_hash != prompt_hash
+                    or identity_changed
+                ):
+                    message_id = entry.get("message_id")
+                    if message_id and not entry.get("resolved"):
+                        edit_message(
+                            config,
+                            target_chat_id,
+                            int(message_id),
+                            "<b>백그라운드 Orchestrator 시작 확인</b>\n"
+                            f"{html.escape(project)} · {html.escape(title)}\n"
+                            "개별 승인 카드는 만료되었습니다. 묶음 상태에서 확인하세요.",
+                            args,
+                        )
+                    clear_session_focus_for_chat_hash(
+                        state,
+                        chat_hash,
+                        session_id=session_id,
+                        sources={"waiting_card"},
+                    )
+                    # Invalidating an obsolete action is maintenance, not a
+                    # claim that its replacement digest was delivered.
+                    notified[session_id] = {
+                        "at": now,
+                        "cards": 0,
+                        "message_id": None,
+                        "prompt_hash": prompt_hash,
+                        "prompt_identity": prompt_hash,
+                        "prompt_observation_hash": prompt_observation_hash,
+                        "label": f"{project} · {title} ({tool})",
+                        "project": project,
+                        "title": title,
+                        "tool": tool,
+                        "interaction_kind": interaction_kind,
+                        "interaction_reason": interaction.get("reason"),
+                        "remote_session_identity": remote_identity,
+                        "bootstrap_suppressed": True,
+                        "resolved": True,
+                    }
+                muted.append(
+                    {
+                        "session_id": session_id,
+                        "reason": "unattended_orchestrator_startup_gate",
+                        "interaction_kind": interaction_kind,
+                        "prompt_hash": prompt_hash,
+                    }
+                )
+                continue
+            if quiet_hours:
+                continue
+            if (interaction_kind == "task_ready" and entry.get("task_ready_input_confirmed")
+                    and not identity_changed and not entry.get("task_ready_rearmed")):
+                candidate = entry.get("task_ready_candidate_identity")
+                stable = prompt_hash != previous_prompt_hash and candidate == prompt_hash
+                entry["task_ready_candidate_identity"] = prompt_hash
+                if stable:
+                    entry["task_ready_rearmed"] = True
+                else:
+                    muted.append({"session_id": session_id, "reason": "task_ready_awaiting_stable_post_input"})
+                    continue
+            same_task_ready_episode = (
+                interaction_kind == "task_ready"
+                and entry.get("interaction_kind") == "task_ready"
+                and not identity_changed
+                and not entry.get("task_ready_rearmed")
+                and bool(entry.get("message_id") or entry.get("delivery_unconfirmed"))
+            )
+            if same_task_ready_episode:
+                updated = False
+                if (prompt_hash != previous_prompt_hash and entry.get("message_id")
+                        and not entry.get("delivery_unconfirmed")
+                        and now - float(entry.get("task_ready_edit_attempt_at") or 0) >= 60):
+                    # Editing preserves one card. Bind its new buttons only after
+                    # Telegram acknowledges the edit; old callbacks stay stale.
+                    message = ("<b>에이전트 작업 완료 · 다음 지시 대기</b>\n"
+                               f"⏸ {html.escape(project)} · {html.escape(title)} ({html.escape(tool)})\n"
+                               "같은 대기 상태입니다. 최신 화면을 확인해 버튼을 갱신했습니다.\n"
+                               "기존 계획의 다음 미완료 작업만 이어서 진행할 수 있습니다.")
+                    entry["task_ready_edit_attempt_at"] = now
+                    updated = edit_message(config, target_chat_id, int(entry["message_id"]), message, args,
+                        reply_markup=session_interaction_markup(interaction, session_id=session_id, prompt_hash=prompt_hash))
+                    if updated:
+                        entry.update(prompt_hash=prompt_hash, prompt_identity=prompt_hash,
+                                     prompt_observation_hash=prompt_observation_hash)
+                muted.append({"session_id": session_id, "reason": "same_task_ready_episode",
+                              "card_updated": updated, "observed_prompt_identity": prompt_hash,
+                              "delivered_prompt_identity": entry.get("prompt_identity")})
+                continue
             # A session that was not waiting at the previous scan hit a NEW
             # waiting episode. A changed pane hash is also a new prompt even
             # when status stayed continuously waiting between polls. Notify
@@ -3127,7 +4367,7 @@ def scan_and_notify_waiting_sessions(
             # prompt, not a mute for the session.
             is_new_prompt = session_id not in prev_waiting or bool(
                 prompt_hash and prompt_hash != previous_prompt_hash
-            )
+            ) or identity_changed
             prompt_cards_sent = 0 if is_new_prompt else cards_sent
             threshold = (
                 60
@@ -3151,87 +4391,224 @@ def scan_and_notify_waiting_sessions(
             if dead_keys.get(f"{session_id[:8]}:{prompt_hash}"):
                 muted.append({"session_id": session_id, "reason": "no_effect", "prompt_hash": prompt_hash})
                 continue
-            options = parse_prompt_options(tail)
+            options = interaction.get("options") or []
             ask_summary = summarize_waiting_prompt(args, tail)
+            headlines = {
+                "startup_trust": "Codex 프로젝트 신뢰 확인",
+                "maintenance_update": "Codex 유지보수 안내",
+                "permission": "에이전트 권한 확인 필요",
+                "selection": "에이전트 선택 필요",
+                "question": "에이전트 질문",
+                "task_ready": "에이전트 작업 완료 · 다음 지시 대기",
+                "unknown": "에이전트 확인 필요",
+            }
             lines = [
-                "<b>세션 입력 대기</b>",
+                f"<b>{headlines.get(interaction_kind, headlines['unknown'])}</b>",
                 f"⏸ {html.escape(project)} · {html.escape(title)} ({html.escape(tool)})",
             ]
             if ask_summary:
-                lines.append(f"요청: {html.escape(ask_summary)}")
+                label = "최근 응답" if interaction_kind == "task_ready" else "요청"
+                lines.append(f"{label}: {html.escape(ask_summary)}")
+            elif interaction_kind == "task_ready":
+                lines.append("에이전트가 이전 응답을 마치고 다음 작업을 기다립니다.")
+            elif interaction_kind == "question":
+                lines.append("에이전트가 답변을 기다립니다.")
             else:
-                lines.append("에이전트가 승인/입력을 기다리고 있습니다.")
-            if options:
+                lines.append("터미널의 현재 요청을 직접 확인해 주세요.")
+            if options and interaction_kind in {
+                "permission",
+                "selection",
+                "startup_trust",
+            }:
                 lines.append(
                     " · ".join(
                         f"{opt['key']}. {html.escape(sanitize_text(opt['label'], max_chars=24))}"
                         for opt in options
                     )
                 )
-            lines.append("아래 버튼 한 번으로 선택합니다.")
-            message = "\n".join(lines)
-            sid8 = session_id[:8]
-            if options:
-                option_row = [
-                    f"/session_approve {sid8} {prompt_hash} {opt['key']}" for opt in options[:3]
-                ]
-                keyboard = [option_row, [f"/session_deny {sid8} {prompt_hash}", "상태"]]
-            else:
-                keyboard = [
-                    [f"/session_approve {sid8} {prompt_hash}", f"/session_deny {sid8} {prompt_hash}"],
-                    ["상태", "도움말"],
-                ]
-            approve_markup = {
-                "keyboard": keyboard,
-                "resize_keyboard": True,
-                "one_time_keyboard": False,
-            }
-            try:
-                message_id = send_message(
-                    config, target_chat_id, message, args, reply_markup=approve_markup
+            if interaction_kind == "maintenance_update":
+                lines.append(
+                    "현재 세션에서 전역 패키지 업데이트를 실행하지 않습니다. "
+                    "On-desk 유지보수 후 세션을 재시작하세요."
                 )
-            except RemoteOperatorTelegramError:
-                continue
-            notified[session_id] = {
+            elif interaction_kind == "startup_trust":
+                lines.append(
+                    "프로젝트 로컬 설정과 hooks를 허용하는 별도 시작 권한입니다."
+                )
+            elif interaction_kind == "task_ready":
+                lines.append("기존 계획의 다음 미완료 작업만 이어서 진행할 수 있습니다.")
+            elif interaction_kind == "question":
+                lines.append("이 카드에 답장하면 정확한 세션에 전달됩니다.")
+            elif interaction_kind == "unknown":
+                lines.append("상태가 불명확하여 자동 입력 버튼을 제공하지 않습니다.")
+            else:
+                lines.append("권한이나 선택 내용을 확인한 뒤 카드 버튼을 누르세요.")
+            message = "\n".join(lines)
+            interaction_markup = session_interaction_markup(
+                interaction,
+                session_id=session_id,
+                prompt_hash=prompt_hash,
+            )
+            entry_to_commit = {
                 "at": now,
                 "cards": 1 if is_new_prompt else prompt_cards_sent + 1,
-                "message_id": message_id,
+                "message_id": None,
                 "prompt_hash": prompt_hash,
+                "prompt_identity": prompt_hash,
+                "prompt_observation_hash": prompt_observation_hash,
                 "label": f"{project} · {title} ({tool})",
                 "project": project,
                 "title": title,
                 "tool": tool,
+                "interaction_kind": interaction_kind,
+                "interaction_reason": interaction.get("reason"),
+                "remote_session_identity": remote_identity,
             }
-            if len(waiting) == 1:
-                remember_session_focus(
-                    state,
-                    chat_hash,
-                    session_id=session_id,
-                    project=project,
-                    title=title,
-                    tool=tool,
-                    prompt_hash=prompt_hash,
-                    source="waiting_card",
+            report = result
+
+            def on_delivered(
+                message_id: int | None,
+                *,
+                _session_id: str = session_id,
+                _entry: dict[str, Any] = entry_to_commit,
+                _message: str = message,
+                _project: str = project,
+                _title: str = title,
+                _tool: str = tool,
+                _prompt_hash: str = prompt_hash,
+                _prompt_observation_hash: str = prompt_observation_hash,
+                _remote_identity: dict[str, Any] = remote_identity,
+                _interaction_kind: str = interaction_kind,
+                _waiting_count: int = len(waiting),
+                _chat_hash: str = str(chat_hash or ""),
+                _evidence: dict[str, Any] = payload_evidence(message, interaction_markup),
+            ) -> None:
+                record_delivery(
+                    state, _evidence, message_id=message_id,
+                    binding_sha256=str(_remote_identity.get("binding_sha256") or ""),
+                    now=time.time(), dry_run=bool(args.dry_run),
                 )
-            sent.append(
-                {
-                    "session_id": session_id,
-                    "title": title,
-                    "project": project,
-                    "prompt_hash": prompt_hash,
-                    "pushed_at": utc_now(),
-                    "message_id": message_id,
-                }
+                _entry["message_id"] = message_id
+                notified[_session_id] = _entry
+                if _waiting_count == 1:
+                    remember_session_focus(
+                        state,
+                        _chat_hash,
+                        session_id=_session_id,
+                        project=_project,
+                        title=_title,
+                        tool=_tool,
+                        prompt_hash=_prompt_hash,
+                        prompt_observation_hash=_prompt_observation_hash,
+                        source="waiting_card",
+                        remote_session_identity=_remote_identity,
+                    )
+                sent.append(
+                    {
+                        "session_id": _session_id,
+                        "title": _title,
+                        "project": _project,
+                        "prompt_hash": _prompt_hash,
+                        "prompt_identity": _prompt_hash,
+                        "prompt_observation_hash": _prompt_observation_hash,
+                        "pushed_at": utc_now(),
+                        "message_id": message_id,
+                        "interaction_kind": _interaction_kind,
+                        "remote_session_identity_sha256": _remote_identity.get("binding_sha256"),
+                        "payload_evidence": _evidence,
+                        "delivery_evidence_status": (
+                            "preview" if args.dry_run else
+                            "acknowledged" if type(message_id) is int and message_id > 0
+                            else "unacknowledged"
+                        ),
+                    }
+                )
+                result.update(
+                    {
+                        "status": "notified",
+                        "send_status": "dry_run" if args.dry_run else "sent",
+                        "attempted_count": 1,
+                        "notified_count": 1,
+                        "message_id": message_id,
+                        "session_id": _session_id,
+                        "message_preview": _message,
+                    }
+                )
+
+            def on_unconfirmed(
+                *, _session_id: str = session_id,
+                _entry: dict[str, Any] = entry_to_commit,
+            ) -> None:
+                # A missing acknowledgement may still mean Telegram accepted
+                # the send. Hold this exact request without creating a reply
+                # target or counting it as delivered.
+                _entry.update({"delivery_unconfirmed": True, "cards": 0, "resolved": True})
+                notified[_session_id] = _entry
+                clear_session_focus_for_chat_hash(
+                    state, chat_hash, session_id=_session_id, sources={"waiting_card"},
+                )
+
+            cycle.add(
+                NotificationCandidate(
+                    event_key=(
+                        f"waiting:{session_id}:{prompt_hash}:"
+                        f"{remote_identity.get('binding_sha256') or ''}"
+                    ),
+                    source="session",
+                    priority=_session_priority(interaction_kind),
+                    message=message,
+                    reply_markup=interaction_markup,
+                    report=report,
+                    on_delivered=on_delivered,
+                    on_unconfirmed=on_unconfirmed,
+                )
             )
-        if not sent:
-            result = {"status": "no_new_waiting", "waiting_count": len(waiting)}
+            candidate_count += 1
+        if quiet_hours:
+            result = {"status": "quiet_hours", "waiting_count": len(waiting)}
             if muted:
                 result["muted"] = muted
+            if keyboard_cleanup:
+                result["keyboard_cleanup"] = keyboard_cleanup
             return result
-        result = {"status": "notified", "sent": sent, "waiting_count": len(waiting)}
+        try:
+            bootstrap_digest = update_orchestrator_bootstrap_digest(
+                args,
+                config,
+                state,
+                bootstrap_blocked,
+                cycle=cycle,
+            )
+        except TelegramControlRevokedError:
+            raise
+        except RemoteOperatorTelegramError as error:
+            bootstrap_digest = {
+                "status": "send_failed",
+                "count": len(bootstrap_blocked),
+                "error": sanitize_text(str(error), max_chars=160),
+            }
+        if candidate_count == 0 and not stopped_pending and not (
+            bootstrap_digest and bootstrap_digest.get("status") == "deferred"
+        ):
+            result["status"] = "no_new_waiting"
         if muted:
             result["muted"] = muted
+        if bootstrap_digest:
+            result["bootstrap_digest"] = bootstrap_digest
+        if keyboard_cleanup:
+            result["keyboard_cleanup"] = keyboard_cleanup
+        if own_cycle:
+            delivery = cycle.deliver()
+            result["notification_cycle"] = delivery
+            if sent:
+                result["status"] = "notified"
+            elif delivery.get("status") == "send_failed":
+                result["status"] = "send_failed"
+            elif delivery.get("status") == "delivered":
+                result["status"] = "notified"
         return result
+    except TelegramControlRevokedError:
+        raise
     except Exception as error:  # noqa: BLE001 - poll loop must never crash here
         return {"status": "scan_failed", "error": sanitize_text(str(error), max_chars=240)}
 
@@ -3240,8 +4617,10 @@ def scan_and_notify_attention(
     args: argparse.Namespace,
     config: dict[str, Any],
     state: dict[str, Any],
+    *,
+    cycle: NotificationCycle | None = None,
 ) -> dict[str, Any] | None:
-    """Push a card for newly waiting attention items. Never raises into the loop."""
+    """Collect attention cards; a cycle owns the single delivery boundary."""
 
     if not args.attention_notify:
         return None
@@ -3255,31 +4634,69 @@ def scan_and_notify_attention(
         )
     except (OSError, RemoteOperatorTelegramError) as error:
         return {"status": "scan_failed", "error": sanitize_text(str(error), max_chars=240)}
+    own_cycle = cycle is None
+    cycle = cycle or _standalone_notification_cycle(args, config, state)
     fresh = notification.get("fresh_items") or []
+    # Prune resolved entries during collection, but never consume a fresh
+    # item until that item's candidate succeeds.
+    commit_attention_notification(state, notification, delivered_keys=())
     if not fresh:
         return {"status": "no_new_attention", "pending_count": notification.get("pending_count")}
-    message = render_attention_message(
-        profile=args.profile, generated_at=utc_now(), items=fresh
-    )
-    send_status = "sent"
-    message_id = None
-    try:
-        message_id = send_message(config, target_chat_id, message, args, reply_markup=None)
-        send_status = "dry_run" if args.dry_run else "sent"
-    except RemoteOperatorTelegramError as error:
-        if "Telegram API" not in str(error):
-            return {"status": "scan_failed", "error": sanitize_text(str(error), max_chars=240)}
-        send_status = "failed"
-    return {
-        "status": "notified",
+    result: dict[str, Any] = {
+        "status": "deferred",
         "pending_count": notification.get("pending_count"),
-        "notified_count": len(fresh),
+        "notified_count": 0,
         "items": fresh,
-        "message_preview": message,
-        "mobile_card_contract": mobile_card_contract(message),
-        "send_status": send_status,
-        "sent_message_id": message_id,
+        "attempted_count": 0,
     }
+    for item in fresh:
+        item_key = str(item.get("key") or "")
+        message = render_attention_message(
+            profile=args.profile, generated_at=utc_now(), items=[item]
+        )
+        report = result
+
+        def on_delivered(
+            message_id: int | None,
+            *,
+            _item_key: str = item_key,
+            _item: dict[str, Any] = item,
+            _message: str = message,
+        ) -> None:
+            commit_attention_notification(
+                state, notification, delivered_keys=(_item_key,)
+            )
+            result.update(
+                {
+                    "status": "notified",
+                    "send_status": "dry_run" if args.dry_run else "sent",
+                    "notified_count": 1,
+                    "sent_message_id": message_id,
+                    "attempted_count": 1,
+                    "items": [_item],
+                    "message_preview": _message,
+                    "mobile_card_contract": mobile_card_contract(_message),
+                }
+            )
+
+        cycle.add(
+            NotificationCandidate(
+                event_key=f"attention:{item_key}",
+                source="attention",
+                priority=_attention_priority(item),
+                message=message,
+                reply_markup=None,
+                report=report,
+                on_delivered=on_delivered,
+            )
+        )
+    if own_cycle:
+        delivery = cycle.deliver()
+        result["notification_cycle"] = delivery
+        if delivery.get("status") == "send_failed":
+            result["status"] = "send_failed"
+            result["send_status"] = "failed"
+    return result
 
 
 def synchronize_reply_delivery_journal(args: argparse.Namespace) -> None:
@@ -3302,6 +4719,9 @@ def synchronize_reply_delivery_journal(args: argparse.Namespace) -> None:
         result = {
             "status": delivery.get("result_status"),
             "effect": delivery.get("effect"),
+            "action_outcome": delivery.get("action_outcome"),
+            "response_card": delivery.get("response_card"),
+            "feedback_workflow": delivery.get("feedback_workflow"),
             "delivery_id": delivery.get("delivery_id"),
         }
         if previous.get("status") == "started":
@@ -3312,7 +4732,10 @@ def synchronize_reply_delivery_journal(args: argparse.Namespace) -> None:
                 result=result,
             )
             previous = latest_update_records(args.update_journal_file)[update_id]
-        if previous.get("status") == "completed" and delivery.get("status") != "delivered":
+        if previous.get("status") == "completed" and delivery.get("status") in {
+            "queued",
+            "failed",
+        }:
             raise RemoteOperatorStateError(
                 f"completed update {update_id} still has a pending reply delivery"
             )
@@ -3328,6 +4751,18 @@ def synchronize_reply_delivery_journal(args: argparse.Namespace) -> None:
                     "conversation_record_status": "unknown_after_recovery",
                 },
             )
+        if delivery.get("status") == "revoked" and previous.get("status") == "effect_committed":
+            complete_update(
+                args.update_journal_file,
+                update_id=update_id,
+                input_hash=str(delivery["input_hash"]),
+                result={
+                    **result,
+                    "send_status": "revoked",
+                    "sent_message_id": None,
+                    "conversation_record_status": "not_delivered_control_revoked",
+                },
+            )
 
 
 def attempt_reply_delivery(
@@ -3335,6 +4770,13 @@ def attempt_reply_delivery(
     config: dict[str, Any],
     delivery: dict[str, Any],
 ) -> dict[str, Any]:
+    latest = latest_delivery_records(args.reply_outbox_file).get(str(delivery["delivery_id"]))
+    if latest is not None and latest.get("delivery_unconfirmed"):
+        delivery = latest
+    if delivery.get("delivery_unconfirmed"):
+        return {"status": "delivery_unconfirmed", "delivery": delivery}
+    if not args.dry_run:
+        delivery = mark_delivery_started(args.reply_outbox_file, delivery)
     try:
         message_id = send_message(
             config,
@@ -3347,6 +4789,11 @@ def attempt_reply_delivery(
                 else None
             ),
         )
+    except TelegramControlRevokedError:
+        raise
+    except TelegramDeliveryUnconfirmed:
+        held = mark_delivery_unconfirmed(args.reply_outbox_file, delivery)
+        return {"status": "delivery_unconfirmed", "delivery": held, "error": held["last_error"]}
     except RemoteOperatorTelegramError as error:
         failed = mark_delivery_failed(
             args.reply_outbox_file,
@@ -3386,7 +4833,7 @@ def drain_reply_outbox(
         last_delivery_id = delivery.get("delivery_id")
         if attempt.get("status") != "delivered":
             return {
-                "status": "failed",
+                "status": attempt.get("status", "failed"),
                 "delivered_count": delivered_count,
                 "remaining_count": len(pending) - delivered_count,
                 "delivery_id": last_delivery_id,
@@ -3416,8 +4863,105 @@ def drain_reply_outbox(
     }
 
 
-def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]:
+def bind_live_control_generation(
+    args: argparse.Namespace,
+    config: dict[str, Any],
+    state: dict[str, Any],
+) -> dict[str, Any]:
+    generation = str(config.get("_control_generation_sha256") or "").strip()
+    binding = bind_control_generation(state, generation)
+    if binding.get("changed"):
+        save_state(args.state_file, state)
+
+    mismatched_reply_exists = any(
+        str(delivery.get("control_generation_sha256") or "").strip()
+        != generation
+        for delivery in latest_delivery_records(args.reply_outbox_file).values()
+        if delivery.get("status") in {"queued", "failed"}
+    )
+    revoked: list[dict[str, Any]] = []
+    if mismatched_reply_exists:
+        # Finish crash ordering locally before revoking a pending external
+        # reply. No Telegram request is made in this reconciliation path.
+        synchronize_reply_delivery_journal(args)
+        revoked = revoke_mismatched_deliveries(
+            args.reply_outbox_file,
+            current_generation_sha256=generation,
+        )
+    for delivery in revoked:
+        complete_update(
+            args.update_journal_file,
+            update_id=int(delivery["update_id"]),
+            input_hash=str(delivery["input_hash"]),
+            result={
+                "status": delivery.get("result_status"),
+                "effect": delivery.get("effect"),
+                "delivery_id": delivery.get("delivery_id"),
+                "send_status": "revoked",
+                "sent_message_id": None,
+                "conversation_record_status": "not_delivered_control_revoked",
+            },
+        )
+
+    return {
+        "status": binding.get("status"),
+        "changed": bool(binding.get("changed")),
+        "previous_generation_id": public_control_generation_id(
+            binding.get("previous_generation")
+        ),
+        "current_generation_id": public_control_generation_id(generation),
+        "previous_offset": binding.get("previous_offset"),
+        "cleared_state": binding.get("cleared_state") or {},
+        "revoked_reply_count": len(revoked),
+    }
+
+
+def revoke_live_control(
+    args: argparse.Namespace,
+    config: dict[str, Any],
+    error: TelegramControlRevokedError,
+) -> dict[str, Any]:
+    try:
+        current = resolve_telegram_config(args.env_file, required=False)
+        current_generation = str(
+            current.get("_control_generation_sha256") or ""
+        ).strip()
+    except RemoteOperatorTelegramError:
+        current_generation = "sha256:" + hashlib.sha256(
+            (
+                "revoked\0"
+                + str(error.previous_generation or "")
+                + "\0"
+                + utc_now()
+            ).encode("utf-8")
+        ).hexdigest()
     state = load_state(args.state_file)
+    revoked_config = dict(config)
+    revoked_config["_control_generation_sha256"] = current_generation
+    cleanup = bind_live_control_generation(args, revoked_config, state)
+    save_state(args.state_file, state)
+    result = result_base(args, config, "live_once")
+    result.update(
+        {
+            "status": "control_revoked",
+            "reason": "telegram_control_generation_changed",
+            "updates_seen": 0,
+            "previous_generation_id": public_control_generation_id(
+                error.previous_generation
+            ),
+            "current_generation_id": public_control_generation_id(
+                current_generation
+            ),
+            "cleanup": cleanup,
+        }
+    )
+    return result
+
+
+def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]:
+    assert_telegram_config_current(config, required=not args.dry_run)
+    state = load_state(args.state_file)
+    control_binding = bind_live_control_generation(args, config, state)
     outbox_delivery = drain_reply_outbox(args, config)
     if outbox_delivery.get("status") == "failed":
         result = result_base(args, config, "live_once")
@@ -3452,18 +4996,29 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
             ),
             "updates_seen": len(updates),
             "reply_outbox_delivery": outbox_delivery,
+            "control_generation_binding": control_binding,
         }
     )
     max_update_id = int(state.get("offset") or 0) - 1
     for update in updates:
+        callback_query_id = callback_query_id_for(update)
+        callback_data = callback_data_for(update)
         update_id = update.get("update_id")
         if isinstance(update_id, int):
             max_update_id = max(max_update_id, update_id)
         message = message_from_update(update)
         if not message:
+            if callback_query_id:
+                answer_callback_query(
+                    config, callback_query_id, args, text="만료되었거나 알 수 없는 버튼입니다."
+                )
             continue
         allowed, reason = update_is_allowed(config, message)
         if not allowed:
+            if callback_query_id:
+                answer_callback_query(
+                    config, callback_query_id, args, text="이 작업을 사용할 권한이 없습니다."
+                )
             result.update(
                 {
                     "status": "ignored",
@@ -3475,6 +5030,10 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
             continue
         text = update_text(message)
         if not text:
+            if callback_query_id:
+                answer_callback_query(
+                    config, callback_query_id, args, text="버튼 요청이 비어 있습니다."
+                )
             result.update({"status": "ignored", "reason": "empty_message"})
             continue
         if isinstance(update_id, bool) or not isinstance(update_id, int):
@@ -3496,14 +5055,75 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                 sort_keys=True,
             )
         )
+        inbound_event = InboundEvent(
+            transport="telegram",
+            source="callback" if callback_query_id else "message",
+            event_id=update_id,
+            message_id=message_id_for(message),
+            occurred_at_epoch=message_date_for(message),
+            input_hash=input_hash,
+            actor_scope_hash=chat_hash,
+            actor_hash=user_hash,
+            text=text,
+        )
+        active_session = active_remote_plan_session(state, chat_hash)
+        is_plan_callback = PLAN_CALLBACK_RE.fullmatch(callback_data) is not None
+        plan_text_owned = bool(
+            active_session
+            and remote_plan_session_should_handle_text(args, active_session, text)
+        )
+        routed_intent = route_inbound_event(
+            inbound_event,
+            active_plan_session=active_session,
+            plan_callback=is_plan_callback,
+            plan_text_owned=plan_text_owned,
+        )
+        session_payload = routed_intent.plan_payload
+        plan_callback_issue = routed_intent.validation_issue
+        session_handles_text = routed_intent.plan_session_input
+        preparsed_command = routed_intent.parsed_command
+        command_envelope = build_command_envelope(
+            update_id=update_id,
+            message_id=message_id_for(message),
+            message_date=message_date_for(message),
+            input_hash=input_hash,
+            chat_hash=chat_hash,
+            user_hash=user_hash,
+            parsed_command=preparsed_command,
+            plan_session_input=session_handles_text,
+            ttl_sec=args.remote_command_ttl_sec,
+        )
+        action_candidate = validate_action_candidate(
+            inbound_event,
+            routed_intent,
+            command_envelope,
+        )
         completed_record = begin_update(
             args.update_journal_file,
             update_id=update_id,
             input_hash=input_hash,
             chat_hash=chat_hash,
             user_hash=user_hash,
+            command_envelope=command_envelope,
         )
         if completed_record is not None:
+            if callback_query_id:
+                answer_callback_query(
+                    config,
+                    callback_query_id,
+                    args,
+                    text="이미 처리된 요청입니다.",
+                )
+                callback_message_id = message_id_for(message)
+                if callback_message_id is not None and callback_consumes_card(
+                    callback_data
+                ):
+                    clear_inline_keyboard(
+                        config,
+                        chat_id_for(message),
+                        callback_message_id,
+                        args,
+                    )
             result.update(
                 {
                     "status": "already_processed",
@@ -3515,10 +5135,60 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                 }
             )
             break
+        # An explicitly authorized retry can restore the original durable
+        # envelope in begin_update. Rebind the candidate to the exact envelope
+        # that will govern this handler attempt.
+        action_candidate = validate_action_candidate(
+            inbound_event,
+            routed_intent,
+            command_envelope,
+        )
         session_context: dict[str, Any] | None = None
-        active_session = active_remote_plan_session(state, chat_hash)
-        session_payload = remote_plan_session_command_payload(text) if active_session else None
-        if active_session and session_payload:
+        authority_issue = (
+            action_candidate.primary_issue
+            if action_candidate.primary_issue != plan_callback_issue
+            else None
+        )
+        if authority_issue:
+            rendered = result_base(args, config, "live_once")
+            refusal_reason = str(authority_issue)
+            message_preview = render_command_envelope_refusal_message(
+                profile=args.profile,
+                reason=refusal_reason,
+            )
+            rendered.update(
+                {
+                    "status": "command_refused",
+                    "reason": refusal_reason,
+                    "command_text": sanitize_text(text, max_chars=400),
+                    "parsed_command": {
+                        "supported": False,
+                        "command": "command_envelope_refused",
+                        "reason": refusal_reason,
+                        "requested_command": preparsed_command.get("command"),
+                    },
+                    "dispatch_result": {
+                        "ok": False,
+                        "kind": "remote_command_envelope",
+                        "stage": "command_envelope_refused",
+                        "error": refusal_reason,
+                    },
+                    "projection": None,
+                    "message_preview": message_preview,
+                    "mobile_card_contract": mobile_card_contract(message_preview),
+                }
+            )
+            attach_choice_surface(rendered, None)
+        elif plan_callback_issue:
+            rendered = render_remote_plan_callback_refusal(
+                args,
+                config,
+                mode="live_once",
+                session=active_session,
+                reason=plan_callback_issue,
+            )
+        elif active_session and session_payload:
+            assert_telegram_config_current(config, required=not args.dry_run)
             rendered = handle_remote_plan_session_input(
                 args,
                 config,
@@ -3528,7 +5198,8 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                 text=session_payload,
                 mode="live_once",
             )
-        elif active_session and remote_plan_session_should_handle_text(args, active_session, text):
+        elif active_session and routed_intent.plan_text_owned:
+            assert_telegram_config_current(config, required=not args.dry_run)
             rendered = handle_remote_plan_session_input(
                 args,
                 config,
@@ -3544,7 +5215,12 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                 chat_hash,
                 max_age_sec=args.context_max_age_sec,
             )
-            session_context = replied_session_context(state, message)
+            session_context = pending_session_action_context(
+                state,
+                preparsed_command,
+            )
+            if session_context is None:
+                session_context = replied_session_context(state, message)
             if session_context is None:
                 session_context = session_focus_for_chat_hash(
                     state,
@@ -3556,6 +5232,12 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                 chat_hash,
                 max_age_sec=args.project_focus_max_age_sec,
             )
+            consumed_key = consumed_continue_key(preparsed_command, chat_hash, user_hash, message_id_for(message) if callback_query_id else None)
+            consumed = state.get("consumed_continue_actions", {})
+            if not isinstance(consumed, dict) or any(not isinstance(row, dict) for row in consumed.values()):
+                raise RemoteOperatorTelegramError("invalid consumed action ledger")
+            if consumed_key and isinstance(consumed, dict) and consumed_key in consumed:
+                session_context = {"already_processed": True}
             rendered = render_command_result(
                 args,
                 config,
@@ -3569,8 +5251,22 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                 ),
                 sticky_focus_key=str((sticky_focus or {}).get("project_key") or "") or None,
                 session_context=session_context,
+                remote_plan_session_id=str((active_session or {}).get("session_id") or "")
+                or None,
             )
         rendered["updates_seen"] = len(updates)
+        rendered["remote_command_envelope"] = command_envelope
+        rendered["inbound_event"] = inbound_event.public_record()
+        rendered["routed_intent"] = routed_intent.public_record()
+        rendered["action_candidate"] = action_candidate.public_record()
+        if session_handles_text and isinstance(active_session, dict):
+            rendered.setdefault(
+                "remote_plan_session_id",
+                str(active_session.get("session_id") or "") or None,
+            )
+        rendered["operator_identity"] = operator_identity_for(
+            config, chat_hash=chat_hash, user_hash=user_hash
+        )
         if isinstance(update_id, int):
             rendered["processed_update_id"] = update_id
         parsed_command = rendered.get("parsed_command") if isinstance(rendered.get("parsed_command"), dict) else {}
@@ -3636,48 +5332,25 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                 max_age_sec=args.context_max_age_sec,
             )
             feedback_text = str(parsed_command.get("feedback_text") or parsed_command.get("plan_text") or text)
-            feedback_result = record_feedback(
+            feedback_outcome = process_feedback_workflow(
                 args,
                 config,
-                message,
-                feedback_text,
-                feedback_context=feedback_context,
+                state,
+                chat_hash=chat_hash,
+                user_hash=user_hash,
+                message_id=message_id_for(message),
+                text=feedback_text,
                 parsed_command=parsed_command,
+                feedback_context=feedback_context,
             )
-            feedback_record = feedback_result.pop("feedback_record", None)
-            rendered.update(feedback_result)
-            if isinstance(feedback_record, dict):
-                ingest_result = ingest_feedback_decision(args, feedback_record)
-                rendered.update(ingest_result)
-                rendered["message_preview"] = render_feedback_message(
-                    profile=args.profile,
-                    generated_at=rendered["generated_at"],
-                    feedback_text=feedback_text,
-                    feedback_kind=str(parsed_command.get("feedback_kind") or "freeform_feedback"),
-                    feedback_context=feedback_context,
-                    inbox_status=str(ingest_result.get("decision_feedback_ingest_status") or ""),
-                    agent_intent=parsed_command.get("agent_intent")
-                    if isinstance(parsed_command.get("agent_intent"), dict)
-                    else None,
-                )
-                rendered["mobile_card_contract"] = mobile_card_contract(rendered["message_preview"])
-                if parsed_command.get("command") == "plan_request":
-                    session = create_remote_plan_session(
-                        args,
-                        chat_hash=chat_hash,
-                        request_text=feedback_text,
-                        parsed_command=parsed_command,
-                        feedback_context=feedback_context,
-                        decision_id=ingest_result.get("decision_feedback_decision_id"),
-                    )
-                    store_remote_plan_session(state, chat_hash, session)
-                    rendered["remote_plan_session"] = public_remote_plan_session(session)
-                    rendered["message_preview"] = render_project_selection_message(
-                        profile=args.profile,
-                        session=session,
-                    )
-                    attach_choice_surface(rendered, remote_plan_selection_context(session))
-                    rendered["mobile_card_contract"] = mobile_card_contract(rendered["message_preview"])
+            apply_feedback_workflow_presentation(
+                args,
+                rendered,
+                feedback_outcome,
+                feedback_text=feedback_text,
+                parsed_command=parsed_command,
+                feedback_context=feedback_context,
+            )
         if parsed_command.get("command") == "chat":
             agent_intent = (
                 parsed_command.get("agent_intent")
@@ -3693,7 +5366,7 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
             if wants_session_message:
                 target_session_id = str(agent_intent.get("session_id") or "")
                 session_message = str(agent_intent.get("session_message") or "")
-                expected_hash = ""
+                expected_prompt_identity = ""
                 context_session_id = str((session_context or {}).get("session_id") or "")
                 same_context_session = bool(
                     target_session_id
@@ -3707,7 +5380,11 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                     "reply_card",
                     "waiting_card",
                 }:
-                    expected_hash = str((session_context or {}).get("prompt_hash") or "")
+                    expected_prompt_identity = str(
+                        (session_context or {}).get("prompt_identity")
+                        or (session_context or {}).get("prompt_hash")
+                        or ""
+                    )
                 if (
                     float(agent_intent.get("confidence") or 0.0)
                     < SESSION_MESSAGE_MIN_CONFIDENCE
@@ -3728,8 +5405,19 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                         rendered,
                         session_id=target_session_id,
                         message=session_message,
-                        expected_hash=expected_hash,
+                        expected_prompt_identity=expected_prompt_identity,
+                        expected_interaction_kind=str(
+                            (session_context or {}).get("interaction_kind") or ""
+                        ),
                         require_exact_id=True,
+                        expected_identity=(session_context or {}).get(
+                            "remote_session_identity"
+                        ),
+                        require_remote_identity=bool(
+                            same_context_session
+                            and str((session_context or {}).get("source") or "")
+                            in {"reply_card", "waiting_card"}
+                        ),
                     )
             if agent_intent.get("status") == "classified":
                 # The chat agent owns the routing decision (function-calling
@@ -3773,9 +5461,9 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                 capture = build_confirmation(
                     kind="plan_capture", target_id="plan", action_kind="capture",
                     observed_hash="", note=sanitize_text(capture_note, max_chars=380),
-                    chat_hash=chat_hash, ttl_sec=900,
+                    chat_hash=chat_hash, user_hash=user_hash, ttl_sec=900,
                 )
-                store_confirmation(state, chat_hash, capture)
+                store_confirmation(state, chat_hash, user_hash, capture)
                 preview = "\n".join([
                     "<b>계획 후보로 등록할까요?</b>",
                     sanitize_text(capture_note, max_chars=150),
@@ -3784,7 +5472,13 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                 ])
                 rendered["message_preview"] = preview
                 rendered["mobile_card_contract"] = mobile_card_contract(preview)
-                rendered["reply_markup_preview"] = choice_keyboard({"context_kind": "dispatch_confirm"})
+                attach_choice_surface(
+                    rendered,
+                    {
+                        "context_kind": "dispatch_confirm",
+                        "confirmation_token": str(capture.get("token") or ""),
+                    },
+                )
                 rendered["plan_capture_offered"] = True
         if parsed_command.get("command") in {
             "decision",
@@ -3792,6 +5486,7 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
             "dispatch",
             "run",
             "cancel_task",
+            "terminate_task",
             "session_approve",
             "session_deny",
             "pause",
@@ -3801,7 +5496,9 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
         }:
             # Guarded remote execution. Every branch catches its own errors so
             # nothing raises before the offset save and re-delivers the update.
-            resolve_dispatch_confirmation(args, state, chat_hash, rendered, parsed_command)
+            resolve_dispatch_confirmation(
+                args, config, state, chat_hash, user_hash, rendered, parsed_command
+            )
             plan_text = rendered.pop("captured_plan_text", None)
             if plan_text:
                 synthetic = {
@@ -3812,37 +5509,43 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                 capture_context = last_context_for_chat_hash(
                     state, chat_hash, max_age_sec=args.context_max_age_sec,
                 )
-                capture_result = record_feedback(
-                    args, config, message, plan_text,
-                    feedback_context=capture_context, parsed_command=synthetic,
+                capture_outcome = process_feedback_workflow(
+                    args,
+                    config,
+                    state,
+                    chat_hash=chat_hash,
+                    user_hash=user_hash,
+                    message_id=message_id_for(message),
+                    text=plan_text,
+                    parsed_command=synthetic,
+                    feedback_context=capture_context,
                 )
-                capture_record = capture_result.pop("feedback_record", None)
-                rendered.update(capture_result)
-                if isinstance(capture_record, dict):
-                    capture_ingest = ingest_feedback_decision(args, capture_record)
-                    rendered.update(capture_ingest)
-                    # Mirror the direct /plan path: store the session and move
-                    # straight into project selection, so a confirmed capture
-                    # behaves exactly like typing /plan.
-                    session = create_remote_plan_session(
-                        args, chat_hash=chat_hash, request_text=plan_text,
-                        parsed_command=synthetic, feedback_context=capture_context,
-                        decision_id=capture_ingest.get("decision_feedback_decision_id"),
-                    )
-                    store_remote_plan_session(state, chat_hash, session)
-                    rendered["remote_plan_session"] = public_remote_plan_session(session)
-                    rendered["message_preview"] = render_project_selection_message(
-                        profile=args.profile,
-                        session=session,
-                    )
-                    attach_choice_surface(rendered, remote_plan_selection_context(session))
-                    rendered["mobile_card_contract"] = mobile_card_contract(rendered["message_preview"])
+                apply_feedback_workflow_presentation(
+                    args,
+                    rendered,
+                    capture_outcome,
+                    feedback_text=plan_text,
+                    parsed_command=synthetic,
+                    feedback_context=capture_context,
+                )
         dispatch_result = (
             rendered.get("dispatch_result")
             if isinstance(rendered.get("dispatch_result"), dict)
             else {}
         )
         if dispatch_result.get("kind") == "session_message" and dispatch_result.get("ok"):
+            delivered_session = str(dispatch_result.get("session_id") or "")
+            previous_card = state.get("waiting_notified_by_session", {}).get(delivered_session)
+            if isinstance(previous_card, dict) and previous_card.get("interaction_kind") == "task_ready":
+                previous_card["task_ready_input_confirmed"] = True
+                previous_card.pop("task_ready_candidate_identity", None)
+            consumed_key = consumed_continue_key(parsed_command, chat_hash, user_hash, message_id_for(message) if callback_query_id else None)
+            if consumed_key:
+                consumed = state.setdefault("consumed_continue_actions", {})
+                consumed[consumed_key] = {"at": utc_now(), "update_id": update_id}
+                while len(consumed) > 256:
+                    oldest = min(consumed, key=lambda key: str(consumed[key].get("at") or ""))
+                    del consumed[oldest]
             remember_session_focus(
                 state,
                 chat_hash,
@@ -3853,23 +5556,34 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
                 source="delivered_message",
             )
         annotate_result_effect(rendered)
+        action_outcome = finalize_action_outcome(action_candidate, rendered)
+        rendered["action_outcome"] = action_outcome.public_record()
+        response_card = finalize_response_card(
+            action_outcome,
+            rendered,
+            mobile_contract_builder=mobile_card_contract,
+            choice_contract_builder=choice_surface_contract,
+        )
+        rendered["message_preview"] = response_card.message
+        rendered["reply_markup_preview"] = response_card.reply_markup
+        rendered["mobile_card_contract"] = response_card.mobile_contract
+        rendered["choice_surface_contract"] = response_card.choice_contract
+        rendered["response_card"] = response_card.public_record()
         # Persist handler-owned state and the reply payload before attempting
         # delivery. A restart can then retry the reply without re-running the
         # guarded effect handler.
         save_state(args.state_file, state)
-        reply_markup = (
-            rendered.get("reply_markup_preview")
-            if isinstance(rendered.get("reply_markup_preview"), dict)
-            else None
-        )
         delivery = queue_reply(
             args.reply_outbox_file,
             update_id=update_id,
             input_hash=input_hash,
             chat_id=chat_id_for(message),
-            message=str(rendered["message_preview"]),
-            reply_markup=reply_markup,
+            message=response_card.message,
+            reply_markup=response_card.reply_markup,
             result=rendered,
+            control_generation_sha256=str(
+                config.get("_control_generation_sha256") or ""
+            ),
         )
         rendered["delivery_id"] = delivery["delivery_id"]
         mark_effect_committed(
@@ -3878,14 +5592,33 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
             input_hash=input_hash,
             result=rendered,
         )
+        # Callback feedback is external state too. Acknowledge and consume the
+        # originating card only after the handler state, queued reply, and
+        # effect-committed journal record are durable.
+        if callback_query_id:
+            answer_callback_query(
+                config,
+                callback_query_id,
+                args,
+                text=callback_outcome_text(rendered),
+            )
+            callback_message_id = message_id_for(message)
+            if callback_message_id is not None and callback_consumes_card(callback_data):
+                clear_inline_keyboard(
+                    config,
+                    chat_id_for(message),
+                    callback_message_id,
+                    args,
+                )
         delivery_attempt = attempt_reply_delivery(args, config, delivery)
         if delivery_attempt.get("status") == "delivered":
             message_id = delivery_attempt.get("sent_message_id")
             rendered["send_status"] = delivery_attempt.get("send_status")
         else:
             message_id = None
-            rendered["status"] = "send_failed"
-            rendered["send_status"] = "failed"
+            uncertain = delivery_attempt.get("status") == "delivery_unconfirmed"
+            rendered["status"] = "delivery_unconfirmed" if uncertain else "send_failed"
+            rendered["send_status"] = "unconfirmed" if uncertain else "failed"
             rendered["send_error"] = delivery_attempt.get("error")
         rendered["sent_message_id"] = message_id
         remember_context_for_chat_hash(state, chat_hash, rendered)
@@ -3940,32 +5673,57 @@ def run_once(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
     attention = None
     autonomy = None
     session_notification = None
+    notification_cycle = None
+    notification_state_before = None
     # Do not stack proactive cards behind a failed reply. The next poll first
     # drains the durable reply outbox, then resumes notification scans.
-    if result.get("status") != "send_failed":
-        attention = scan_and_notify_attention(args, config, state)
+    if result.get("status") not in {"send_failed", "delivery_unconfirmed"}:
+        notification_cycle = _standalone_notification_cycle(args, config, state)
+        notification_state_before = copy.deepcopy(state)
+        attention = scan_and_notify_attention(args, config, state, cycle=notification_cycle)
         if attention is not None:
             result["attention_notification"] = attention
-        autonomy = scan_and_propose_autonomy(args, config, state)
+        autonomy = scan_and_propose_autonomy(args, config, state, cycle=notification_cycle)
         if autonomy is not None:
             result["autonomy_proposal"] = autonomy
-        session_notification = scan_and_notify_waiting_sessions(args, config, state)
+        session_notification = scan_and_notify_waiting_sessions(
+            args, config, state, cycle=notification_cycle
+        )
         if session_notification is not None:
             result["session_notification"] = session_notification
+        delivery = notification_cycle.deliver()
+        result["notification_cycle"] = delivery
+        if session_notification is not None:
+            digest = session_notification.get("bootstrap_digest")
+            if isinstance(digest, dict) and digest.get("status") in {
+                "notified", "send_failed"
+            }:
+                session_notification.update({
+                    "status": digest["status"],
+                    "send_status": digest.get("send_status"),
+                    "notified_count": int(digest.get("notified_count") or 0),
+                })
+        if delivery.get("status") == "send_failed":
+            result["proactive_notification_status"] = "send_failed"
+            if result.get("status") == "no_update":
+                result["status"] = "send_failed"
+        elif delivery.get("status") in {"delivery_unconfirmed", "delivery_unconfirmed_hold"}:
+            result["proactive_notification_status"] = delivery["status"]
+            if result.get("status") == "no_update":
+                result["status"] = delivery["status"]
+        elif delivery.get("status") == "delivered":
+            result["proactive_notification_status"] = "delivered"
     offset_advanced = max_update_id >= int(state.get("offset") or 0)
     if offset_advanced:
         state["offset"] = max_update_id + 1
-    # A successful attention scan prunes/marks the notified registry, so persist
-    # state even when no update advanced the offset; otherwise the same item
-    # would re-notify on the next poll.
-    attention_touched_state = bool(
-        attention and attention.get("status") in {"notified", "no_new_attention"}
+    state_changed = (
+        notification_state_before is not None
+        and state != notification_state_before
     )
-    session_touched_state = bool(
-        session_notification
-        and session_notification.get("status") in {"notified", "no_new_waiting"}
-    )
-    if offset_advanced or attention_touched_state or session_touched_state:
+    if (
+        offset_advanced
+        or state_changed
+    ):
         save_state(args.state_file, state)
     return result
 
@@ -3996,7 +5754,7 @@ def update_loop_summary(summary: dict[str, Any], result: dict[str, Any]) -> None
     status = str(result.get("status") or "unknown")
     status_counts = summary.setdefault("status_counts", {})
     status_counts[status] = int(status_counts.get(status) or 0) + 1
-    if status in {"poll_error", "send_failed", "loop_error", "state_error"}:
+    if status in {"poll_error", "send_failed", "delivery_unconfirmed", "delivery_unconfirmed_hold", "loop_error", "state_error"}:
         summary["consecutive_error_count"] = (
             int(summary.get("consecutive_error_count") or 0) + 1
         )
@@ -4112,6 +5870,9 @@ def result_carries_push(result: dict[str, Any]) -> bool:
     unmeasurable.
     """
 
+    cycle = result.get("notification_cycle")
+    if isinstance(cycle, dict) and int(cycle.get("delivered_count") or 0) > 0:
+        return True
     session = result.get("session_notification")
     if isinstance(session, dict) and session.get("status") == "notified":
         return True
@@ -4137,6 +5898,14 @@ def run_loop(args: argparse.Namespace, config: dict[str, Any]) -> dict[str, Any]
         while max_polls is None or int(summary["poll_count"]) < max_polls:
             try:
                 result = run_once(args, config)
+            except TelegramControlRevokedError as error:
+                result = revoke_live_control(args, config, error)
+                update_loop_summary(summary, result)
+                summary["status"] = "control_revoked"
+                summary["control_revocation"] = result
+                if status_path:
+                    write_json(status_path, summary)
+                return summary
             except RemoteOperatorStateError as error:
                 result = loop_state_error_result(args, config, error)
             except RemoteOperatorTelegramError as error:
@@ -4224,11 +5993,16 @@ def main() -> int:
                 bool(args.journal_inspect),
                 bool(args.journal_reconcile),
                 bool(args.journal_compact),
+                bool(args.receipt_inspect),
             ]
         )
         if journal_tool_count > 1:
             raise RemoteOperatorTelegramError(
-                "journal inspect, reconcile, and compact modes cannot be combined"
+                "journal and receipt inspection/reconciliation modes cannot be combined"
+            )
+        if args.receipt_session_id and not args.receipt_inspect:
+            raise RemoteOperatorTelegramError(
+                "--receipt-session-id requires --receipt-inspect"
             )
         if args.journal_reconcile:
             if args.journal_update_id is None:
@@ -4249,6 +6023,19 @@ def main() -> int:
                 update_id=args.journal_update_id,
             )
             result["reply_outbox"] = outbox_inspection(args.reply_outbox_file)
+            emit_result(args, result)
+            return 0
+        if args.receipt_inspect:
+            if args.dry_run or args.once or args.max_polls is not None:
+                raise RemoteOperatorTelegramError(
+                    "--receipt-inspect cannot be combined with listener or dry-run modes"
+                )
+            result = inspect_remote_receipts(
+                args.remote_plan_artifact_dir,
+                args.update_journal_file,
+                requested_session_id=args.receipt_session_id,
+                update_id=args.journal_update_id,
+            )
             emit_result(args, result)
             return 0
         if args.journal_compact:
@@ -4335,14 +6122,17 @@ def main() -> int:
             # Make this powerful mode visible in logs/systemd journal: it lets
             # the allowlisted chat queue arbitrary commands for tick execution.
             print(
-                "WARNING: --enable-runtime-dispatch is ON. Allowlisted Telegram chat can "
+                "WARNING: --enable-runtime-dispatch is ON. An authenticated Telegram operator can "
                 "queue arbitrary commands for `forager offdesk tick`. Treat this as remote "
-                "command execution and keep the chat allowlist locked down.",
+                "command execution and keep the operator identities and bot token locked down.",
                 file=sys.stderr,
                 flush=True,
             )
         if args.once:
-            result = run_once(args, config)
+            try:
+                result = run_once(args, config)
+            except TelegramControlRevokedError as error:
+                result = revoke_live_control(args, config, error)
         else:
             listener_lock = acquire_listener_lock(args.listener_lock_file)
             try:

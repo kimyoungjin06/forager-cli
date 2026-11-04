@@ -4,7 +4,7 @@
 //! intentionally separate. AI projections are compact and redacted. Human
 //! projections keep governance context such as evidence refs and review state.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use chrono::{DateTime, Duration, Utc};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
@@ -12,12 +12,14 @@ use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::io::{ErrorKind, Read, Write};
+use std::path::{Component, Path, PathBuf};
 use uuid::Uuid;
 
 use super::background::{BackgroundProbe, BackgroundRunnerPhase};
-use super::redaction::operator_safe_text;
+use super::redaction::{
+    operator_safe_identity, operator_safe_identity_selector, operator_safe_text,
+};
 use super::resume::{ResumeStatus, TaskResumeState};
 use super::task_queue::{OffdeskTask, OffdeskTaskStatus};
 
@@ -43,6 +45,7 @@ const STALE_CANDIDATE_DAYS: i64 = 30;
 const DEFAULT_PROJECTION_MAX_ENTRIES: usize = 8;
 const DEFAULT_PROJECTION_MAX_CONTEXT_CHARS: usize = 4_000;
 const DEFAULT_PROJECTION_MAX_INSTRUCTION_CHARS: usize = 500;
+pub(crate) const MAX_WIKI_CONTEXT_SOURCE_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -1372,6 +1375,72 @@ impl AdaptiveWikiStore {
         read_entry_state(&self.entries_path())
     }
 
+    pub(crate) fn load_entries_bounded_for_context(&self) -> Result<AdaptiveWikiEntryState> {
+        let path_metadata = match fs::symlink_metadata(&self.root) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                return Ok(AdaptiveWikiEntryState::default());
+            }
+            Err(error) => return Err(error).context("inspect adaptive wiki context root"),
+        };
+        ensure!(
+            !path_metadata.file_type().is_symlink() && path_metadata.is_dir(),
+            "adaptive wiki context root is not one safe directory"
+        );
+        let root = crate::process::open_bounded_root(&self.root)
+            .context("open adaptive wiki context root")?;
+        let root_identity = crate::process::filesystem_file_identity(&root.metadata()?)
+            .context("adaptive wiki context root lacks a stable identity")?;
+        ensure!(
+            crate::process::filesystem_file_identity(&path_metadata) == Some(root_identity),
+            "adaptive wiki context root path and descriptor identities differ"
+        );
+
+        let mut file = match crate::process::open_bounded_regular_file(
+            &root,
+            Path::new(ADAPTIVE_WIKI_ENTRIES_FILE),
+        ) {
+            Ok(file) => file,
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                ensure_active_wiki_context_root(&self.root, &root, root_identity)?;
+                return Ok(AdaptiveWikiEntryState::default());
+            }
+            Err(error) => {
+                return Err(error).context("open bounded adaptive wiki context entries");
+            }
+        };
+        ensure_single_link_wiki_context_source(&file)?;
+        let before = crate::process::FilesystemObjectSnapshot::from_metadata(&file.metadata()?);
+        let mut bytes = Vec::new();
+        Read::by_ref(&mut file)
+            .take((MAX_WIKI_CONTEXT_SOURCE_BYTES + 1) as u64)
+            .read_to_end(&mut bytes)
+            .context("read bounded adaptive wiki context entries")?;
+        ensure!(
+            bytes.len() <= MAX_WIKI_CONTEXT_SOURCE_BYTES,
+            "adaptive wiki context entries exceed the source byte budget"
+        );
+        let after = crate::process::FilesystemObjectSnapshot::from_metadata(&file.metadata()?);
+        ensure!(
+            before == after,
+            "adaptive wiki context entries changed while they were read"
+        );
+        let active =
+            crate::process::open_bounded_regular_file(&root, Path::new(ADAPTIVE_WIKI_ENTRIES_FILE))
+                .context("reopen active adaptive wiki context entries")?;
+        ensure_single_link_wiki_context_source(&active)?;
+        ensure!(
+            crate::process::FilesystemObjectSnapshot::from_metadata(&active.metadata()?) == after,
+            "active adaptive wiki context entries were replaced while they were read"
+        );
+        ensure_active_wiki_context_root(&self.root, &root, root_identity)?;
+
+        if bytes.iter().all(u8::is_ascii_whitespace) {
+            return Ok(AdaptiveWikiEntryState::default());
+        }
+        serde_json::from_slice(&bytes).context("parse bounded adaptive wiki context entries")
+    }
+
     pub fn save_entries(&self, state: &AdaptiveWikiEntryState) -> Result<()> {
         let _lock = self.lock_exclusive()?;
         write_json_state(&self.entries_path(), state)
@@ -1397,25 +1466,35 @@ impl AdaptiveWikiStore {
         let claim_key = normalize_key(&input.claim);
 
         let candidate = if let Some(existing) = state.candidates.iter_mut().find(|candidate| {
-            candidate.kind == input.kind
-                && candidate.scope == input.scope
+            candidate.scope == input.scope
                 && candidate.scope_ref == normalized_scope_ref
-                && normalize_key(&candidate.claim) == claim_key
+                && ((candidate.kind == input.kind && normalize_key(&candidate.claim) == claim_key)
+                    || same_background_review_observation(candidate, &input))
         }) {
-            existing.occurrence_count = existing.occurrence_count.saturating_add(1).max(1);
-            existing.suggested_ai_instruction = prefer_new_text(
-                &existing.suggested_ai_instruction,
-                &input.suggested_ai_instruction,
-            );
-            existing.human_summary = prefer_new_text(&existing.human_summary, &input.human_summary);
-            existing.confidence = input.confidence;
-            existing.updated_at = now;
-            existing.last_seen_at = now;
-            existing.signal_kind = input.signal_kind;
-            existing.origin = input.origin;
-            existing.suggested_scope = input.suggested_scope;
+            let same_claim =
+                existing.kind == input.kind && normalize_key(&existing.claim) == claim_key;
+            let same_observation = (same_claim && same_background_review_source(existing, &input))
+                || same_background_review_observation(existing, &input);
+            if !same_observation {
+                existing.occurrence_count = existing.occurrence_count.saturating_add(1).max(1);
+                existing.updated_at = now;
+                existing.last_seen_at = now;
+            }
+            if same_claim && !same_observation {
+                existing.suggested_ai_instruction = prefer_new_text(
+                    &existing.suggested_ai_instruction,
+                    &input.suggested_ai_instruction,
+                );
+                existing.human_summary =
+                    prefer_new_text(&existing.human_summary, &input.human_summary);
+                existing.confidence = input.confidence;
+                existing.signal_kind = input.signal_kind;
+                existing.origin = input.origin;
+                existing.suggested_scope = input.suggested_scope;
+                existing.review_reason =
+                    prefer_new_text(&existing.review_reason, &input.review_reason);
+            }
             push_unique_modes(&mut existing.agent_modes, input.agent_modes.iter());
-            existing.review_reason = prefer_new_text(&existing.review_reason, &input.review_reason);
             push_unique(&mut existing.evidence_refs, input.evidence_ref.as_deref());
             push_unique_many(&mut existing.source_refs, input.source_refs.iter());
             push_unique_many(&mut existing.source_hashes, input.source_hashes.iter());
@@ -1505,10 +1584,10 @@ impl AdaptiveWikiStore {
     ) -> Result<Option<AdaptiveWikiEntry>> {
         let _lock = self.lock_exclusive()?;
         let mut candidate_state = read_candidate_state(&self.candidates_path())?;
-        let Some(index) = candidate_state
-            .candidates
-            .iter()
-            .position(|candidate| candidate.id == candidate_id)
+        let Some(index) =
+            resolve_identity_index(&candidate_state.candidates, candidate_id, |candidate| {
+                candidate.id.as_str()
+            })?
         else {
             return Ok(None);
         };
@@ -1560,10 +1639,9 @@ impl AdaptiveWikiStore {
     pub fn reject_candidate(&self, candidate_id: &str) -> Result<Option<AdaptiveWikiCandidate>> {
         let _lock = self.lock_exclusive()?;
         let mut state = read_candidate_state(&self.candidates_path())?;
-        let Some(index) = state
-            .candidates
-            .iter()
-            .position(|candidate| candidate.id == candidate_id)
+        let Some(index) = resolve_identity_index(&state.candidates, candidate_id, |candidate| {
+            candidate.id.as_str()
+        })?
         else {
             return Ok(None);
         };
@@ -1581,9 +1659,12 @@ impl AdaptiveWikiStore {
     ) -> Result<Option<AdaptiveWikiEntry>> {
         let _lock = self.lock_exclusive()?;
         let mut state = read_entry_state(&self.entries_path())?;
-        let Some(entry) = state.entries.iter_mut().find(|entry| entry.id == entry_id) else {
+        let Some(index) =
+            resolve_identity_index(&state.entries, entry_id, |entry| entry.id.as_str())?
+        else {
             return Ok(None);
         };
+        let entry = &mut state.entries[index];
         entry.scope = scope;
         entry.scope_ref = normalize_scope_ref(scope, scope_ref);
         entry.updated_at = now;
@@ -1599,9 +1680,12 @@ impl AdaptiveWikiStore {
     ) -> Result<Option<AdaptiveWikiEntry>> {
         let _lock = self.lock_exclusive()?;
         let mut state = read_entry_state(&self.entries_path())?;
-        let Some(entry) = state.entries.iter_mut().find(|entry| entry.id == entry_id) else {
+        let Some(index) =
+            resolve_identity_index(&state.entries, entry_id, |entry| entry.id.as_str())?
+        else {
             return Ok(None);
         };
+        let entry = &mut state.entries[index];
         entry.status = AdaptiveWikiStatus::Deprecated;
         entry.updated_at = now;
         let entry = entry.clone();
@@ -1617,9 +1701,12 @@ impl AdaptiveWikiStore {
     ) -> Result<Option<AdaptiveWikiEntry>> {
         let _lock = self.lock_exclusive()?;
         let mut state = read_entry_state(&self.entries_path())?;
-        let Some(entry) = state.entries.iter_mut().find(|entry| entry.id == entry_id) else {
+        let Some(index) =
+            resolve_identity_index(&state.entries, entry_id, |entry| entry.id.as_str())?
+        else {
             return Ok(None);
         };
+        let entry = &mut state.entries[index];
         push_unique(&mut entry.counterexamples, Some(evidence_ref));
         entry.updated_at = now;
         let entry = entry.clone();
@@ -1637,9 +1724,12 @@ impl AdaptiveWikiStore {
     ) -> Result<Option<AdaptiveWikiEntry>> {
         let _lock = self.lock_exclusive()?;
         let mut state = read_entry_state(&self.entries_path())?;
-        let Some(entry) = state.entries.iter_mut().find(|entry| entry.id == entry_id) else {
+        let Some(index) =
+            resolve_identity_index(&state.entries, entry_id, |entry| entry.id.as_str())?
+        else {
             return Ok(None);
         };
+        let entry = &mut state.entries[index];
         push_unique_many(&mut entry.support_refs, support_refs.iter());
         push_unique_many(&mut entry.capability_ids, capability_ids.iter());
         push_unique_many(
@@ -1660,9 +1750,12 @@ impl AdaptiveWikiStore {
     ) -> Result<Option<AdaptiveWikiEntry>> {
         let _lock = self.lock_exclusive()?;
         let mut state = read_entry_state(&self.entries_path())?;
-        let Some(entry) = state.entries.iter_mut().find(|entry| entry.id == entry_id) else {
+        let Some(index) =
+            resolve_identity_index(&state.entries, entry_id, |entry| entry.id.as_str())?
+        else {
             return Ok(None);
         };
+        let entry = &mut state.entries[index];
         entry.review_after = Some(review_after);
         entry.updated_at = now;
         let entry = entry.clone();
@@ -1681,9 +1774,12 @@ impl AdaptiveWikiStore {
     ) -> Result<Option<AdaptiveWikiEntry>> {
         let _lock = self.lock_exclusive()?;
         let mut state = read_entry_state(&self.entries_path())?;
-        let Some(entry) = state.entries.iter_mut().find(|entry| entry.id == entry_id) else {
+        let Some(index) =
+            resolve_identity_index(&state.entries, entry_id, |entry| entry.id.as_str())?
+        else {
             return Ok(None);
         };
+        let entry = &mut state.entries[index];
         if let Some(kind) = edit.kind {
             entry.kind = kind;
         }
@@ -1723,9 +1819,12 @@ impl AdaptiveWikiStore {
     ) -> Result<Option<AdaptiveWikiEntry>> {
         let _lock = self.lock_exclusive()?;
         let mut state = read_entry_state(&self.entries_path())?;
-        let Some(entry) = state.entries.iter_mut().find(|entry| entry.id == entry_id) else {
+        let Some(index) =
+            resolve_identity_index(&state.entries, entry_id, |entry| entry.id.as_str())?
+        else {
             return Ok(None);
         };
+        let entry = &mut state.entries[index];
         push_unique_many(&mut entry.core_tags, clean_tags(core_tags.to_vec()).iter());
         push_unique_many(
             &mut entry.proposed_tags,
@@ -2132,7 +2231,7 @@ impl AdaptiveWikiStore {
     ) -> Result<AdaptiveWikiMarkdownExportReport> {
         let entries = self.load_entries()?.entries;
         let candidates = self.load_candidates()?.candidates;
-        let files = build_markdown_export_files(&entries, &candidates, now);
+        let files = build_markdown_export_files(&entries, &candidates, now)?;
         if !dry_run {
             write_markdown_export(output_dir, &files)?;
         }
@@ -2283,12 +2382,17 @@ impl AdaptiveWikiStore {
             now,
         );
 
-        let target_entry_id = operator_safe_text(target_entry_id.trim());
-        let target_entry = entries.iter().find(|entry| entry.id == target_entry_id);
+        let target_selector = target_entry_id.trim();
+        let target_entry =
+            resolve_identity_index(&entries, target_selector, |entry| entry.id.as_str())?
+                .map(|index| &entries[index]);
+        let target_entry_id = target_entry
+            .map(|entry| operator_safe_identity(&entry.id))
+            .unwrap_or_else(|| operator_safe_identity_selector(target_selector));
         let target_entry_in_scope =
-            projection_contains_entry(&in_scope_projection, &target_entry_id);
+            projection_contains_public_entry(&in_scope_projection, &target_entry_id);
         let target_entry_out_of_scope =
-            projection_contains_entry(&out_of_scope_projection, &target_entry_id);
+            projection_contains_public_entry(&out_of_scope_projection, &target_entry_id);
         let mut failures = Vec::new();
         if target_entry.is_none() {
             failures.push(format!("target entry `{target_entry_id}` was not found"));
@@ -2424,8 +2528,12 @@ impl AdaptiveWikiStore {
         let audit_records = self.load_audit_records()?;
         let correction_records = self.load_correction_records()?;
         let report_dir = self.correction_recurrence_report_dir(now);
-        let entry_id = operator_safe_text(entry_id.trim());
-        let entry = entries.iter().find(|entry| entry.id == entry_id);
+        let entry_selector = entry_id.trim();
+        let entry = resolve_identity_index(&entries, entry_selector, |entry| entry.id.as_str())?
+            .map(|index| &entries[index]);
+        let entry_id = entry
+            .map(|entry| operator_safe_identity(&entry.id))
+            .unwrap_or_else(|| operator_safe_identity_selector(entry_selector));
         let scope = entry.map(|entry| AdaptiveWikiScopeSuggestion {
             scope: entry.scope,
             scope_ref: operator_safe_text(&entry.scope_ref),
@@ -2568,12 +2676,16 @@ impl AdaptiveWikiStore {
         let usage_records = self.load_usage_records()?;
         let audit_records = self.load_audit_records()?;
         let report_dir = self.promotion_evidence_chain_report_dir(now);
-        let raw_entry_id = entry_id.trim();
-        let entry_id = operator_safe_text(raw_entry_id);
-        let current_entry = entries
-            .iter()
-            .find(|entry| entry.id == raw_entry_id)
-            .map(human_entry_snapshot);
+        let entry_selector = entry_id.trim();
+        let current_entry_index =
+            resolve_identity_index(&entries, entry_selector, |entry| entry.id.as_str())?;
+        let raw_entry_id = current_entry_index
+            .map(|index| entries[index].id.as_str())
+            .unwrap_or(entry_selector);
+        let entry_id = current_entry_index
+            .map(|index| operator_safe_identity(&entries[index].id))
+            .unwrap_or_else(|| operator_safe_identity_selector(entry_selector));
+        let current_entry = current_entry_index.map(|index| human_entry_snapshot(&entries[index]));
         let promotion_audit = promotion_audit_for_entry_id(raw_entry_id, &audit_records)
             .map(operator_safe_audit_record);
         let candidate_snapshot = promotion_audit
@@ -2584,7 +2696,7 @@ impl AdaptiveWikiStore {
             .and_then(|audit| audit.entry_snapshot.clone());
         let usage_records_for_entry: Vec<_> = usage_records
             .iter()
-            .filter(|usage| usage.entry_id == raw_entry_id)
+            .filter(|usage| identity_reference_matches(&usage.entry_id, raw_entry_id))
             .map(operator_safe_usage_record)
             .collect();
         let related_audit_records: Vec<_> = audit_records
@@ -2754,10 +2866,10 @@ pub fn build_ai_projection_report_with_policy(
         }
         candidates.push(AdaptiveWikiProjectionCandidate {
             projection: AdaptiveWikiAiProjection {
-                id: entry.id.clone(),
+                id: operator_safe_identity(&entry.id),
                 kind: entry.kind,
                 scope: entry.scope,
-                scope_ref: entry.scope_ref.clone(),
+                scope_ref: operator_safe_text(&entry.scope_ref),
                 activation_mode: entry.activation_mode,
                 agent_modes: entry.agent_modes.clone(),
                 instruction,
@@ -2953,7 +3065,7 @@ fn projection_id_difference(
     let right_ids: BTreeSet<_> = right.iter().map(|entry| entry.id.as_str()).collect();
     left.iter()
         .filter(|entry| !right_ids.contains(entry.id.as_str()))
-        .map(|entry| operator_safe_text(&entry.id))
+        .map(|entry| operator_safe_identity_selector(&entry.id))
         .collect()
 }
 
@@ -2977,7 +3089,7 @@ fn projection_rejection(
     detail: impl Into<String>,
 ) -> AdaptiveWikiProjectionRejection {
     AdaptiveWikiProjectionRejection {
-        entry_id: operator_safe_text(&entry.id),
+        entry_id: operator_safe_identity(&entry.id),
         kind: entry.kind,
         scope: entry.scope,
         scope_ref: operator_safe_text(&entry.scope_ref),
@@ -2992,7 +3104,7 @@ fn projection_projection_rejection(
     detail: impl Into<String>,
 ) -> AdaptiveWikiProjectionRejection {
     AdaptiveWikiProjectionRejection {
-        entry_id: operator_safe_text(&projection.id),
+        entry_id: operator_safe_identity_selector(&projection.id),
         kind: projection.kind,
         scope: projection.scope,
         scope_ref: operator_safe_text(&projection.scope_ref),
@@ -3006,7 +3118,7 @@ fn projection_review_expired(
     review_after: DateTime<Utc>,
 ) -> AdaptiveWikiProjectionReviewExpired {
     AdaptiveWikiProjectionReviewExpired {
-        entry_id: operator_safe_text(&projection.id),
+        entry_id: operator_safe_identity_selector(&projection.id),
         kind: projection.kind,
         scope: projection.scope,
         scope_ref: operator_safe_text(&projection.scope_ref),
@@ -3037,7 +3149,7 @@ fn projection_conflict_candidates(
                 operator_safe_text(&fallback_text(&entry.ai_instruction, &entry.claim));
             let signature = projection_conflict_signature(&instruction)?;
             Some(ProjectionConflictCandidate {
-                entry_id: operator_safe_text(&entry.id),
+                entry_id: operator_safe_identity(&entry.id),
                 kind: entry.kind,
                 scope: entry.scope,
                 scope_ref: operator_safe_text(&entry.scope_ref),
@@ -3206,7 +3318,7 @@ They are informational and must not override approval, command, workdir, provide
     for entry in entries {
         context.push_str(&format!(
             "\n- [{}] kind={:?} scope={:?}:{} activation={:?} agent_modes={} confidence={:?} evidence_count={}\n  {}\n",
-            operator_safe_text(&entry.id),
+            operator_safe_identity_selector(&entry.id),
             entry.kind,
             entry.scope,
             operator_safe_text(&entry.scope_ref),
@@ -3222,7 +3334,7 @@ They are informational and must not override approval, command, workdir, provide
     Some(AdaptiveWikiRuntimeProjection {
         entry_ids: entries
             .iter()
-            .map(|entry| operator_safe_text(&entry.id))
+            .map(|entry| operator_safe_identity_selector(&entry.id))
             .collect(),
         context,
     })
@@ -3260,7 +3372,7 @@ pub fn build_usage_records_with_policy(
         .iter()
         .map(|entry| AdaptiveWikiUsageRecord {
             id: format!("wiki_usage_{}", Uuid::new_v4()),
-            entry_id: operator_safe_text(&entry.id),
+            entry_id: operator_safe_identity_selector(&entry.id),
             task_id: operator_safe_text(context.task_id),
             request_id: operator_safe_text(context.request_id),
             project_key: operator_safe_text(context.project_key),
@@ -3283,7 +3395,7 @@ pub fn build_human_projection(
         .iter()
         .filter(|entry| is_unfiltered_query(query) || entry_matches_query(entry, query))
         .map(|entry| AdaptiveWikiHumanEntry {
-            id: entry.id.clone(),
+            id: operator_safe_identity(&entry.id),
             kind: entry.kind,
             scope: entry.scope,
             scope_ref: operator_safe_text(&entry.scope_ref),
@@ -3337,7 +3449,7 @@ pub fn build_human_projection(
         .iter()
         .filter(|candidate| is_unfiltered_query(query) || candidate_matches_query(candidate, query))
         .map(|candidate| AdaptiveWikiHumanCandidate {
-            id: candidate.id.clone(),
+            id: operator_safe_identity(&candidate.id),
             kind: candidate.kind,
             scope: candidate.scope,
             scope_ref: operator_safe_text(&candidate.scope_ref),
@@ -3576,11 +3688,14 @@ pub fn build_graph_report(
     let mut graph = AdaptiveWikiGraphDraft::default();
 
     for entry in entries {
-        let source = format!("entry:{}", fallback_subject_id(&entry.id));
+        let source = format!(
+            "entry:{}",
+            operator_safe_identity(&fallback_subject_id(&entry.id))
+        );
         nodes.push(AdaptiveWikiGraphNode {
             id: source.clone(),
             node_type: "entry".to_string(),
-            wiki_id: operator_safe_text(&entry.id),
+            wiki_id: operator_safe_identity(&entry.id),
             label: operator_safe_text(&fallback_text(&entry.human_summary, &entry.claim)),
             tag: None,
             tag_class: None,
@@ -3610,11 +3725,14 @@ pub fn build_graph_report(
     }
 
     for candidate in candidates {
-        let source = format!("candidate:{}", fallback_subject_id(&candidate.id));
+        let source = format!(
+            "candidate:{}",
+            operator_safe_identity(&fallback_subject_id(&candidate.id))
+        );
         nodes.push(AdaptiveWikiGraphNode {
             id: source.clone(),
             node_type: "candidate".to_string(),
-            wiki_id: operator_safe_text(&candidate.id),
+            wiki_id: operator_safe_identity(&candidate.id),
             label: operator_safe_text(&fallback_text(&candidate.human_summary, &candidate.claim)),
             tag: None,
             tag_class: None,
@@ -3861,7 +3979,7 @@ fn add_tag_edges(
 ) {
     let mut seen = BTreeSet::new();
     for tag in tags {
-        let tag = clean_tag(tag);
+        let tag = operator_safe_tag(tag);
         if tag.is_empty() || !seen.insert(tag.clone()) {
             continue;
         }
@@ -3993,11 +4111,11 @@ fn tag_review_issue(
 ) -> AdaptiveWikiTagReviewIssue {
     AdaptiveWikiTagReviewIssue {
         severity,
-        subject_kind: subject_kind.to_string(),
-        subject_id: fallback_subject_id(subject_id),
-        tag: tag.to_string(),
-        code: code.to_string(),
-        message: message.to_string(),
+        subject_kind: operator_safe_text(subject_kind),
+        subject_id: operator_safe_identity(&fallback_subject_id(subject_id)),
+        tag: operator_safe_text(tag),
+        code: operator_safe_text(code),
+        message: operator_safe_text(message),
     }
 }
 
@@ -4026,7 +4144,7 @@ fn tag_node_id(tag: &str) -> String {
 fn tag_component(value: &str) -> Option<String> {
     let mut component = String::new();
     let mut previous_dash = false;
-    for ch in operator_safe_text(value)
+    for ch in operator_safe_identity(value)
         .trim()
         .to_ascii_lowercase()
         .chars()
@@ -4111,7 +4229,7 @@ pub fn build_markdown_export_files(
     entries: &[AdaptiveWikiEntry],
     candidates: &[AdaptiveWikiCandidate],
     now: DateTime<Utc>,
-) -> Vec<(String, String)> {
+) -> Result<Vec<(String, String)>> {
     let mut files = Vec::new();
     files.push(("SCHEMA.md".to_string(), markdown_schema()));
     files.push((
@@ -4136,7 +4254,7 @@ pub fn build_markdown_export_files(
             format!(
                 "entries/{}/{}.md",
                 kind_dir(entry.kind),
-                markdown_slug(&entry.id, "entry")
+                markdown_slug(&operator_safe_identity(&entry.id), "entry")
             ),
             markdown_entry_page(&entry),
         ));
@@ -4154,40 +4272,1327 @@ pub fn build_markdown_export_files(
         files.push((
             format!(
                 "candidates/{}.md",
-                markdown_slug(&candidate.id, "candidate")
+                markdown_slug(&operator_safe_identity(&candidate.id), "candidate")
             ),
             markdown_candidate_page(&candidate),
         ));
     }
 
-    files
+    let mut paths = BTreeSet::new();
+    for (path, _) in &files {
+        ensure!(
+            paths.insert(path.clone()),
+            "adaptive wiki markdown export identity collision at {path}"
+        );
+    }
+    Ok(files)
 }
 
 fn write_markdown_export(output_dir: &Path, files: &[(String, String)]) -> Result<()> {
-    fs::create_dir_all(output_dir)?;
-    for relative_dir in [
-        "entries/preference",
-        "entries/procedure",
-        "entries/failure-pattern",
-        "entries/policy-rule",
-        "entries/fact",
-        "candidates",
-        "raw/audits",
-        "raw/diffs",
-        "raw/docs",
-        "support/references",
-        "support/templates",
-        "support/scripts",
-    ] {
-        fs::create_dir_all(output_dir.join(relative_dir))?;
-    }
-    for (relative_path, content) in files {
-        let path = output_dir.join(relative_path);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+    write_markdown_export_with_hook(output_dir, files, |_, _| Ok(()))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum MarkdownExportTargetSnapshot {
+    Absent,
+    Regular(crate::process::FilesystemObjectSnapshot),
+}
+
+#[derive(Debug)]
+struct MarkdownExportStagedFile {
+    parent_path: PathBuf,
+    parent: File,
+    parent_identity: (u64, u64),
+    target_name: PathBuf,
+    staged_name: PathBuf,
+    backup_name: PathBuf,
+    target: PathBuf,
+    staged: PathBuf,
+    backup: PathBuf,
+    initial: MarkdownExportTargetSnapshot,
+    initial_file: Option<File>,
+    initial_identity: Option<(u64, u64)>,
+    initial_size_bytes: u64,
+    initial_sha256: Option<String>,
+    staged_file: File,
+    staged_snapshot: Option<crate::process::FilesystemObjectSnapshot>,
+    staged_size_bytes: u64,
+    staged_sha256: String,
+    backup_reservation: Option<File>,
+    backup_reservation_snapshot: Option<crate::process::FilesystemObjectSnapshot>,
+    backup_reserved: bool,
+    stage_name_present: bool,
+    committed: bool,
+    backup_present: bool,
+}
+
+#[derive(Debug)]
+struct MarkdownExportCreatedDirectory {
+    parent: File,
+    parent_path: PathBuf,
+    parent_identity: (u64, u64),
+    name: PathBuf,
+    path: PathBuf,
+    directory_identity: Option<(u64, u64)>,
+}
+
+#[derive(Debug)]
+struct MarkdownExportInitialTargetCapture {
+    file: Option<File>,
+    identity: Option<(u64, u64)>,
+    size_bytes: u64,
+    sha256: Option<String>,
+}
+
+fn write_markdown_export_with_hook<F>(
+    output_dir: &Path,
+    files: &[(String, String)],
+    before_commit: F,
+) -> Result<()>
+where
+    F: FnMut(usize, &Path) -> Result<()>,
+{
+    write_markdown_export_with_hooks(output_dir, files, before_commit, |_, _| Ok(()))
+}
+
+fn write_markdown_export_with_hooks<F, G>(
+    output_dir: &Path,
+    files: &[(String, String)],
+    mut before_commit: F,
+    mut after_backup_sync: G,
+) -> Result<()>
+where
+    F: FnMut(usize, &Path) -> Result<()>,
+    G: FnMut(usize, &Path) -> Result<()>,
+{
+    let output_dir = normalize_markdown_export_output_path(output_dir)?;
+    let output_dir = output_dir.as_path();
+    let mut created_dirs = Vec::new();
+    let mut targets = Vec::with_capacity(files.len());
+    let result = (|| -> Result<()> {
+        ensure_markdown_export_no_symlink_ancestors(output_dir)?;
+        ensure_markdown_export_directory(output_dir, &mut created_dirs)?;
+        ensure_markdown_export_no_symlink_ancestors(output_dir)?;
+        for relative_dir in [
+            "entries/preference",
+            "entries/procedure",
+            "entries/failure-pattern",
+            "entries/policy-rule",
+            "entries/fact",
+            "candidates",
+            "raw/audits",
+            "raw/diffs",
+            "raw/docs",
+            "support/references",
+            "support/templates",
+            "support/scripts",
+        ] {
+            let directory = output_dir.join(relative_dir);
+            ensure_markdown_export_directory(&directory, &mut created_dirs)?;
+            ensure_markdown_export_safe_chain(output_dir, &directory)?;
         }
-        fs::write(path, content)?;
+        for (relative_path, content) in files {
+            let relative = Path::new(relative_path);
+            ensure!(
+                !relative.is_absolute()
+                    && relative
+                        .components()
+                        .all(|component| matches!(component, Component::Normal(_))),
+                "adaptive wiki markdown export path is not a safe relative path: {relative_path}"
+            );
+            let target = output_dir.join(relative);
+            let parent = target
+                .parent()
+                .context("adaptive wiki markdown export target has no parent")?;
+            ensure_markdown_export_directory(parent, &mut created_dirs)?;
+            ensure_markdown_export_safe_chain(output_dir, parent)?;
+            let parent_path = parent.to_path_buf();
+            let parent_file =
+                crate::process::open_bounded_root(&parent_path).with_context(|| {
+                    format!(
+                        "open adaptive wiki markdown export parent {}",
+                        parent_path.display()
+                    )
+                })?;
+            let parent_identity =
+                crate::process::filesystem_file_identity(&parent_file.metadata()?)
+                    .context("adaptive wiki markdown export parent lacks a stable identity")?;
+            ensure_markdown_export_active_parent(&parent_path, &parent_file, parent_identity)?;
+            let nonce = Uuid::new_v4();
+            let target_name = PathBuf::from(
+                target
+                    .file_name()
+                    .context("adaptive wiki markdown export target has no file name")?,
+            );
+            let file_name = target_name.to_string_lossy();
+            let staged_name = PathBuf::from(format!(".{file_name}.{nonce}.stage"));
+            let backup_name = PathBuf::from(format!(".{file_name}.{nonce}.backup"));
+            let staged = parent.join(&staged_name);
+            let backup = parent.join(&backup_name);
+            let initial = markdown_export_target_snapshot(&parent_file, &target_name, &target)?;
+            let initial_capture = capture_markdown_export_initial_target(
+                &parent_file,
+                &target_name,
+                &target,
+                &initial,
+            )?;
+            let staged_file = create_markdown_export_stage(&parent_file, &staged_name, &staged)?;
+            targets.push(MarkdownExportStagedFile {
+                parent_path,
+                parent: parent_file,
+                parent_identity,
+                target_name,
+                staged_name,
+                backup_name,
+                target,
+                staged,
+                backup,
+                initial,
+                initial_file: initial_capture.file,
+                initial_identity: initial_capture.identity,
+                initial_size_bytes: initial_capture.size_bytes,
+                initial_sha256: initial_capture.sha256,
+                staged_file,
+                staged_snapshot: None,
+                staged_size_bytes: 0,
+                staged_sha256: String::new(),
+                backup_reservation: None,
+                backup_reservation_snapshot: None,
+                backup_reserved: false,
+                stage_name_present: true,
+                committed: false,
+                backup_present: false,
+            });
+            let prepared = targets
+                .last_mut()
+                .context("adaptive wiki markdown export stage disappeared")?;
+            prepared
+                .staged_file
+                .write_all(content.as_bytes())
+                .with_context(|| {
+                    format!(
+                        "stage adaptive wiki markdown export {}",
+                        prepared.target.display()
+                    )
+                })?;
+            prepared.staged_file.sync_all().with_context(|| {
+                format!(
+                    "sync adaptive wiki markdown export {}",
+                    prepared.target.display()
+                )
+            })?;
+            let staged_metadata = prepared.staged_file.metadata()?;
+            ensure_markdown_export_regular_single_link(&staged_metadata, &prepared.staged)?;
+            prepared.staged_size_bytes = u64::try_from(content.len())
+                .context("adaptive wiki markdown export stage is too large")?;
+            prepared.staged_sha256 = sha256_hex(content.as_bytes());
+            prepared.staged_snapshot = Some(
+                crate::process::FilesystemObjectSnapshot::from_metadata(&staged_metadata),
+            );
+            if matches!(prepared.initial, MarkdownExportTargetSnapshot::Regular(_)) {
+                let reservation = crate::process::create_new_bounded_regular_file(
+                    &prepared.parent,
+                    &prepared.backup_name,
+                )
+                .with_context(|| {
+                    format!(
+                        "reserve adaptive wiki markdown export backup {}",
+                        prepared.backup.display()
+                    )
+                })?;
+                prepared.backup_reserved = true;
+                prepared.backup_reservation = Some(reservation);
+                let reservation = prepared
+                    .backup_reservation
+                    .as_ref()
+                    .context("adaptive wiki markdown export backup reservation disappeared")?;
+                reservation.sync_all().with_context(|| {
+                    format!(
+                        "sync adaptive wiki markdown export backup reservation {}",
+                        prepared.backup.display()
+                    )
+                })?;
+                let reservation_metadata = reservation.metadata()?;
+                ensure_markdown_export_regular_single_link(
+                    &reservation_metadata,
+                    &prepared.backup,
+                )?;
+                ensure!(
+                    reservation_metadata.len() == 0,
+                    "adaptive wiki markdown export backup reservation is not empty: {}",
+                    prepared.backup.display()
+                );
+                prepared.backup_reservation_snapshot = Some(
+                    crate::process::FilesystemObjectSnapshot::from_metadata(&reservation_metadata),
+                );
+            }
+            prepared.parent.sync_all().with_context(|| {
+                format!(
+                    "sync adaptive wiki markdown export staging directory {}",
+                    prepared.parent_path.display()
+                )
+            })?;
+        }
+
+        for (index, target) in targets.iter_mut().enumerate() {
+            before_commit(index, &target.target)?;
+            ensure_markdown_export_active_parent(
+                &target.parent_path,
+                &target.parent,
+                target.parent_identity,
+            )?;
+            validate_markdown_export_stage(target)?;
+            if matches!(target.initial, MarkdownExportTargetSnapshot::Regular(_)) {
+                validate_markdown_export_backup_reservation(target)?;
+            }
+            ensure_markdown_export_active_parent(
+                &target.parent_path,
+                &target.parent,
+                target.parent_identity,
+            )?;
+            ensure!(
+                markdown_export_target_snapshot(
+                    &target.parent,
+                    &target.target_name,
+                    &target.target,
+                )? == target.initial,
+                "adaptive wiki markdown export target changed before commit: {}",
+                target.target.display()
+            );
+            if matches!(target.initial, MarkdownExportTargetSnapshot::Regular(_)) {
+                crate::process::rename_bounded_root_file_unsynced(
+                    &target.parent,
+                    &target.target_name,
+                    &target.backup_name,
+                )
+                .with_context(|| {
+                    format!(
+                        "preserve adaptive wiki markdown export target {}",
+                        target.target.display()
+                    )
+                })?;
+                target.backup_present = true;
+                target.backup_reserved = false;
+                target.backup_reservation = None;
+                validate_markdown_export_recovery_backup(target)?;
+                target.parent.sync_all().with_context(|| {
+                    format!(
+                        "sync adaptive wiki markdown export recovery backup {}",
+                        target.backup.display()
+                    )
+                })?;
+            }
+            after_backup_sync(index, &target.target)?;
+            if target.backup_present {
+                validate_markdown_export_recovery_backup(target)?;
+            }
+            validate_markdown_export_stage(target)?;
+            let staged_identity =
+                crate::process::filesystem_file_identity(&target.staged_file.metadata()?)
+                    .context("adaptive wiki markdown export stage lacks a stable identity")?;
+            crate::process::link_bounded_root_file_noreplace_unsynced(
+                &target.parent,
+                &target.staged_name,
+                &target.target_name,
+            )
+            .with_context(|| {
+                format!(
+                    "commit adaptive wiki markdown export {}",
+                    target.target.display()
+                )
+            })?;
+            target.committed = true;
+            validate_markdown_export_linked_target(target, staged_identity, false)?;
+            crate::process::remove_bounded_root_file_unsynced(&target.parent, &target.staged_name)
+                .with_context(|| {
+                    format!(
+                        "remove committed adaptive wiki markdown export stage {}",
+                        target.staged.display()
+                    )
+                })?;
+            target.stage_name_present = false;
+            validate_markdown_export_linked_target(target, staged_identity, true)?;
+            target.parent.sync_all().with_context(|| {
+                format!(
+                    "sync committed adaptive wiki markdown export {}",
+                    target.target.display()
+                )
+            })?;
+            ensure_markdown_export_active_parent(
+                &target.parent_path,
+                &target.parent,
+                target.parent_identity,
+            )?;
+        }
+        Ok(())
+    })();
+
+    if let Err(error) = result {
+        let rollback = rollback_markdown_export(&mut targets);
+        let cleanup = cleanup_markdown_export_staging(&mut targets, &created_dirs);
+        match (rollback, cleanup) {
+            (Err(rollback_error), Err(cleanup_error)) => {
+                return Err(error).context(format!(
+                    "adaptive wiki markdown export rollback failed: {rollback_error:#}; staging cleanup failed: {cleanup_error:#}"
+                ));
+            }
+            (Err(rollback_error), Ok(())) => {
+                return Err(error).context(format!(
+                    "adaptive wiki markdown export rollback failed: {rollback_error:#}"
+                ));
+            }
+            (Ok(()), Err(cleanup_error)) => {
+                return Err(error).context(format!(
+                    "adaptive wiki markdown export staging cleanup failed: {cleanup_error:#}"
+                ));
+            }
+            (Ok(()), Ok(())) => {}
+        }
+        return Err(error);
     }
+    cleanup_markdown_export_backups(&mut targets)?;
+    Ok(())
+}
+
+fn normalize_markdown_export_output_path(output_dir: &Path) -> Result<PathBuf> {
+    let absolute = if output_dir.is_absolute() {
+        output_dir.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(output_dir)
+    };
+    let mut normalized = PathBuf::new();
+    let mut normal_depth = 0_usize;
+    for component in absolute.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                ensure!(
+                    normal_depth > 0,
+                    "adaptive wiki markdown export path escapes the filesystem root"
+                );
+                normalized.pop();
+                normal_depth -= 1;
+            }
+            Component::Normal(name) => {
+                normalized.push(name);
+                normal_depth += 1;
+            }
+        }
+    }
+    ensure!(
+        normalized.is_absolute(),
+        "adaptive wiki markdown export path could not be made absolute"
+    );
+    Ok(normalized)
+}
+
+fn ensure_markdown_export_directory(
+    path: &Path,
+    created_dirs: &mut Vec<MarkdownExportCreatedDirectory>,
+) -> Result<()> {
+    if path.exists() {
+        let metadata = fs::symlink_metadata(path).with_context(|| {
+            format!(
+                "inspect adaptive wiki markdown export directory {}",
+                path.display()
+            )
+        })?;
+        ensure!(
+            metadata.is_dir() && !metadata.file_type().is_symlink(),
+            "adaptive wiki markdown export directory is unsafe: {}",
+            path.display()
+        );
+        return Ok(());
+    }
+    let parent = path
+        .parent()
+        .context("adaptive wiki markdown export directory has no parent")?;
+    ensure_markdown_export_directory(parent, created_dirs)?;
+    let parent_path = parent.to_path_buf();
+    let parent_file = crate::process::open_bounded_root(parent).with_context(|| {
+        format!(
+            "open adaptive wiki markdown export directory parent {}",
+            parent.display()
+        )
+    })?;
+    let parent_identity = crate::process::filesystem_file_identity(&parent_file.metadata()?)
+        .context("adaptive wiki markdown export directory parent lacks a stable identity")?;
+    ensure_markdown_export_active_parent(&parent_path, &parent_file, parent_identity)?;
+    let name = PathBuf::from(
+        path.file_name()
+            .context("adaptive wiki markdown export directory has no name")?,
+    );
+    crate::process::create_bounded_root_directory_unsynced(&parent_file, &name).with_context(
+        || {
+            format!(
+                "create adaptive wiki markdown export directory {}",
+                path.display()
+            )
+        },
+    )?;
+    created_dirs.push(MarkdownExportCreatedDirectory {
+        parent: parent_file,
+        parent_path,
+        parent_identity,
+        name,
+        path: path.to_path_buf(),
+        directory_identity: None,
+    });
+    let created = created_dirs
+        .last_mut()
+        .context("adaptive wiki markdown export created directory disappeared")?;
+    created.parent.sync_all().with_context(|| {
+        format!(
+            "sync adaptive wiki markdown export directory parent {}",
+            created.parent_path.display()
+        )
+    })?;
+    ensure_markdown_export_active_parent(
+        &created.parent_path,
+        &created.parent,
+        created.parent_identity,
+    )?;
+    let directory = crate::process::open_bounded_subdirectory(&created.parent, &created.name)
+        .with_context(|| {
+            format!(
+                "open created adaptive wiki markdown export directory {}",
+                created.path.display()
+            )
+        })?;
+    let metadata = directory.metadata()?;
+    ensure!(
+        metadata.is_dir(),
+        "created adaptive wiki markdown export path is not a directory: {}",
+        created.path.display()
+    );
+    created.directory_identity = Some(
+        crate::process::filesystem_file_identity(&metadata)
+            .context("created adaptive wiki markdown export directory lacks a stable identity")?,
+    );
+    Ok(())
+}
+
+fn ensure_markdown_export_safe_chain(output_dir: &Path, parent: &Path) -> Result<()> {
+    let output_metadata = fs::symlink_metadata(output_dir).with_context(|| {
+        format!(
+            "inspect adaptive wiki markdown export root {}",
+            output_dir.display()
+        )
+    })?;
+    ensure!(
+        output_metadata.is_dir() && !output_metadata.file_type().is_symlink(),
+        "adaptive wiki markdown export root is unsafe"
+    );
+    let relative = parent
+        .strip_prefix(output_dir)
+        .context("adaptive wiki markdown export target escaped its root")?;
+    let mut current = output_dir.to_path_buf();
+    for component in relative.components() {
+        let Component::Normal(name) = component else {
+            bail!("adaptive wiki markdown export parent is unsafe");
+        };
+        current.push(name);
+        let metadata = fs::symlink_metadata(&current).with_context(|| {
+            format!(
+                "inspect adaptive wiki markdown export parent {}",
+                current.display()
+            )
+        })?;
+        ensure!(
+            metadata.is_dir() && !metadata.file_type().is_symlink(),
+            "adaptive wiki markdown export parent is unsafe: {}",
+            current.display()
+        );
+    }
+    Ok(())
+}
+
+fn ensure_markdown_export_no_symlink_ancestors(path: &Path) -> Result<()> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    let mut current = PathBuf::new();
+    for component in absolute.components() {
+        current.push(component.as_os_str());
+        let metadata = match fs::symlink_metadata(&current) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == ErrorKind::NotFound => break,
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!(
+                        "inspect adaptive wiki markdown export ancestor {}",
+                        current.display()
+                    )
+                })
+            }
+        };
+        ensure!(
+            !metadata.file_type().is_symlink(),
+            "adaptive wiki markdown export ancestor is a symlink: {}",
+            current.display()
+        );
+        ensure!(
+            metadata.is_dir(),
+            "adaptive wiki markdown export ancestor is not a directory: {}",
+            current.display()
+        );
+    }
+    Ok(())
+}
+
+fn ensure_markdown_export_active_parent(
+    parent_path: &Path,
+    parent: &File,
+    expected_identity: (u64, u64),
+) -> Result<()> {
+    ensure_markdown_export_no_symlink_ancestors(parent_path)?;
+    let metadata = fs::symlink_metadata(parent_path).with_context(|| {
+        format!(
+            "inspect active adaptive wiki markdown export parent {}",
+            parent_path.display()
+        )
+    })?;
+    ensure!(
+        metadata.is_dir() && !metadata.file_type().is_symlink(),
+        "active adaptive wiki markdown export parent is unsafe: {}",
+        parent_path.display()
+    );
+    ensure!(
+        crate::process::filesystem_file_identity(&metadata) == Some(expected_identity)
+            && crate::process::filesystem_file_identity(&parent.metadata()?)
+                == Some(expected_identity),
+        "active adaptive wiki markdown export parent was replaced: {}",
+        parent_path.display()
+    );
+    Ok(())
+}
+
+fn markdown_export_target_snapshot(
+    parent: &File,
+    name: &Path,
+    display_path: &Path,
+) -> Result<MarkdownExportTargetSnapshot> {
+    let file = match crate::process::open_bounded_regular_file(parent, name) {
+        Ok(file) => file,
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            return Ok(MarkdownExportTargetSnapshot::Absent)
+        }
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!(
+                    "inspect adaptive wiki markdown export target {}",
+                    display_path.display()
+                )
+            })
+        }
+    };
+    let metadata = file.metadata()?;
+    ensure_markdown_export_regular_single_link(&metadata, display_path)?;
+    Ok(MarkdownExportTargetSnapshot::Regular(
+        crate::process::FilesystemObjectSnapshot::from_metadata(&metadata),
+    ))
+}
+
+fn capture_markdown_export_initial_target(
+    parent: &File,
+    name: &Path,
+    display_path: &Path,
+    expected: &MarkdownExportTargetSnapshot,
+) -> Result<MarkdownExportInitialTargetCapture> {
+    match expected {
+        MarkdownExportTargetSnapshot::Absent => {
+            match crate::process::open_bounded_regular_file(parent, name) {
+                Err(error) if error.kind() == ErrorKind::NotFound => {
+                    Ok(MarkdownExportInitialTargetCapture {
+                        file: None,
+                        identity: None,
+                        size_bytes: 0,
+                        sha256: None,
+                    })
+                }
+                Ok(_) => bail!(
+                    "adaptive wiki markdown export target appeared while capturing: {}",
+                    display_path.display()
+                ),
+                Err(error) => Err(error).with_context(|| {
+                    format!(
+                        "capture adaptive wiki markdown export target {}",
+                        display_path.display()
+                    )
+                }),
+            }
+        }
+        MarkdownExportTargetSnapshot::Regular(expected_snapshot) => {
+            let mut file =
+                crate::process::open_bounded_regular_file(parent, name).with_context(|| {
+                    format!(
+                        "capture adaptive wiki markdown export target {}",
+                        display_path.display()
+                    )
+                })?;
+            let before = file.metadata()?;
+            ensure_markdown_export_regular_single_link(&before, display_path)?;
+            ensure!(
+                crate::process::FilesystemObjectSnapshot::from_metadata(&before)
+                    == *expected_snapshot,
+                "adaptive wiki markdown export target changed while capturing: {}",
+                display_path.display()
+            );
+            let identity = crate::process::filesystem_file_identity(&before)
+                .context("adaptive wiki markdown export target lacks a stable identity")?;
+            let size_bytes = before.len();
+            let content_sha256 = hash_markdown_export_open_file(
+                &mut file,
+                size_bytes,
+                display_path,
+                "initial target",
+            )?;
+            let after = file.metadata()?;
+            let reopened = crate::process::open_bounded_regular_file(parent, name)?;
+            ensure!(
+                crate::process::FilesystemObjectSnapshot::from_metadata(&after)
+                    == *expected_snapshot
+                    && crate::process::FilesystemObjectSnapshot::from_metadata(
+                        &reopened.metadata()?
+                    ) == *expected_snapshot,
+                "adaptive wiki markdown export target changed while hashing: {}",
+                display_path.display()
+            );
+            Ok(MarkdownExportInitialTargetCapture {
+                file: Some(file),
+                identity: Some(identity),
+                size_bytes,
+                sha256: Some(content_sha256),
+            })
+        }
+    }
+}
+
+fn hash_markdown_export_open_file(
+    file: &mut File,
+    expected_size_bytes: u64,
+    display_path: &Path,
+    role: &str,
+) -> Result<String> {
+    let read_limit = expected_size_bytes
+        .checked_add(1)
+        .context("adaptive wiki markdown export read limit overflow")?;
+    let mut observed = 0_u64;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 8 * 1024];
+    while observed < read_limit {
+        let remaining = usize::try_from((read_limit - observed).min(buffer.len() as u64))?;
+        let read = file.read(&mut buffer[..remaining])?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+        observed += u64::try_from(read)?;
+    }
+    ensure!(
+        observed == expected_size_bytes,
+        "adaptive wiki markdown export {role} size changed while reading: {}",
+        display_path.display()
+    );
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn ensure_markdown_export_regular_single_link(
+    metadata: &fs::Metadata,
+    display_path: &Path,
+) -> Result<()> {
+    ensure!(
+        metadata.is_file(),
+        "adaptive wiki markdown export file is unsafe: {}",
+        display_path.display()
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        ensure!(
+            metadata.nlink() == 1,
+            "adaptive wiki markdown export file must have one link: {}",
+            display_path.display()
+        );
+    }
+    Ok(())
+}
+
+fn create_markdown_export_stage(parent: &File, name: &Path, display_path: &Path) -> Result<File> {
+    crate::process::create_new_bounded_regular_file(parent, name).with_context(|| {
+        format!(
+            "create adaptive wiki markdown export stage {}",
+            display_path.display()
+        )
+    })
+}
+
+fn validate_markdown_export_stage(target: &MarkdownExportStagedFile) -> Result<()> {
+    let expected = target
+        .staged_snapshot
+        .as_ref()
+        .context("adaptive wiki markdown export stage was not finalized")?;
+    let held_metadata = target.staged_file.metadata()?;
+    ensure_markdown_export_regular_single_link(&held_metadata, &target.staged)?;
+    ensure!(
+        crate::process::FilesystemObjectSnapshot::from_metadata(&held_metadata) == *expected,
+        "adaptive wiki markdown export held stage changed before commit: {}",
+        target.staged.display()
+    );
+    let mut active = crate::process::open_bounded_regular_file(&target.parent, &target.staged_name)
+        .with_context(|| {
+            format!(
+                "reopen adaptive wiki markdown export stage {}",
+                target.staged.display()
+            )
+        })?;
+    let before = active.metadata()?;
+    ensure_markdown_export_regular_single_link(&before, &target.staged)?;
+    ensure!(
+        crate::process::FilesystemObjectSnapshot::from_metadata(&before) == *expected,
+        "adaptive wiki markdown export stage identity changed before commit: {}",
+        target.staged.display()
+    );
+    let read_limit = target
+        .staged_size_bytes
+        .checked_add(1)
+        .context("adaptive wiki markdown export stage read limit overflow")?;
+    let mut observed = 0_u64;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 8 * 1024];
+    while observed < read_limit {
+        let remaining = usize::try_from((read_limit - observed).min(buffer.len() as u64))?;
+        let read = active.read(&mut buffer[..remaining])?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+        observed += u64::try_from(read)?;
+    }
+    ensure!(
+        observed == target.staged_size_bytes
+            && format!("{:x}", hasher.finalize()) == target.staged_sha256,
+        "adaptive wiki markdown export stage content changed before commit: {}",
+        target.staged.display()
+    );
+    let after = active.metadata()?;
+    ensure!(
+        crate::process::FilesystemObjectSnapshot::from_metadata(&after) == *expected
+            && crate::process::FilesystemObjectSnapshot::from_metadata(
+                &target.staged_file.metadata()?
+            ) == *expected,
+        "adaptive wiki markdown export stage changed while validating: {}",
+        target.staged.display()
+    );
+    Ok(())
+}
+
+fn validate_markdown_export_backup_reservation(target: &MarkdownExportStagedFile) -> Result<()> {
+    ensure!(
+        target.backup_reserved,
+        "adaptive wiki markdown export backup was not reserved: {}",
+        target.backup.display()
+    );
+    let expected = target
+        .backup_reservation_snapshot
+        .as_ref()
+        .context("adaptive wiki markdown export backup reservation was not finalized")?;
+    let held = target
+        .backup_reservation
+        .as_ref()
+        .context("adaptive wiki markdown export backup reservation disappeared")?;
+    let held_metadata = held.metadata()?;
+    ensure_markdown_export_regular_single_link(&held_metadata, &target.backup)?;
+    let active = crate::process::open_bounded_regular_file(&target.parent, &target.backup_name)
+        .with_context(|| {
+            format!(
+                "reopen adaptive wiki markdown export backup reservation {}",
+                target.backup.display()
+            )
+        })?;
+    let active_metadata = active.metadata()?;
+    ensure_markdown_export_regular_single_link(&active_metadata, &target.backup)?;
+    ensure!(
+        held_metadata.len() == 0
+            && active_metadata.len() == 0
+            && crate::process::FilesystemObjectSnapshot::from_metadata(&held_metadata) == *expected
+            && crate::process::FilesystemObjectSnapshot::from_metadata(&active_metadata)
+                == *expected,
+        "adaptive wiki markdown export backup reservation changed before commit: {}",
+        target.backup.display()
+    );
+    Ok(())
+}
+
+fn validate_markdown_export_recovery_backup(target: &MarkdownExportStagedFile) -> Result<()> {
+    validate_markdown_export_initial_target_at_name(target, &target.backup_name, &target.backup, 1)
+}
+
+fn validate_markdown_export_initial_target_at_name(
+    target: &MarkdownExportStagedFile,
+    name: &Path,
+    display_path: &Path,
+    expected_links: u64,
+) -> Result<()> {
+    let held = target
+        .initial_file
+        .as_ref()
+        .context("adaptive wiki markdown export initial target descriptor is missing")?;
+    let expected_identity = target
+        .initial_identity
+        .context("adaptive wiki markdown export initial target identity is missing")?;
+    let expected_sha256 = target
+        .initial_sha256
+        .as_deref()
+        .context("adaptive wiki markdown export initial target hash is missing")?;
+    let held_metadata = held.metadata()?;
+    ensure!(
+        held_metadata.is_file()
+            && crate::process::filesystem_file_identity(&held_metadata) == Some(expected_identity),
+        "adaptive wiki markdown export held initial target changed: {}",
+        display_path.display()
+    );
+    let mut active =
+        crate::process::open_bounded_regular_file(&target.parent, name).with_context(|| {
+            format!(
+                "reopen adaptive wiki markdown export recovery file {}",
+                display_path.display()
+            )
+        })?;
+    let before = active.metadata()?;
+    ensure!(
+        before.is_file()
+            && before.len() == target.initial_size_bytes
+            && crate::process::filesystem_file_identity(&before) == Some(expected_identity),
+        "adaptive wiki markdown export recovery identity changed: {}",
+        display_path.display()
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        ensure!(
+            before.nlink() == expected_links && held_metadata.nlink() == expected_links,
+            "adaptive wiki markdown export recovery link count changed: {}",
+            display_path.display()
+        );
+    }
+    ensure!(
+        hash_markdown_export_open_file(
+            &mut active,
+            target.initial_size_bytes,
+            display_path,
+            "recovery file",
+        )? == expected_sha256,
+        "adaptive wiki markdown export recovery content changed: {}",
+        display_path.display()
+    );
+    let after = active.metadata()?;
+    let reopened = crate::process::open_bounded_regular_file(&target.parent, name)?;
+    ensure!(
+        after.len() == target.initial_size_bytes
+            && crate::process::filesystem_file_identity(&after) == Some(expected_identity)
+            && crate::process::filesystem_file_identity(&reopened.metadata()?)
+                == Some(expected_identity),
+        "adaptive wiki markdown export recovery file changed while validating: {}",
+        display_path.display()
+    );
+    Ok(())
+}
+
+fn validate_markdown_export_linked_target(
+    target: &MarkdownExportStagedFile,
+    expected_identity: (u64, u64),
+    stage_name_removed: bool,
+) -> Result<()> {
+    let mut active = crate::process::open_bounded_regular_file(&target.parent, &target.target_name)
+        .with_context(|| {
+            format!(
+                "reopen committed adaptive wiki markdown export {}",
+                target.target.display()
+            )
+        })?;
+    let before = active.metadata()?;
+    ensure!(
+        before.is_file()
+            && crate::process::filesystem_file_identity(&before) == Some(expected_identity)
+            && crate::process::filesystem_file_identity(&target.staged_file.metadata()?)
+                == Some(expected_identity),
+        "committed adaptive wiki markdown export identity changed: {}",
+        target.target.display()
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let expected_links = if stage_name_removed { 1 } else { 2 };
+        ensure!(
+            before.nlink() == expected_links
+                && target.staged_file.metadata()?.nlink() == expected_links,
+            "committed adaptive wiki markdown export link count changed: {}",
+            target.target.display()
+        );
+    }
+    let read_limit = target
+        .staged_size_bytes
+        .checked_add(1)
+        .context("adaptive wiki markdown export committed read limit overflow")?;
+    let mut observed = 0_u64;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 8 * 1024];
+    while observed < read_limit {
+        let remaining = usize::try_from((read_limit - observed).min(buffer.len() as u64))?;
+        let read = active.read(&mut buffer[..remaining])?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+        observed += u64::try_from(read)?;
+    }
+    ensure!(
+        observed == target.staged_size_bytes
+            && format!("{:x}", hasher.finalize()) == target.staged_sha256,
+        "committed adaptive wiki markdown export content changed: {}",
+        target.target.display()
+    );
+    let after = active.metadata()?;
+    let reopened = crate::process::open_bounded_regular_file(&target.parent, &target.target_name)?;
+    ensure!(
+        crate::process::filesystem_file_identity(&after) == Some(expected_identity)
+            && crate::process::filesystem_file_identity(&reopened.metadata()?)
+                == Some(expected_identity),
+        "committed adaptive wiki markdown export changed while validating: {}",
+        target.target.display()
+    );
+    Ok(())
+}
+
+fn rollback_markdown_export(targets: &mut [MarkdownExportStagedFile]) -> Result<()> {
+    let mut failures = Vec::new();
+    for target in targets.iter_mut().rev() {
+        if target.backup_present {
+            if let Err(error) = validate_markdown_export_recovery_backup(target) {
+                failures.push(format!(
+                    "validate recovery backup {}: {error:#}",
+                    target.backup.display()
+                ));
+                continue;
+            }
+            if target.committed {
+                let staged_identity =
+                    match crate::process::filesystem_file_identity(&target.staged_file.metadata()?)
+                    {
+                        Some(identity) => identity,
+                        None => {
+                            failures.push(format!(
+                                "committed target lacks stable identity: {}",
+                                target.target.display()
+                            ));
+                            continue;
+                        }
+                    };
+                if let Err(error) = validate_markdown_export_linked_target(
+                    target,
+                    staged_identity,
+                    !target.stage_name_present,
+                ) {
+                    failures.push(format!(
+                        "validate committed target before rollback {}: {error:#}",
+                        target.target.display()
+                    ));
+                    continue;
+                }
+                match crate::process::remove_bounded_root_file_unsynced(
+                    &target.parent,
+                    &target.target_name,
+                ) {
+                    Ok(()) => {
+                        target.committed = false;
+                        if let Err(error) = target.parent.sync_all() {
+                            failures.push(format!(
+                                "sync removal of committed {} before restore: {error}",
+                                target.target.display()
+                            ));
+                        }
+                    }
+                    Err(error) => {
+                        failures.push(format!(
+                            "remove committed {} before restore: {error}",
+                            target.target.display()
+                        ));
+                        continue;
+                    }
+                }
+            }
+            if let Err(error) = validate_markdown_export_recovery_backup(target) {
+                failures.push(format!(
+                    "validate recovery backup {}: {error:#}",
+                    target.backup.display()
+                ));
+                continue;
+            }
+            match crate::process::link_bounded_root_file_noreplace_unsynced(
+                &target.parent,
+                &target.backup_name,
+                &target.target_name,
+            ) {
+                Ok(()) => {
+                    if let Err(error) = validate_markdown_export_initial_target_at_name(
+                        target,
+                        &target.target_name,
+                        &target.target,
+                        2,
+                    ) {
+                        failures.push(format!(
+                            "validate restored target {}: {error:#}",
+                            target.target.display()
+                        ));
+                        continue;
+                    }
+                }
+                Err(error) => {
+                    failures.push(format!(
+                        "restore {} from {} without replacement: {error}",
+                        target.target.display(),
+                        target.backup.display()
+                    ));
+                    continue;
+                }
+            }
+            match crate::process::remove_bounded_root_file_unsynced(
+                &target.parent,
+                &target.backup_name,
+            ) {
+                Ok(()) => target.backup_present = false,
+                Err(error) => {
+                    failures.push(format!(
+                        "remove restored recovery backup {}: {error}",
+                        target.backup.display()
+                    ));
+                    continue;
+                }
+            }
+            if let Err(error) = validate_markdown_export_initial_target_at_name(
+                target,
+                &target.target_name,
+                &target.target,
+                1,
+            ) {
+                failures.push(format!(
+                    "validate exact restored target {}: {error:#}",
+                    target.target.display()
+                ));
+            }
+            if let Err(error) = target.parent.sync_all() {
+                failures.push(format!(
+                    "sync restored {} from {}: {error}",
+                    target.target.display(),
+                    target.backup.display()
+                ));
+            }
+        } else if target.committed {
+            let staged_identity =
+                match crate::process::filesystem_file_identity(&target.staged_file.metadata()?) {
+                    Some(identity) => identity,
+                    None => {
+                        failures.push(format!(
+                            "newly committed target lacks stable identity: {}",
+                            target.target.display()
+                        ));
+                        continue;
+                    }
+                };
+            if let Err(error) = validate_markdown_export_linked_target(
+                target,
+                staged_identity,
+                !target.stage_name_present,
+            ) {
+                failures.push(format!(
+                    "validate newly committed target before rollback {}: {error:#}",
+                    target.target.display()
+                ));
+                continue;
+            }
+            match crate::process::remove_bounded_root_file_unsynced(
+                &target.parent,
+                &target.target_name,
+            ) {
+                Ok(()) => {
+                    target.committed = false;
+                    if let Err(error) = target.parent.sync_all() {
+                        failures.push(format!(
+                            "sync removal of newly committed {}: {error}",
+                            target.target.display()
+                        ));
+                    }
+                }
+                Err(error) => failures.push(format!(
+                    "remove newly committed {}: {error}",
+                    target.target.display()
+                )),
+            }
+        }
+    }
+    ensure!(
+        failures.is_empty(),
+        "{}",
+        operator_safe_text(&failures.join("; "))
+    );
+    Ok(())
+}
+
+fn cleanup_markdown_export_staging(
+    targets: &mut [MarkdownExportStagedFile],
+    created_dirs: &[MarkdownExportCreatedDirectory],
+) -> Result<()> {
+    let mut failures = Vec::new();
+    for target in targets.iter_mut() {
+        if target.backup_present {
+            failures.push(format!(
+                "original target remains in recovery backup {}",
+                target.backup.display()
+            ));
+        }
+        match crate::process::remove_bounded_root_file_unsynced(&target.parent, &target.staged_name)
+        {
+            Ok(()) => {
+                target.stage_name_present = false;
+                if let Err(error) = target.parent.sync_all() {
+                    failures.push(format!(
+                        "sync removal of stage {}: {error}",
+                        target.staged.display()
+                    ));
+                }
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                target.stage_name_present = false;
+            }
+            Err(error) => {
+                failures.push(format!("remove stage {}: {error}", target.staged.display()))
+            }
+        }
+        if target.backup_reserved {
+            match crate::process::remove_bounded_root_file_unsynced(
+                &target.parent,
+                &target.backup_name,
+            ) {
+                Ok(()) => {
+                    target.backup_reserved = false;
+                    target.backup_reservation = None;
+                    if let Err(error) = target.parent.sync_all() {
+                        failures.push(format!(
+                            "sync removal of backup reservation {}: {error}",
+                            target.backup.display()
+                        ));
+                    }
+                }
+                Err(error) if error.kind() == ErrorKind::NotFound => {
+                    target.backup_reserved = false;
+                    target.backup_reservation = None;
+                }
+                Err(error) => failures.push(format!(
+                    "remove backup reservation {}: {error}",
+                    target.backup.display()
+                )),
+            }
+        }
+    }
+    for directory in created_dirs.iter().rev() {
+        if let Some(expected_identity) = directory.directory_identity {
+            match crate::process::open_bounded_subdirectory(&directory.parent, &directory.name) {
+                Ok(active) => {
+                    if crate::process::filesystem_file_identity(&active.metadata()?)
+                        != Some(expected_identity)
+                    {
+                        failures.push(format!(
+                            "created directory identity changed before cleanup: {}",
+                            directory.path.display()
+                        ));
+                        continue;
+                    }
+                }
+                Err(error) if error.kind() == ErrorKind::NotFound => continue,
+                Err(error) => {
+                    failures.push(format!(
+                        "inspect created directory {}: {error}",
+                        directory.path.display()
+                    ));
+                    continue;
+                }
+            }
+        }
+        match crate::process::remove_bounded_root_directory_unsynced(
+            &directory.parent,
+            &directory.name,
+        ) {
+            Ok(()) => {
+                if let Err(error) = directory.parent.sync_all() {
+                    failures.push(format!(
+                        "sync removal of created directory {}: {error}",
+                        directory.path.display()
+                    ));
+                }
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => failures.push(format!(
+                "remove created directory {}: {error}",
+                directory.path.display()
+            )),
+        }
+    }
+    ensure!(
+        failures.is_empty(),
+        "{}",
+        operator_safe_text(&failures.join("; "))
+    );
+    Ok(())
+}
+
+fn cleanup_markdown_export_backups(targets: &mut [MarkdownExportStagedFile]) -> Result<()> {
+    let mut failures = Vec::new();
+    for target in targets.iter_mut() {
+        if !target.backup_present {
+            continue;
+        }
+        if let Err(error) = ensure_markdown_export_active_parent(
+            &target.parent_path,
+            &target.parent,
+            target.parent_identity,
+        ) {
+            failures.push(format!("{}: {error:#}", target.parent_path.display()));
+            continue;
+        }
+        if let Err(error) = validate_markdown_export_recovery_backup(target) {
+            failures.push(format!(
+                "validate committed recovery backup {}: {error:#}",
+                target.backup.display()
+            ));
+            continue;
+        }
+        match crate::process::remove_bounded_root_file_unsynced(&target.parent, &target.backup_name)
+        {
+            Ok(()) => {
+                target.backup_present = false;
+                if let Err(error) = target.parent.sync_all() {
+                    failures.push(format!(
+                        "sync removal of committed backup {}: {error}",
+                        target.backup.display()
+                    ));
+                }
+            }
+            Err(error) => failures.push(format!(
+                "remove committed backup {}: {error}",
+                target.backup.display()
+            )),
+        }
+    }
+    ensure!(
+        failures.is_empty(),
+        "adaptive wiki markdown export committed but cleanup requires recovery: {}",
+        operator_safe_text(&failures.join("; "))
+    );
     Ok(())
 }
 
@@ -4598,7 +6003,7 @@ fn projected_entries_without_evidence(
             projection_contains_entry(in_scope_projection, &entry.id)
                 || projection_contains_entry(out_of_scope_projection, &entry.id)
         })
-        .map(|entry| operator_safe_text(&entry.id))
+        .map(|entry| operator_safe_identity(&entry.id))
         .collect();
     ids.sort();
     ids.dedup();
@@ -4618,7 +6023,7 @@ fn projected_entries_with_status(
             projection_contains_entry(in_scope_projection, &entry.id)
                 || projection_contains_entry(out_of_scope_projection, &entry.id)
         })
-        .map(|entry| operator_safe_text(&entry.id))
+        .map(|entry| operator_safe_identity(&entry.id))
         .collect();
     ids.sort();
     ids.dedup();
@@ -4644,7 +6049,7 @@ fn projected_review_expired_entries(
             projection_contains_entry(in_scope_projection, &entry.id)
                 || projection_contains_entry(out_of_scope_projection, &entry.id)
         })
-        .map(|entry| operator_safe_text(&entry.id))
+        .map(|entry| operator_safe_identity(&entry.id))
         .collect();
     ids.sort();
     ids.dedup();
@@ -4652,6 +6057,15 @@ fn projected_review_expired_entries(
 }
 
 fn projection_contains_entry(projection: &[AdaptiveWikiAiProjection], entry_id: &str) -> bool {
+    let entry_id = operator_safe_identity(entry_id);
+    projection.iter().any(|entry| entry.id == entry_id)
+}
+
+fn projection_contains_public_entry(
+    projection: &[AdaptiveWikiAiProjection],
+    entry_id: &str,
+) -> bool {
+    let entry_id = operator_safe_identity_selector(entry_id);
     projection.iter().any(|entry| entry.id == entry_id)
 }
 
@@ -4665,7 +6079,7 @@ fn build_episode_trace(
             entry_ids: report
                 .in_scope_projection
                 .iter()
-                .map(|entry| operator_safe_text(&entry.id))
+                .map(|entry| operator_safe_identity_selector(&entry.id))
                 .collect(),
         },
         AdaptiveWikiEpisodeTraceStep {
@@ -4674,7 +6088,7 @@ fn build_episode_trace(
             entry_ids: report
                 .out_of_scope_projection
                 .iter()
-                .map(|entry| operator_safe_text(&entry.id))
+                .map(|entry| operator_safe_identity_selector(&entry.id))
                 .collect(),
         },
         AdaptiveWikiEpisodeTraceStep {
@@ -4829,7 +6243,7 @@ fn build_live_episode_events(
             request_id: Some(operator_safe_text(&task.request_id)),
             project_key: Some(operator_safe_text(&task.project_key)),
             artifact_kind: task.artifact_kind.as_deref().map(operator_safe_text),
-            entry_ids: safe_refs(task.last_adaptive_wiki_entry_ids.iter()),
+            entry_ids: safe_identities(task.last_adaptive_wiki_entry_ids.iter()),
             candidate_id: None,
             evidence_refs: task
                 .log_artifact_path
@@ -4858,7 +6272,7 @@ fn build_live_episode_events(
                 request_id: Some(operator_safe_text(&task.request_id)),
                 project_key: Some(operator_safe_text(&task.project_key)),
                 artifact_kind: task.artifact_kind.as_deref().map(operator_safe_text),
-                entry_ids: safe_refs(task.last_adaptive_wiki_entry_ids.iter()),
+                entry_ids: safe_identities(task.last_adaptive_wiki_entry_ids.iter()),
                 candidate_id: None,
                 evidence_refs: Vec::new(),
                 summary: "task recorded adaptive wiki entry ids".to_string(),
@@ -4884,7 +6298,7 @@ fn build_live_episode_events(
                 request_id: Some(operator_safe_text(&task.request_id)),
                 project_key: Some(operator_safe_text(&task.project_key)),
                 artifact_kind: task.artifact_kind.as_deref().map(operator_safe_text),
-                entry_ids: safe_refs(task.last_adaptive_wiki_entry_ids.iter()),
+                entry_ids: safe_identities(task.last_adaptive_wiki_entry_ids.iter()),
                 candidate_id: None,
                 evidence_refs: task
                     .last_error
@@ -4915,7 +6329,7 @@ fn build_live_episode_events(
             request_id: Some(operator_safe_text(&usage.request_id)),
             project_key: Some(operator_safe_text(&usage.project_key)),
             artifact_kind: usage.artifact_kind.as_deref().map(operator_safe_text),
-            entry_ids: vec![operator_safe_text(&usage.entry_id)],
+            entry_ids: vec![operator_safe_identity_selector(&usage.entry_id)],
             candidate_id: None,
             evidence_refs: Vec::new(),
             summary: operator_safe_text(&format!(
@@ -4942,9 +6356,12 @@ fn build_live_episode_events(
             entry_ids: correction
                 .entry_id
                 .as_ref()
-                .map(|entry_id| vec![operator_safe_text(entry_id)])
+                .map(|entry_id| vec![operator_safe_identity_selector(entry_id)])
                 .unwrap_or_default(),
-            candidate_id: correction.candidate_id.as_deref().map(operator_safe_text),
+            candidate_id: correction
+                .candidate_id
+                .as_deref()
+                .map(operator_safe_identity_selector),
             evidence_refs: safe_refs(
                 correction
                     .evidence_refs
@@ -4976,7 +6393,7 @@ fn build_live_episode_events(
                 request_id: probe.request_id.as_deref().map(operator_safe_text),
                 project_key: probe.project_key.as_deref().map(operator_safe_text),
                 artifact_kind: None,
-                entry_ids: safe_refs(probe.adaptive_wiki_entry_ids.iter()),
+                entry_ids: safe_identities(probe.adaptive_wiki_entry_ids.iter()),
                 candidate_id: None,
                 evidence_refs: Vec::new(),
                 summary: operator_safe_text(&format!(
@@ -5011,7 +6428,7 @@ fn build_live_episode_events(
                 request_id: probe.request_id.as_deref().map(operator_safe_text),
                 project_key: probe.project_key.as_deref().map(operator_safe_text),
                 artifact_kind: None,
-                entry_ids: safe_refs(probe.adaptive_wiki_entry_ids.iter()),
+                entry_ids: safe_identities(probe.adaptive_wiki_entry_ids.iter()),
                 candidate_id: None,
                 evidence_refs: probe
                     .last_recovery_evidence
@@ -5044,7 +6461,7 @@ fn build_live_episode_events(
             project_key: None,
             artifact_kind: None,
             entry_ids: Vec::new(),
-            candidate_id: Some(operator_safe_text(&candidate.id)),
+            candidate_id: Some(operator_safe_identity(&candidate.id)),
             evidence_refs: evidence_refs.clone(),
             summary: operator_safe_text(&format!(
                 "candidate signal={} origin={} occurrences={}",
@@ -5055,9 +6472,12 @@ fn build_live_episode_events(
             occurred_at: candidate.created_at,
         });
         if candidate.signal_kind == AdaptiveWikiSignalKind::OperatorCorrection
-            && !correction_records
-                .iter()
-                .any(|correction| correction.candidate_id.as_deref() == Some(candidate.id.as_str()))
+            && !correction_records.iter().any(|correction| {
+                correction
+                    .candidate_id
+                    .as_deref()
+                    .is_some_and(|id| identity_reference_matches(id, &candidate.id))
+            })
         {
             events.push(AdaptiveWikiLiveEpisodeEvent {
                 id: live_event_id(
@@ -5071,7 +6491,7 @@ fn build_live_episode_events(
                 project_key: None,
                 artifact_kind: None,
                 entry_ids: Vec::new(),
-                candidate_id: Some(operator_safe_text(&candidate.id)),
+                candidate_id: Some(operator_safe_identity(&candidate.id)),
                 evidence_refs: evidence_refs.clone(),
                 summary: "operator correction produced adaptive wiki evidence".to_string(),
                 occurred_at: candidate.last_seen_at,
@@ -5090,7 +6510,7 @@ fn build_live_episode_events(
                 project_key: None,
                 artifact_kind: None,
                 entry_ids: Vec::new(),
-                candidate_id: Some(operator_safe_text(&candidate.id)),
+                candidate_id: Some(operator_safe_identity(&candidate.id)),
                 evidence_refs,
                 summary: "rollback evidence produced adaptive wiki candidate".to_string(),
                 occurred_at: candidate.last_seen_at,
@@ -5121,9 +6541,9 @@ fn build_live_episode_events(
                 } else {
                     None
                 })
-                .map(|value| operator_safe_text(value))
+                .map(|value| operator_safe_identity(value))
                 .collect(),
-            candidate_id: audit.candidate_id.as_deref().map(operator_safe_text),
+            candidate_id: audit.candidate_id.as_deref().map(operator_safe_identity),
             evidence_refs: audit
                 .evidence_ref
                 .as_ref()
@@ -5456,7 +6876,13 @@ fn promotion_audit_for_entry_id<'a>(
     audit_records
         .iter()
         .filter(|audit| audit.action == AdaptiveWikiAuditAction::Promote)
-        .filter(|audit| audit.entry_id.as_deref() == Some(entry_id) || audit.subject_id == entry_id)
+        .filter(|audit| {
+            audit
+                .entry_id
+                .as_deref()
+                .is_some_and(|id| identity_reference_matches(id, entry_id))
+                || identity_reference_matches(&audit.subject_id, entry_id)
+        })
         .min_by_key(|audit| audit.created_at)
 }
 
@@ -5468,7 +6894,11 @@ fn promotion_time_for_entry(
         .iter()
         .filter(|audit| audit.action == AdaptiveWikiAuditAction::Promote)
         .filter(|audit| {
-            audit.entry_id.as_deref() == Some(entry.id.as_str()) || audit.subject_id == entry.id
+            audit
+                .entry_id
+                .as_deref()
+                .is_some_and(|id| identity_reference_matches(id, &entry.id))
+                || identity_reference_matches(&audit.subject_id, &entry.id)
         })
         .map(|audit| audit.created_at)
         .min()
@@ -5639,7 +7069,10 @@ fn operator_safe_live_episode_filter(
         task_id: filter.task_id.as_deref().map(operator_safe_text),
         project_key: filter.project_key.as_deref().map(operator_safe_text),
         artifact_kind: filter.artifact_kind.as_deref().map(operator_safe_text),
-        entry_id: filter.entry_id.as_deref().map(operator_safe_text),
+        entry_id: filter
+            .entry_id
+            .as_deref()
+            .map(operator_safe_identity_selector),
     }
 }
 
@@ -5666,7 +7099,7 @@ fn human_entry_snapshot(entry: &AdaptiveWikiEntry) -> AdaptiveWikiHumanEntry {
 
 fn operator_safe_human_entry(entry: &AdaptiveWikiHumanEntry) -> AdaptiveWikiHumanEntry {
     AdaptiveWikiHumanEntry {
-        id: operator_safe_text(&entry.id),
+        id: operator_safe_identity_selector(&entry.id),
         kind: entry.kind,
         scope: entry.scope,
         scope_ref: operator_safe_text(&entry.scope_ref),
@@ -5713,7 +7146,7 @@ fn operator_safe_human_candidate(
     candidate: &AdaptiveWikiHumanCandidate,
 ) -> AdaptiveWikiHumanCandidate {
     AdaptiveWikiHumanCandidate {
-        id: operator_safe_text(&candidate.id),
+        id: operator_safe_identity_selector(&candidate.id),
         kind: candidate.kind,
         scope: candidate.scope,
         scope_ref: operator_safe_text(&candidate.scope_ref),
@@ -5755,9 +7188,9 @@ fn operator_safe_audit_record(audit: &AdaptiveWikiAuditRecord) -> AdaptiveWikiAu
     AdaptiveWikiAuditRecord {
         id: operator_safe_text(&audit.id),
         action: audit.action,
-        subject_id: operator_safe_text(&audit.subject_id),
-        candidate_id: audit.candidate_id.as_deref().map(operator_safe_text),
-        entry_id: audit.entry_id.as_deref().map(operator_safe_text),
+        subject_id: operator_safe_identity(&audit.subject_id),
+        candidate_id: audit.candidate_id.as_deref().map(operator_safe_identity),
+        entry_id: audit.entry_id.as_deref().map(operator_safe_identity),
         actor: operator_safe_text(&audit.actor),
         reason: operator_safe_text(&audit.reason),
         evidence_ref: audit.evidence_ref.as_deref().map(operator_safe_text),
@@ -5782,7 +7215,7 @@ fn operator_safe_audit_record(audit: &AdaptiveWikiAuditRecord) -> AdaptiveWikiAu
 fn operator_safe_usage_record(usage: &AdaptiveWikiUsageRecord) -> AdaptiveWikiUsageRecord {
     AdaptiveWikiUsageRecord {
         id: operator_safe_text(&usage.id),
-        entry_id: operator_safe_text(&usage.entry_id),
+        entry_id: operator_safe_identity_selector(&usage.entry_id),
         task_id: operator_safe_text(&usage.task_id),
         request_id: operator_safe_text(&usage.request_id),
         project_key: operator_safe_text(&usage.project_key),
@@ -5809,7 +7242,7 @@ fn live_filter_matches_task(task: &OffdeskTask, filter: &AdaptiveWikiLiveEpisode
             .map(|entry_id| {
                 task.last_adaptive_wiki_entry_ids
                     .iter()
-                    .any(|id| id == entry_id)
+                    .any(|id| identity_reference_matches(id, entry_id))
             })
             .unwrap_or(true)
 }
@@ -5825,7 +7258,11 @@ fn live_filter_matches_usage(
             filter.artifact_kind.as_deref(),
             usage.artifact_kind.as_deref().unwrap_or(""),
         )
-        && matches_optional_filter(filter.entry_id.as_deref(), &usage.entry_id)
+        && filter
+            .entry_id
+            .as_deref()
+            .map(|entry_id| identity_reference_matches(&usage.entry_id, entry_id))
+            .unwrap_or(true)
 }
 
 fn live_filter_matches_correction(
@@ -5870,10 +7307,16 @@ fn live_filter_matches_correction(
             filter.artifact_kind.as_deref(),
             correction.artifact_kind.as_deref().unwrap_or(""),
         )
-        && matches_optional_filter(
-            filter.entry_id.as_deref(),
-            correction.entry_id.as_deref().unwrap_or(""),
-        )
+        && filter
+            .entry_id
+            .as_deref()
+            .map(|entry_id| {
+                correction
+                    .entry_id
+                    .as_deref()
+                    .is_some_and(|id| identity_reference_matches(id, entry_id))
+            })
+            .unwrap_or(true)
 }
 
 fn live_filter_matches_probe(
@@ -5897,7 +7340,7 @@ fn live_filter_matches_probe(
                 probe
                     .adaptive_wiki_entry_ids
                     .iter()
-                    .any(|id| id == entry_id)
+                    .any(|id| identity_reference_matches(id, entry_id))
             })
             .unwrap_or(true)
 }
@@ -5937,11 +7380,11 @@ fn live_filter_matches_audit(
         filter
             .entry_id
             .as_deref()
-            .map(|filter_entry_id| filter_entry_id == entry_id)
+            .map(|filter_entry_id| identity_reference_matches(entry_id, filter_entry_id))
             .unwrap_or(true)
             && entries
                 .iter()
-                .find(|entry| entry.id == *entry_id)
+                .find(|entry| identity_reference_matches(entry_id, &entry.id))
                 .map(|entry| live_filter_matches_scope(entry.scope, &entry.scope_ref, filter))
                 .unwrap_or(true)
     });
@@ -5949,7 +7392,7 @@ fn live_filter_matches_audit(
         filter.entry_id.is_none()
             && candidates
                 .iter()
-                .find(|candidate| candidate.id == *candidate_id)
+                .find(|candidate| identity_reference_matches(candidate_id, &candidate.id))
                 .map(|candidate| {
                     live_filter_matches_scope(candidate.scope, &candidate.scope_ref, filter)
                 })
@@ -5958,7 +7401,7 @@ fn live_filter_matches_audit(
     let subject_matches = filter
         .entry_id
         .as_deref()
-        .map(|entry_id| audit.subject_id == entry_id)
+        .map(|entry_id| identity_reference_matches(&audit.subject_id, entry_id))
         .unwrap_or(false);
     (entry_matches || candidate_matches || subject_matches || filter_is_unscoped(filter))
         && refs_match_filter(audit.evidence_ref.iter(), filter)
@@ -6088,6 +7531,12 @@ fn safe_refs<'a>(values: impl Iterator<Item = &'a String>) -> Vec<String> {
     values.map(|value| operator_safe_text(value)).collect()
 }
 
+fn safe_identities<'a>(values: impl Iterator<Item = &'a String>) -> Vec<String> {
+    values
+        .map(|value| operator_safe_identity_selector(value))
+        .collect()
+}
+
 fn optional_text(value: Option<&str>) -> String {
     value
         .map(table_text)
@@ -6110,7 +7559,8 @@ fn push_review_proposal(
     proposals: &mut Vec<AdaptiveWikiReviewProposal>,
     input: AdaptiveWikiReviewProposalInput<'_>,
 ) {
-    let subject_id = fallback_subject_id(input.subject_id);
+    let raw_subject_id = fallback_subject_id(input.subject_id);
+    let subject_id = operator_safe_identity(&raw_subject_id);
     let action = review_action_label(input.action);
     let id = format!(
         "wiki_review_{}_{}_{}",
@@ -6125,14 +7575,14 @@ fn push_review_proposal(
         id,
         action: input.action,
         subject_kind: operator_safe_text(input.subject_kind),
-        subject_id: operator_safe_text(&subject_id),
+        subject_id: subject_id.clone(),
         title: operator_safe_text(input.title),
         rationale: operator_safe_text(input.rationale),
         evidence_refs: ensure_review_evidence(&subject_id, input.evidence_refs),
         risk: input.risk,
         suggested_command: input
             .suggested_command
-            .map(|command| operator_safe_text(&command)),
+            .map(|command| operator_safe_text(&command.replace(&raw_subject_id, &subject_id))),
         lifecycle: None,
     });
 }
@@ -6230,7 +7680,7 @@ fn attach_review_proposal_lifecycle(
                 evidence_refs: event
                     .evidence_refs
                     .iter()
-                    .map(|value| operator_safe_text(value))
+                    .map(|value| operator_safe_reference(value))
                     .filter(|value| !value.is_empty())
                     .collect(),
                 stale_evidence_refs,
@@ -6265,7 +7715,7 @@ fn stale_review_evidence_refs(
 
     clean_refs(refs)
         .into_iter()
-        .map(|value| operator_safe_text(&value))
+        .map(|value| operator_safe_reference(&value))
         .collect()
 }
 
@@ -6278,13 +7728,13 @@ fn subject_updated_after_decision(
         "candidate" => context
             .candidates
             .iter()
-            .find(|candidate| candidate.id == proposal.subject_id)
+            .find(|candidate| operator_safe_identity(&candidate.id) == proposal.subject_id)
             .map(candidate_review_timestamp)
             .is_some_and(|timestamp| timestamp > decided_at),
         "entry" => context
             .entries
             .iter()
-            .find(|entry| entry.id == proposal.subject_id)
+            .find(|entry| operator_safe_identity(&entry.id) == proposal.subject_id)
             .is_some_and(|entry| entry.updated_at > decided_at),
         _ => false,
     }
@@ -6299,27 +7749,27 @@ fn evidence_ref_timestamp(
         "audit" => context
             .audit_records
             .iter()
-            .find(|record| record.id == id)
+            .find(|record| identity_reference_matches(id, &record.id))
             .map(|record| record.created_at),
         "candidate" => context
             .candidates
             .iter()
-            .find(|candidate| candidate.id == id)
+            .find(|candidate| identity_reference_matches(id, &candidate.id))
             .map(candidate_review_timestamp),
         "correction" => context
             .correction_records
             .iter()
-            .find(|record| record.id == id)
+            .find(|record| identity_reference_matches(id, &record.id))
             .map(|record| record.created_at),
         "entry" => context
             .entries
             .iter()
-            .find(|entry| entry.id == id)
+            .find(|entry| identity_reference_matches(id, &entry.id))
             .map(|entry| entry.updated_at),
         "usage" => context
             .usage_records
             .iter()
-            .find(|record| record.id == id)
+            .find(|record| identity_reference_matches(id, &record.id))
             .map(|record| record.created_at),
         _ => None,
     }
@@ -6437,8 +7887,20 @@ fn ensure_review_evidence(subject_id: &str, refs: Vec<String>) -> Vec<String> {
     }
     cleaned
         .into_iter()
-        .map(|value| operator_safe_text(&value))
+        .map(|value| operator_safe_reference(&value))
         .collect()
+}
+
+fn operator_safe_reference(value: &str) -> String {
+    let Some((kind, identity)) = value.split_once(':') else {
+        return operator_safe_text(value);
+    };
+    let safe_identity = operator_safe_identity_selector(identity);
+    if safe_identity == identity {
+        operator_safe_text(value)
+    } else {
+        format!("{}:{safe_identity}", operator_safe_text(kind))
+    }
 }
 
 fn add_merge_proposals(
@@ -6490,7 +7952,10 @@ fn add_projection_conflict_proposals(
     let conflict_candidates = projection_conflict_candidates(entries, None);
     let conflicts = detect_projection_conflicts(&conflict_candidates);
     for conflict in conflicts {
-        let Some(entry) = entries.iter().find(|entry| entry.id == conflict.entry_id) else {
+        let Some(entry) = entries
+            .iter()
+            .find(|entry| operator_safe_identity(&entry.id) == conflict.entry_id)
+        else {
             continue;
         };
         let mut evidence = entry_evidence_refs(entry, &["projection:conflict"]);
@@ -6507,7 +7972,7 @@ fn add_projection_conflict_proposals(
             AdaptiveWikiReviewProposalInput {
                 action: AdaptiveWikiReviewProposalAction::Split,
                 subject_kind: "entry",
-                subject_id: &conflict.entry_id,
+                subject_id: &entry.id,
                 title: "Resolve conflicting promoted entries",
                 rationale: "Two promoted entries share kind and scope but project opposite instruction polarity, so an operator should rescope, split, deprecate, or add counterexample evidence before relying on them together.",
                 evidence_refs: evidence,
@@ -6527,10 +7992,10 @@ fn add_usage_proposals(
         .iter()
         .filter(|entry| entry.status == AdaptiveWikiStatus::Deprecated)
     {
-        if !usage_records
-            .iter()
-            .any(|record| record.entry_id == entry.id && record.created_at >= entry.updated_at)
-        {
+        if !usage_records.iter().any(|record| {
+            identity_reference_matches(&record.entry_id, &entry.id)
+                && record.created_at >= entry.updated_at
+        }) {
             continue;
         }
         push_review_proposal(
@@ -6625,7 +8090,10 @@ fn correction_record_targets_entry(
     correction: &AdaptiveWikiCorrectionRecord,
     entry: &AdaptiveWikiEntry,
 ) -> bool {
-    correction.entry_id.as_deref() == Some(entry.id.as_str())
+    correction
+        .entry_id
+        .as_deref()
+        .is_some_and(|id| identity_reference_matches(id, &entry.id))
 }
 
 fn add_promotion_chain_proposals(
@@ -6648,9 +8116,10 @@ fn add_promotion_chain_proposals(
             continue;
         }
 
-        let used_after_promotion = usage_records
-            .iter()
-            .any(|usage| usage.entry_id == entry.id && usage.created_at >= entry.created_at);
+        let used_after_promotion = usage_records.iter().any(|usage| {
+            identity_reference_matches(&usage.entry_id, &entry.id)
+                && usage.created_at >= entry.created_at
+        });
         let mut evidence = entry_evidence_refs(entry, &["promotion_chain:incomplete"]);
         if missing_promotion_audit {
             push_unique(&mut evidence, Some("audit:missing_promotion_audit"));
@@ -6663,7 +8132,7 @@ fn add_promotion_chain_proposals(
         }
         for usage in usage_records
             .iter()
-            .filter(|usage| usage.entry_id == entry.id)
+            .filter(|usage| identity_reference_matches(&usage.entry_id, &entry.id))
         {
             push_unique(&mut evidence, Some(&format!("usage:{}", usage.id)));
         }
@@ -6805,11 +8274,11 @@ fn markdown_index(
         let entry_path = format!(
             "entries/{}/{}.md",
             kind_dir(entry.kind),
-            markdown_slug(&entry.id, "entry")
+            markdown_slug(&operator_safe_identity(&entry.id), "entry")
         );
         content.push_str(&format!(
             "| [{}]({}) | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | {} |\n",
-            table_text(&entry.id),
+            table_text(&operator_safe_identity(&entry.id)),
             entry_path,
             status_label(entry.status),
             kind_label(entry.kind),
@@ -6840,11 +8309,11 @@ fn markdown_index(
     for candidate in &candidates {
         let candidate_path = format!(
             "candidates/{}.md",
-            markdown_slug(&candidate.id, "candidate")
+            markdown_slug(&operator_safe_identity(&candidate.id), "candidate")
         );
         content.push_str(&format!(
             "| [{}]({}) | `{}` | `{}` | `{}` | `{}` | `{}` | {} |\n",
-            table_text(&candidate.id),
+            table_text(&operator_safe_identity(&candidate.id)),
             candidate_path,
             kind_label(candidate.kind),
             table_text(&format!(
@@ -6880,7 +8349,7 @@ fn markdown_export_log(
 fn markdown_entry_page(entry: &AdaptiveWikiEntry) -> String {
     let mut content = String::new();
     content.push_str("---\n");
-    push_frontmatter_scalar(&mut content, "id", &entry.id);
+    push_frontmatter_scalar(&mut content, "id", &operator_safe_identity(&entry.id));
     push_frontmatter_scalar(&mut content, "kind", kind_label(entry.kind));
     push_frontmatter_scalar(&mut content, "status", status_label(entry.status));
     push_frontmatter_scalar(&mut content, "scope", scope_label(entry.scope));
@@ -6917,18 +8386,18 @@ fn markdown_entry_page(entry: &AdaptiveWikiEntry) -> String {
     push_frontmatter_list(
         &mut content,
         "core_tags",
-        &clean_tags(entry.core_tags.clone()),
+        &operator_safe_tags(&clean_tags(entry.core_tags.clone())),
     );
     push_frontmatter_list(
         &mut content,
         "proposed_tags",
-        &clean_tags(entry.proposed_tags.clone()),
+        &operator_safe_tags(&clean_tags(entry.proposed_tags.clone())),
     );
     content.push_str("---\n\n");
 
     content.push_str(&format!(
         "# {}\n\n",
-        markdown_heading(&entry.claim, &entry.id)
+        markdown_heading(&entry.claim, &operator_safe_identity(&entry.id))
     ));
     content.push_str("## Summary\n\n");
     content.push_str(&paragraph_or_placeholder(&entry.human_summary));
@@ -6998,7 +8467,7 @@ fn markdown_entry_page(entry: &AdaptiveWikiEntry) -> String {
 fn markdown_candidate_page(candidate: &AdaptiveWikiCandidate) -> String {
     let mut content = String::new();
     content.push_str("---\n");
-    push_frontmatter_scalar(&mut content, "id", &candidate.id);
+    push_frontmatter_scalar(&mut content, "id", &operator_safe_identity(&candidate.id));
     push_frontmatter_scalar(&mut content, "kind", kind_label(candidate.kind));
     push_frontmatter_scalar(&mut content, "scope", scope_label(candidate.scope));
     push_frontmatter_scalar(&mut content, "scope_ref", &candidate.scope_ref);
@@ -7034,18 +8503,18 @@ fn markdown_candidate_page(candidate: &AdaptiveWikiCandidate) -> String {
     push_frontmatter_list(
         &mut content,
         "core_tags",
-        &clean_tags(candidate.core_tags.clone()),
+        &operator_safe_tags(&clean_tags(candidate.core_tags.clone())),
     );
     push_frontmatter_list(
         &mut content,
         "proposed_tags",
-        &clean_tags(candidate.proposed_tags.clone()),
+        &operator_safe_tags(&clean_tags(candidate.proposed_tags.clone())),
     );
     content.push_str("---\n\n");
 
     content.push_str(&format!(
         "# {}\n\n",
-        markdown_heading(&candidate.claim, &candidate.id)
+        markdown_heading(&candidate.claim, &operator_safe_identity(&candidate.id))
     ));
     content.push_str("## Summary\n\n");
     content.push_str(&paragraph_or_placeholder(&candidate.human_summary));
@@ -7160,7 +8629,7 @@ fn table_text(value: &str) -> String {
 fn markdown_slug(value: &str, fallback: &str) -> String {
     let mut slug = String::new();
     let mut previous_separator = false;
-    for ch in value.chars() {
+    for ch in operator_safe_text(value).chars() {
         if ch.is_ascii_alphanumeric() {
             slug.push(ch.to_ascii_lowercase());
             previous_separator = false;
@@ -7260,7 +8729,7 @@ fn agent_mode_values(modes: &[AdaptiveWikiAgentMode]) -> Vec<String> {
 }
 
 fn tag_list_label(tags: &[String]) -> String {
-    let tags = clean_tags(tags.to_vec());
+    let tags = operator_safe_tags(&clean_tags(tags.to_vec()));
     if tags.is_empty() {
         "-".to_string()
     } else {
@@ -7378,6 +8847,7 @@ fn background_phase_label(phase: BackgroundRunnerPhase) -> &'static str {
         BackgroundRunnerPhase::StaleLostCallback => "stale_lost_callback",
         BackgroundRunnerPhase::Reconstructable => "reconstructable",
         BackgroundRunnerPhase::RecoveryAcknowledged => "recovery_acknowledged",
+        BackgroundRunnerPhase::Terminated => "terminated",
     }
 }
 
@@ -7390,6 +8860,44 @@ fn read_entry_state(path: &Path) -> Result<AdaptiveWikiEntryState> {
         return Ok(AdaptiveWikiEntryState::default());
     }
     Ok(serde_json::from_str(&content)?)
+}
+
+fn ensure_active_wiki_context_root(
+    root_path: &Path,
+    held_root: &File,
+    expected_identity: (u64, u64),
+) -> Result<()> {
+    let path_metadata =
+        fs::symlink_metadata(root_path).context("inspect active adaptive wiki context root")?;
+    ensure!(
+        !path_metadata.file_type().is_symlink() && path_metadata.is_dir(),
+        "active adaptive wiki context root is not one safe directory"
+    );
+    let reopened = crate::process::open_bounded_root(root_path)
+        .context("reopen active adaptive wiki context root")?;
+    ensure!(
+        crate::process::filesystem_file_identity(&path_metadata) == Some(expected_identity)
+            && crate::process::filesystem_file_identity(&reopened.metadata()?)
+                == Some(expected_identity)
+            && crate::process::filesystem_file_identity(&held_root.metadata()?)
+                == Some(expected_identity),
+        "active adaptive wiki context root was replaced while it was read"
+    );
+    Ok(())
+}
+
+fn ensure_single_link_wiki_context_source(file: &File) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        ensure!(
+            file.metadata()?.nlink() == 1,
+            "adaptive wiki context entries must have exactly one filesystem link"
+        );
+    }
+    #[cfg(not(unix))]
+    let _ = file;
+    Ok(())
 }
 
 fn read_candidate_state(path: &Path) -> Result<AdaptiveWikiCandidateState> {
@@ -7505,6 +9013,94 @@ fn normalize_key(value: &str) -> String {
         .to_lowercase()
 }
 
+fn same_background_review_observation(
+    candidate: &AdaptiveWikiCandidate,
+    input: &AdaptiveWikiCandidateInput,
+) -> bool {
+    // Nightly model wording is nondeterministic. The grounded observation is
+    // the stable identity, but only inside the background-review authority.
+    if !same_background_review_source(candidate, input) {
+        return false;
+    }
+
+    let Some(candidate_quote) = background_review_evidence_quote(&candidate.review_reason) else {
+        return false;
+    };
+    let Some(input_quote) = background_review_evidence_quote(&input.review_reason) else {
+        return false;
+    };
+    candidate_quote == input_quote
+}
+
+fn same_background_review_source(
+    candidate: &AdaptiveWikiCandidate,
+    input: &AdaptiveWikiCandidateInput,
+) -> bool {
+    candidate.origin == AdaptiveWikiOrigin::BackgroundReview
+        && input.origin == AdaptiveWikiOrigin::BackgroundReview
+        && candidate_source_identity_overlaps(candidate, input)
+}
+
+fn candidate_source_identity_overlaps(
+    candidate: &AdaptiveWikiCandidate,
+    input: &AdaptiveWikiCandidateInput,
+) -> bool {
+    let candidate_refs = candidate
+        .evidence_refs
+        .iter()
+        .chain(candidate.source_refs.iter())
+        .map(|value| normalize_candidate_source_ref(value))
+        .filter(|value| !value.is_empty());
+    let input_refs = input
+        .evidence_ref
+        .iter()
+        .chain(input.source_refs.iter())
+        .map(|value| normalize_candidate_source_ref(value))
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+
+    candidate_refs.into_iter().any(|candidate_ref| {
+        input_refs
+            .iter()
+            .any(|input_ref| input_ref == &candidate_ref)
+    }) || candidate.source_hashes.iter().any(|candidate_hash| {
+        input
+            .source_hashes
+            .iter()
+            .any(|input_hash| clean_ref(candidate_hash) == clean_ref(input_hash))
+    })
+}
+
+fn normalize_candidate_source_ref(value: &str) -> String {
+    let cleaned = clean_ref(value);
+    if cleaned.starts_with("doc:") {
+        cleaned
+            .split_once(" (")
+            .map_or(cleaned.clone(), |(path, _)| path.to_string())
+    } else {
+        cleaned
+    }
+}
+
+fn background_review_evidence_quote(review_reason: &str) -> Option<String> {
+    let normalized_reason = review_reason.to_ascii_lowercase();
+    let quote = ["grounded in:", "verify quote:"]
+        .into_iter()
+        .find_map(|marker| {
+            normalized_reason.find(marker).map(|index| {
+                review_reason[index + marker.len()..]
+                    .trim()
+                    .trim_matches('"')
+            })
+        })?;
+    let normalized = normalize_key(quote);
+    let normalized = normalized
+        .strip_prefix("fail:")
+        .map_or(normalized.as_str(), str::trim)
+        .to_string();
+    (normalized.chars().count() >= 12).then_some(normalized)
+}
+
 fn prefer_new_text(existing: &str, candidate: &str) -> String {
     let trimmed = candidate.trim();
     if trimmed.is_empty() {
@@ -7537,7 +9133,7 @@ fn correction_record_from_candidate(
     AdaptiveWikiCorrectionRecord {
         id: format!("wiki_correction_{}", Uuid::new_v4()),
         correction_kind: AdaptiveWikiCorrectionKind::OperatorCorrection,
-        candidate_id: Some(operator_safe_text(&candidate.id)),
+        candidate_id: Some(operator_safe_identity(&candidate.id)),
         entry_id: None,
         task_id: first_ref_value(&refs, "task:").map(|value| operator_safe_text(&value)),
         request_id: first_ref_value(&refs, "request:").map(|value| operator_safe_text(&value)),
@@ -7595,6 +9191,26 @@ fn clean_tags(values: Vec<String>) -> Vec<String> {
     cleaned
 }
 
+fn operator_safe_tag(value: &str) -> String {
+    let tag = clean_tag(value);
+    let safe = operator_safe_text(&tag);
+    if safe == tag {
+        return safe;
+    }
+    let alias = operator_safe_identity(&tag);
+    tag.split_once('/')
+        .filter(|(prefix, _)| tag_has_valid_syntax(&format!("{prefix}/x")))
+        .map(|(prefix, _)| format!("{prefix}/{alias}"))
+        .unwrap_or(alias)
+}
+
+fn operator_safe_tags(values: &[String]) -> Vec<String> {
+    values
+        .iter()
+        .map(|value| operator_safe_tag(value))
+        .collect()
+}
+
 fn clean_agent_modes(values: Vec<AdaptiveWikiAgentMode>) -> Vec<AdaptiveWikiAgentMode> {
     let mut cleaned = values;
     cleaned.sort();
@@ -7638,6 +9254,39 @@ fn fallback_subject_id(id: &str) -> String {
     }
 }
 
+fn resolve_identity_index<T, F>(items: &[T], selector: &str, identity: F) -> Result<Option<usize>>
+where
+    F: Fn(&T) -> &str,
+{
+    let aliases: Vec<_> = items
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| {
+            (operator_safe_identity(identity(item)) == selector).then_some(index)
+        })
+        .collect();
+    if aliases.len() > 1 {
+        bail!("adaptive wiki public identity selector is ambiguous");
+    }
+    if let Some(index) = aliases.first() {
+        return Ok(Some(*index));
+    }
+
+    let exact: Vec<_> = items
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| (identity(item) == selector).then_some(index))
+        .collect();
+    if exact.len() > 1 {
+        bail!("adaptive wiki identity selector is ambiguous");
+    }
+    Ok(exact.first().copied())
+}
+
+fn identity_reference_matches(reference: &str, raw_identity: &str) -> bool {
+    reference == raw_identity || reference == operator_safe_identity(raw_identity)
+}
+
 fn lint_issue(
     severity: AdaptiveWikiLintSeverity,
     subject_kind: &str,
@@ -7648,7 +9297,7 @@ fn lint_issue(
     AdaptiveWikiLintIssue {
         severity,
         subject_kind: subject_kind.to_string(),
-        subject_id: operator_safe_text(subject_id),
+        subject_id: operator_safe_identity(subject_id),
         code: code.to_string(),
         message: operator_safe_text(message),
     }
@@ -7798,6 +9447,58 @@ mod tests {
             updated_at: now(),
             review_after: None,
         }
+    }
+
+    #[test]
+    fn wiki_context_source_read_is_single_snapshot_and_byte_bounded() -> Result<()> {
+        let temp = tempdir()?;
+        let store = AdaptiveWikiStore::new(temp.path().join("profile"));
+        assert_eq!(
+            store.load_entries_bounded_for_context()?,
+            AdaptiveWikiEntryState::default()
+        );
+
+        let expected = AdaptiveWikiEntryState {
+            version: ADAPTIVE_WIKI_VERSION.to_string(),
+            entries: vec![promoted_entry(
+                "wiki_context_source",
+                AdaptiveWikiScope::Project,
+                "project",
+                "Read one exact source snapshot.",
+            )],
+        };
+        store.save_entries(&expected)?;
+        assert_eq!(store.load_entries_bounded_for_context()?, expected);
+
+        fs::write(
+            store.entries_path(),
+            vec![b' '; MAX_WIKI_CONTEXT_SOURCE_BYTES + 1],
+        )?;
+        let error = store
+            .load_entries_bounded_for_context()
+            .expect_err("oversized wiki context source must fail");
+        assert!(error.to_string().contains("source byte budget"));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wiki_context_source_read_rejects_symlink_and_hardlink() -> Result<()> {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempdir()?;
+        let root = temp.path().join("profile");
+        fs::create_dir(&root)?;
+        let store = AdaptiveWikiStore::new(&root);
+        let outside = temp.path().join("outside.json");
+        fs::write(&outside, b"{\"entries\":[]}")?;
+
+        symlink(&outside, store.entries_path())?;
+        assert!(store.load_entries_bounded_for_context().is_err());
+        fs::remove_file(store.entries_path())?;
+        fs::hard_link(&outside, store.entries_path())?;
+        assert!(store.load_entries_bounded_for_context().is_err());
+        Ok(())
     }
 
     #[test]
@@ -8275,6 +9976,525 @@ mod tests {
     }
 
     #[test]
+    fn secret_bearing_identities_remain_distinct_and_actionable() -> Result<()> {
+        let first_raw = "wiki-entry-sk-aaaaaaaaaaaaaaaa";
+        let second_raw = "wiki-entry-sk-bbbbbbbbbbbbbbbb";
+        let first_alias = operator_safe_identity(first_raw);
+        let second_alias = operator_safe_identity(second_raw);
+        let reserved_raw = first_alias.clone();
+        let reserved_alias = operator_safe_identity(&reserved_raw);
+        let mut first = promoted_entry(
+            first_raw,
+            AdaptiveWikiScope::Project,
+            "project-a",
+            "Keep the first rule.",
+        );
+        let mut second = promoted_entry(
+            second_raw,
+            AdaptiveWikiScope::Project,
+            "project-a",
+            "Keep the second rule.",
+        );
+        let mut reserved = promoted_entry(
+            &reserved_raw,
+            AdaptiveWikiScope::Project,
+            "project-a",
+            "Keep the reserved-prefix rule.",
+        );
+        first.evidence_refs.clear();
+        second.evidence_refs.clear();
+        reserved.evidence_refs.clear();
+        first.core_tags = vec![format!("project/{first_raw}")];
+        second.core_tags = vec![format!("project/{second_raw}")];
+        reserved.core_tags = vec![format!("project/{reserved_raw}")];
+        let entries = vec![first.clone(), second.clone(), reserved.clone()];
+
+        let projection = build_ai_projection(
+            &entries,
+            &AdaptiveWikiQuery {
+                project_key: Some("project-a".to_string()),
+                ..AdaptiveWikiQuery::default()
+            },
+        );
+        assert_eq!(projection.len(), 3);
+        assert_eq!(
+            projection
+                .iter()
+                .map(|entry| entry.id.clone())
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                first_alias.clone(),
+                second_alias.clone(),
+                reserved_alias.clone(),
+            ])
+        );
+
+        let runtime = build_runtime_projection(&projection).expect("runtime projection");
+        assert_eq!(
+            runtime.entry_ids.iter().cloned().collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                first_alias.clone(),
+                second_alias.clone(),
+                reserved_alias.clone(),
+            ])
+        );
+        let usage = build_usage_records(
+            &projection,
+            "task",
+            "request",
+            "project-a",
+            None,
+            "identity-regression",
+            now(),
+        );
+        assert_eq!(
+            usage
+                .iter()
+                .map(|record| record.entry_id.clone())
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                first_alias.clone(),
+                second_alias.clone(),
+                reserved_alias.clone(),
+            ])
+        );
+
+        let graph = build_graph_report(&entries, &[], now());
+        assert!(graph.nodes.iter().any(|node| node.wiki_id == first_alias));
+        assert!(graph.nodes.iter().any(|node| node.wiki_id == second_alias));
+        assert!(graph
+            .nodes
+            .iter()
+            .any(|node| node.wiki_id == reserved_alias));
+        let secret_tag_nodes: BTreeSet<_> = graph
+            .nodes
+            .iter()
+            .filter(|node| node.node_type == "tag")
+            .filter_map(|node| node.tag.as_deref())
+            .filter(|tag| tag.starts_with("project/redacted_id_sha256_"))
+            .collect();
+        assert_eq!(secret_tag_nodes.len(), 3);
+
+        let files = build_markdown_export_files(&entries, &[], now())?;
+        let entry_paths: BTreeSet<_> = files
+            .iter()
+            .map(|(path, _)| path)
+            .filter(|path| path.starts_with("entries/"))
+            .collect();
+        assert_eq!(entry_paths.len(), 3);
+        assert!(files
+            .iter()
+            .all(|(_, content)| { !content.contains(first_raw) && !content.contains(second_raw) }));
+        assert!(build_markdown_export_files(&[first.clone(), first.clone()], &[], now()).is_err());
+
+        let proposals = build_review_proposals(
+            &entries,
+            &[],
+            &[],
+            &[],
+            &[],
+            &build_lint_report(&entries, &[], now()),
+            now(),
+        );
+        let deprecations: Vec<_> = proposals
+            .iter()
+            .filter(|proposal| proposal.action == AdaptiveWikiReviewProposalAction::Deprecate)
+            .collect();
+        assert_eq!(deprecations.len(), 3);
+        assert_eq!(
+            deprecations
+                .iter()
+                .map(|proposal| proposal.id.as_str())
+                .collect::<BTreeSet<_>>()
+                .len(),
+            3
+        );
+        for proposal in deprecations {
+            let command = proposal.suggested_command.as_deref().expect("command");
+            assert!(command.contains(&proposal.subject_id));
+            assert!(!command.contains("[REDACTED_API_KEY]"));
+        }
+
+        let temp = tempdir()?;
+        let store = AdaptiveWikiStore::new(temp.path());
+        write_json_state(
+            &store.entries_path(),
+            &AdaptiveWikiEntryState {
+                version: default_version(),
+                entries,
+            },
+        )?;
+        let changed = store
+            .deprecate_entry(&first_alias, now())?
+            .expect("public alias resolves");
+        assert_eq!(changed.id, first_raw);
+        let reserved_changed = store
+            .deprecate_entry(&reserved_alias, now())?
+            .expect("reserved-prefix public alias resolves");
+        assert_eq!(reserved_changed.id, reserved_raw);
+        let state = store.load_entries()?;
+        assert_eq!(state.entries[0].status, AdaptiveWikiStatus::Deprecated);
+        assert_eq!(state.entries[1].status, AdaptiveWikiStatus::Promoted);
+        assert_eq!(state.entries[2].status, AdaptiveWikiStatus::Deprecated);
+        Ok(())
+    }
+
+    #[test]
+    fn markdown_export_rolls_back_all_targets_after_late_failure() -> Result<()> {
+        let temp = tempdir()?;
+        let output = temp.path().join("vault");
+        fs::create_dir(&output)?;
+        fs::write(output.join("SCHEMA.md"), b"old schema")?;
+        fs::write(output.join("index.md"), b"old index")?;
+        let files = vec![
+            ("SCHEMA.md".to_string(), "new schema".to_string()),
+            ("index.md".to_string(), "new index".to_string()),
+            ("log.md".to_string(), "new log".to_string()),
+        ];
+
+        let result = write_markdown_export_with_hook(&output, &files, |index, _| {
+            if index == 2 {
+                bail!("injected late commit failure");
+            }
+            Ok(())
+        });
+
+        assert!(result.is_err());
+        assert_eq!(fs::read(output.join("SCHEMA.md"))?, b"old schema");
+        assert_eq!(fs::read(output.join("index.md"))?, b"old index");
+        assert!(!output.join("log.md").exists());
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn markdown_export_rejects_symlink_before_replacing_any_target() -> Result<()> {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempdir()?;
+        let output = temp.path().join("vault");
+        let entry_dir = output.join("entries/procedure");
+        fs::create_dir_all(&entry_dir)?;
+        fs::write(output.join("SCHEMA.md"), b"old schema")?;
+        let outside = temp.path().join("outside.md");
+        fs::write(&outside, b"outside")?;
+        symlink(&outside, entry_dir.join("entry.md"))?;
+        let files = vec![
+            ("SCHEMA.md".to_string(), "new schema".to_string()),
+            (
+                "entries/procedure/entry.md".to_string(),
+                "entry".to_string(),
+            ),
+        ];
+
+        assert!(write_markdown_export(&output, &files).is_err());
+        assert_eq!(fs::read(output.join("SCHEMA.md"))?, b"old schema");
+        assert_eq!(fs::read(&outside)?, b"outside");
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn markdown_export_rejects_replaced_stage_before_commit() -> Result<()> {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempdir()?;
+        let output = temp.path().join("vault");
+        fs::create_dir(&output)?;
+        fs::write(output.join("SCHEMA.md"), b"old schema")?;
+        let outside = temp.path().join("outside.md");
+        fs::write(&outside, b"outside")?;
+        let files = vec![("SCHEMA.md".to_string(), "new schema".to_string())];
+
+        let result = write_markdown_export_with_hook(&output, &files, |index, _| {
+            if index == 0 {
+                let stage = fs::read_dir(&output)?
+                    .filter_map(|entry| entry.ok())
+                    .map(|entry| entry.path())
+                    .find(|path| {
+                        path.file_name()
+                            .and_then(|name| name.to_str())
+                            .is_some_and(|name| {
+                                name.starts_with(".SCHEMA.md.") && name.ends_with(".stage")
+                            })
+                    })
+                    .context("schema stage missing")?;
+                fs::remove_file(&stage)?;
+                symlink(&outside, stage)?;
+            }
+            Ok(())
+        });
+
+        let error = result.expect_err("replaced stage must fail closed");
+        let detail = format!("{error:#}");
+        assert!(
+            detail.contains("adaptive wiki markdown export file must have one link"),
+            "{detail}"
+        );
+        assert_eq!(fs::read(output.join("SCHEMA.md"))?, b"old schema");
+        assert_eq!(fs::read(outside)?, b"outside");
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn markdown_export_revalidates_stage_after_backup_sync() -> Result<()> {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempdir()?;
+        let output = temp.path().join("vault");
+        fs::create_dir(&output)?;
+        fs::write(output.join("SCHEMA.md"), b"old schema")?;
+        let outside = temp.path().join("outside.md");
+        fs::write(&outside, b"outside")?;
+        let files = vec![("SCHEMA.md".to_string(), "new schema".to_string())];
+
+        let result = write_markdown_export_with_hooks(
+            &output,
+            &files,
+            |_, _| Ok(()),
+            |index, _| {
+                if index == 0 {
+                    let stage = fs::read_dir(&output)?
+                        .filter_map(|entry| entry.ok())
+                        .map(|entry| entry.path())
+                        .find(|path| {
+                            path.file_name()
+                                .and_then(|name| name.to_str())
+                                .is_some_and(|name| {
+                                    name.starts_with(".SCHEMA.md.") && name.ends_with(".stage")
+                                })
+                        })
+                        .context("schema stage missing after backup sync")?;
+                    fs::remove_file(&stage)?;
+                    symlink(&outside, stage)?;
+                }
+                Ok(())
+            },
+        );
+
+        let error = result.expect_err("stage replacement after backup sync must fail closed");
+        let detail = format!("{error:#}");
+        assert!(
+            detail.contains("adaptive wiki markdown export file must have one link"),
+            "{detail}"
+        );
+        assert_eq!(fs::read(output.join("SCHEMA.md"))?, b"old schema");
+        assert_eq!(fs::read(outside)?, b"outside");
+        Ok(())
+    }
+
+    #[test]
+    fn markdown_export_rejects_target_collision_after_backup_sync() -> Result<()> {
+        let temp = tempdir()?;
+        let output = temp.path().join("vault");
+        fs::create_dir(&output)?;
+        fs::write(output.join("SCHEMA.md"), b"old schema")?;
+        let files = vec![("SCHEMA.md".to_string(), "new schema".to_string())];
+
+        let result = write_markdown_export_with_hooks(
+            &output,
+            &files,
+            |_, _| Ok(()),
+            |index, target| {
+                if index == 0 {
+                    fs::write(target, b"collision")?;
+                }
+                Ok(())
+            },
+        );
+
+        let error = result.expect_err("target collision must fail closed");
+        let detail = format!("{error:#}");
+        assert!(detail.contains("commit adaptive wiki markdown export"));
+        assert!(detail.contains("rollback failed"), "{detail}");
+        assert_eq!(fs::read(output.join("SCHEMA.md"))?, b"collision");
+        let backup = fs::read_dir(&output)?
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .find(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| {
+                        name.starts_with(".SCHEMA.md.") && name.ends_with(".backup")
+                    })
+            })
+            .context("exact original recovery backup missing")?;
+        assert_eq!(fs::read(backup)?, b"old schema");
+        Ok(())
+    }
+
+    #[test]
+    fn markdown_export_preserves_new_target_collision_when_initially_absent() -> Result<()> {
+        let temp = tempdir()?;
+        let output = temp.path().join("vault");
+        fs::create_dir(&output)?;
+        let files = vec![("SCHEMA.md".to_string(), "new schema".to_string())];
+
+        let result = write_markdown_export_with_hooks(
+            &output,
+            &files,
+            |_, _| Ok(()),
+            |index, target| {
+                if index == 0 {
+                    fs::write(target, b"collision")?;
+                }
+                Ok(())
+            },
+        );
+
+        let error = result.expect_err("new target collision must fail closed");
+        assert!(
+            format!("{error:#}").contains("commit adaptive wiki markdown export"),
+            "{error:#}"
+        );
+        assert_eq!(fs::read(output.join("SCHEMA.md"))?, b"collision");
+        Ok(())
+    }
+
+    #[test]
+    fn markdown_export_rejects_replaced_recovery_backup_without_deleting_it() -> Result<()> {
+        let temp = tempdir()?;
+        let output = temp.path().join("vault");
+        fs::create_dir(&output)?;
+        fs::write(output.join("SCHEMA.md"), b"old schema")?;
+        let files = vec![("SCHEMA.md".to_string(), "new schema".to_string())];
+
+        let result = write_markdown_export_with_hooks(
+            &output,
+            &files,
+            |_, _| Ok(()),
+            |index, _| {
+                if index == 0 {
+                    let backup = fs::read_dir(&output)?
+                        .filter_map(|entry| entry.ok())
+                        .map(|entry| entry.path())
+                        .find(|path| {
+                            path.file_name()
+                                .and_then(|name| name.to_str())
+                                .is_some_and(|name| {
+                                    name.starts_with(".SCHEMA.md.") && name.ends_with(".backup")
+                                })
+                        })
+                        .context("schema recovery backup missing")?;
+                    fs::remove_file(&backup)?;
+                    fs::write(backup, b"replacement backup")?;
+                }
+                Ok(())
+            },
+        );
+
+        let error = result.expect_err("replaced recovery backup must fail loudly");
+        let detail = format!("{error:#}");
+        assert!(detail.contains("recovery identity changed"), "{detail}");
+        assert!(detail.contains("rollback failed"), "{detail}");
+        assert!(!output.join("SCHEMA.md").exists());
+        let replacement = fs::read_dir(&output)?
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .find(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| {
+                        name.starts_with(".SCHEMA.md.") && name.ends_with(".backup")
+                    })
+            })
+            .context("replacement backup was deleted")?;
+        assert_eq!(fs::read(replacement)?, b"replacement backup");
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn markdown_export_rejects_symlink_ancestor_without_writing() -> Result<()> {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempdir()?;
+        let real = temp.path().join("real");
+        fs::create_dir(&real)?;
+        let linked = temp.path().join("linked");
+        symlink(&real, &linked)?;
+        let output = linked.join("vault");
+        let files = vec![("SCHEMA.md".to_string(), "schema".to_string())];
+
+        assert!(write_markdown_export(&output, &files).is_err());
+        assert!(!real.join("vault").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn markdown_export_root_replacement_rolls_back_descriptor_bound_targets() -> Result<()> {
+        let temp = tempdir()?;
+        let output = temp.path().join("vault");
+        let moved = temp.path().join("moved-vault");
+        fs::create_dir(&output)?;
+        fs::write(output.join("SCHEMA.md"), b"old schema")?;
+        fs::write(output.join("index.md"), b"old index")?;
+        let files = vec![
+            ("SCHEMA.md".to_string(), "new schema".to_string()),
+            ("index.md".to_string(), "new index".to_string()),
+        ];
+
+        let result = write_markdown_export_with_hook(&output, &files, |index, _| {
+            if index == 1 {
+                fs::rename(&output, &moved)?;
+                fs::create_dir_all(output.join("entries/procedure"))?;
+            }
+            Ok(())
+        });
+
+        let error = result.expect_err("root replacement must fail");
+        let detail = format!("{error:#}");
+        assert!(detail.contains("parent was replaced"));
+        assert!(!detail.contains("staging cleanup failed"));
+        assert_eq!(fs::read(moved.join("SCHEMA.md"))?, b"old schema");
+        assert_eq!(fs::read(moved.join("index.md"))?, b"old index");
+        assert!(!output.join("SCHEMA.md").exists());
+        assert!(!output.join("index.md").exists());
+        assert!(output.join("entries/procedure").is_dir());
+        Ok(())
+    }
+
+    #[test]
+    fn markdown_export_reports_unrecoverable_rollback_failure() -> Result<()> {
+        let temp = tempdir()?;
+        let output = temp.path().join("vault");
+        fs::create_dir(&output)?;
+        fs::write(output.join("SCHEMA.md"), b"old schema")?;
+        let files = vec![
+            ("SCHEMA.md".to_string(), "new schema".to_string()),
+            ("index.md".to_string(), "new index".to_string()),
+        ];
+
+        let result = write_markdown_export_with_hook(&output, &files, |index, _| {
+            if index == 1 {
+                let backup = fs::read_dir(&output)?
+                    .filter_map(|entry| entry.ok())
+                    .map(|entry| entry.path())
+                    .find(|path| {
+                        path.file_name()
+                            .and_then(|name| name.to_str())
+                            .is_some_and(|name| {
+                                name.starts_with(".SCHEMA.md.") && name.ends_with(".backup")
+                            })
+                    })
+                    .context("schema recovery backup missing")?;
+                fs::remove_file(backup)?;
+                bail!("injected rollback source loss");
+            }
+            Ok(())
+        });
+
+        let error = result.expect_err("lost recovery source must fail loudly");
+        let detail = format!("{error:#}");
+        assert!(detail.contains("rollback failed"));
+        assert!(detail.contains("recovery backup"), "{detail}");
+        assert_eq!(fs::read(output.join("SCHEMA.md"))?, b"new schema");
+        assert!(!output.join("index.md").exists());
+        Ok(())
+    }
+
+    #[test]
     fn graph_report_uses_core_tags_as_edges_and_keeps_proposed_tags_reviewable() {
         let entry = AdaptiveWikiEntry {
             core_tags: vec!["#project/project-a".to_string()],
@@ -8420,6 +10640,100 @@ mod tests {
         let serialized = serde_json::to_string(&corrections)?;
         assert!(!serialized.contains(secret));
         assert!(serialized.contains("[REDACTED]"));
+        Ok(())
+    }
+
+    #[test]
+    fn background_candidate_recording_deduplicates_same_grounded_observation() -> Result<()> {
+        let temp = tempdir()?;
+        let store = AdaptiveWikiStore::new(temp.path());
+        let base = AdaptiveWikiCandidateInput {
+            kind: AdaptiveWikiKind::FailurePattern,
+            scope: AdaptiveWikiScope::Project,
+            scope_ref: "scoreboard".to_string(),
+            claim: "Local smoke test cannot connect to port 8772".to_string(),
+            suggested_ai_instruction: "Verify the service before the smoke test.".to_string(),
+            human_summary: "The local data service was unavailable.".to_string(),
+            evidence_ref: Some("chat:rollout-1#incident3".to_string()),
+            signal_kind: AdaptiveWikiSignalKind::RepeatedFailure,
+            origin: AdaptiveWikiOrigin::BackgroundReview,
+            source_refs: vec!["chat:rollout-1#incident3".to_string()],
+            source_hashes: Vec::new(),
+            suggested_scope: None,
+            agent_modes: Vec::new(),
+            core_tags: vec!["facet/ops".to_string()],
+            proposed_tags: Vec::new(),
+            review_reason: concat!(
+                "session retrospective; grounded in: \"FAIL: curl: (7) Failed to connect ",
+                "to 127.0.0.1 port 8772\""
+            )
+            .to_string(),
+            confidence: AdaptiveWikiConfidence::Inferred,
+        };
+
+        let first = store.record_candidate(base.clone(), now())?;
+        let duplicate = store.record_candidate(
+            AdaptiveWikiCandidateInput {
+                kind: AdaptiveWikiKind::Procedure,
+                claim: "Start the data service before running smoke tests".to_string(),
+                suggested_ai_instruction: "A different generated instruction.".to_string(),
+                human_summary: "A different generated summary.".to_string(),
+                core_tags: vec!["tool/curl".to_string()],
+                review_reason: concat!(
+                    "session retrospective; grounded in: \"curl: (7) Failed to connect ",
+                    "to 127.0.0.1 port 8772\""
+                )
+                .to_string(),
+                ..base.clone()
+            },
+            now(),
+        )?;
+
+        assert_eq!(duplicate.id, first.id);
+        assert_eq!(duplicate.occurrence_count, 1);
+        assert_eq!(duplicate.kind, first.kind);
+        assert_eq!(duplicate.claim, first.claim);
+        assert_eq!(
+            duplicate.suggested_ai_instruction,
+            first.suggested_ai_instruction
+        );
+        assert_eq!(duplicate.human_summary, first.human_summary);
+        assert_eq!(duplicate.review_reason, first.review_reason);
+        assert!(duplicate.core_tags.contains(&"tool/curl".to_string()));
+
+        let recurrence = store.record_candidate(
+            AdaptiveWikiCandidateInput {
+                evidence_ref: Some("chat:rollout-2#incident3".to_string()),
+                source_refs: vec!["chat:rollout-2#incident3".to_string()],
+                ..base.clone()
+            },
+            now(),
+        )?;
+        assert_eq!(recurrence.id, first.id);
+        assert_eq!(recurrence.occurrence_count, 2);
+
+        let other_source = store.record_candidate(
+            AdaptiveWikiCandidateInput {
+                claim: "A distinct observation used the same error text".to_string(),
+                evidence_ref: Some("chat:rollout-3#incident3".to_string()),
+                source_refs: vec!["chat:rollout-3#incident3".to_string()],
+                ..base.clone()
+            },
+            now(),
+        )?;
+        assert_ne!(other_source.id, first.id);
+
+        let operator_authored = store.record_candidate(
+            AdaptiveWikiCandidateInput {
+                claim: "The operator deliberately recorded a separate lesson".to_string(),
+                origin: AdaptiveWikiOrigin::OperatorExplicit,
+                ..base
+            },
+            now(),
+        )?;
+        assert_ne!(operator_authored.id, first.id);
+
+        assert_eq!(store.load_candidates()?.candidates.len(), 3);
         Ok(())
     }
 
@@ -9369,7 +11683,7 @@ mod tests {
         let report_md = fs::read_to_string(report_dir.join("REPORT.md"))?;
         assert!(report_md.contains("Adaptive Wiki Review Report"));
         assert!(report_md.contains("wiki_candidate_review"));
-        assert!(report_md.contains("[REDACTED]"));
+        assert!(report_md.contains("redacted_id_sha256_"));
         assert!(!report_md.contains(secret));
         assert_eq!(fs::read_to_string(store.entries_path())?, entries_before);
         assert_eq!(

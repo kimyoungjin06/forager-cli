@@ -1,4 +1,21 @@
-# Status Detection Fixtures
+# Test Fixtures
+
+## Document Lifecycle Contracts
+
+Versioned JSON contract fixtures for document lifecycle governance live under
+`document_lifecycle/`. They are validated without reading or writing real user
+state and remain separate from the terminal status captures described below.
+
+## Remote Session Creation Contracts
+
+Canonical S2-A policy, preview, confirmed request, reservation, receipt,
+policy-derived harness launch hash, and SHA-256 fixtures live under
+`remote_session_creation/`. Their integration test requires exact serialized
+bytes and validates the complete cross-contract hash and identity chain,
+including typed cleanup evidence, without creating a profile, worktree,
+session, or tmux process.
+
+## Status Detection Captures
 
 This directory contains terminal screen captures used for golden testing of status detection. Each state (idle, running, waiting_permission, waiting_question) is a directory containing one or more fixture files.
 

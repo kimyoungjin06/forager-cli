@@ -119,7 +119,10 @@ fn has_numbered_selection(non_empty_lines: &[&str]) -> bool {
         .any(|line| {
             let clean = strip_ansi(line);
             let trimmed = clean.trim();
-            let Some(after_cursor) = trimmed.strip_prefix('❯') else {
+            let Some(after_cursor) = trimmed
+                .strip_prefix('❯')
+                .or_else(|| trimmed.strip_prefix('›'))
+            else {
                 return false;
             };
             let after_cursor = after_cursor.trim_start();
@@ -133,6 +136,94 @@ pub fn detect_status_from_content(content: &str, tool: &str, _fg_pid: Option<u32
     crate::agents::get_agent(tool)
         .map(|a| (a.detect_status)(content))
         .unwrap_or_else(|| detect_claude_status(content))
+}
+
+/// Return true only for the ordinary empty task prompt of Codex or Claude.
+///
+/// The general status detector intentionally groups permission prompts and
+/// input-ready prompts under `Waiting`. Wiki context input needs a narrower
+/// authority boundary: activity, questions and selection menus always win,
+/// and a recognizable task cursor must be present at the bottom of the pane.
+pub(crate) fn wiki_context_prompt_ready(content: &str, tool: &str) -> bool {
+    if !matches!(tool, "codex" | "claude") {
+        return false;
+    }
+    if detect_status_from_content(content, tool, None) == Status::Running {
+        return false;
+    }
+
+    let clean_lines = content
+        .lines()
+        .map(strip_ansi)
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    let tail = clean_lines
+        .iter()
+        .rev()
+        .take(12)
+        .rev()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let tail_text = tail.join("\n").to_lowercase();
+    let forbidden = [
+        "enter to select",
+        "esc to cancel",
+        "do you want to proceed?",
+        "allow this command?",
+        "allow codex to",
+        "yes, allow",
+        "type here to tell",
+        "(y/n)",
+        "[y/n]",
+    ];
+    if forbidden.iter().any(|marker| tail_text.contains(marker))
+        || has_numbered_selection(&tail)
+        || (tool == "codex" && tail.contains(&"loading"))
+    {
+        return false;
+    }
+
+    // Codex shows this placeholder before account bootstrap finishes. The model
+    // footer appears only after the native task composer is ready.
+    let native_codex_prompt_ready = tail
+        .iter()
+        .rposition(|line| line.starts_with('›'))
+        .and_then(|cursor| {
+            if tail[cursor] != "› Ask Codex to do anything" {
+                return None;
+            }
+            tail.get(cursor + 1)
+                .and_then(|footer| footer.split_once(" · "))
+                .map(|(model, _)| {
+                    [
+                        " default", " low", " medium", " high", " xhigh", " max", " ultra",
+                    ]
+                    .iter()
+                    .any(|effort| model.ends_with(*effort))
+                })
+        })
+        .unwrap_or(false);
+
+    tail.iter().rev().any(|line| match tool {
+        "claude" => line.strip_prefix('❯').is_some_and(|rest| {
+            let rest = rest.trim();
+            rest.is_empty()
+                || (rest.starts_with("Try ") && !rest.ends_with('?'))
+                || rest.starts_with("new task?")
+        }),
+        "codex" => line.strip_prefix('›').is_some_and(|rest| {
+            let rest = rest.trim();
+            rest.is_empty()
+                || rest.starts_with("Implement ")
+                || rest.starts_with("Run /review")
+                || rest.starts_with("Summarize ")
+                || rest.starts_with("Write tests ")
+                || rest.starts_with("Use /skills ")
+                || (rest == "Ask Codex to do anything" && native_codex_prompt_ready)
+        }),
+        _ => false,
+    })
 }
 
 pub fn detect_claude_status(content: &str) -> Status {
@@ -496,6 +587,19 @@ pub fn detect_codex_status(raw_content: &str) -> Status {
         return Status::Waiting;
     }
 
+    // Modern Codex draws a Unicode cursor above its footer. Keep this near the
+    // bottom so quoted prompts in earlier output do not become live requests.
+    for line in non_empty_lines.iter().rev().take(3) {
+        let clean = strip_ansi(line);
+        let prompt = clean.trim();
+        if (prompt == "›" || prompt.starts_with("› "))
+            && !prompt.contains("esc")
+            && prompt.chars().count() < 100
+        {
+            return Status::Waiting;
+        }
+    }
+
     // WAITING: Input prompt ready
     for line in non_empty_lines.iter().rev().take(10) {
         let clean_line = strip_ansi(line).trim().to_string();
@@ -817,6 +921,25 @@ mod tests {
     }
 
     #[test]
+    fn codex_unicode_task_prompt_is_waiting_but_running_still_wins() {
+        let screen = "Work completed.\n› Ask Codex to do anything\ngpt-6-astra high · project · Main [default]";
+        assert_eq!(detect_codex_status(screen), Status::Waiting);
+        assert_eq!(detect_codex_status("done\n›"), Status::Waiting);
+        assert_eq!(
+            detect_codex_status(&format!("esc to interrupt\n{screen}")),
+            Status::Running
+        );
+        assert_eq!(
+            detect_codex_status("│ › Ask Codex to do anything\nquoted output"),
+            Status::Idle
+        );
+        assert_eq!(
+            detect_codex_status("› Old prompt\noutput one\noutput two\noutput three"),
+            Status::Idle
+        );
+    }
+
+    #[test]
     fn test_detect_codex_status_ignores_approval_words_in_output() {
         // Captured from a session auditing a review workflow: the agent's own
         // diff and grep output mention approval, but nothing waits on the
@@ -937,5 +1060,87 @@ mod tests {
     fn test_detect_gemini_status_idle() {
         assert_eq!(detect_gemini_status("file saved"), Status::Idle);
         assert_eq!(detect_gemini_status("random output text"), Status::Idle);
+    }
+
+    #[test]
+    fn codex_native_return_prompt_preserves_loading_and_input_guards() {
+        let startup = ">_ OpenAI Codex (v0.158.0)\n› Ask Codex to do anything";
+        let prompt = format!("{startup}\nGPT-6-Sol default · ~/project");
+        assert!(!wiki_context_prompt_ready(startup, "codex"));
+        assert!(wiki_context_prompt_ready(&prompt, "codex"));
+        assert!(!wiki_context_prompt_ready(
+            &format!("loading\n{prompt}"),
+            "codex"
+        ));
+        assert!(!wiki_context_prompt_ready(
+            &format!("• Working (2s • esc to interrupt)\n{prompt}"),
+            "codex"
+        ));
+        assert!(!wiki_context_prompt_ready(
+            &format!("{prompt}\n› 1. Read Only\n2. Default\nEnter to select"),
+            "codex"
+        ));
+        assert!(!wiki_context_prompt_ready(
+            "› Ask Codex to do anything then execute the pending task",
+            "codex"
+        ));
+        assert!(!wiki_context_prompt_ready(
+            &format!("{startup}\n› /permissions\nGPT-6-Sol default · ~/project"),
+            "codex"
+        ));
+    }
+
+    #[test]
+    fn wiki_context_prompt_ready_accepts_only_ordinary_agent_task_prompts() {
+        assert!(wiki_context_prompt_ready(
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/claude_code/idle/001_welcome_screen.txt"
+            )),
+            "claude"
+        ));
+        assert!(wiki_context_prompt_ready(
+            "Completed work\n\n› Implement {feature}\n\n  gpt-5.6-sol",
+            "codex"
+        ));
+        assert!(wiki_context_prompt_ready(
+            concat!(
+                "Press enter to continue\n",
+                "✨ Update available!\n",
+                "OpenAI Codex (v0.147.0)\n",
+                "permissions: YOLO mode\n",
+                "Tip: New Use /fast to enable our fastest inference\n",
+                "clamping SessionEnd hook timeout to 3s\n",
+                "› Use /skills to list available skills\n",
+                "gpt-5.6-sol xhigh · /tmp/project\n",
+            ),
+            "codex"
+        ));
+        assert!(!wiki_context_prompt_ready(
+            "• Working (2s • esc to interrupt)\n\n› Implement {feature}",
+            "codex"
+        ));
+        assert!(!wiki_context_prompt_ready(
+            "Update available\n› 1. Update now\n  2. Skip\n  3. Skip until next version\nPress enter to continue",
+            "codex"
+        ));
+        assert!(!wiki_context_prompt_ready(
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/codex/waiting_permission/001_command_approval.txt"
+            )),
+            "codex"
+        ));
+        assert!(!wiki_context_prompt_ready(
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/fixtures/claude_code/waiting_permission/001_bash_command.txt"
+            )),
+            "claude"
+        ));
+        assert!(!wiki_context_prompt_ready(
+            "› Implement {feature}",
+            "gemini"
+        ));
     }
 }

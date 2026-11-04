@@ -7,6 +7,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tempfile::tempdir;
 
+#[path = "offdesk_closeout_cli/output_scope.rs"]
+mod output_scope;
+
 fn forager_command(home: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_forager"));
     command.env("HOME", home);
@@ -33,6 +36,81 @@ fn profile_dir(home: &Path) -> PathBuf {
     }
 }
 
+fn write_closeout_record_presentation_fixture(
+    artifact_dir: &Path,
+    closeout_id: &str,
+    task_id: &str,
+    archive_followup: bool,
+) -> Result<Vec<u8>> {
+    fs::create_dir_all(artifact_dir)?;
+    let plan_path = artifact_dir.join("closeout_plan.json");
+    let plan_markdown_path = artifact_dir.join("CLOSEOUT_PLAN.md");
+    let manifest_path = artifact_dir.join("cleanup_manifest.json");
+    let review_packet_path = artifact_dir.join("COMMERCIAL_REVIEW_PACKET.md");
+    let return_package_path = artifact_dir.join("RETURN_PACKAGE.md");
+    let open_decisions = if archive_followup {
+        vec![json!({
+            "kind": "archive_review",
+            "detail": "Review archive retention.",
+            "suggested_command": "forager offdesk closeout-decision"
+        })]
+    } else {
+        Vec::new()
+    };
+    let archive_candidates = usize::from(archive_followup);
+    let plan = json!({
+        "generated_at": Utc::now(),
+        "closeout_id": closeout_id,
+        "summary": {
+            "archive_candidates": archive_candidates,
+            "delete_candidates": 0,
+            "operations_requiring_commercial_review": archive_candidates,
+            "operations_requiring_human_approval": archive_candidates,
+            "missing_artifacts": 0
+        },
+        "tasks": [{
+            "project_key": "presentation-project",
+            "request_id": format!("request-{task_id}"),
+            "task_id": task_id
+        }],
+        "open_decisions": open_decisions,
+        "artifacts": {
+            "closeout_plan_json": plan_path.to_str().expect("utf-8 plan path"),
+            "closeout_plan_markdown": plan_markdown_path
+                .to_str()
+                .expect("utf-8 plan markdown path"),
+            "cleanup_manifest_json": manifest_path.to_str().expect("utf-8 manifest path"),
+            "commercial_review_packet": review_packet_path
+                .to_str()
+                .expect("utf-8 review packet path"),
+            "return_package_markdown": return_package_path
+                .to_str()
+                .expect("utf-8 return package path")
+        }
+    });
+    let plan_bytes = serde_json::to_vec_pretty(&plan)?;
+    fs::write(&plan_path, &plan_bytes)?;
+    fs::write(plan_markdown_path, "# Closeout Plan\n")?;
+    fs::write(manifest_path, "[]\n")?;
+    fs::write(review_packet_path, "# Commercial Review\n")?;
+    fs::write(return_package_path, "# Ondesk Return Package\n")?;
+    Ok(plan_bytes)
+}
+
+fn latest_closeout_review_record(artifact_dir: &Path) -> Result<Value> {
+    let mut paths = fs::read_dir(artifact_dir)?
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("closeout_review_") && name.ends_with(".json"))
+        })
+        .collect::<Vec<_>>();
+    paths.sort();
+    let path = paths.last().expect("closeout review record");
+    Ok(serde_json::from_slice(&fs::read(path)?)?)
+}
+
 fn initialize_git_repo_with_initial_commit(repo_path: &Path, paths: &[&str]) -> Result<()> {
     let repo = git2::Repository::init(repo_path)?;
     let sig = git2::Signature::now("Test", "test@example.com")?;
@@ -44,6 +122,73 @@ fn initialize_git_repo_with_initial_commit(repo_path: &Path, paths: &[&str]) -> 
     let tree_id = index.write_tree()?;
     let tree = repo.find_tree(tree_id)?;
     repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])?;
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn closeout_resolves_relative_task_artifacts_from_task_workdir() -> Result<()> {
+    let temp = tempdir()?;
+    let profile = profile_dir(temp.path());
+    fs::create_dir_all(&profile)?;
+    let workdir = temp.path().join("run");
+    fs::create_dir_all(&workdir)?;
+    fs::write(
+        workdir.join("result.json"),
+        "{\"status\":\"pending_user_review\"}\n",
+    )?;
+    fs::write(workdir.join("runner.log"), "done\n")?;
+    let now = Utc::now();
+    fs::write(
+        profile.join("offdesk_tasks.json"),
+        serde_json::to_vec_pretty(&json!([{
+            "task_id": "relative-task",
+            "request_id": "relative-request",
+            "project_key": "relative-project",
+            "status": "completed",
+            "capability_id": "dispatch.runtime",
+            "runner_kind": "local_tmux",
+            "command": "true",
+            "workdir": workdir,
+            "attempt_count": 1,
+            "created_at": now,
+            "updated_at": now,
+            "log_artifact_path": "runner.log",
+            "result_artifact_path": "result.json"
+        }]))?,
+    )?;
+
+    let output = forager_command(temp.path())
+        .current_dir(temp.path())
+        .args([
+            "offdesk",
+            "closeout",
+            "--project-key",
+            "relative-project",
+            "--task-id",
+            "relative-task",
+            "--dry-run",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(report["summary"]["missing_artifacts"], 0);
+    let operations = report["file_operations"].as_array().expect("operations");
+    for name in ["result.json", "runner.log"] {
+        let expected = workdir.join(name).to_string_lossy().to_string();
+        assert!(operations
+            .iter()
+            .any(|item| item["path"] == expected && item["present"] == true));
+    }
+    assert_eq!(
+        report["tasks"][0]["result_artifact_path"],
+        workdir.join("result.json").to_string_lossy().as_ref()
+    );
     Ok(())
 }
 
@@ -84,6 +229,293 @@ fn offdesk_closeout_output_collision_writes_no_partial_artifacts() -> Result<()>
             "unexpected artifact: {name}"
         );
     }
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_closeout_presentation_redacts_outputs_and_preserves_local_artifacts() -> Result<()> {
+    let temp = tempdir()?;
+    fs::create_dir_all(profile_dir(temp.path()))?;
+    let secret = "sk-secretsecretsecretsecret";
+    let expected_files = [
+        "CLOSEOUT_PLAN.md",
+        "COMMERCIAL_REVIEW_PACKET.md",
+        "RETURN_PACKAGE.md",
+        "cleanup_manifest.json",
+        "closeout_plan.json",
+    ];
+
+    let json_dir = temp.path().join(format!("json-closeout-token={secret}"));
+    let json_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "closeout",
+            "--output",
+            json_dir.to_str().expect("utf-8 JSON output directory"),
+            "--dry-run",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        json_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&json_output.stderr)
+    );
+    let json_stdout = String::from_utf8_lossy(&json_output.stdout);
+    assert!(!json_stdout.contains(secret));
+    assert!(!String::from_utf8_lossy(&json_output.stderr).contains(secret));
+    let presented_report: Value = serde_json::from_slice(&json_output.stdout)?;
+    assert!(presented_report["artifact_dir"]
+        .as_str()
+        .expect("presented artifact directory")
+        .contains("[REDACTED]"));
+    assert!(presented_report["artifacts"]["closeout_plan_json"]
+        .as_str()
+        .expect("presented closeout plan path")
+        .contains("[REDACTED]"));
+
+    let stored_plan_path = json_dir.join("closeout_plan.json");
+    let stored_plan_bytes = fs::read(&stored_plan_path)?;
+    let stored_report: Value = serde_json::from_slice(&stored_plan_bytes)?;
+    assert_eq!(
+        stored_report["artifact_dir"],
+        json_dir.to_str().expect("utf-8 JSON output directory")
+    );
+    assert!(stored_report["artifacts"]["closeout_plan_json"]
+        .as_str()
+        .expect("stored closeout plan path")
+        .contains(secret));
+    let mut json_files = fs::read_dir(&json_dir)?
+        .map(|entry| entry.map(|entry| entry.file_name().to_string_lossy().into_owned()))
+        .collect::<std::io::Result<Vec<_>>>()?;
+    json_files.sort();
+    assert_eq!(json_files, expected_files);
+    assert_eq!(fs::read(&stored_plan_path)?, stored_plan_bytes);
+
+    let human_dir = temp.path().join(format!("human-closeout-token={secret}"));
+    let human_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "closeout",
+            "--output",
+            human_dir.to_str().expect("utf-8 human output directory"),
+            "--dry-run",
+        ])
+        .output()?;
+    assert!(
+        human_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&human_output.stderr)
+    );
+    let human_stdout = String::from_utf8_lossy(&human_output.stdout);
+    assert!(human_stdout.contains("Offdesk closeout plan"));
+    assert!(human_stdout.contains("artifact_dir:"));
+    assert!(human_stdout.contains("[REDACTED]"));
+    assert!(!human_stdout.contains(secret));
+    assert!(!String::from_utf8_lossy(&human_output.stderr).contains(secret));
+
+    let human_stored_report: Value =
+        serde_json::from_slice(&fs::read(human_dir.join("closeout_plan.json"))?)?;
+    assert_eq!(
+        human_stored_report["artifact_dir"],
+        human_dir.to_str().expect("utf-8 human output directory")
+    );
+    let mut human_files = fs::read_dir(&human_dir)?
+        .map(|entry| entry.map(|entry| entry.file_name().to_string_lossy().into_owned()))
+        .collect::<std::io::Result<Vec<_>>>()?;
+    human_files.sort();
+    assert_eq!(human_files, expected_files);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_closeout_record_presentation_redacts_without_moving_record_authority() -> Result<()> {
+    let temp = tempdir()?;
+    fs::create_dir_all(profile_dir(temp.path()))?;
+    let secret = "sk-secretsecretsecretsecret";
+
+    let decision_dir = temp
+        .path()
+        .join(format!("decision-closeout-token={secret}"));
+    let decision_plan_before = write_closeout_record_presentation_fixture(
+        &decision_dir,
+        "closeout-presentation-decision",
+        "task-presentation-decision",
+        true,
+    )?;
+    let review_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "closeout-review",
+            "--artifact-dir",
+            decision_dir
+                .to_str()
+                .expect("utf-8 decision artifact directory"),
+            "--verdict",
+            "approved",
+            "--reviewer",
+            &format!("reviewer-token={secret}"),
+            "--notes",
+            &format!("Review accepted token={secret}"),
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        review_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&review_output.stderr)
+    );
+    let review_stdout = String::from_utf8_lossy(&review_output.stdout);
+    assert!(!review_stdout.contains(secret));
+    let presented_review: Value = serde_json::from_slice(&review_output.stdout)?;
+    assert_eq!(
+        presented_review["closeout_receipt"]["acceptance_status"],
+        "approved_with_followups"
+    );
+    assert_eq!(presented_review["applies_file_operations"], false);
+    assert!(presented_review["artifacts"]["review_record_json"]
+        .as_str()
+        .expect("presented review path")
+        .contains("[REDACTED]"));
+
+    let stored_review = latest_closeout_review_record(&decision_dir)?;
+    assert_eq!(
+        stored_review["closeout_receipt"]["acceptance_status"],
+        "approved_with_followups"
+    );
+    assert!(stored_review["artifacts"]["review_record_json"]
+        .as_str()
+        .expect("stored review path")
+        .contains(secret));
+    assert!(stored_review["reviewer"]
+        .as_str()
+        .expect("stored reviewer")
+        .contains("[REDACTED]"));
+    assert_eq!(
+        fs::read(decision_dir.join("closeout_plan.json"))?,
+        decision_plan_before
+    );
+
+    let decision_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "closeout-decision",
+            "--artifact-dir",
+            decision_dir
+                .to_str()
+                .expect("utf-8 decision artifact directory"),
+            "--kind",
+            "archive_review",
+            "--decision",
+            "preserve-in-place",
+            "--reviewer",
+            &format!("decision-reviewer-token={secret}"),
+            "--reason",
+            &format!("Preserve in place token={secret}"),
+        ])
+        .output()?;
+    assert!(
+        decision_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&decision_output.stderr)
+    );
+    let decision_stdout = String::from_utf8_lossy(&decision_output.stdout);
+    assert!(decision_stdout.contains("Offdesk closeout review"));
+    assert!(decision_stdout.contains("decision:     archive_review"));
+    assert!(decision_stdout.contains("resolution:   preserve_in_place"));
+    assert!(decision_stdout.contains("token=[REDACTED]"));
+    assert!(!decision_stdout.contains(secret));
+    let stored_decision = latest_closeout_review_record(&decision_dir)?;
+    assert_eq!(
+        stored_decision["closeout_receipt"]["acceptance_status"],
+        "approved_with_followups"
+    );
+    assert_eq!(
+        stored_decision["decision_resolution"]["decision"],
+        "preserve_in_place"
+    );
+    assert_eq!(stored_decision["applies_file_operations"], false);
+    assert_eq!(
+        fs::read(decision_dir.join("closeout_plan.json"))?,
+        decision_plan_before
+    );
+
+    let retirement_dir = temp
+        .path()
+        .join(format!("retirement-closeout-token={secret}"));
+    let retirement_plan_before = write_closeout_record_presentation_fixture(
+        &retirement_dir,
+        "closeout-presentation-retirement",
+        "task-presentation-retirement",
+        false,
+    )?;
+    let revision_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "closeout-review",
+            "--artifact-dir",
+            retirement_dir
+                .to_str()
+                .expect("utf-8 retirement artifact directory"),
+            "--verdict",
+            "revise",
+            "--reviewer",
+            "operator",
+            "--notes",
+            "Evidence remains incomplete.",
+            "--json",
+        ])
+        .output()?;
+    assert!(revision_output.status.success());
+
+    let retirement_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "closeout-retire",
+            "--artifact-dir",
+            retirement_dir
+                .to_str()
+                .expect("utf-8 retirement artifact directory"),
+            "--reviewer",
+            &format!("retirement-reviewer-token={secret}"),
+            "--reason",
+            &format!("Retire incomplete evidence token={secret}"),
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        retirement_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&retirement_output.stderr)
+    );
+    let retirement_stdout = String::from_utf8_lossy(&retirement_output.stdout);
+    assert!(!retirement_stdout.contains(secret));
+    let presented_retirement: Value = serde_json::from_slice(&retirement_output.stdout)?;
+    assert_eq!(
+        presented_retirement["closeout_receipt"]["acceptance_status"],
+        "retired_incomplete"
+    );
+    assert_eq!(presented_retirement["applies_file_operations"], false);
+    assert!(presented_retirement["artifacts"]["closeout_receipt_json"]
+        .as_str()
+        .expect("presented retirement receipt path")
+        .contains("[REDACTED]"));
+    let stored_retirement = latest_closeout_review_record(&retirement_dir)?;
+    assert_eq!(
+        stored_retirement["closeout_receipt"]["acceptance_status"],
+        "retired_incomplete"
+    );
+    assert!(stored_retirement["artifacts"]["closeout_receipt_json"]
+        .as_str()
+        .expect("stored retirement receipt path")
+        .contains(secret));
+    assert_eq!(stored_retirement["applies_file_operations"], false);
+    assert_eq!(
+        fs::read(retirement_dir.join("closeout_plan.json"))?,
+        retirement_plan_before
+    );
     Ok(())
 }
 
@@ -900,11 +1332,11 @@ fn offdesk_closeout_decision_resolves_archive_review_without_file_mutation() -> 
     let decision: Value = serde_json::from_slice(&decision_output.stdout)?;
     assert_eq!(
         decision["closeout_receipt"]["acceptance_status"],
-        "accepted"
+        "approved_with_followups"
     );
     assert_eq!(
         decision["closeout_receipt"]["verification_status"],
-        "recorded"
+        "pending"
     );
     assert_eq!(
         decision["closeout_receipt"]["retention_review"],
@@ -930,7 +1362,7 @@ fn offdesk_closeout_decision_resolves_archive_review_without_file_mutation() -> 
             .expect("return package path"),
     );
     let return_package = fs::read_to_string(return_package_path)?;
-    assert!(return_package.contains("acceptance_status: `accepted`"));
+    assert!(return_package.contains("acceptance_status: `approved_with_followups`"));
 
     let status_output = forager_command(temp.path())
         .args(["status", "--json"])
@@ -941,8 +1373,8 @@ fn offdesk_closeout_decision_resolves_archive_review_without_file_mutation() -> 
         String::from_utf8_lossy(&status_output.stderr)
     );
     let status: Value = serde_json::from_slice(&status_output.stdout)?;
-    assert_eq!(status["closeout_state"]["accepted"], 1);
-    assert_eq!(status["closeout_state"]["approved_with_followups"], 0);
+    assert_eq!(status["closeout_state"]["accepted"], 0);
+    assert_eq!(status["closeout_state"]["approved_with_followups"], 1);
     Ok(())
 }
 

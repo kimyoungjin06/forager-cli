@@ -1,17 +1,92 @@
-//! Offdesk scheduler-gate and background-launch presentation.
+//! Offdesk scheduler-gate, background-launch, and tick presentation.
 //!
 //! Command handlers retain scheduler evaluation, approval creation, background
-//! launch execution, persistence, and adaptive-wiki usage recording. This
-//! module only renders completed gate and launch outcomes.
+//! launch execution, tick locking and polling, persistence, and adaptive-wiki
+//! usage and learning recording. This module only renders completed outcomes.
 
 use anyhow::Result;
 
+use super::task_lifecycle_presentation::present_next_safe_actions;
 use super::{
     adaptive_wiki_agent_mode_cli_value, adaptive_wiki_agent_modes_label, operator_safe_json_value,
 };
 use crate::offdesk::{
-    operator_safe_text, BackgroundLaunchOutcome, SchedulerGateOutcome, SchedulerGateStatus,
+    operator_safe_text, BackgroundLaunchOutcome, OffdeskTickReport, SchedulerGateOutcome,
+    SchedulerGateStatus,
 };
+
+pub(super) fn present_tick_report(report: &OffdeskTickReport, json: bool) -> Result<()> {
+    if json {
+        present_operator_safe_json(report)?;
+        return Ok(());
+    }
+
+    println!(
+        "Tick: {} launched, {} pending approval, {} completed, {} resume pending, {} failed",
+        report.launched,
+        report.pending_approval,
+        report.completed,
+        report.resume_pending,
+        report.failed
+    );
+    if let Some(shift) = report.bounded_shift.as_ref() {
+        println!(
+            "  bounded shift: {} {:?}, {} bound tasks, {} held",
+            operator_safe_text(&shift.shift_id),
+            shift.status,
+            shift.bound_tasks,
+            shift.held
+        );
+        if !shift.hold_reasons.is_empty() {
+            let reasons = shift
+                .hold_reasons
+                .iter()
+                .map(|reason| operator_safe_text(reason))
+                .collect::<Vec<_>>();
+            println!("  shift holds: {}", reasons.join(", "));
+        }
+    }
+    if report.dispatch_paused {
+        println!("  dispatch paused: {} held", report.held);
+        if let Some(reason) = report.pause_reason.as_deref() {
+            println!("  pause reason: {}", operator_safe_text(reason));
+        }
+    }
+    if report.expired_approvals > 0 {
+        println!("  expired approvals: {}", report.expired_approvals);
+    }
+    if report.polled_background > 0 {
+        println!("  background polled: {}", report.polled_background);
+    }
+    if report.provider_deferred > 0 {
+        println!("  provider deferred: {}", report.provider_deferred);
+    }
+    if report.provider_retargeted > 0 {
+        println!("  provider retargeted: {}", report.provider_retargeted);
+    }
+    if report.skipped > 0 {
+        println!("  skipped by limit: {}", report.skipped);
+    }
+    if report.stale_lock_replaced {
+        println!("  stale tick lock metadata replaced");
+    }
+    if report.learning_signals_emitted > 0 {
+        println!(
+            "  learning signals emitted: {}",
+            report.learning_signals_emitted
+        );
+    }
+    if !report.updated_task_ids.is_empty() {
+        let task_ids = report
+            .updated_task_ids
+            .iter()
+            .map(|task_id| operator_safe_text(task_id))
+            .collect::<Vec<_>>();
+        println!("  updated tasks: {}", task_ids.join(", "));
+    }
+    present_next_safe_actions(&report.next_safe_actions);
+    Ok(())
+}
 
 pub(super) fn present_scheduler_gate_outcome(
     outcome: &SchedulerGateOutcome,

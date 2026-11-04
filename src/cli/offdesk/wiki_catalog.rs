@@ -8,11 +8,12 @@ use clap::Args;
 use serde::Serialize;
 
 use super::{
-    adaptive_wiki_agent_modes_label, parse_adaptive_wiki_agent_mode, wiki_query, wiki_scope_label,
-    wiki_store,
+    adaptive_wiki_agent_modes_label, operator_safe_json_value, parse_adaptive_wiki_agent_mode,
+    wiki_query, wiki_scope_label, wiki_store,
 };
 use crate::offdesk::{
-    AdaptiveWikiAgentMode, AdaptiveWikiHumanCandidate, AdaptiveWikiHumanEntry, AdaptiveWikiQuery,
+    operator_safe_identity_selector, operator_safe_text, AdaptiveWikiAgentMode,
+    AdaptiveWikiHumanCandidate, AdaptiveWikiHumanEntry, AdaptiveWikiQuery,
 };
 
 #[derive(Args)]
@@ -68,7 +69,7 @@ pub(super) async fn wiki_candidates(profile: &str, args: WikiListArgs) -> Result
     ))?;
 
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&projection.candidates)?);
+        present_operator_safe_json(&projection.candidates)?;
         return Ok(());
     }
 
@@ -90,7 +91,7 @@ pub(super) async fn wiki_entries(profile: &str, args: WikiListArgs) -> Result<()
     ))?;
 
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&projection.entries)?);
+        present_operator_safe_json(&projection.entries)?;
         return Ok(());
     }
 
@@ -105,25 +106,29 @@ pub(super) async fn wiki_entries(profile: &str, args: WikiListArgs) -> Result<()
 
 pub(super) async fn wiki_show(profile: &str, args: WikiShowArgs) -> Result<()> {
     let projection = wiki_store(profile)?.human_projection(&AdaptiveWikiQuery::default())?;
+    let selector = operator_safe_identity_selector(&args.id);
     let result = projection
         .entries
         .into_iter()
-        .find(|entry| entry.id == args.id)
+        .find(|entry| entry.id == selector)
         .map(|entry| WikiShowResult::Entry { entry })
         .or_else(|| {
             projection
                 .candidates
                 .into_iter()
-                .find(|candidate| candidate.id == args.id)
+                .find(|candidate| candidate.id == selector)
                 .map(|candidate| WikiShowResult::Candidate { candidate })
         });
 
     let Some(result) = result else {
-        bail!("Adaptive wiki entry or candidate not found: {}", args.id);
+        bail!(
+            "Adaptive wiki entry or candidate not found: {}",
+            operator_safe_text(&args.id)
+        );
     };
 
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&result)?);
+        present_operator_safe_json(&result)?;
         return Ok(());
     }
 
@@ -139,27 +144,33 @@ fn print_wiki_entries(entries: &[AdaptiveWikiHumanEntry]) {
     for entry in entries {
         println!(
             "{:<44} {:<12} {:<14} {:<16} {:<18} {}",
-            entry.id,
+            operator_safe_text(&entry.id),
             format!("{:?}", entry.status).to_lowercase(),
-            wiki_scope_label(entry.scope, &entry.scope_ref),
+            operator_safe_text(&wiki_scope_label(entry.scope, &entry.scope_ref)),
             format!("{:?}", entry.activation_mode).to_lowercase(),
             adaptive_wiki_agent_modes_label(&entry.agent_modes),
-            entry.claim
+            operator_safe_text(&entry.claim)
         );
         if !entry.human_summary.trim().is_empty() {
-            println!("  summary: {}", entry.human_summary);
+            println!("  summary: {}", operator_safe_text(&entry.human_summary));
         }
         if !entry.evidence_refs.is_empty() {
-            println!("  evidence: {}", entry.evidence_refs.join(", "));
+            println!("  evidence: {}", operator_safe_list(&entry.evidence_refs));
         }
         if !entry.support_refs.is_empty() {
-            println!("  support: {}", entry.support_refs.join(", "));
+            println!("  support: {}", operator_safe_list(&entry.support_refs));
         }
         if !entry.capability_ids.is_empty() {
-            println!("  capabilities: {}", entry.capability_ids.join(", "));
+            println!(
+                "  capabilities: {}",
+                operator_safe_list(&entry.capability_ids)
+            );
         }
         if !entry.required_artifact_kinds.is_empty() {
-            println!("  artifacts: {}", entry.required_artifact_kinds.join(", "));
+            println!(
+                "  artifacts: {}",
+                operator_safe_list(&entry.required_artifact_kinds)
+            );
         }
     }
 }
@@ -172,20 +183,23 @@ fn print_wiki_candidates(candidates: &[AdaptiveWikiHumanCandidate]) {
     for candidate in candidates {
         println!(
             "{:<44} {:<14} {:<18} {:<18} {:<8} {}",
-            candidate.id,
-            wiki_scope_label(candidate.scope, &candidate.scope_ref),
+            operator_safe_text(&candidate.id),
+            operator_safe_text(&wiki_scope_label(candidate.scope, &candidate.scope_ref)),
             format!("{:?}", candidate.signal_kind).to_lowercase(),
             adaptive_wiki_agent_modes_label(&candidate.agent_modes),
             candidate.occurrence_count,
-            candidate.claim
+            operator_safe_text(&candidate.claim)
         );
         if !candidate.review_reason.trim().is_empty() {
-            println!("  review: {}", candidate.review_reason);
+            println!("  review: {}", operator_safe_text(&candidate.review_reason));
         }
         if !candidate.source_refs.is_empty() {
-            println!("  sources: {}", candidate.source_refs.join(", "));
+            println!("  sources: {}", operator_safe_list(&candidate.source_refs));
         } else if !candidate.evidence_refs.is_empty() {
-            println!("  evidence: {}", candidate.evidence_refs.join(", "));
+            println!(
+                "  evidence: {}",
+                operator_safe_list(&candidate.evidence_refs)
+            );
         }
     }
 }
@@ -193,12 +207,12 @@ fn print_wiki_candidates(candidates: &[AdaptiveWikiHumanCandidate]) {
 fn print_wiki_show(result: &WikiShowResult) {
     match result {
         WikiShowResult::Entry { entry } => {
-            println!("Adaptive wiki entry {}", entry.id);
+            println!("Adaptive wiki entry {}", operator_safe_text(&entry.id));
             println!("  status:     {:?}", entry.status);
             println!("  kind:       {:?}", entry.kind);
             println!(
                 "  scope:      {}",
-                wiki_scope_label(entry.scope, &entry.scope_ref)
+                operator_safe_text(&wiki_scope_label(entry.scope, &entry.scope_ref))
             );
             println!("  activation: {:?}", entry.activation_mode);
             println!(
@@ -206,29 +220,38 @@ fn print_wiki_show(result: &WikiShowResult) {
                 adaptive_wiki_agent_modes_label(&entry.agent_modes)
             );
             println!("  confidence: {:?}", entry.confidence);
-            println!("  claim:      {}", entry.claim);
+            println!("  claim:      {}", operator_safe_text(&entry.claim));
             if !entry.human_summary.trim().is_empty() {
-                println!("  summary:    {}", entry.human_summary);
+                println!("  summary:    {}", operator_safe_text(&entry.human_summary));
             }
             if !entry.evidence_refs.is_empty() {
-                println!("  evidence:   {}", entry.evidence_refs.join(", "));
+                println!("  evidence:   {}", operator_safe_list(&entry.evidence_refs));
             }
             if !entry.support_refs.is_empty() {
-                println!("  support:    {}", entry.support_refs.join(", "));
+                println!("  support:    {}", operator_safe_list(&entry.support_refs));
             }
             if !entry.capability_ids.is_empty() {
-                println!("  capabilities: {}", entry.capability_ids.join(", "));
+                println!(
+                    "  capabilities: {}",
+                    operator_safe_list(&entry.capability_ids)
+                );
             }
             if !entry.required_artifact_kinds.is_empty() {
-                println!("  artifacts:  {}", entry.required_artifact_kinds.join(", "));
+                println!(
+                    "  artifacts:  {}",
+                    operator_safe_list(&entry.required_artifact_kinds)
+                );
             }
         }
         WikiShowResult::Candidate { candidate } => {
-            println!("Adaptive wiki candidate {}", candidate.id);
+            println!(
+                "Adaptive wiki candidate {}",
+                operator_safe_text(&candidate.id)
+            );
             println!("  kind:       {:?}", candidate.kind);
             println!(
                 "  scope:      {}",
-                wiki_scope_label(candidate.scope, &candidate.scope_ref)
+                operator_safe_text(&wiki_scope_label(candidate.scope, &candidate.scope_ref))
             );
             println!("  signal:     {:?}", candidate.signal_kind);
             println!("  origin:     {:?}", candidate.origin);
@@ -238,16 +261,39 @@ fn print_wiki_show(result: &WikiShowResult) {
             );
             println!("  hits:       {}", candidate.occurrence_count);
             println!("  confidence: {:?}", candidate.confidence);
-            println!("  claim:      {}", candidate.claim);
+            println!("  claim:      {}", operator_safe_text(&candidate.claim));
             if !candidate.human_summary.trim().is_empty() {
-                println!("  summary:    {}", candidate.human_summary);
+                println!(
+                    "  summary:    {}",
+                    operator_safe_text(&candidate.human_summary)
+                );
             }
             if !candidate.review_reason.trim().is_empty() {
-                println!("  review:     {}", candidate.review_reason);
+                println!(
+                    "  review:     {}",
+                    operator_safe_text(&candidate.review_reason)
+                );
             }
             if !candidate.source_refs.is_empty() {
-                println!("  sources:    {}", candidate.source_refs.join(", "));
+                println!(
+                    "  sources:    {}",
+                    operator_safe_list(&candidate.source_refs)
+                );
             }
         }
     }
+}
+
+fn present_operator_safe_json(value: &impl Serialize) -> Result<()> {
+    let value = operator_safe_json_value(serde_json::to_value(value)?);
+    println!("{}", serde_json::to_string_pretty(&value)?);
+    Ok(())
+}
+
+fn operator_safe_list(values: &[String]) -> String {
+    values
+        .iter()
+        .map(|value| operator_safe_text(value))
+        .collect::<Vec<_>>()
+        .join(", ")
 }

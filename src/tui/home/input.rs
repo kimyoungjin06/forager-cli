@@ -1,6 +1,6 @@
 //! Input handling for HomeView
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use tui_input::backend::crossterm::EventHandler;
 use tui_input::Input;
 
@@ -39,6 +39,20 @@ impl HomeView {
                     }
                 }
             }
+        }
+
+        if let Some(ref mut morning) = self.morning_view {
+            if morning.handle_key(key) {
+                self.morning_view = None;
+            }
+            return None;
+        }
+
+        if let Some(ref mut night) = self.night_view {
+            if night.handle_key(key) {
+                self.night_view = None;
+            }
+            return None;
         }
 
         // Handle attention view (full-screen takeover)
@@ -353,7 +367,7 @@ impl HomeView {
                 KeyCode::Esc => {
                     self.search_active = false;
                     self.search_query = Input::default();
-                    self.filtered_items = None;
+                    self.clear_search_filter();
                 }
                 KeyCode::Enter => {
                     self.search_active = false;
@@ -443,6 +457,12 @@ impl HomeView {
                 self.projects_view = Some(crate::tui::home::projects::ProjectsView::new(
                     &self.instances,
                 ));
+            }
+            KeyCode::Char('N') => {
+                self.night_view = Some(super::night::NightView::new(self.storage.profile()));
+            }
+            KeyCode::Char('M') => {
+                self.morning_view = Some(super::morning::MorningView::new(self.storage.profile()));
             }
             KeyCode::Char('s') => {
                 // Open settings view with selected session's project path (if any)
@@ -601,6 +621,7 @@ impl HomeView {
                 self.update_selected();
             }
             KeyCode::Enter => {
+                self.update_selected();
                 if let Some(id) = &self.selected_session {
                     if let Some(inst) = self.instance_map.get(id) {
                         if inst.status == Status::Deleting {
@@ -611,8 +632,7 @@ impl HomeView {
                         ViewMode::Agent => Some(Action::AttachSession(id.clone())),
                         ViewMode::Terminal => Some(Action::AttachTerminal(id.clone())),
                     };
-                } else if let Some(Item::Group { path, .. }) = self.flat_items.get(self.cursor) {
-                    let path = path.clone();
+                } else if let Some(path) = self.selected_group.clone() {
                     self.toggle_group_collapsed(&path);
                 }
             }
@@ -694,7 +714,7 @@ impl HomeView {
             ViewMode::Terminal => Some(Action::AttachTerminal(session_id.to_string())),
         };
 
-        self.select_session_by_id_in_current_view(session_id);
+        self.select_session_by_id(session_id);
         action
     }
 
@@ -720,6 +740,8 @@ impl HomeView {
     }
 
     pub(super) fn update_selected(&mut self) {
+        self.selected_session = None;
+        self.selected_group = None;
         let item_idx = if let Some(ref filtered) = self.filtered_items {
             filtered.get(self.cursor).copied()
         } else {
@@ -755,7 +777,7 @@ impl HomeView {
 
     pub(super) fn update_filter(&mut self) {
         if self.search_query.value().is_empty() {
-            self.filtered_items = None;
+            self.clear_search_filter();
             return;
         }
 
@@ -785,6 +807,17 @@ impl HomeView {
         self.filtered_items = Some(matches);
         self.cursor = 0;
         self.update_selected();
+    }
+
+    fn clear_search_filter(&mut self) {
+        let selected = self.selected_session.clone();
+        self.filtered_items = None;
+        self.cursor = self.cursor.min(self.flat_items.len().saturating_sub(1));
+        if let Some(id) = selected {
+            self.select_session_by_id(&id);
+        } else {
+            self.update_selected();
+        }
     }
 
     /// Create a session with optional hooks. Delegates to the background
@@ -859,7 +892,55 @@ impl HomeView {
             }
         }
 
-        // No mouse handling for other views currently
+        if self.settings_view.is_some()
+            || self.attention_view.is_some()
+            || self.projects_view.is_some()
+            || self.night_view.is_some()
+            || self.morning_view.is_some()
+            || self.show_help
+            || self.search_active
+            || self.new_dialog.is_some()
+            || self.confirm_dialog.is_some()
+            || self.unified_delete_dialog.is_some()
+            || self.group_delete_options_dialog.is_some()
+            || self.rename_dialog.is_some()
+            || self.hook_trust_dialog.is_some()
+            || self.welcome_dialog.is_some()
+            || self.changelog_dialog.is_some()
+            || self.info_dialog.is_some()
+        {
+            return None;
+        }
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+            if let Some((_, id)) = self.session_tab_areas.iter().find(|(area, _)| {
+                mouse.column >= area.x
+                    && mouse.column < area.x.saturating_add(area.width)
+                    && mouse.row >= area.y
+                    && mouse.row < area.y.saturating_add(area.height)
+            }) {
+                let id = id.clone();
+                return self.attach_session_by_shortcut_id(&id);
+            }
+        }
+        let area = self.list_area;
+        if mouse.column < area.x
+            || mouse.column >= area.x.saturating_add(area.width)
+            || mouse.row < area.y
+            || mouse.row >= area.y.saturating_add(area.height)
+        {
+            return None;
+        }
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+            let index = self.list_state.offset() + usize::from(mouse.row - area.y);
+            let count = self
+                .filtered_items
+                .as_ref()
+                .map_or(self.flat_items.len(), Vec::len);
+            if index < count {
+                self.cursor = index;
+                self.update_selected();
+            }
+        }
         None
     }
 

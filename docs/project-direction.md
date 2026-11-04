@@ -243,6 +243,37 @@ The north star is being met when these internal criteria are true:
 
 ## Near-Term Focus
 
+### Maintenance sequence after the 2026-11-04 core checkpoint
+
+The published source checkpoint preserves the qualified core snapshot. It is
+based on `8172701`; the newer remote-session policy commit `2c8a01f` needs a
+separate integration review. Publishing this branch does not merge it into
+`main`, issue a new version, or qualify additional executors.
+
+The task IDs below belong to the existing operator-owned continuity plan.
+This section explains their product outcomes; it is not a second execution
+queue. New work stays Ondesk until its exact selection is approved for Offdesk.
+
+| Order | Owning task | Outcome and completion evidence | Planning range |
+| --- | --- | --- | --- |
+| 1 | QA.1 | Integration fixtures use private HOME/XDG directories and tmux sockets. Success, failure, and interrupted cleanup leave the host profile and unrelated sessions unchanged. | 60 to 120 minutes |
+| 2 | Release.2 | Reconcile the source checkpoint with the newer remote-session policy commit. Keep a reviewed diff, run the affected policy and core regressions, and expose an exact build identity in local diagnostics. | 60 to 120 minutes |
+| 3 | Release.3 | Make frontend replacement repeatable while retaining agent identities. A cooperative startup gate, final old-reader inventory, terminal restoration, and state-compatible rollback decisions cover a reopen during the backup/selector window. | 60 to 120 minutes |
+| 4 | Ops.1 | Separate service health from project review holds. New uncertain-delivery records include time, event kind, safe identity, and attempt outcome; existing digest-only holds retain their unknown status. | 30 to 90 minutes |
+| 5 | C5.1a | Independently qualify actual local-model edits, checks, and recovery across a real context transition using the explicitly selected adapter and budget. | Estimate after adapter and scope selection |
+| 6 | C6.3-local | After C5.1a acceptance, qualify the local adapter through the complete two-project selection, execution, return, and TODO agreement cycle. | Estimate after qualification |
+
+QA.1 is the first implementation package. Each range includes verification and
+closeout; stop when the outcome is complete. Release.2 includes a read-only
+mapping of the older aggregate night task to existing evidence, so completed
+subwork is not repeated or silently accepted. Release.3's cooperative gate
+does not claim to prevent arbitrary direct execution of an old binary.
+
+The final two items remain qualification work. The accepted core executor flow
+does not establish arbitrary local-model coding, context recovery, or scientific
+acceptance. Plan preparation does not authorize a new model call, deployment,
+event replay, or modification of another project's accepted records.
+
 The current implementation should prioritize:
 
 - Offdesk closeout and review closure;

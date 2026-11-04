@@ -1,6 +1,6 @@
 //! One-shot offdesk control loop.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{DateTime, Duration, Utc};
 use serde::Serialize;
 use serde_json::Value;
@@ -25,6 +25,10 @@ use super::runner::{
 use super::scheduler::{
     is_provider_capacity_block, SchedulerGate, SchedulerGateRequest, SchedulerGateStatus,
 };
+use super::shift_runtime::{
+    OffdeskShiftBackgroundObservationScope, OffdeskShiftLaunchDecision, OffdeskShiftTickAuthority,
+    OffdeskShiftTickView,
+};
 use super::task_queue::{
     count_tasks, status_next_safe_actions_from_summary, tick_next_safe_actions_from_report,
     OffdeskCloseoutStateSummary, OffdeskNextSafeAction, OffdeskStatusNextSafeActionInput,
@@ -32,8 +36,8 @@ use super::task_queue::{
 };
 use super::tick_lock::OffdeskTickLockGuard;
 use super::{
-    recommend_provider_fallback, ProviderCapacityStore, ProviderFallbackCandidate,
-    ProviderFallbackRecommendation,
+    recommend_provider_fallback, OffdeskShiftTaskLaunchReservationV1, ProviderCapacityStore,
+    ProviderFallbackCandidate, ProviderFallbackRecommendation,
 };
 
 const PROVIDER_FALLBACK_ACTION: &str = "dispatch.provider_fallback";
@@ -88,6 +92,8 @@ pub struct OffdeskTickReport {
     #[serde(default)]
     pub learning_signals_emitted: usize,
     pub updated_task_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bounded_shift: Option<OffdeskShiftTickView>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub next_safe_actions: Vec<OffdeskNextSafeAction>,
 }
@@ -99,6 +105,7 @@ pub struct OffdeskStatusSummary {
     pub background_active: usize,
     pub background_stale: usize,
     pub background_failed: usize,
+    pub background_failed_history: usize,
     pub closeout_required: usize,
     pub closeout_state: OffdeskCloseoutStateSummary,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -108,6 +115,14 @@ pub struct OffdeskStatusSummary {
 pub fn run_offdesk_tick(
     profile_dir: impl AsRef<Path>,
     options: OffdeskTickOptions,
+) -> Result<OffdeskTickReport> {
+    run_offdesk_tick_with_shift(profile_dir, options, None)
+}
+
+pub(crate) fn run_offdesk_tick_with_shift(
+    profile_dir: impl AsRef<Path>,
+    options: OffdeskTickOptions,
+    mut shift_authority: Option<&mut OffdeskShiftTickAuthority>,
 ) -> Result<OffdeskTickReport> {
     let profile_dir = profile_dir.as_ref();
     let tick_lock =
@@ -125,8 +140,16 @@ pub fn run_offdesk_tick(
     .with_adaptive_wiki(adaptive_wiki_store.clone());
     let (mut approval_session, expired) = approval_ledger.begin_session(options.now)?;
     let mut tasks = task_store.load()?;
-    let scoped_ticket_id = task_scoped_background_ticket_id(&tasks, &options);
-    let background_outcomes = match scoped_ticket_id {
+    let scoped_ticket_id =
+        task_scoped_background_ticket_id(&tasks, &options, shift_authority.as_deref());
+    let background_observation_scope = match &scoped_ticket_id {
+        ScopedBackgroundTicket::All => OffdeskShiftBackgroundObservationScope::Complete,
+        ScopedBackgroundTicket::One(ticket_id) => {
+            OffdeskShiftBackgroundObservationScope::ExactTicket(ticket_id.clone())
+        }
+        ScopedBackgroundTicket::None => OffdeskShiftBackgroundObservationScope::None,
+    };
+    let background_outcomes = match &scoped_ticket_id {
         ScopedBackgroundTicket::All => poll_background_runs(
             &background_store,
             None,
@@ -135,7 +158,7 @@ pub fn run_offdesk_tick(
         )?,
         ScopedBackgroundTicket::One(ticket_id) => poll_background_runs(
             &background_store,
-            Some(&ticket_id),
+            Some(ticket_id),
             options.now,
             options.notification_cooldown,
         )?,
@@ -146,8 +169,8 @@ pub fn run_offdesk_tick(
         .map(|outcome| (outcome.probe.ticket_id.clone(), outcome))
         .collect::<HashMap<_, _>>();
 
-    let operator_pause =
-        crate::offdesk::operator_pause::OperatorPauseStore::new(profile_dir).load()?;
+    let pause_store = crate::offdesk::operator_pause::OperatorPauseStore::new(profile_dir);
+    let operator_pause = pause_store.load()?;
 
     let mut report = OffdeskTickReport {
         expired_approvals: expired.len(),
@@ -157,10 +180,27 @@ pub fn run_offdesk_tick(
         pause_reason: operator_pause.reason.clone(),
         ..OffdeskTickReport::default()
     };
+    let mut shift_tick = ShiftTickAccumulator::default();
+    if let Some(authority) = shift_authority.as_deref_mut() {
+        authority.begin_tick(options.now)?;
+        authority.reconcile_task_background(
+            &background_outcomes,
+            &background_observation_scope,
+            options.now,
+        )?;
+        if let Some(reason) = authority.current_hold_reason(options.now)? {
+            shift_tick.note_reason(reason);
+        }
+    }
 
     for task in tasks.iter_mut() {
         if !task_matches_tick_filter(task, &options) {
             continue;
+        }
+        if let Some(authority) = shift_authority.as_deref() {
+            if authority.reconcile_task_record(task, options.now)? {
+                report.updated_task_ids.push(task.task_id.clone());
+            }
         }
         apply_background_outcome(
             task,
@@ -181,7 +221,8 @@ pub fn run_offdesk_tick(
     )?;
 
     let mut dispatched = 0usize;
-    for task in tasks.iter_mut() {
+    for task_index in 0..tasks.len() {
+        let task = &tasks[task_index];
         if !task_matches_tick_filter(task, &options) {
             continue;
         }
@@ -204,16 +245,31 @@ pub fn run_offdesk_tick(
             continue;
         }
 
+        let current_pause =
+            crate::offdesk::operator_pause::OperatorPauseStore::new(profile_dir).load()?;
+        if current_pause.paused {
+            report.dispatch_paused = true;
+            report.pause_reason = current_pause.reason;
+            report.held += 1;
+            continue;
+        }
+
+        let task_snapshot = tasks.clone();
+        let task = &mut tasks[task_index];
         let before = task.status;
-        if let Err(error) = dispatch_task(
-            task,
-            &gate,
-            &mut approval_session,
-            &background_store,
-            &adaptive_wiki_store,
-            options.now,
-            &mut report,
-        ) {
+        let mut context = DispatchTaskContext {
+            gate: &gate,
+            approvals: &mut approval_session,
+            background_store: &background_store,
+            adaptive_wiki_store: &adaptive_wiki_store,
+            pause_store: &pause_store,
+            now: options.now,
+            report: &mut report,
+            shift_authority: shift_authority.as_deref_mut(),
+            task_snapshot: &task_snapshot,
+            shift_tick: &mut shift_tick,
+        };
+        if let Err(error) = dispatch_task(task, &mut context) {
             approval_session.flush()?;
             return Err(error);
         }
@@ -224,7 +280,13 @@ pub fn run_offdesk_tick(
 
     approval_session.flush()?;
     refresh_tick_next_safe_actions(&mut report);
-    task_store.save(&tasks)?;
+    task_store.save_locked(&tasks, &tick_lock)?;
+    if let Some(authority) = shift_authority {
+        for task_id in &shift_tick.launched_task_ids {
+            authority.after_task_store_save(task_id)?;
+        }
+        report.bounded_shift = Some(authority.view(shift_tick.held, shift_tick.hold_reasons)?);
+    }
 
     // Event-driven learning: translate this tick's observed denials, failures,
     // and resume-recovery rows into adaptive-wiki candidates (recommendation-only;
@@ -237,6 +299,26 @@ pub fn run_offdesk_tick(
     }
 
     Ok(report)
+}
+
+#[derive(Default)]
+struct ShiftTickAccumulator {
+    held: usize,
+    hold_reasons: Vec<String>,
+    launched_task_ids: Vec<String>,
+}
+
+impl ShiftTickAccumulator {
+    fn hold(&mut self, reason: String) {
+        self.held += 1;
+        self.note_reason(reason);
+    }
+
+    fn note_reason(&mut self, reason: String) {
+        if !self.hold_reasons.contains(&reason) {
+            self.hold_reasons.push(reason);
+        }
+    }
 }
 
 enum ScopedBackgroundTicket {
@@ -262,6 +344,7 @@ fn task_matches_tick_filter(task: &OffdeskTask, options: &OffdeskTickOptions) ->
 fn task_scoped_background_ticket_id(
     tasks: &[OffdeskTask],
     options: &OffdeskTickOptions,
+    shift_authority: Option<&OffdeskShiftTickAuthority>,
 ) -> ScopedBackgroundTicket {
     if options.project_key.is_none() && options.task_id.is_none() {
         return ScopedBackgroundTicket::All;
@@ -272,7 +355,12 @@ fn task_scoped_background_ticket_id(
     tasks
         .iter()
         .find(|task| task.task_id == task_id && task_matches_tick_filter(task, options))
-        .and_then(|task| task.background_ticket_id.clone())
+        .and_then(|task| {
+            task.background_ticket_id.clone().or_else(|| {
+                shift_authority
+                    .and_then(|authority| authority.expected_background_ticket_for_task(task_id))
+            })
+        })
         .map(ScopedBackgroundTicket::One)
         .unwrap_or(ScopedBackgroundTicket::None)
 }
@@ -283,6 +371,7 @@ pub fn reconcile_tasks_with_background_outcomes(
     now: DateTime<Utc>,
 ) -> Result<OffdeskTickReport> {
     let profile_dir = profile_dir.as_ref();
+    let tick_lock = OffdeskTickLockGuard::acquire(profile_dir, now, Duration::minutes(30))?;
     let task_store = OffdeskTaskStore::new(profile_dir);
     let resume_store = TaskResumeStore::new(profile_dir);
     let background_by_ticket = outcomes
@@ -300,7 +389,7 @@ pub fn reconcile_tasks_with_background_outcomes(
     }
     refresh_tick_next_safe_actions(&mut report);
     if !report.updated_task_ids.is_empty() {
-        task_store.save(&tasks)?;
+        task_store.save_locked(&tasks, &tick_lock)?;
     }
     Ok(report)
 }
@@ -341,15 +430,34 @@ pub fn load_offdesk_status_summary(
         ..OffdeskStatusSummary::default()
     };
 
-    for probe in backgrounds {
+    let retirements =
+        super::failure_history::RetirementIndex::load(profile_dir).unwrap_or_default();
+    for probe in &backgrounds {
         match probe.phase {
-            BackgroundRunnerPhase::Failed => summary.background_failed += 1,
+            BackgroundRunnerPhase::Failed => {
+                let matching: Vec<_> = tasks
+                    .iter()
+                    .filter(|task| {
+                        task.background_ticket_id.as_deref() == Some(probe.ticket_id.as_str())
+                    })
+                    .collect();
+                if matching.len() == 1
+                    && retirements
+                        .closed(profile_dir, matching[0], &backgrounds, now)
+                        .is_some()
+                {
+                    summary.background_failed_history += 1;
+                } else {
+                    summary.background_failed += 1;
+                }
+            }
             BackgroundRunnerPhase::StaleNoAck
             | BackgroundRunnerPhase::StaleLostCallback
             | BackgroundRunnerPhase::Reconstructable => summary.background_stale += 1,
             BackgroundRunnerPhase::Completed
             | BackgroundRunnerPhase::ResultReceived
-            | BackgroundRunnerPhase::RecoveryAcknowledged => {}
+            | BackgroundRunnerPhase::RecoveryAcknowledged
+            | BackgroundRunnerPhase::Terminated => {}
             BackgroundRunnerPhase::Launched
             | BackgroundRunnerPhase::HandoffEmitted
             | BackgroundRunnerPhase::PickupAcknowledged => summary.background_active += 1,
@@ -369,7 +477,7 @@ pub fn load_offdesk_status_summary(
     Ok(summary)
 }
 
-fn summarize_closeout_state(
+pub(crate) fn summarize_closeout_state(
     profile_dir: &Path,
     tasks: &[OffdeskTask],
 ) -> OffdeskCloseoutStateSummary {
@@ -383,9 +491,42 @@ fn summarize_closeout_state(
     {
         let key = (task.project_key.clone(), task.task_id.clone());
         let closeout_generated_at = closeouts.get(&key).copied();
-        let review = reviews.get(&key);
+        let review = reviews
+            .get(&key)
+            .filter(|review| review.request_id == task.request_id);
+        if closeout_generated_at.is_none()
+            && review.is_none()
+            && task.review_links.last().is_some_and(|link| {
+                link.preview.result_validity == "invalid_result"
+                    && link
+                        .preview
+                        .assessment
+                        .as_ref()
+                        .is_some_and(|assessment| assessment.successor.is_some())
+                    && super::workflow::review_link::validate_record(profile_dir, task, link)
+                        .is_ok()
+            })
+        {
+            summary.historical_invalid += 1;
+            continue;
+        }
         if let Some(review) = review.filter(|review| review.reviewed_at > task.updated_at) {
-            apply_closeout_review_snapshot(&mut summary, review);
+            if super::workflow::review_link::reviewed_accepted_receipt(
+                profile_dir,
+                tasks,
+                &review.record,
+            ) {
+                summary.accepted += 1;
+                summary.approved += 1;
+            } else if super::workflow::review_link::reviewed_nonaccepted_receipt(
+                profile_dir,
+                tasks,
+                &review.record,
+            ) {
+                summary.reviewed_nonaccepted += 1;
+            } else {
+                apply_closeout_review_snapshot(&mut summary, review);
+            }
         } else if closeout_generated_at.is_some_and(|generated_at| generated_at > task.updated_at) {
             summary.pending_review += 1;
         } else if review.is_some() {
@@ -435,6 +576,8 @@ struct CloseoutReviewSnapshot {
     reviewed_at: DateTime<Utc>,
     verdict: String,
     receipt_acceptance_status: Option<String>,
+    request_id: String,
+    record: Value,
 }
 
 fn latest_closeout_generated_at_by_task(
@@ -519,6 +662,7 @@ fn latest_closeout_review_by_task(
                 .and_then(Value::as_str)
                 .map(ToOwned::to_owned);
             let tasks = value.get("applies_to_tasks")?.as_array()?;
+            let record = value.clone();
             Some(
                 tasks
                     .iter()
@@ -530,6 +674,8 @@ fn latest_closeout_review_by_task(
                                 reviewed_at,
                                 verdict: verdict.clone(),
                                 receipt_acceptance_status: receipt_acceptance_status.clone(),
+                                request_id: task.get("request_id")?.as_str()?.to_string(),
+                                record: record.clone(),
                             },
                         ))
                     })
@@ -571,6 +717,31 @@ fn apply_background_outcome(
         return Ok(());
     };
 
+    let Some(observed_at) = outcome.probe.last_observed_at else {
+        return Ok(());
+    };
+    if observed_at < task.updated_at
+        || observed_at > now
+        || outcome
+            .probe
+            .task_id
+            .as_deref()
+            .is_some_and(|id| id != task.task_id)
+        || outcome
+            .probe
+            .project_key
+            .as_deref()
+            .is_some_and(|key| key != task.project_key)
+        || outcome
+            .probe
+            .request_id
+            .as_deref()
+            .is_some_and(|id| id != task.request_id)
+        || outcome.probe.runner_kind != task.runner_kind
+    {
+        return Ok(());
+    }
+
     match outcome.decision.phase {
         BackgroundRunnerPhase::Completed | BackgroundRunnerPhase::ResultReceived => {
             if task.status != OffdeskTaskStatus::Completed {
@@ -597,6 +768,15 @@ fn apply_background_outcome(
             }
         }
         BackgroundRunnerPhase::RecoveryAcknowledged => {}
+        BackgroundRunnerPhase::Terminated => {
+            if task.status != OffdeskTaskStatus::Cancelled {
+                task.status = OffdeskTaskStatus::Cancelled;
+                task.last_error = None;
+                task.updated_at = now;
+                resume_store.cancel(&task.project_key, &task.task_id, now)?;
+                report.updated_task_ids.push(task.task_id.clone());
+            }
+        }
         BackgroundRunnerPhase::Launched
         | BackgroundRunnerPhase::HandoffEmitted
         | BackgroundRunnerPhase::PickupAcknowledged => {
@@ -608,6 +788,14 @@ fn apply_background_outcome(
         }
     }
 
+    // Advance the observation watermark even if the lifecycle phase did not
+    // change, so a delayed older result cannot overwrite a newer running poll.
+    if observed_at > task.updated_at {
+        task.updated_at = observed_at;
+        if !report.updated_task_ids.contains(&task.task_id) {
+            report.updated_task_ids.push(task.task_id.clone());
+        }
+    }
     Ok(())
 }
 
@@ -741,15 +929,56 @@ fn ensure_provider_fallback_approval(
     Ok(())
 }
 
-fn dispatch_task(
-    task: &mut OffdeskTask,
-    gate: &SchedulerGate,
-    approvals: &mut ApprovalLedgerSession,
-    background_store: &BackgroundRunStore,
-    adaptive_wiki_store: &AdaptiveWikiStore,
+struct DispatchTaskContext<'a> {
+    gate: &'a SchedulerGate,
+    approvals: &'a mut ApprovalLedgerSession,
+    background_store: &'a BackgroundRunStore,
+    adaptive_wiki_store: &'a AdaptiveWikiStore,
+    pause_store: &'a crate::offdesk::operator_pause::OperatorPauseStore,
     now: DateTime<Utc>,
-    report: &mut OffdeskTickReport,
-) -> Result<()> {
+    report: &'a mut OffdeskTickReport,
+    shift_authority: Option<&'a mut OffdeskShiftTickAuthority>,
+    task_snapshot: &'a [OffdeskTask],
+    shift_tick: &'a mut ShiftTickAccumulator,
+}
+
+fn dispatch_task(task: &mut OffdeskTask, context: &mut DispatchTaskContext<'_>) -> Result<()> {
+    let worker = super::workflow::worker_invocation::inspect(task, None, context.now)?;
+    if worker.as_ref().is_some_and(|v| {
+        v["adapter"] == "codex_tool_free_review" || v["adapter"] == "deterministic_metadata"
+    }) {
+        let authority = context
+            .shift_authority
+            .as_deref()
+            .context("Codex review requires bounded shift authority")?;
+        let manifest = &authority.record().manifest;
+        anyhow::ensure!(
+            manifest.host_policy_attestation.is_none(),
+            "Codex review cannot use a host-policy runner"
+        );
+        manifest
+            .read_policy
+            .as_ref()
+            .context("Codex review requires canonical read isolation")?
+            .validate()?;
+        super::workflow::worker_invocation::validate_selected(
+            &authority.record().manifest,
+            context.task_snapshot,
+            context.now,
+        )?;
+    }
+    if let Some(authority) = context.shift_authority.as_deref_mut() {
+        match authority.preflight_task(task, context.task_snapshot, context.now)? {
+            OffdeskShiftLaunchDecision::Proceed => {}
+            OffdeskShiftLaunchDecision::Held(reason) => {
+                context.shift_tick.hold(reason);
+                return Ok(());
+            }
+        }
+    }
+    if hold_for_operator_pause(context)? {
+        return Ok(());
+    }
     let mut gate_request = SchedulerGateRequest::new(
         task.capability_id.clone(),
         task.project_key.clone(),
@@ -787,19 +1016,83 @@ fn dispatch_task(
     command_spec.log_artifact_path = task.log_artifact_path.as_ref().map(PathBuf::from);
     command_spec.result_artifact_path = task.result_artifact_path.as_ref().map(PathBuf::from);
 
-    let gate_outcome = gate.evaluate_with_session(
+    // A bounded shift's approved brief binds the task, but its enterprise
+    // policy still requires a separate, fresh dispatch approval.
+    let gate_brief = if context.shift_authority.is_some() {
+        None
+    } else {
+        task.execution_brief.as_ref()
+    };
+    let gate_outcome = context.gate.evaluate_with_session(
         launch_request.gate_request.clone(),
-        task.execution_brief.as_ref(),
-        now,
-        approvals,
+        gate_brief,
+        context.now,
+        context.approvals,
     )?;
-    let outcome = launch_background_command_with_gate_outcome(
-        background_store,
+    let mut shift_reservation: Option<OffdeskShiftTaskLaunchReservationV1> = None;
+    if gate_outcome.status == SchedulerGateStatus::Proceed {
+        if hold_for_operator_pause(context)? {
+            return Ok(());
+        }
+        if let Some(authority) = context.shift_authority.as_deref_mut() {
+            let reservation = authority
+                .commit_task_launch(task, context.task_snapshot, context.now)?
+                .ok_or_else(|| {
+                    anyhow::anyhow!("bounded shift authority changed between task gate and launch")
+                })?;
+            launch_request.ticket_id = Some(reservation.background_ticket_id.clone());
+            command_spec.host_policy_attestation =
+                authority.record().manifest.host_policy_attestation.clone();
+            command_spec.read_policy = authority.record().manifest.read_policy.clone();
+            command_spec.read_policy_root_identity_sha256 = command_spec
+                .read_policy
+                .as_ref()
+                .map(|_| reservation.project_root_identity_sha256.clone());
+            shift_reservation = Some(reservation);
+        }
+    }
+    let outcome = match launch_background_command_with_gate_outcome(
+        context.background_store,
         launch_request,
         gate_outcome,
-        now,
+        context.now,
         command_spec,
-    )?;
+    ) {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            if let (Some(authority), Some(reservation)) = (
+                context.shift_authority.as_deref_mut(),
+                shift_reservation.as_ref(),
+            ) {
+                authority.record_launch_unresolved(
+                    &reservation.launch_id,
+                    context.now,
+                    "background launch returned without a reconciled ticket",
+                )?;
+            }
+            return Err(error);
+        }
+    };
+    if let (Some(authority), Some(reservation), Some(probe)) = (
+        context.shift_authority.as_deref_mut(),
+        shift_reservation.as_ref(),
+        outcome.probe.as_ref(),
+    ) {
+        authority.record_task_launch_ticket(reservation, probe, context.now)?;
+    }
+    if let (Some(authority), Some(reservation)) = (
+        context.shift_authority.as_deref_mut(),
+        shift_reservation.as_ref(),
+    ) {
+        if outcome.gate.status == SchedulerGateStatus::Proceed && outcome.probe.is_none() {
+            authority.record_launch_unresolved(
+                &reservation.launch_id,
+                context.now,
+                "background launch produced no ticket probe",
+            )?;
+            anyhow::bail!("bounded shift launch produced no background ticket probe");
+        }
+    }
     task.last_gate_status = Some(outcome.gate.status);
     match outcome.gate.status {
         SchedulerGateStatus::Proceed => {
@@ -810,19 +1103,30 @@ fn dispatch_task(
                 task.last_error = None;
                 task.last_provider_fallback = None;
                 task.last_adaptive_wiki_entry_ids = probe.adaptive_wiki_entry_ids.clone();
-                append_adaptive_wiki_usage_for_task(task, &outcome, adaptive_wiki_store, now)?;
-                task.updated_at = now;
-                report.launched += 1;
-                report.updated_task_ids.push(task.task_id.clone());
+                append_adaptive_wiki_usage_for_task(
+                    task,
+                    &outcome,
+                    context.adaptive_wiki_store,
+                    context.now,
+                )?;
+                task.updated_at = context.now;
+                context.report.launched += 1;
+                context.report.updated_task_ids.push(task.task_id.clone());
+                if context.shift_authority.is_some() {
+                    context
+                        .shift_tick
+                        .launched_task_ids
+                        .push(task.task_id.clone());
+                }
             }
         }
         SchedulerGateStatus::PendingApproval => {
             task.status = OffdeskTaskStatus::PendingApproval;
             task.last_provider_fallback = None;
             task.last_adaptive_wiki_entry_ids.clear();
-            task.updated_at = now;
-            report.pending_approval += 1;
-            report.updated_task_ids.push(task.task_id.clone());
+            task.updated_at = context.now;
+            context.report.pending_approval += 1;
+            context.report.updated_task_ids.push(task.task_id.clone());
         }
         SchedulerGateStatus::Denied | SchedulerGateStatus::Blocked => {
             if is_provider_capacity_block(&outcome.gate) {
@@ -832,23 +1136,42 @@ fn dispatch_task(
                 task.last_error = Some(outcome.gate.reason);
                 task.last_provider_fallback = fallback.clone();
                 task.last_adaptive_wiki_entry_ids.clear();
-                task.updated_at = now;
-                ensure_provider_fallback_approval(task, fallback.as_ref(), approvals, now)?;
-                report.provider_deferred += 1;
-                report.updated_task_ids.push(task.task_id.clone());
+                task.updated_at = context.now;
+                ensure_provider_fallback_approval(
+                    task,
+                    fallback.as_ref(),
+                    context.approvals,
+                    context.now,
+                )?;
+                context.report.provider_deferred += 1;
+                context.report.updated_task_ids.push(task.task_id.clone());
             } else {
                 task.status = OffdeskTaskStatus::Failed;
                 task.last_error = Some(outcome.gate.reason);
                 task.last_provider_fallback = None;
                 task.last_adaptive_wiki_entry_ids.clear();
-                task.updated_at = now;
-                report.failed += 1;
-                report.updated_task_ids.push(task.task_id.clone());
+                task.updated_at = context.now;
+                context.report.failed += 1;
+                context.report.updated_task_ids.push(task.task_id.clone());
             }
         }
     }
 
     Ok(())
+}
+
+fn hold_for_operator_pause(context: &mut DispatchTaskContext<'_>) -> Result<bool> {
+    let pause = context.pause_store.load()?;
+    if !pause.paused {
+        return Ok(false);
+    }
+    context.report.dispatch_paused = true;
+    context.report.pause_reason = pause.reason;
+    context.report.held += 1;
+    if context.shift_authority.is_some() {
+        context.shift_tick.note_reason("operator_pause".to_string());
+    }
+    Ok(true)
 }
 
 fn append_adaptive_wiki_usage_for_task(
@@ -991,6 +1314,74 @@ mod tests {
                 std::env::remove_var(self.key);
             }
         }
+    }
+
+    #[test]
+    fn delayed_poll_cannot_overwrite_newer_running_observation() -> Result<()> {
+        let temp = tempdir()?;
+        let now = Utc::now();
+        let store = BackgroundRunStore::new(temp.path());
+        let mut probe = BackgroundProbe::new("ticket", BackgroundRunnerKind::LocalBackground);
+        probe.task_id = Some("task".into());
+        probe.project_key = Some("project".into());
+        probe.request_id = Some("request".into());
+        store.save(&[probe])?;
+        let mut outcome = poll_background_runs(&store, None, now, None)?.remove(0);
+        outcome.decision.phase = BackgroundRunnerPhase::Launched;
+        outcome.probe.last_observed_at = Some(now + Duration::seconds(2));
+        let mut task = OffdeskTask::new(task_input(now, "true"), now);
+        task.status = OffdeskTaskStatus::Running;
+        task.background_ticket_id = Some("ticket".into());
+        let resume = TaskResumeStore::new(temp.path());
+        let mut report = OffdeskTickReport::default();
+        apply_background_outcome(
+            &mut task,
+            &HashMap::from([("ticket".into(), &outcome)]),
+            &resume,
+            now + Duration::seconds(3),
+            &mut report,
+        )?;
+        assert_eq!(task.updated_at, now + Duration::seconds(2));
+        assert_eq!(report.updated_task_ids, vec!["task"]);
+        let expected = task.clone();
+        outcome.decision.phase = BackgroundRunnerPhase::Completed;
+        for timestamp in [
+            None,
+            Some(now + Duration::seconds(1)),
+            Some(now + Duration::seconds(4)),
+        ] {
+            outcome.probe.last_observed_at = timestamp;
+            let mut report = OffdeskTickReport::default();
+            apply_background_outcome(
+                &mut task,
+                &HashMap::from([("ticket".into(), &outcome)]),
+                &resume,
+                now + Duration::seconds(3),
+                &mut report,
+            )?;
+            assert_eq!(task, expected);
+            assert!(report.updated_task_ids.is_empty());
+        }
+        outcome.probe.last_observed_at = Some(now + Duration::seconds(3));
+        outcome.probe.task_id = Some("other-task".into());
+        apply_background_outcome(
+            &mut task,
+            &HashMap::from([("ticket".into(), &outcome)]),
+            &resume,
+            now + Duration::seconds(3),
+            &mut report,
+        )?;
+        assert_eq!(task, expected);
+        outcome.probe.task_id = Some("task".into());
+        apply_background_outcome(
+            &mut task,
+            &HashMap::from([("ticket".into(), &outcome)]),
+            &resume,
+            now + Duration::seconds(3),
+            &mut report,
+        )?;
+        assert_eq!(task.status, OffdeskTaskStatus::Completed);
+        Ok(())
     }
 
     fn task_input(now: DateTime<Utc>, command: &str) -> OffdeskTaskInput {

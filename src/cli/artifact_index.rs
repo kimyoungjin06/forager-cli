@@ -9,20 +9,36 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
+use std::io::{Read, Write};
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
+use uuid::Uuid;
 
+use crate::document_lifecycle::{
+    retention_approval_metadata_sha256_v2, retention_proposal_sha256_v2,
+    scan_project_with_lifecycle, CatalogOptions, DocumentCatalogEntryV2,
+    DocumentLifecycleObservationV1, DocumentLifecycleStateV1, LifecycleProjectionStatusV1,
+    RetentionApprovalMetadataV2, RetentionDisposition, RetentionProposalV2,
+    RetentionRequestedActionV2, RetentionTargetSourceKind, RetentionTargetV2, StrictUtcTimestamp,
+    RETENTION_APPROVAL_METADATA_SCHEMA_V2,
+};
 use crate::offdesk::{
     operator_safe_text, ActionApprovalMetadata, ActionApprovalRequest, ApprovalBrief,
-    ApprovalBriefOption, ApprovalLedger, ApprovalStatus, ArtifactRetentionApprovalMetadata,
-    MutationRestorePlan, MutationSnapshotRequest, MutationSnapshotStore,
-    MutationSnapshotVerification, PendingActionApproval, RiskLevel,
+    ApprovalBriefOption, ApprovalLedger, ApprovalMode, ApprovalScope, ApprovalStatus,
+    ArtifactRetentionApprovalMetadata, MutationRestorePlan, MutationSnapshotRequest,
+    MutationSnapshotStore, MutationSnapshotVerification, PendingActionApproval, RiskLevel,
 };
-use crate::session::get_profile_dir;
+use crate::session::{get_profile_dir, profile_dir_path};
 
 const ARTIFACT_INDEX_SCHEMA: &str = "artifact_index.v1";
+const ARTIFACT_INDEX_SCHEMA_V2: &str = "artifact_index.v2";
 const ARTIFACT_RETENTION_REVIEW_SCHEMA: &str = "artifact_retention_review.v1";
-const ARTIFACT_RETENTION_APPROVAL_REQUEST_SCHEMA: &str = "artifact_retention_approval_request.v1";
+const ARTIFACT_RETENTION_APPROVAL_REQUEST_SCHEMA_V2: &str =
+    "artifact_retention_approval_request.v2";
 const ARTIFACT_RETENTION_APPLICATION_SCHEMA: &str = "artifact_retention_application.v1";
+const ARTIFACT_RETENTION_APPLICATION_SCHEMA_V2: &str = "artifact_retention_application.v2";
 const ARTIFACT_RETENTION_PROMOTION_SCHEMA: &str = "artifact_retention_promotion.v1";
 const ARTIFACT_RETENTION_APPLICATIONS_DIR: &str = "artifact_retention_applications";
 const ARTIFACT_RETENTION_PROMOTIONS_DIR: &str = "artifact_retention_promotions";
@@ -35,6 +51,15 @@ const MAX_HUMAN_ROWS: usize = 12;
 const MAX_RETENTION_REVIEW_ITEMS: usize = 40;
 const MAX_RETENTION_REVIEW_KEEP_SAMPLE: usize = 12;
 const MAX_RETENTION_REVIEW_PROJECTION_ITEMS: usize = 10;
+const MAX_RETENTION_ARTIFACT_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_RETENTION_DISCOVERY_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_RETENTION_DISCOVERY_ENTRIES: u64 = 10_000;
+const MAX_RETENTION_DISCOVERY_DEPTH: usize = 32;
+const MAX_RETENTION_DISCOVERY_MS: u64 = 5_000;
+const MAX_RETENTION_DELIVERABLES_BYTES: u64 = 1024 * 1024;
+const MAX_RETENTION_RECEIPT_BYTES: u64 = 1024 * 1024;
+const MAX_RETENTION_RECEIPT_ENTRIES: u64 = 100_000;
+const MAX_RETENTION_RECEIPT_SCAN_MS: u64 = 5_000;
 
 #[derive(Debug, Clone, Args)]
 pub struct ProjectArtifactIndexArgs {
@@ -59,6 +84,10 @@ pub struct ProjectRetentionReviewArgs {
     #[arg(long)]
     project_key: Option<String>,
 
+    /// Resolve one exact durable document through the retention crosswalk
+    #[arg(long)]
+    document_id: Option<String>,
+
     /// Output machine-readable JSON
     #[arg(long)]
     json: bool,
@@ -74,12 +103,20 @@ pub struct ProjectRetentionRequestArgs {
     project_key: String,
 
     /// Existing artifact_index/artifact_retention_review artifact id to request approval for
-    #[arg(long, conflicts_with = "path_filter")]
+    #[arg(long)]
     artifact_id: Option<String>,
 
     /// Artifact path or relative path to request approval for
-    #[arg(long = "path", conflicts_with = "artifact_id")]
+    #[arg(long = "path")]
     path_filter: Option<String>,
+
+    /// Durable lifecycle document to request retention for
+    #[arg(long)]
+    document_id: Option<String>,
+
+    /// Exact active summary document required by summary-keep
+    #[arg(long)]
+    summary_document_id: Option<String>,
 
     /// Retention action to request approval for
     #[arg(long, value_enum)]
@@ -164,8 +201,12 @@ pub struct ProjectRetentionPromoteArgs {
 #[serde(rename_all = "snake_case")]
 pub enum RetentionRequestAction {
     Keep,
+    Preserve,
+    #[serde(rename = "summary-keep")]
+    SummaryKeep,
     Promote,
     Archive,
+    Quarantine,
     Dispose,
 }
 
@@ -173,8 +214,11 @@ impl RetentionRequestAction {
     fn as_str(self) -> &'static str {
         match self {
             Self::Keep => "keep",
+            Self::Preserve => "preserve",
+            Self::SummaryKeep => "summary-keep",
             Self::Promote => "promote",
             Self::Archive => "archive",
+            Self::Quarantine => "quarantine",
             Self::Dispose => "dispose",
         }
     }
@@ -182,16 +226,21 @@ impl RetentionRequestAction {
     fn label(self) -> &'static str {
         match self {
             Self::Keep => "Keep artifact",
+            Self::Preserve => "Preserve artifact",
+            Self::SummaryKeep => "Keep artifact through summary",
             Self::Promote => "Promote artifact",
             Self::Archive => "Archive artifact",
+            Self::Quarantine => "Quarantine artifact",
             Self::Dispose => "Dispose artifact",
         }
     }
 
     fn risk_level(self) -> RiskLevel {
         match self {
-            Self::Archive | Self::Dispose => RiskLevel::Destructive,
-            Self::Keep | Self::Promote => RiskLevel::CanonicalMutation,
+            Self::Archive | Self::Quarantine | Self::Dispose => RiskLevel::Destructive,
+            Self::Keep | Self::Preserve | Self::SummaryKeep | Self::Promote => {
+                RiskLevel::CanonicalMutation
+            }
         }
     }
 
@@ -200,17 +249,137 @@ impl RetentionRequestAction {
             Self::Keep => {
                 "Records approval to preserve this artifact in the retention plan; it does not edit project files."
             }
+            Self::Preserve => {
+                "Records reviewed preservation in lifecycle state; it does not copy or move the file."
+            }
+            Self::SummaryKeep => {
+                "Records a reviewed summary replacement; it does not edit or remove either file."
+            }
             Self::Promote => {
                 "Records approval to promote this artifact in a later reviewed surface update; it does not edit DELIVERABLES.md."
             }
             Self::Archive => {
                 "Records approval to prepare an archive step for this artifact; it does not move the file."
             }
+            Self::Quarantine => {
+                "Records approval to prepare a quarantine step for this artifact; it does not move the file."
+            }
             Self::Dispose => {
                 "Records approval to prepare a disposal step for this artifact; it does not delete the file."
             }
         }
     }
+
+    fn as_v2(self) -> RetentionRequestedActionV2 {
+        match self {
+            Self::Keep => RetentionRequestedActionV2::Keep,
+            Self::Preserve => RetentionRequestedActionV2::Preserve,
+            Self::SummaryKeep => RetentionRequestedActionV2::SummaryKeep,
+            Self::Promote => RetentionRequestedActionV2::Promote,
+            Self::Archive => RetentionRequestedActionV2::Archive,
+            Self::Quarantine => RetentionRequestedActionV2::Quarantine,
+            Self::Dispose => RetentionRequestedActionV2::Dispose,
+        }
+    }
+
+    fn from_v2(action: RetentionRequestedActionV2) -> Self {
+        match action {
+            RetentionRequestedActionV2::Keep => Self::Keep,
+            RetentionRequestedActionV2::Preserve => Self::Preserve,
+            RetentionRequestedActionV2::SummaryKeep => Self::SummaryKeep,
+            RetentionRequestedActionV2::Promote => Self::Promote,
+            RetentionRequestedActionV2::Archive => Self::Archive,
+            RetentionRequestedActionV2::Quarantine => Self::Quarantine,
+            RetentionRequestedActionV2::Dispose => Self::Dispose,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct ArtifactIndexEntryV2 {
+    artifact_id: String,
+    relative_path: Option<String>,
+    present: bool,
+    size_bytes: Option<u64>,
+    modified_at: Option<StrictUtcTimestamp>,
+    content_sha256: Option<String>,
+    exact_current_identity: bool,
+    status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct ArtifactIndexV2 {
+    schema: &'static str,
+    generated_at: DateTime<Utc>,
+    project_key: String,
+    root_id: String,
+    root_path_identity_sha256: String,
+    root_instance_identity_sha256: String,
+    source_snapshot_sha256: String,
+    entries: Vec<ArtifactIndexEntryV2>,
+    read_only: bool,
+    file_mutation_authorized: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RetentionDiscoveryBudgets {
+    max_entries: u64,
+    max_depth: usize,
+    max_elapsed_ms: u64,
+}
+
+impl Default for RetentionDiscoveryBudgets {
+    fn default() -> Self {
+        Self {
+            max_entries: MAX_RETENTION_DISCOVERY_ENTRIES,
+            max_depth: MAX_RETENTION_DISCOVERY_DEPTH,
+            max_elapsed_ms: MAX_RETENTION_DISCOVERY_MS,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct BoundedRetentionArtifactIndex {
+    index: ArtifactIndex,
+    directory_snapshots: Vec<(PathBuf, crate::process::FilesystemObjectSnapshot)>,
+    source_file_snapshots: Vec<(PathBuf, crate::process::FilesystemObjectSnapshot)>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CanonicalRetentionResolutionV2 {
+    schema: &'static str,
+    project_key: String,
+    artifact_snapshot_sha256: String,
+    artifact_index: ArtifactIndexV2,
+    target: RetentionTargetV2,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reviewed_state: Option<DocumentLifecycleStateV1>,
+    selector_evidence: Vec<String>,
+    authority: ArtifactRetentionReviewAuthority,
+}
+
+struct ResolvedRetentionContextV2 {
+    resolution: CanonicalRetentionResolutionV2,
+    proposal: RetentionProposalV2,
+    review_item: ArtifactRetentionReviewItem,
+}
+
+struct RetentionResolverInput<'a> {
+    artifact_id: Option<&'a str>,
+    path: Option<&'a str>,
+    document_id: Option<&'a str>,
+    action: RetentionRequestAction,
+    summary_document_id: Option<&'a str>,
+    reason: Option<&'a str>,
+    allow_applied_state: bool,
+}
+
+struct RetentionApplyV2Context<'a> {
+    profile: &'a str,
+    project_root: Option<&'a Path>,
+    profile_dir: &'a Path,
+    args: &'a ProjectRetentionApplyArgs,
+    generated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -385,6 +554,8 @@ struct ArtifactRetentionApplicationReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     project_root: Option<String>,
     approval_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    application_id: Option<String>,
     request_id: String,
     task_id: String,
     action: &'static str,
@@ -393,9 +564,73 @@ struct ArtifactRetentionApplicationReport {
     target: ArtifactRetentionApplicationTarget,
     operation: ArtifactRetentionApplicationOperation,
     approval: ArtifactRetentionApplicationApproval,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lifecycle_event: Option<RetentionLifecycleEventReceiptV2>,
     receipt_path: String,
     next_actions: Vec<String>,
     authority: ArtifactRetentionApplicationAuthority,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RetentionLifecycleEventReceiptV2 {
+    event_id: String,
+    event_sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RetentionApplicationReceiptV2 {
+    schema: String,
+    application_id: String,
+    approval_id: String,
+    project_key: String,
+    proposal_sha256: String,
+    approval_metadata_sha256: String,
+    approval_preview_sha256: String,
+    retention_target_id: String,
+    requested_action: RetentionRequestedActionV2,
+    lifecycle_event: Option<RetentionLifecycleEventReceiptV2>,
+    plan_only: bool,
+    file_mutation_performed: bool,
+}
+
+impl RetentionApplicationReceiptV2 {
+    fn validate_shape(&self, filename: &str) -> Result<()> {
+        if self.schema != ARTIFACT_RETENTION_APPLICATION_SCHEMA_V2
+            || self.application_id != format!("retention_application_{}", self.proposal_sha256)
+            || filename != format!("{}.json", self.application_id)
+            || !is_lower_sha256(&self.proposal_sha256)
+            || !is_lower_sha256(&self.approval_metadata_sha256)
+            || !is_lower_sha256(&self.approval_preview_sha256)
+            || !self.approval_id.starts_with("approval_")
+            || self.project_key.trim().is_empty()
+            || self.retention_target_id.trim().is_empty()
+            || !self.plan_only
+            || self.file_mutation_performed
+        {
+            bail!("retention v2 receipt has an invalid authority shape");
+        }
+        if let Some(event) = &self.lifecycle_event {
+            let event_uuid = event
+                .event_id
+                .strip_prefix("document_event_")
+                .context("retention receipt lifecycle event ID has the wrong prefix")?;
+            Uuid::parse_str(event_uuid)
+                .context("retention receipt lifecycle event ID is invalid")?;
+            if !is_lower_sha256(&event.event_sha256) {
+                bail!("retention receipt lifecycle event hash is invalid");
+            }
+        }
+        Ok(())
+    }
+}
+
+fn is_lower_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -558,6 +793,36 @@ pub async fn run_retention_review(profile: &str, args: ProjectRetentionReviewArg
         .map(operator_safe_text)
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| default_project_key(project_root.as_deref()));
+    if let Some(document_id) = args.document_id.as_deref() {
+        let project_root = project_root
+            .as_deref()
+            .context("document retention review requires one explicit project root")?;
+        let resolved = resolve_retention_target_v2(
+            profile,
+            project_root,
+            &project_key,
+            RetentionResolverInput {
+                artifact_id: None,
+                path: None,
+                document_id: Some(document_id),
+                action: RetentionRequestAction::Keep,
+                summary_document_id: None,
+                reason: None,
+                allow_applied_state: true,
+            },
+        )?;
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&resolved.resolution)?);
+        } else {
+            println!(
+                "Retention target: {} ({:?})\n  path: {}\n  boundary: read-only; no lifecycle or file mutation was performed.",
+                resolved.resolution.target.retention_target_id,
+                resolved.resolution.target.source_kind,
+                resolved.resolution.target.observation.relative_path
+            );
+        }
+        return Ok(());
+    }
     let index = build_artifact_index(profile, Some(&project_key), project_root.as_deref())?;
     let review = build_retention_review(&index);
 
@@ -619,18 +884,287 @@ fn build_retention_approval_request(
         bail!("--request-id cannot be empty");
     }
 
-    let index = build_artifact_index(profile, Some(&project_key), project_root.as_deref())?;
-    let target = retention_request_target(
-        &index,
-        args.artifact_id.as_deref(),
-        args.path_filter.as_deref(),
+    let generated_at = Utc::now();
+    let profile_dir = get_profile_dir(if profile.is_empty() {
+        "default"
+    } else {
+        profile
+    })?;
+    let ledger = ApprovalLedger::new(profile_dir.clone());
+    let (mut session, _) = ledger.begin_bounded_session(generated_at)?;
+    let project_root = project_root
+        .as_deref()
+        .context("retention-request requires one current project root")?;
+    let project_root_guard = crate::process::open_bounded_root(project_root)
+        .with_context(|| format!("open retention project root {}", project_root.display()))?;
+    let project_root_identity =
+        crate::process::filesystem_file_identity(&project_root_guard.metadata()?)
+            .context("retention project root lacks stable identity")?;
+    let resolved = resolve_retention_target_v2(
+        profile,
+        project_root,
+        &project_key,
+        RetentionResolverInput {
+            artifact_id: args.artifact_id.as_deref(),
+            path: args.path_filter.as_deref(),
+            document_id: args.document_id.as_deref(),
+            action: args.action,
+            summary_document_id: args.summary_document_id.as_deref(),
+            reason: args.reason.as_deref(),
+            allow_applied_state: false,
+        },
     )?;
+    ensure_retention_project_root_active(project_root, project_root_identity)?;
+    let target = resolved.review_item;
     validate_retention_request_action(args.action, &target)?;
 
-    let generated_at = Utc::now();
-    let task_id = retention_request_task_id(args.action, &target, args.task_id.as_deref());
+    let profile_root_identity = session
+        .bounded_root_identity()
+        .context("retention v2 request requires a descriptor-bound approval session")?;
+    let retention_receipts =
+        load_retention_application_receipts_v2(&profile_dir, profile_root_identity)?;
+    for receipt in &retention_receipts {
+        if receipt.project_key != project_key
+            || receipt.retention_target_id != resolved.proposal.target.retention_target_id
+        {
+            continue;
+        }
+        let receipt_approval = session
+            .approval(&receipt.approval_id)
+            .cloned()
+            .context("retention receipt references a missing approval")?;
+        let receipt_metadata = receipt_approval
+            .metadata
+            .as_ref()
+            .and_then(ActionApprovalMetadata::as_retention_v2)
+            .cloned()
+            .context("retention v2 receipt references non-v2 approval metadata")?;
+        validate_retention_receipt_v2_against_approval(
+            receipt,
+            &receipt_approval,
+            &receipt_metadata,
+        )?;
+        crate::document_lifecycle::validate_retention_approval_identity_v2(
+            &receipt_approval,
+            &receipt_metadata,
+        )?;
+        let existing_lifecycle = crate::document_lifecycle::reconcile_existing_retention_event_v2(
+            &profile_dir,
+            profile_root_identity,
+            &receipt_approval,
+            &receipt_metadata,
+            generated_at,
+        )?;
+        let expected_lifecycle = receipt_metadata.proposal.target.document_id.is_some()
+            && receipt_metadata
+                .proposal
+                .requested_action
+                .lifecycle_action()
+                .is_some();
+        let existing_event_receipt =
+            existing_lifecycle
+                .as_ref()
+                .map(|result| RetentionLifecycleEventReceiptV2 {
+                    event_id: result.event.payload.event_id.clone(),
+                    event_sha256: result.event.event_sha256.clone(),
+                });
+        if (expected_lifecycle && existing_lifecycle.is_none())
+            || receipt.lifecycle_event != existing_event_receipt
+        {
+            bail!("retention receipt lacks its exact durable lifecycle event");
+        }
+        if receipt_approval.status == ApprovalStatus::Superseded {
+            continue;
+        }
+        if receipt.requested_action != resolved.proposal.requested_action {
+            bail!(
+                "retention target already has a different unconsumed application receipt: {}",
+                receipt.approval_id
+            );
+        }
+        if receipt_metadata.proposal != resolved.proposal
+            || receipt_metadata.proposal_sha256 != retention_proposal_sha256_v2(&resolved.proposal)?
+        {
+            bail!(
+                "unconsumed retention receipt {} no longer matches the exact current target snapshot",
+                receipt.approval_id
+            );
+        }
+        validate_retention_approval_v2_against_live_target(
+            &receipt_approval,
+            &receipt_metadata,
+            args.action,
+            &target,
+        )?;
+        ensure_retention_project_root_active(project_root, project_root_identity)?;
+        session.flush()?;
+        ensure_retention_project_root_active(project_root, project_root_identity)?;
+        return Ok(ArtifactRetentionApprovalRequestReport {
+            schema: ARTIFACT_RETENTION_APPROVAL_REQUEST_SCHEMA_V2,
+            generated_at,
+            status: retention_request_status(receipt_approval.status).to_string(),
+            action: RETENTION_APPROVAL_ACTION,
+            requested_action: args.action,
+            project_key,
+            request_id: receipt_approval.request_id.clone(),
+            task_id: receipt_approval.task_id.clone(),
+            risk_level: receipt_approval.risk_level,
+            target,
+            approval: Some(receipt_approval.clone()),
+            detail: "Reused the exact approval referenced by a durable application receipt."
+                .to_string(),
+            next_commands: retention_request_next_commands(Some(&receipt_approval)),
+            authority: ArtifactRetentionApprovalRequestAuthority {
+                records_approval_only: true,
+                does_not_authorize: vec![
+                    "delete files",
+                    "move files",
+                    "archive files",
+                    "edit DELIVERABLES.md",
+                    "publish outputs",
+                    "accept output as truth without review",
+                ],
+            },
+        });
+    }
+
+    for approval in session.approvals().iter().filter(|approval| {
+        approval.project_key == project_key && approval.status == ApprovalStatus::Superseded
+    }) {
+        let Some(metadata) = approval
+            .metadata
+            .as_ref()
+            .and_then(ActionApprovalMetadata::as_retention_v2)
+        else {
+            continue;
+        };
+        if metadata.proposal.target.retention_target_id
+            == resolved.proposal.target.retention_target_id
+            && !retention_receipts
+                .iter()
+                .any(|receipt| receipt.approval_id == approval.approval_id)
+        {
+            bail!("consumed retention approval has no matching deterministic receipt");
+        }
+    }
+
+    let unresolved_approvals = session
+        .approvals()
+        .iter()
+        .filter(|approval| {
+            approval.project_key == project_key
+                && matches!(
+                    approval.status,
+                    ApprovalStatus::Pending | ApprovalStatus::Approved
+                )
+                && approval.expires_at >= generated_at
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    for approval in &unresolved_approvals {
+        if let Some(metadata) = approval
+            .metadata
+            .as_ref()
+            .and_then(ActionApprovalMetadata::as_retention_v2)
+        {
+            metadata.validate()?;
+            if metadata.proposal.target.retention_target_id
+                == resolved.proposal.target.retention_target_id
+            {
+                validate_retention_request_approval_v2(
+                    approval,
+                    metadata,
+                    RetentionRequestAction::from_v2(metadata.proposal.requested_action),
+                    &target,
+                )?;
+                if metadata.proposal.requested_action != resolved.proposal.requested_action {
+                    bail!(
+                        "retention target already has a different unresolved action: {}",
+                        approval.approval_id
+                    );
+                }
+                if metadata.proposal != resolved.proposal
+                    || metadata.proposal_sha256 != retention_proposal_sha256_v2(&resolved.proposal)?
+                {
+                    bail!(
+                        "unresolved retention approval {} no longer matches the exact current target snapshot",
+                        approval.approval_id
+                    );
+                }
+                ensure_retention_project_root_active(project_root, project_root_identity)?;
+                session.flush()?;
+                ensure_retention_project_root_active(project_root, project_root_identity)?;
+                return Ok(ArtifactRetentionApprovalRequestReport {
+                    schema: ARTIFACT_RETENTION_APPROVAL_REQUEST_SCHEMA_V2,
+                    generated_at,
+                    status: retention_request_status(approval.status).to_string(),
+                    action: RETENTION_APPROVAL_ACTION,
+                    requested_action: args.action,
+                    project_key,
+                    request_id: approval.request_id.clone(),
+                    task_id: approval.task_id.clone(),
+                    risk_level: approval.risk_level,
+                    target,
+                    approval: Some(approval.clone()),
+                    detail: "Reused the exact unresolved retention target and action.".to_string(),
+                    next_commands: retention_request_next_commands(Some(approval)),
+                    authority: ArtifactRetentionApprovalRequestAuthority {
+                        records_approval_only: true,
+                        does_not_authorize: vec![
+                            "delete files",
+                            "move files",
+                            "archive files",
+                            "edit DELIVERABLES.md",
+                            "publish outputs",
+                            "accept output as truth without review",
+                        ],
+                    },
+                });
+            }
+        } else if let Some(legacy) = approval
+            .metadata
+            .as_ref()
+            .and_then(ActionApprovalMetadata::as_artifact_retention)
+        {
+            if resolved.proposal.target.artifact_id.as_deref() == Some(&legacy.artifact_id)
+                || resolved.proposal.target.observation.relative_path
+                    == legacy.relative_path.as_deref().unwrap_or_default()
+            {
+                bail!(
+                    "legacy unresolved approval {} lacks the current hash authority needed for a v2 request",
+                    approval.approval_id
+                );
+            }
+        }
+    }
+
+    let task_id = args
+        .task_id
+        .as_deref()
+        .map(operator_safe_text)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| {
+            format!(
+                "retention_{}_{}",
+                args.action.as_str().replace('-', "_"),
+                sanitize_id_fragment(&resolved.proposal.target.retention_target_id)
+            )
+        });
     let risk_level = args.action.risk_level();
     let brief = retention_request_approval_brief(args.action, &target, &project_key, &request_id);
+    let proposal_sha256 = retention_proposal_sha256_v2(&resolved.proposal)?;
+    let metadata = RetentionApprovalMetadataV2 {
+        schema: RETENTION_APPROVAL_METADATA_SCHEMA_V2.to_string(),
+        generated_at: StrictUtcTimestamp::from_datetime(generated_at),
+        proposal: resolved.proposal,
+        proposal_sha256: proposal_sha256.clone(),
+        application_id: format!("retention_application_{proposal_sha256}"),
+        request_id: request_id.clone(),
+        task_id: task_id.clone(),
+        approval_brief: brief,
+    };
+    metadata.validate()?;
+    let approval_reason = metadata.proposal.reason.clone();
     let mut request = ActionApprovalRequest::new(
         project_key.clone(),
         request_id.clone(),
@@ -640,32 +1174,15 @@ fn build_retention_approval_request(
     );
     request.mutation_class = Some(RETENTION_APPROVAL_ACTION.to_string());
     request.preview = retention_request_preview(args.action, &target);
-    request.reason = retention_request_reason(args.action, &target, args.reason.as_deref());
+    request.reason = approval_reason;
     request.source_surface = "project.retention_request".to_string();
     request.ttl = Duration::minutes(args.ttl_minutes.max(1));
-    request.metadata = Some(retention_request_metadata(
-        generated_at,
-        args.action,
-        &target,
-        brief,
-    ));
-
-    let ledger = ApprovalLedger::new(get_profile_dir(profile)?);
-    let (mut session, _) = ledger.begin_session(generated_at)?;
+    request.metadata = Some(ActionApprovalMetadata::RetentionV2(Box::new(metadata)));
     let pending = session.ensure_pending_without_consuming_grant(request, generated_at)?;
+    ensure_retention_project_root_active(project_root, project_root_identity)?;
     session.flush()?;
-
-    let approvals = ledger.load()?;
-    let approval = pending.or_else(|| {
-        matching_retention_approval(
-            &approvals,
-            &project_key,
-            &request_id,
-            &task_id,
-            RETENTION_APPROVAL_ACTION,
-            risk_level,
-        )
-    });
+    ensure_retention_project_root_active(project_root, project_root_identity)?;
+    let approval = pending;
     let approval_status = approval
         .as_ref()
         .map(|approval| approval.status)
@@ -681,7 +1198,7 @@ fn build_retention_approval_request(
     let next_commands = retention_request_next_commands(approval.as_ref());
 
     Ok(ArtifactRetentionApprovalRequestReport {
-        schema: ARTIFACT_RETENTION_APPROVAL_REQUEST_SCHEMA,
+        schema: ARTIFACT_RETENTION_APPROVAL_REQUEST_SCHEMA_V2,
         generated_at,
         status,
         action: RETENTION_APPROVAL_ACTION,
@@ -759,13 +1276,11 @@ fn build_retention_application(
     } else {
         profile
     };
-    let profile_dir = get_profile_dir(profile_name)?;
+    let profile_dir = profile_dir_path(profile_name)?;
     let ledger = ApprovalLedger::new(profile_dir.clone());
-    let (mut session, _) = ledger.begin_session(generated_at)?;
-    let approvals = ledger.load()?;
-    let approval = approvals
-        .iter()
-        .find(|approval| approval.approval_id == approval_id)
+    let (mut session, _) = ledger.begin_bounded_session(generated_at)?;
+    let approval = session
+        .approval(&approval_id)
         .cloned()
         .with_context(|| format!("approval not found: {approval_id}"))?;
 
@@ -783,6 +1298,25 @@ fn build_retention_application(
             approval.approval_id,
             approval.action,
             RETENTION_APPROVAL_ACTION
+        );
+    }
+    if let Some(metadata) = approval
+        .metadata
+        .as_ref()
+        .and_then(ActionApprovalMetadata::as_retention_v2)
+        .cloned()
+    {
+        return build_retention_application_v2(
+            &mut session,
+            approval,
+            metadata,
+            RetentionApplyV2Context {
+                profile,
+                project_root: project_root.as_deref(),
+                profile_dir: &profile_dir,
+                args: &args,
+                generated_at,
+            },
         );
     }
     if approval.status != ApprovalStatus::Approved {
@@ -849,6 +1383,7 @@ fn build_retention_application(
             .as_deref()
             .map(|root| operator_safe_path(root.to_string_lossy().as_ref())),
         approval_id: approval.approval_id.clone(),
+        application_id: None,
         request_id: approval.request_id.clone(),
         task_id: approval.task_id.clone(),
         action: RETENTION_APPROVAL_ACTION,
@@ -862,6 +1397,7 @@ fn build_retention_application(
             consumed: consumed.status == ApprovalStatus::Superseded,
             consumed_at: generated_at,
         },
+        lifecycle_event: None,
         receipt_path: operator_safe_path(receipt_path.to_string_lossy().as_ref()),
         next_actions,
         authority: ArtifactRetentionApplicationAuthority {
@@ -881,6 +1417,635 @@ fn build_retention_application(
     };
     write_retention_application_receipt(&receipt_path, &report)?;
     Ok(report)
+}
+
+fn build_retention_application_v2(
+    session: &mut crate::offdesk::approval::ApprovalLedgerSession,
+    approval: PendingActionApproval,
+    metadata: RetentionApprovalMetadataV2,
+    context: RetentionApplyV2Context<'_>,
+) -> Result<ArtifactRetentionApplicationReport> {
+    metadata.validate()?;
+    crate::document_lifecycle::validate_retention_approval_identity_v2(&approval, &metadata)?;
+    if context.args.receipt_out.is_some() {
+        bail!("retention v2 uses one deterministic profile receipt; --receipt-out is not allowed");
+    }
+    let project_root = context
+        .project_root
+        .context("retention v2 apply requires one project root")?;
+    let project_root_guard = crate::process::open_bounded_root(project_root)
+        .with_context(|| format!("open retention project root {}", project_root.display()))?;
+    let project_root_identity =
+        crate::process::filesystem_file_identity(&project_root_guard.metadata()?)
+            .context("retention project root lacks stable identity")?;
+    if crate::document_lifecycle::root_instance_identity_sha256(project_root)?
+        != metadata.proposal.root_instance_identity_sha256
+    {
+        bail!("retention approval belongs to a different project root instance");
+    }
+    let requested_action = RetentionRequestAction::from_v2(metadata.proposal.requested_action);
+    let profile_root_identity = session
+        .bounded_root_identity()
+        .context("retention v2 apply requires a descriptor-bound approval session")?;
+    let stored_receipt = load_retention_application_receipt_v2(
+        context.profile_dir,
+        profile_root_identity,
+        &metadata.application_id,
+    )?;
+    let existing_lifecycle = crate::document_lifecycle::reconcile_existing_retention_event_v2(
+        context.profile_dir,
+        profile_root_identity,
+        &approval,
+        &metadata,
+        context.generated_at,
+    )?;
+    let lifecycle_expected = metadata.proposal.target.document_id.is_some()
+        && metadata
+            .proposal
+            .requested_action
+            .lifecycle_action()
+            .is_some();
+    if let Some(receipt) = &stored_receipt {
+        validate_retention_receipt_v2_against_approval(receipt, &approval, &metadata)?;
+        if lifecycle_expected && existing_lifecycle.is_none() {
+            bail!("retention receipt exists without its exact durable lifecycle event");
+        }
+        let existing_event_receipt =
+            existing_lifecycle
+                .as_ref()
+                .map(|result| RetentionLifecycleEventReceiptV2 {
+                    event_id: result.event.payload.event_id.clone(),
+                    event_sha256: result.event.event_sha256.clone(),
+                });
+        if receipt.lifecycle_event != existing_event_receipt {
+            bail!("retention receipt lifecycle identity differs from the durable event");
+        }
+    }
+    if approval.status == ApprovalStatus::Superseded
+        && lifecycle_expected
+        && existing_lifecycle.is_none()
+    {
+        bail!("consumed retention approval has no matching durable lifecycle event");
+    }
+    if approval.status == ApprovalStatus::Superseded && stored_receipt.is_none() {
+        bail!("consumed retention approval has no matching deterministic receipt");
+    }
+
+    let durable_application_started = stored_receipt.is_some() || existing_lifecycle.is_some();
+    let target = if durable_application_started {
+        retention_application_target_v2_from_metadata(&metadata)
+    } else {
+        if approval.expires_at < context.generated_at {
+            bail!("retention apply requires one current approved approval");
+        }
+        let summary_document_id = metadata
+            .proposal
+            .after
+            .as_ref()
+            .and_then(|state| state.summary_document_id.as_deref());
+        let live = resolve_retention_target_v2(
+            context.profile,
+            project_root,
+            &metadata.proposal.project_key,
+            RetentionResolverInput {
+                artifact_id: metadata.proposal.target.artifact_id.as_deref(),
+                path: Some(&metadata.proposal.target.observation.relative_path),
+                document_id: metadata.proposal.target.document_id.as_deref(),
+                action: requested_action,
+                summary_document_id,
+                reason: Some(&metadata.proposal.reason),
+                allow_applied_state: false,
+            },
+        )?;
+        if live.proposal != metadata.proposal
+            || retention_proposal_sha256_v2(&live.proposal)? != metadata.proposal_sha256
+        {
+            bail!("current retention target differs from the approved exact proposal");
+        }
+        validate_retention_approval_v2_against_live_target(
+            &approval,
+            &metadata,
+            requested_action,
+            &live.review_item,
+        )?;
+        ArtifactRetentionApplicationTarget {
+            artifact_id: metadata.proposal.target.retention_target_id.clone(),
+            label: live.review_item.label,
+            source: live.review_item.source,
+            kind: live.review_item.kind,
+            path: live.review_item.path,
+            relative_path: live.review_item.relative_path,
+            present: true,
+            bytes: Some(metadata.proposal.target.observation.size_bytes),
+            retention_class: live.review_item.retention_class,
+            review_status: live.review_item.review_status,
+            why_it_matters: live.review_item.why_it_matters,
+            refs: live.review_item.refs,
+        }
+    };
+    ensure_retention_project_root_active(project_root, project_root_identity)?;
+    let (lifecycle, receipt, receipt_path, reused_receipt, consumed) =
+        crate::document_lifecycle::with_retention_event_v2_lock(
+            context.profile_dir,
+            profile_root_identity,
+            &approval,
+            &metadata,
+            !durable_application_started,
+            context.generated_at,
+            |lifecycle| {
+                if lifecycle_expected && lifecycle.is_none() {
+                    bail!("retention application lacks its exact durable lifecycle event");
+                }
+                let lifecycle_receipt = lifecycle.map(|result| RetentionLifecycleEventReceiptV2 {
+                    event_id: result.event.payload.event_id.clone(),
+                    event_sha256: result.event.event_sha256.clone(),
+                });
+                let receipt = RetentionApplicationReceiptV2 {
+                    schema: ARTIFACT_RETENTION_APPLICATION_SCHEMA_V2.to_string(),
+                    application_id: metadata.application_id.clone(),
+                    approval_id: approval.approval_id.clone(),
+                    project_key: approval.project_key.clone(),
+                    proposal_sha256: metadata.proposal_sha256.clone(),
+                    approval_metadata_sha256: retention_approval_metadata_sha256_v2(&metadata)?,
+                    approval_preview_sha256: sha256_text(&approval.preview),
+                    retention_target_id: metadata.proposal.target.retention_target_id.clone(),
+                    requested_action: metadata.proposal.requested_action,
+                    lifecycle_event: lifecycle_receipt,
+                    plan_only: true,
+                    file_mutation_performed: false,
+                };
+                let (receipt_path, reused_receipt) =
+                    write_or_reconcile_retention_application_receipt_v2(
+                        context.profile_dir,
+                        profile_root_identity,
+                        &receipt,
+                        approval.status == ApprovalStatus::Approved,
+                    )?;
+                ensure_retention_project_root_active(project_root, project_root_identity)?;
+                let consumed = match approval.status {
+                    ApprovalStatus::Approved => session
+                        .supersede_approval(&approval.approval_id, "retention_application_consumed")
+                        .context("approved retention row disappeared while its lock was held")?,
+                    ApprovalStatus::Superseded => approval.clone(),
+                    _ => unreachable!("status checked above"),
+                };
+                session.ensure_bounded_root_active()?;
+                session.flush()?;
+                ensure_retention_project_root_active(project_root, project_root_identity)?;
+                Ok((
+                    lifecycle.cloned(),
+                    receipt,
+                    receipt_path,
+                    reused_receipt,
+                    consumed,
+                ))
+            },
+        )?;
+
+    let disposition = metadata
+        .proposal
+        .after
+        .as_ref()
+        .map(|state| format!("{:?}", state.retention_disposition).to_lowercase())
+        .unwrap_or_else(|| "promotion_plan".to_string());
+    let lifecycle_receipt = receipt.lifecycle_event.clone();
+    Ok(ArtifactRetentionApplicationReport {
+        schema: ARTIFACT_RETENTION_APPLICATION_SCHEMA_V2,
+        generated_at: context.generated_at,
+        status: if lifecycle
+            .as_ref()
+            .is_some_and(|result| result.reused_existing)
+            || reused_receipt
+        {
+            "reconciled_existing".to_string()
+        } else {
+            "applied_plan_recorded".to_string()
+        },
+        project_key: approval.project_key,
+        project_root: Some(operator_safe_path(project_root.to_string_lossy().as_ref())),
+        approval_id: approval.approval_id,
+        application_id: Some(metadata.application_id),
+        request_id: approval.request_id,
+        task_id: approval.task_id,
+        action: RETENTION_APPROVAL_ACTION,
+        requested_action: requested_action.as_str().to_string(),
+        risk_level: approval.risk_level,
+        target,
+        operation: ArtifactRetentionApplicationOperation {
+            operation_id: receipt.application_id,
+            mutation_performed: false,
+            plan_only: true,
+            disposition,
+            summary: requested_action.approval_impact().to_string(),
+            planned_changes: vec![
+                "Record the reviewed retention decision without changing project files."
+                    .to_string(),
+            ],
+            blockers: vec![
+                "Physical archive, quarantine, or disposal requires a separate mutation workflow."
+                    .to_string(),
+            ],
+        },
+        approval: ArtifactRetentionApplicationApproval {
+            before_status: approval.status,
+            after_status: consumed.status,
+            consumed: consumed.status == ApprovalStatus::Superseded,
+            consumed_at: context.generated_at,
+        },
+        lifecycle_event: lifecycle_receipt,
+        receipt_path: operator_safe_path(receipt_path.to_string_lossy().as_ref()),
+        next_actions: retention_application_next_actions(
+            Some(project_root),
+            &metadata.proposal.project_key,
+            requested_action.as_str(),
+        ),
+        authority: ArtifactRetentionApplicationAuthority {
+            consumes_approval: true,
+            writes_profile_receipt: true,
+            writes_project_state: false,
+            writes_files: false,
+            does_not_authorize: vec![
+                "delete files",
+                "move files",
+                "archive files",
+                "edit DELIVERABLES.md",
+                "publish outputs",
+            ],
+        },
+    })
+}
+
+fn retention_application_target_v2_from_metadata(
+    metadata: &RetentionApprovalMetadataV2,
+) -> ArtifactRetentionApplicationTarget {
+    let target = &metadata.proposal.target;
+    let source = match target.source_kind {
+        RetentionTargetSourceKind::Artifact => "artifact_index.v2",
+        RetentionTargetSourceKind::Document => "document_catalog.v2",
+    };
+    let kind = if target.artifact_id.is_some() {
+        "artifact"
+    } else {
+        "document"
+    };
+    let mut refs = Vec::new();
+    if let Some(artifact_id) = &target.artifact_id {
+        refs.push(format!("artifact:{artifact_id}"));
+    }
+    if let Some(document_id) = &target.document_id {
+        refs.push(format!("document:{document_id}"));
+    }
+    ArtifactRetentionApplicationTarget {
+        artifact_id: target.retention_target_id.clone(),
+        label: target.observation.relative_path.clone(),
+        source: source.to_string(),
+        kind: kind.to_string(),
+        path: target.observation.relative_path.clone(),
+        relative_path: Some(target.observation.relative_path.clone()),
+        present: true,
+        bytes: Some(target.observation.size_bytes),
+        retention_class: "approved_snapshot".to_string(),
+        review_status: "durable_application_reconciled".to_string(),
+        why_it_matters: "This report reconciles an already durable retention application."
+            .to_string(),
+        refs,
+    }
+}
+
+fn load_retention_application_receipt_v2(
+    profile_dir: &Path,
+    expected_root_identity: (u64, u64),
+    application_id: &str,
+) -> Result<Option<RetentionApplicationReceiptV2>> {
+    let root = crate::process::open_bounded_root(profile_dir)
+        .with_context(|| format!("open active profile root {}", profile_dir.display()))?;
+    if crate::process::filesystem_file_identity(&root.metadata()?) != Some(expected_root_identity) {
+        bail!("active profile root changed before retention receipt preflight");
+    }
+    let receipt_directory = Path::new(ARTIFACT_RETENTION_APPLICATIONS_DIR);
+    let initial_directory_snapshot =
+        crate::process::bounded_directory_snapshot(&root, receipt_directory).ok();
+    let relative =
+        Path::new(ARTIFACT_RETENTION_APPLICATIONS_DIR).join(format!("{application_id}.json"));
+    match crate::process::open_bounded_regular_file(&root, &relative) {
+        Ok(mut file) => {
+            ensure_owner_only_retention_receipt(&file)?;
+            let initial_metadata = file.metadata().context("inspect retention receipt")?;
+            let mut bytes = Vec::new();
+            Read::by_ref(&mut file)
+                .take(MAX_RETENTION_RECEIPT_BYTES + 1)
+                .read_to_end(&mut bytes)
+                .context("read deterministic retention receipt")?;
+            if bytes.len() as u64 > MAX_RETENTION_RECEIPT_BYTES {
+                bail!("deterministic retention receipt exceeds its read budget");
+            }
+            let final_metadata = file.metadata().context("reinspect retention receipt")?;
+            let active = crate::process::open_bounded_regular_file(&root, &relative)
+                .context("reopen active retention receipt")?;
+            let active_metadata = active
+                .metadata()
+                .context("inspect active retention receipt")?;
+            if crate::process::filesystem_file_identity(&initial_metadata)
+                != crate::process::filesystem_file_identity(&final_metadata)
+                || crate::process::filesystem_file_identity(&final_metadata)
+                    != crate::process::filesystem_file_identity(&active_metadata)
+                || initial_metadata.len() != final_metadata.len()
+                || final_metadata.len() != active_metadata.len()
+                || initial_metadata.modified().ok() != final_metadata.modified().ok()
+                || final_metadata.modified().ok() != active_metadata.modified().ok()
+                || initial_directory_snapshot.is_none()
+                || crate::process::bounded_directory_snapshot(&root, receipt_directory).ok()
+                    != initial_directory_snapshot
+            {
+                bail!("deterministic retention receipt changed during bounded read");
+            }
+            let receipt: RetentionApplicationReceiptV2 =
+                serde_json::from_slice(&bytes).context("parse deterministic retention receipt")?;
+            receipt.validate_shape(
+                relative
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .context("deterministic retention receipt name is invalid")?,
+            )?;
+            Ok(Some(receipt))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).context("inspect deterministic retention receipt"),
+    }
+}
+
+fn load_retention_application_receipts_v2(
+    profile_dir: &Path,
+    expected_root_identity: (u64, u64),
+) -> Result<Vec<RetentionApplicationReceiptV2>> {
+    let root = crate::process::open_bounded_root(profile_dir)
+        .with_context(|| format!("open active profile root {}", profile_dir.display()))?;
+    if crate::process::filesystem_file_identity(&root.metadata()?) != Some(expected_root_identity) {
+        bail!("active profile root changed before retention receipt scan");
+    }
+    let relative_dir = Path::new(ARTIFACT_RETENTION_APPLICATIONS_DIR);
+    let scan = match crate::process::read_bounded_directory(
+        &root,
+        relative_dir,
+        MAX_RETENTION_RECEIPT_ENTRIES,
+        Instant::now(),
+        MAX_RETENTION_RECEIPT_SCAN_MS,
+    ) {
+        Ok(scan) => scan,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error).context("scan bounded retention receipt directory"),
+    };
+    if scan.limit.is_some() || !scan.stable {
+        bail!("retention receipt scan was incomplete or unstable");
+    }
+    let mut receipts = Vec::new();
+    for name in scan.names {
+        let name = name
+            .to_str()
+            .context("retention receipt name is not valid UTF-8")?;
+        if name.starts_with('.') || !name.ends_with(".json") {
+            continue;
+        }
+        let relative = relative_dir.join(name);
+        let mut file = crate::process::open_bounded_regular_file(&root, &relative)
+            .context("open bounded retention receipt")?;
+        ensure_owner_only_retention_receipt(&file)?;
+        let initial_metadata = file
+            .metadata()
+            .context("inspect bounded retention receipt")?;
+        let mut bytes = Vec::new();
+        Read::by_ref(&mut file)
+            .take(MAX_RETENTION_RECEIPT_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .context("read bounded retention receipt")?;
+        if bytes.len() as u64 > MAX_RETENTION_RECEIPT_BYTES {
+            bail!("retention receipt exceeds its read budget");
+        }
+        let final_metadata = file
+            .metadata()
+            .context("reinspect bounded retention receipt")?;
+        let active = crate::process::open_bounded_regular_file(&root, &relative)
+            .context("reopen active bounded retention receipt")?;
+        let active_metadata = active
+            .metadata()
+            .context("inspect active bounded retention receipt")?;
+        if crate::process::filesystem_file_identity(&initial_metadata)
+            != crate::process::filesystem_file_identity(&final_metadata)
+            || crate::process::filesystem_file_identity(&final_metadata)
+                != crate::process::filesystem_file_identity(&active_metadata)
+            || initial_metadata.len() != final_metadata.len()
+            || final_metadata.len() != active_metadata.len()
+            || initial_metadata.modified().ok() != final_metadata.modified().ok()
+            || final_metadata.modified().ok() != active_metadata.modified().ok()
+        {
+            bail!("retention receipt changed during bounded scan");
+        }
+        let value: Value = serde_json::from_slice(&bytes).context("parse retention receipt")?;
+        match value.get("schema").and_then(Value::as_str) {
+            Some(ARTIFACT_RETENTION_APPLICATION_SCHEMA) => continue,
+            Some(ARTIFACT_RETENTION_APPLICATION_SCHEMA_V2) => {
+                let receipt: RetentionApplicationReceiptV2 =
+                    serde_json::from_value(value).context("parse retention v2 receipt")?;
+                receipt.validate_shape(name)?;
+                receipts.push(receipt);
+            }
+            _ => bail!("unsupported retention receipt schema in the active receipt directory"),
+        }
+    }
+    if crate::process::bounded_directory_snapshot(&root, relative_dir).ok() != Some(scan.snapshot)
+        || crate::process::filesystem_file_identity(&root.metadata()?)
+            != Some(expected_root_identity)
+    {
+        bail!("retention receipt directory changed during its bounded scan");
+    }
+    Ok(receipts)
+}
+
+fn ensure_retention_project_root_active(
+    project_root: &Path,
+    expected_identity: (u64, u64),
+) -> Result<()> {
+    let metadata = fs::symlink_metadata(project_root)
+        .with_context(|| format!("inspect retention project root {}", project_root.display()))?;
+    if metadata.file_type().is_symlink()
+        || !metadata.is_dir()
+        || crate::process::filesystem_file_identity(&metadata) != Some(expected_identity)
+    {
+        bail!("retention project root changed during the bounded operation");
+    }
+    Ok(())
+}
+
+fn validate_retention_approval_v2_against_live_target(
+    approval: &PendingActionApproval,
+    metadata: &RetentionApprovalMetadataV2,
+    requested_action: RetentionRequestAction,
+    target: &ArtifactRetentionReviewItem,
+) -> Result<()> {
+    crate::document_lifecycle::validate_retention_approval_identity_v2(approval, metadata)?;
+    let expected_brief = retention_request_approval_brief(
+        requested_action,
+        target,
+        &metadata.proposal.project_key,
+        &metadata.request_id,
+    );
+    if approval.preview != retention_request_preview(requested_action, target)
+        || metadata.approval_brief != expected_brief
+    {
+        bail!("approval presentation is not bound to the exact retention v2 proposal");
+    }
+    Ok(())
+}
+
+fn validate_retention_request_approval_v2(
+    approval: &PendingActionApproval,
+    metadata: &RetentionApprovalMetadataV2,
+    requested_action: RetentionRequestAction,
+    target: &ArtifactRetentionReviewItem,
+) -> Result<()> {
+    metadata.validate()?;
+    let status_provenance_valid = match approval.status {
+        ApprovalStatus::Pending => approval.resolved_at.is_none() && approval.resolved_by.is_none(),
+        ApprovalStatus::Approved => {
+            approval.resolved_at.is_some()
+                && approval
+                    .resolved_by
+                    .as_deref()
+                    .is_some_and(|actor| !operator_safe_text(actor).is_empty())
+        }
+        _ => false,
+    };
+    if approval.project_key != metadata.proposal.project_key
+        || approval.request_id != metadata.request_id
+        || approval.task_id != metadata.task_id
+        || approval.action != RETENTION_APPROVAL_ACTION
+        || approval.scope != ApprovalScope::Once
+        || approval.risk_level != requested_action.risk_level()
+        || approval.approval_mode != ApprovalMode::OperatorRequired
+        || approval.action_id.is_empty()
+        || approval.action_id == approval.approval_id
+        || approval.reason != metadata.proposal.reason
+        || approval.source_surface != "project.retention_request"
+        || approval.created_at != *metadata.generated_at.as_datetime()
+        || approval.expires_at <= approval.created_at
+        || !status_provenance_valid
+    {
+        bail!("approval identity is not one exact retention v2 request authority");
+    }
+    let expected_brief = retention_request_approval_brief(
+        requested_action,
+        target,
+        &metadata.proposal.project_key,
+        &metadata.request_id,
+    );
+    if approval.preview != retention_request_preview(requested_action, target)
+        || metadata.approval_brief != expected_brief
+    {
+        bail!("approval presentation is not bound to the exact retention v2 proposal");
+    }
+    Ok(())
+}
+
+fn validate_retention_receipt_v2_against_approval(
+    receipt: &RetentionApplicationReceiptV2,
+    approval: &PendingActionApproval,
+    metadata: &RetentionApprovalMetadataV2,
+) -> Result<()> {
+    let metadata_sha256 = retention_approval_metadata_sha256_v2(metadata)?;
+    let lifecycle_event_expected = metadata.proposal.target.document_id.is_some()
+        && metadata
+            .proposal
+            .requested_action
+            .lifecycle_action()
+            .is_some();
+    if receipt.approval_id != approval.approval_id
+        || receipt.application_id != metadata.application_id
+        || receipt.project_key != metadata.proposal.project_key
+        || receipt.proposal_sha256 != metadata.proposal_sha256
+        || receipt.approval_metadata_sha256 != metadata_sha256
+        || receipt.approval_preview_sha256 != sha256_text(&approval.preview)
+        || receipt.retention_target_id != metadata.proposal.target.retention_target_id
+        || receipt.requested_action != metadata.proposal.requested_action
+        || receipt.lifecycle_event.is_some() != lifecycle_event_expected
+    {
+        bail!("retention receipt is not bound to one exact approval and proposal");
+    }
+    Ok(())
+}
+
+fn sha256_text(value: &str) -> String {
+    format!("{:x}", Sha256::digest(value.as_bytes()))
+}
+
+fn write_or_reconcile_retention_application_receipt_v2(
+    profile_dir: &Path,
+    expected_root_identity: (u64, u64),
+    receipt: &RetentionApplicationReceiptV2,
+    allow_create: bool,
+) -> Result<(PathBuf, bool)> {
+    let root = crate::process::open_bounded_root(profile_dir)
+        .with_context(|| format!("open active profile root {}", profile_dir.display()))?;
+    let root_identity = crate::process::filesystem_file_identity(&root.metadata()?)
+        .context("active profile root lacks stable identity")?;
+    if root_identity != expected_root_identity {
+        bail!("active profile root changed before retention receipt persistence");
+    }
+    crate::process::ensure_bounded_directory(
+        &root,
+        Path::new(ARTIFACT_RETENTION_APPLICATIONS_DIR),
+    )?;
+    let filename = format!("{}.json", receipt.application_id);
+    let relative = Path::new(ARTIFACT_RETENTION_APPLICATIONS_DIR).join(&filename);
+    if let Some(stored) = load_retention_application_receipt_v2(
+        profile_dir,
+        expected_root_identity,
+        &receipt.application_id,
+    )? {
+        if &stored != receipt {
+            bail!("deterministic retention receipt differs from the approved application");
+        }
+        return Ok((profile_dir.join(relative), true));
+    }
+    if !allow_create {
+        bail!("consumed retention approval has no matching deterministic receipt");
+    }
+    let partial_name = format!(".{filename}.{}.partial", Uuid::new_v4());
+    let partial_relative = Path::new(ARTIFACT_RETENTION_APPLICATIONS_DIR).join(&partial_name);
+    let mut partial = crate::process::create_new_bounded_regular_file(&root, &partial_relative)
+        .context("create deterministic retention receipt partial")?;
+    ensure_owner_only_retention_receipt(&partial)?;
+    let mut bytes = serde_json::to_vec_pretty(receipt).context("serialize retention v2 receipt")?;
+    bytes.push(b'\n');
+    partial
+        .write_all(&bytes)
+        .context("write deterministic retention receipt")?;
+    partial
+        .sync_all()
+        .context("sync deterministic retention receipt")?;
+    drop(partial);
+    crate::process::finalize_bounded_file_noreplace(
+        &root,
+        Path::new(ARTIFACT_RETENTION_APPLICATIONS_DIR),
+        Path::new(&partial_name),
+        Path::new(&filename),
+    )
+    .context("finalize deterministic retention receipt")?;
+    if crate::process::filesystem_file_identity(&root.metadata()?) != Some(expected_root_identity) {
+        bail!("active profile root changed after retention receipt persistence");
+    }
+    Ok((profile_dir.join(relative), false))
+}
+
+fn ensure_owner_only_retention_receipt(file: &fs::File) -> Result<()> {
+    let metadata = file.metadata().context("inspect retention receipt")?;
+    if !metadata.is_file() {
+        bail!("retention receipt is not one regular file");
+    }
+    #[cfg(unix)]
+    if metadata.permissions().mode() & 0o077 != 0 || metadata.nlink() != 1 {
+        bail!("retention receipt must be one owner-only file");
+    }
+    Ok(())
 }
 
 fn retention_application_human_summary(report: &ArtifactRetentionApplicationReport) -> String {
@@ -1553,45 +2718,6 @@ fn shell_arg(value: &str) -> String {
     }
 }
 
-fn retention_request_target(
-    index: &ArtifactIndex,
-    artifact_id: Option<&str>,
-    path_filter: Option<&str>,
-) -> Result<ArtifactRetentionReviewItem> {
-    let artifact_id = artifact_id.map(operator_safe_text);
-    let path_filter = path_filter.map(operator_safe_path);
-    match (artifact_id.as_deref(), path_filter.as_deref()) {
-        (Some(_), Some(_)) => bail!("provide only one of --artifact-id or --path"),
-        (None, None) => bail!("provide --artifact-id or --path"),
-        _ => {}
-    }
-
-    let matches = index
-        .entries
-        .iter()
-        .filter(
-            |entry| match (artifact_id.as_deref(), path_filter.as_deref()) {
-                (Some(id), None) => entry.id == id,
-                (None, Some(path)) => {
-                    entry.path == path
-                        || entry
-                            .relative_path
-                            .as_deref()
-                            .is_some_and(|rel| rel == path)
-                }
-                _ => false,
-            },
-        )
-        .map(retention_review_item)
-        .collect::<Vec<_>>();
-
-    match matches.as_slice() {
-        [target] => Ok(target.clone()),
-        [] => bail!("no artifact retention review item matched the selector"),
-        _ => bail!("selector matched multiple artifacts; use --artifact-id for a stable request"),
-    }
-}
-
 fn validate_retention_request_action(
     action: RetentionRequestAction,
     target: &ArtifactRetentionReviewItem,
@@ -1599,36 +2725,7 @@ fn validate_retention_request_action(
     if !target.present && !matches!(action, RetentionRequestAction::Keep) {
         bail!("only keep can be requested for a missing artifact reference");
     }
-    if action == RetentionRequestAction::Dispose
-        && target.retention_class != "disposal_candidate"
-        && target.review_status != "needs_triage"
-    {
-        bail!("dispose requires a disposal candidate or needs_triage item");
-    }
-    if action == RetentionRequestAction::Archive
-        && target.retention_class != "archive_candidate"
-        && target.review_status != "needs_triage"
-    {
-        bail!("archive requires an archive candidate or needs_triage item");
-    }
     Ok(())
-}
-
-fn retention_request_task_id(
-    action: RetentionRequestAction,
-    target: &ArtifactRetentionReviewItem,
-    override_task_id: Option<&str>,
-) -> String {
-    override_task_id
-        .map(operator_safe_text)
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| {
-            format!(
-                "retention-{}-{}",
-                action.as_str(),
-                sanitize_id_fragment(&target.id)
-            )
-        })
 }
 
 fn retention_request_preview(
@@ -1642,27 +2739,6 @@ fn retention_request_preview(
         target.retention_class,
         target.review_status
     )
-}
-
-fn retention_request_reason(
-    action: RetentionRequestAction,
-    target: &ArtifactRetentionReviewItem,
-    extra: Option<&str>,
-) -> String {
-    let mut reason = format!(
-        "{}. Review recommended: {}. {}",
-        target.reason,
-        target.recommended_action,
-        action.approval_impact()
-    );
-    if let Some(extra) = extra
-        .map(operator_safe_text)
-        .filter(|value| !value.trim().is_empty())
-    {
-        reason.push_str(" Operator note: ");
-        reason.push_str(&extra);
-    }
-    reason
 }
 
 fn retention_request_approval_brief(
@@ -1783,33 +2859,6 @@ fn retention_request_approval_brief(
     }
 }
 
-fn retention_request_metadata(
-    generated_at: DateTime<Utc>,
-    action: RetentionRequestAction,
-    target: &ArtifactRetentionReviewItem,
-    brief: ApprovalBrief,
-) -> ActionApprovalMetadata {
-    ActionApprovalMetadata::ArtifactRetention(Box::new(ArtifactRetentionApprovalMetadata {
-        generated_at,
-        artifact_id: target.id.clone(),
-        label: target.label.clone(),
-        source: target.source.clone(),
-        artifact_kind: target.kind.clone(),
-        path: target.path.clone(),
-        relative_path: target.relative_path.clone(),
-        present: target.present,
-        bytes: target.bytes,
-        retention_class: target.retention_class.clone(),
-        review_status: target.review_status.clone(),
-        recommended_action: target.recommended_action.clone(),
-        requested_action: action.as_str().to_string(),
-        reason: target.reason.clone(),
-        why_it_matters: target.why_it_matters.clone(),
-        refs: target.refs.clone(),
-        approval_brief: Some(brief),
-    }))
-}
-
 fn retention_request_status(approval_status: ApprovalStatus) -> &'static str {
     match approval_status {
         ApprovalStatus::Pending => "pending_approval",
@@ -1868,36 +2917,6 @@ fn retention_request_risk_label(risk_level: RiskLevel) -> &'static str {
         RiskLevel::Destructive => "destructive",
         RiskLevel::ExternalSideEffect => "external_side_effect",
     }
-}
-
-fn matching_retention_approval(
-    approvals: &[PendingActionApproval],
-    project_key: &str,
-    request_id: &str,
-    task_id: &str,
-    action: &str,
-    risk_level: RiskLevel,
-) -> Option<PendingActionApproval> {
-    approvals
-        .iter()
-        .find(|approval| {
-            approval.project_key == project_key
-                && approval.request_id == request_id
-                && approval.task_id == task_id
-                && approval.action == action
-                && approval.risk_level == risk_level
-                && approval.status == ApprovalStatus::Pending
-        })
-        .or_else(|| {
-            approvals.iter().find(|approval| {
-                approval.project_key == project_key
-                    && approval.request_id == request_id
-                    && approval.task_id == task_id
-                    && approval.action == action
-                    && approval.risk_level == risk_level
-            })
-        })
-        .cloned()
 }
 
 fn sanitize_id_fragment(value: &str) -> String {
@@ -2015,7 +3034,7 @@ fn build_artifact_index(
     } else {
         profile
     };
-    let profile_dir = get_profile_dir(profile_name)?;
+    let profile_dir = profile_dir_path(profile_name)?;
     let safe_project_key = project_key
         .map(operator_safe_text)
         .unwrap_or_else(|| "all".to_string());
@@ -2060,6 +3079,907 @@ fn build_artifact_index(
                 "accepting output as truth without closeout receipt review",
             ],
         },
+    })
+}
+
+fn build_bounded_retention_artifact_index(
+    profile: &str,
+    project_key: &str,
+    project_root: &Path,
+    root_instance_identity_sha256: &str,
+    scan_started: Instant,
+    budgets: RetentionDiscoveryBudgets,
+) -> Result<BoundedRetentionArtifactIndex> {
+    let root = crate::process::open_bounded_root(project_root)
+        .with_context(|| format!("open retention artifact root {}", project_root.display()))?;
+    if crate::document_lifecycle::root_instance_identity_sha256_from_descriptor(&root)?
+        != root_instance_identity_sha256
+    {
+        bail!("project root changed before bounded artifact discovery");
+    }
+
+    let mut entries = BTreeMap::new();
+    let mut directory_snapshots = vec![(
+        PathBuf::new(),
+        crate::process::bounded_directory_snapshot(&root, Path::new(""))
+            .context("snapshot bounded retention artifact root")?,
+    )];
+    let mut source_file_snapshots = Vec::new();
+    let deliverables_relative = Path::new("DELIVERABLES.md");
+    let referenced = match read_bounded_retention_text(
+        &root,
+        deliverables_relative,
+        MAX_RETENTION_DELIVERABLES_BYTES,
+    )? {
+        Some((text, snapshot)) => {
+            source_file_snapshots.push((deliverables_relative.to_path_buf(), snapshot));
+            extract_backtick_paths(&text)
+                .into_iter()
+                .filter(|value| {
+                    let path = Path::new(value);
+                    !path.is_absolute()
+                        && !path.as_os_str().is_empty()
+                        && path
+                            .components()
+                            .all(|component| matches!(component, std::path::Component::Normal(_)))
+                })
+                .collect::<BTreeSet<_>>()
+        }
+        None => BTreeSet::new(),
+    };
+
+    for reference in &referenced {
+        let relative = Path::new(reference);
+        let metadata = crate::process::open_bounded_regular_file(&root, relative)
+            .ok()
+            .and_then(|file| file.metadata().ok())
+            .filter(|metadata| metadata.is_file());
+        insert_bounded_project_entry(
+            &mut entries,
+            project_root,
+            reference,
+            metadata.as_ref(),
+            "Deliverables surface reference",
+            "project_deliverables",
+            if has_deliverable_extension(relative) {
+                "handoff"
+            } else {
+                "review"
+            },
+            if metadata.is_some() {
+                "referenced"
+            } else {
+                "missing"
+            },
+            "A human-facing deliverables surface selected this artifact for inspection.",
+            vec![
+                format!("project:{project_key}"),
+                "surface:DELIVERABLES.md".to_string(),
+            ],
+        );
+    }
+
+    let mut observed_entries = 0_u64;
+    let mut output_candidates = Vec::new();
+    for output_root in OUTPUT_ROOTS {
+        let relative = Path::new(output_root);
+        match walk_bounded_output_directory(
+            &root,
+            relative,
+            1,
+            scan_started,
+            budgets,
+            &mut observed_entries,
+            &mut directory_snapshots,
+            &mut output_candidates,
+        ) {
+            Ok(()) => {}
+            Err(error)
+                if error
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    output_candidates.sort_by(|left, right| left.0.cmp(&right.0));
+    for (relative, metadata) in output_candidates {
+        let relative_path = relative.to_string_lossy().replace('\\', "/");
+        let referenced_by_deliverables = referenced.contains(&relative_path);
+        insert_bounded_project_entry(
+            &mut entries,
+            project_root,
+            &relative_path,
+            Some(&metadata),
+            if referenced_by_deliverables {
+                "Referenced human-facing output"
+            } else {
+                "Unreferenced human-facing output"
+            },
+            "project_output_scan",
+            if referenced_by_deliverables {
+                "handoff"
+            } else {
+                "review"
+            },
+            if referenced_by_deliverables {
+                "referenced"
+            } else {
+                "needs_triage"
+            },
+            if referenced_by_deliverables {
+                "Selected output is already promoted to the deliverables surface."
+            } else {
+                "Human-facing output exists but is not yet promoted to the deliverables surface."
+            },
+            vec![format!("project:{project_key}")],
+        );
+    }
+
+    if scan_started.elapsed().as_millis() as u64 >= budgets.max_elapsed_ms {
+        bail!("bounded artifact discovery exceeded its elapsed-time budget");
+    }
+    let mut entries = entries.into_values().collect::<Vec<_>>();
+    entries.sort_by(|left, right| {
+        left.source
+            .cmp(&right.source)
+            .then(left.retention_class.cmp(&right.retention_class))
+            .then(left.path.cmp(&right.path))
+    });
+    if entries.len() > MAX_INDEX_ENTRIES {
+        bail!("bounded artifact discovery exceeded its retained-entry budget");
+    }
+    let total_entries = entries.len();
+    let summary = summarize_entries(&entries, total_entries, 0);
+    let profile_name = if profile.is_empty() {
+        "default"
+    } else {
+        profile
+    };
+    Ok(BoundedRetentionArtifactIndex {
+        index: ArtifactIndex {
+            schema: ARTIFACT_INDEX_SCHEMA,
+            generated_at: Utc::now(),
+            profile: operator_safe_text(profile_name),
+            project_key: operator_safe_text(project_key),
+            project_root: Some(operator_safe_path(project_root.to_string_lossy().as_ref())),
+            summary,
+            entries,
+            redaction: ArtifactIndexRedaction {
+                operator_safe: true,
+                path_policy: "summary_first_paths_in_json",
+            },
+            authority: ArtifactIndexAuthority {
+                read_only: true,
+                does_not_authorize: vec![
+                    "delete",
+                    "move",
+                    "archive",
+                    "publish",
+                    "accepting output as truth without closeout receipt review",
+                ],
+            },
+        },
+        directory_snapshots,
+        source_file_snapshots,
+    })
+}
+
+fn read_bounded_retention_text(
+    root: &std::fs::File,
+    relative: &Path,
+    max_bytes: u64,
+) -> Result<Option<(String, crate::process::FilesystemObjectSnapshot)>> {
+    let mut file = match crate::process::open_bounded_regular_file(root, relative) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error).context("open bounded retention source text"),
+    };
+    let initial = crate::process::FilesystemObjectSnapshot::from_metadata(&file.metadata()?);
+    let mut bytes = Vec::new();
+    Read::by_ref(&mut file)
+        .take(max_bytes + 1)
+        .read_to_end(&mut bytes)
+        .context("read bounded retention source text")?;
+    if bytes.len() as u64 > max_bytes {
+        bail!("bounded retention source text exceeds its byte budget");
+    }
+    let final_snapshot = crate::process::FilesystemObjectSnapshot::from_metadata(&file.metadata()?);
+    let current = crate::process::open_bounded_regular_file(root, relative)
+        .context("reopen bounded retention source text")?;
+    let current_snapshot =
+        crate::process::FilesystemObjectSnapshot::from_metadata(&current.metadata()?);
+    if initial != final_snapshot || initial != current_snapshot {
+        bail!("bounded retention source text changed while it was read");
+    }
+    Ok(Some((
+        String::from_utf8_lossy(&bytes).into_owned(),
+        initial,
+    )))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_bounded_project_entry(
+    entries: &mut BTreeMap<String, ArtifactIndexEntry>,
+    project_root: &Path,
+    relative_path: &str,
+    metadata: Option<&std::fs::Metadata>,
+    label: &str,
+    source: &str,
+    retention_class: &str,
+    review_status: &str,
+    why_it_matters: &str,
+    refs: Vec<String>,
+) {
+    let path = project_root.join(relative_path);
+    let kind = artifact_kind(&path);
+    let path_text = path.to_string_lossy().into_owned();
+    let key = format!("{source}|{kind}|{path_text}");
+    let entry = ArtifactIndexEntry {
+        id: artifact_id(&key),
+        label: operator_safe_text(label),
+        source: source.to_string(),
+        kind,
+        path: operator_safe_path(&path_text),
+        relative_path: Some(operator_safe_text(relative_path)),
+        present: metadata.is_some(),
+        bytes: metadata.map(std::fs::Metadata::len),
+        modified_at: metadata
+            .and_then(|metadata| metadata.modified().ok())
+            .map(Into::into),
+        retention_class: retention_class.to_string(),
+        review_status: review_status.to_string(),
+        why_it_matters: why_it_matters.to_string(),
+        refs: refs
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
+    };
+    entries
+        .entry(key)
+        .and_modify(|existing| merge_entry(existing, &entry))
+        .or_insert(entry);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn walk_bounded_output_directory(
+    root: &std::fs::File,
+    relative: &Path,
+    depth: usize,
+    scan_started: Instant,
+    budgets: RetentionDiscoveryBudgets,
+    observed_entries: &mut u64,
+    snapshots: &mut Vec<(PathBuf, crate::process::FilesystemObjectSnapshot)>,
+    candidates: &mut Vec<(PathBuf, std::fs::Metadata)>,
+) -> Result<()> {
+    if depth > budgets.max_depth {
+        bail!("bounded artifact discovery exceeded its depth budget");
+    }
+    if scan_started.elapsed().as_millis() as u64 >= budgets.max_elapsed_ms {
+        bail!("bounded artifact discovery exceeded its elapsed-time budget");
+    }
+    let remaining = budgets.max_entries.saturating_sub(*observed_entries);
+    if remaining == 0 {
+        bail!("bounded artifact discovery exceeded its directory-entry budget");
+    }
+    let read = crate::process::read_bounded_directory(
+        root,
+        relative,
+        remaining,
+        scan_started,
+        budgets.max_elapsed_ms,
+    )?;
+    *observed_entries = observed_entries.saturating_add(read.entries_observed);
+    if read.limit.is_some() || !read.stable {
+        bail!("bounded artifact discovery was incomplete or unstable");
+    }
+    snapshots.push((relative.to_path_buf(), read.snapshot));
+    for name in read.names {
+        let name = name
+            .to_str()
+            .context("bounded artifact path is not valid UTF-8")?;
+        let child = relative.join(name);
+        if depth + 1 > budgets.max_depth {
+            bail!("bounded artifact discovery exceeded its depth budget");
+        }
+        match crate::process::open_bounded_regular_file(root, &child) {
+            Ok(file) => {
+                let metadata = file
+                    .metadata()
+                    .context("inspect bounded artifact candidate")?;
+                if !metadata.is_file() {
+                    bail!("bounded artifact candidate is not one regular file");
+                }
+                if has_deliverable_extension(&child) {
+                    candidates.push((child, metadata));
+                    if candidates.len() > MAX_INDEX_ENTRIES {
+                        bail!("bounded artifact discovery exceeded its retained-entry budget");
+                    }
+                }
+            }
+            Err(_) => walk_bounded_output_directory(
+                root,
+                &child,
+                depth + 1,
+                scan_started,
+                budgets,
+                observed_entries,
+                snapshots,
+                candidates,
+            )
+            .with_context(|| format!("classify bounded artifact path {}", child.display()))?,
+        }
+    }
+    Ok(())
+}
+
+fn build_artifact_index_v2(
+    project_root: &Path,
+    source: &BoundedRetentionArtifactIndex,
+    root_id: &str,
+    root_path_identity_sha256: &str,
+    root_instance_identity_sha256: &str,
+    scan_started: Instant,
+) -> Result<ArtifactIndexV2> {
+    let index = &source.index;
+    let root = crate::process::open_bounded_root(project_root)
+        .with_context(|| format!("open artifact-index root {}", project_root.display()))?;
+    if crate::document_lifecycle::root_instance_identity_sha256_from_descriptor(&root)?
+        != root_instance_identity_sha256
+    {
+        bail!("project root changed before artifact-index v2 hashing");
+    }
+    let mut entries = Vec::with_capacity(index.entries.len());
+    let mut total_hashed_bytes = 0_u64;
+    let mut artifact_file_snapshots = Vec::new();
+    for entry in &index.entries {
+        if scan_started.elapsed().as_millis() as u64 >= MAX_RETENTION_DISCOVERY_MS {
+            bail!("artifact-index v2 exceeded its elapsed-time budget");
+        }
+        let Some(relative_path) = entry.relative_path.as_deref() else {
+            continue;
+        };
+        let relative = Path::new(relative_path);
+        if relative.is_absolute()
+            || relative.as_os_str().is_empty()
+            || !relative
+                .components()
+                .all(|component| matches!(component, std::path::Component::Normal(_)))
+        {
+            entries.push(ArtifactIndexEntryV2 {
+                artifact_id: entry.id.clone(),
+                relative_path: Some(relative_path.to_string()),
+                present: entry.present,
+                size_bytes: entry.bytes,
+                modified_at: None,
+                content_sha256: None,
+                exact_current_identity: false,
+                status: "invalid_relative_path".to_string(),
+            });
+            continue;
+        }
+        let opened = crate::process::open_bounded_regular_file(&root, relative);
+        let Ok(mut file) = opened else {
+            entries.push(ArtifactIndexEntryV2 {
+                artifact_id: entry.id.clone(),
+                relative_path: Some(relative_path.to_string()),
+                present: entry.present,
+                size_bytes: entry.bytes,
+                modified_at: None,
+                content_sha256: None,
+                exact_current_identity: false,
+                status: "not_one_current_regular_file".to_string(),
+            });
+            continue;
+        };
+        let metadata = file.metadata().context("inspect bounded artifact")?;
+        let remaining_total = MAX_RETENTION_DISCOVERY_TOTAL_BYTES
+            .checked_sub(total_hashed_bytes)
+            .context("artifact-index v2 total byte budget was exceeded")?;
+        if !metadata.is_file()
+            || metadata.len() > MAX_RETENTION_ARTIFACT_BYTES
+            || metadata.len() > remaining_total
+        {
+            bail!("artifact-index v2 cannot completely hash its bounded source set");
+        }
+        let path_metadata = fs::symlink_metadata(project_root.join(relative))
+            .with_context(|| format!("inspect artifact path {relative_path}"))?;
+        if path_metadata.file_type().is_symlink()
+            || crate::process::filesystem_file_identity(&path_metadata)
+                != crate::process::filesystem_file_identity(&metadata)
+        {
+            bail!("artifact changed while its bounded descriptor was opened");
+        }
+        let mut bytes = Vec::with_capacity(metadata.len() as usize);
+        Read::by_ref(&mut file)
+            .take(remaining_total.min(MAX_RETENTION_ARTIFACT_BYTES) + 1)
+            .read_to_end(&mut bytes)
+            .with_context(|| format!("read bounded artifact {relative_path}"))?;
+        if bytes.len() as u64 > remaining_total.min(MAX_RETENTION_ARTIFACT_BYTES) {
+            bail!("artifact-index v2 exceeded its byte budget while reading");
+        }
+        let final_metadata = file.metadata().context("reinspect bounded artifact")?;
+        let final_path_metadata = fs::symlink_metadata(project_root.join(relative))
+            .with_context(|| format!("reinspect artifact path {relative_path}"))?;
+        if crate::process::filesystem_file_identity(&metadata)
+            != crate::process::filesystem_file_identity(&final_metadata)
+            || metadata.len() != final_metadata.len()
+            || metadata.modified().ok() != final_metadata.modified().ok()
+            || final_path_metadata.file_type().is_symlink()
+            || crate::process::filesystem_file_identity(&final_path_metadata)
+                != crate::process::filesystem_file_identity(&final_metadata)
+        {
+            bail!("artifact changed while its content hash was computed");
+        }
+        total_hashed_bytes = total_hashed_bytes
+            .checked_add(bytes.len() as u64)
+            .context("artifact-index v2 total byte budget overflow")?;
+        artifact_file_snapshots.push((
+            relative.to_path_buf(),
+            crate::process::FilesystemObjectSnapshot::from_metadata(&final_metadata),
+        ));
+        entries.push(ArtifactIndexEntryV2 {
+            artifact_id: entry.id.clone(),
+            relative_path: Some(relative_path.to_string()),
+            present: true,
+            size_bytes: Some(metadata.len()),
+            modified_at: metadata
+                .modified()
+                .ok()
+                .map(|value| StrictUtcTimestamp::from_datetime(value.into())),
+            content_sha256: Some(format!("{:x}", Sha256::digest(&bytes))),
+            exact_current_identity: true,
+            status: "exact_current".to_string(),
+        });
+    }
+    entries.sort_by(|left, right| left.artifact_id.cmp(&right.artifact_id));
+    for (relative, expected) in &source.directory_snapshots {
+        let current = crate::process::bounded_directory_snapshot(&root, relative)
+            .with_context(|| format!("reinspect artifact directory {}", relative.display()))?;
+        if &current != expected {
+            bail!("artifact source directory changed while artifact-index v2 was built");
+        }
+    }
+    for (relative, expected) in &source.source_file_snapshots {
+        let current = crate::process::open_bounded_regular_file(&root, relative)
+            .with_context(|| format!("reopen artifact source file {}", relative.display()))?;
+        let current = crate::process::FilesystemObjectSnapshot::from_metadata(&current.metadata()?);
+        if &current != expected {
+            bail!("artifact source file changed while artifact-index v2 was built");
+        }
+    }
+    for (relative, expected) in &artifact_file_snapshots {
+        let current = crate::process::open_bounded_regular_file(&root, relative)
+            .with_context(|| format!("reopen indexed artifact {}", relative.display()))?;
+        let current = crate::process::FilesystemObjectSnapshot::from_metadata(&current.metadata()?);
+        if &current != expected {
+            bail!("indexed artifact changed before artifact-index v2 completed");
+        }
+    }
+    for entry in entries.iter().filter(|entry| !entry.exact_current_identity) {
+        let Some(relative) = entry.relative_path.as_deref() else {
+            continue;
+        };
+        if crate::process::open_bounded_regular_file(&root, Path::new(relative)).is_ok() {
+            bail!("non-regular artifact source became a current regular file");
+        }
+    }
+    if scan_started.elapsed().as_millis() as u64 >= MAX_RETENTION_DISCOVERY_MS {
+        bail!("artifact-index v2 exceeded its elapsed-time budget");
+    }
+    if crate::document_lifecycle::root_instance_identity_sha256(project_root)?
+        != root_instance_identity_sha256
+    {
+        bail!("project root changed while artifact-index v2 was built");
+    }
+    let source_bytes = serde_json::to_vec(&entries).context("serialize artifact-index v2 rows")?;
+    Ok(ArtifactIndexV2 {
+        schema: ARTIFACT_INDEX_SCHEMA_V2,
+        generated_at: Utc::now(),
+        project_key: index.project_key.clone(),
+        root_id: root_id.to_string(),
+        root_path_identity_sha256: root_path_identity_sha256.to_string(),
+        root_instance_identity_sha256: root_instance_identity_sha256.to_string(),
+        source_snapshot_sha256: format!("{:x}", Sha256::digest(source_bytes)),
+        entries,
+        read_only: true,
+        file_mutation_authorized: false,
+    })
+}
+
+fn retention_observation_from_artifact(
+    root_id: &str,
+    entry: &ArtifactIndexEntryV2,
+) -> Result<DocumentLifecycleObservationV1> {
+    let relative_path = entry
+        .relative_path
+        .as_deref()
+        .context("retention artifact is outside the validated project root")?;
+    let size_bytes = entry
+        .size_bytes
+        .context("retention artifact lacks a bounded current size")?;
+    let content_sha256 = entry
+        .content_sha256
+        .as_deref()
+        .context("retention artifact lacks a bounded current content hash")?;
+    if !entry.exact_current_identity {
+        bail!("retention artifact does not have one exact current identity");
+    }
+    let modified_at = entry
+        .modified_at
+        .as_ref()
+        .context("retention artifact lacks a bounded current modified time")?;
+    Ok(DocumentLifecycleObservationV1 {
+        observation_id: crate::document_lifecycle::observation_id(
+            root_id,
+            relative_path,
+            size_bytes,
+            Some(modified_at.as_datetime()),
+            Some(content_sha256),
+        ),
+        relative_path: relative_path.to_string(),
+        size_bytes,
+        modified_at: modified_at.clone(),
+        content_sha256: content_sha256.to_string(),
+    })
+}
+
+fn normalize_retention_path_selector(project_root: &Path, value: &str) -> Result<String> {
+    let value = value.trim();
+    if value.is_empty() {
+        bail!("retention path selector cannot be empty");
+    }
+    let path = Path::new(value);
+    let relative = if path.is_absolute() {
+        let canonical = path
+            .canonicalize()
+            .with_context(|| format!("resolve retention path {value}"))?;
+        canonical
+            .strip_prefix(project_root)
+            .context("retention path is outside the validated project root")?
+            .to_path_buf()
+    } else {
+        path.to_path_buf()
+    };
+    if relative.as_os_str().is_empty()
+        || !relative
+            .components()
+            .all(|component| matches!(component, std::path::Component::Normal(_)))
+    {
+        bail!("retention path must be one bounded relative file path");
+    }
+    Ok(relative.to_string_lossy().replace('\\', "/"))
+}
+
+fn exact_document_entry<'a>(
+    entries: &'a [DocumentCatalogEntryV2],
+    document_id: &str,
+) -> Result<&'a DocumentCatalogEntryV2> {
+    let matches = entries
+        .iter()
+        .filter(|entry| entry.document_id.as_deref() == Some(document_id))
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [entry] if !entry.lifecycle_stale => Ok(entry),
+        [_, _, ..] => bail!("document selector resolves to multiple observations"),
+        [_] => bail!("document selector resolves only to stale lifecycle state"),
+        [] => bail!("document selector is not an exact current lifecycle head"),
+    }
+}
+
+fn resolve_retention_target_v2(
+    profile: &str,
+    project_root: &Path,
+    project_key: &str,
+    input: RetentionResolverInput<'_>,
+) -> Result<ResolvedRetentionContextV2> {
+    let RetentionResolverInput {
+        artifact_id: artifact_id_selector,
+        path: path_selector,
+        document_id: document_id_selector,
+        action: requested_action,
+        summary_document_id,
+        reason,
+        allow_applied_state,
+    } = input;
+    if artifact_id_selector.is_none() && path_selector.is_none() && document_id_selector.is_none() {
+        bail!("one of --artifact-id, --path, or --document-id is required");
+    }
+    let profile_dir = profile_dir_path(if profile.is_empty() {
+        "default"
+    } else {
+        profile
+    })?;
+    let catalog = scan_project_with_lifecycle(
+        &profile_dir,
+        project_root,
+        &CatalogOptions {
+            project_key: Some(project_key.to_string()),
+            ..CatalogOptions::default()
+        },
+    )?;
+    let root = catalog
+        .base_catalog
+        .roots
+        .first()
+        .context("retention resolver requires exactly one project root")?;
+    let root_instance_identity_sha256 =
+        crate::document_lifecycle::root_instance_identity_sha256(project_root)?;
+    let artifact_scan_started = Instant::now();
+    let bounded_index = build_bounded_retention_artifact_index(
+        profile,
+        project_key,
+        project_root,
+        &root_instance_identity_sha256,
+        artifact_scan_started,
+        RetentionDiscoveryBudgets::default(),
+    )?;
+    let legacy_index = &bounded_index.index;
+    let artifact_index = build_artifact_index_v2(
+        project_root,
+        &bounded_index,
+        &root.root_id,
+        &root.path_identity_sha256,
+        &root_instance_identity_sha256,
+        artifact_scan_started,
+    )?;
+    let normalized_path = path_selector
+        .map(|value| normalize_retention_path_selector(project_root, value))
+        .transpose()?;
+
+    let selected_artifact = artifact_id_selector
+        .map(|selector| {
+            let matches = artifact_index
+                .entries
+                .iter()
+                .filter(|entry| entry.artifact_id == selector.trim())
+                .collect::<Vec<_>>();
+            match matches.as_slice() {
+                [entry] => Ok(*entry),
+                [] => bail!("artifact selector is not present in artifact-index v2"),
+                _ => bail!("artifact selector is ambiguous"),
+            }
+        })
+        .transpose()?;
+    let selected_document = document_id_selector
+        .map(|selector| exact_document_entry(&catalog.entries, selector.trim()))
+        .transpose()?;
+
+    if let (Some(path), Some(artifact)) = (&normalized_path, selected_artifact) {
+        if artifact.relative_path.as_deref() != Some(path.as_str()) {
+            bail!("artifact and path selectors do not identify the same current file");
+        }
+    }
+    if let (Some(path), Some(document)) = (&normalized_path, selected_document) {
+        if document.observation.relative_path != *path {
+            bail!("document and path selectors do not identify the same current file");
+        }
+    }
+
+    let selected_relative_path = selected_document
+        .map(|entry| entry.observation.relative_path.as_str())
+        .or_else(|| selected_artifact.and_then(|entry| entry.relative_path.as_deref()))
+        .or(normalized_path.as_deref())
+        .context("selectors do not identify one current relative path")?;
+    let artifacts_at_path = artifact_index
+        .entries
+        .iter()
+        .filter(|entry| entry.relative_path.as_deref() == Some(selected_relative_path))
+        .collect::<Vec<_>>();
+    if artifacts_at_path.len() > 1 {
+        bail!("multiple artifact IDs resolve to the same current physical path");
+    }
+    let artifact = selected_artifact.or_else(|| artifacts_at_path.first().copied());
+    if let Some(artifact) = artifact {
+        if !artifact.exact_current_identity || artifact.content_sha256.is_none() {
+            bail!("hashless or stale artifact identity cannot authorize retention");
+        }
+    }
+
+    let catalog_rows_at_path = catalog
+        .entries
+        .iter()
+        .filter(|entry| entry.observation.relative_path == selected_relative_path)
+        .collect::<Vec<_>>();
+    if catalog.lifecycle.status != LifecycleProjectionStatusV1::Absent
+        && catalog_rows_at_path
+            .iter()
+            .any(|entry| entry.lifecycle_stale)
+    {
+        bail!("stale lifecycle identity at the selected path blocks artifact-only normalization");
+    }
+    let documents_at_path = catalog_rows_at_path
+        .iter()
+        .copied()
+        .filter(|entry| entry.document_id.is_some())
+        .collect::<Vec<_>>();
+    if documents_at_path.len() > 1 {
+        bail!("multiple durable documents resolve to the same current physical path");
+    }
+    let document = selected_document.or_else(|| documents_at_path.first().copied());
+    if document.is_none()
+        && !matches!(
+            catalog.lifecycle.status,
+            LifecycleProjectionStatusV1::Absent
+        )
+        && (!matches!(catalog.lifecycle.status, LifecycleProjectionStatusV1::Valid)
+            || !catalog.base_catalog.scan.complete
+            || !catalog.lifecycle_findings.is_empty())
+    {
+        bail!("incomplete or unresolved lifecycle projection blocks artifact-only normalization");
+    }
+    if let (Some(artifact), Some(document)) = (artifact, document) {
+        if artifact.relative_path.as_deref() != Some(document.observation.relative_path.as_str())
+            || artifact.size_bytes != Some(document.observation.size_bytes)
+            || artifact.content_sha256.as_deref() != document.observation.content_sha256.as_deref()
+        {
+            bail!("artifact and document selectors disagree on current content identity");
+        }
+    }
+
+    let observation = if let Some(document) = document {
+        let modified_at = document
+            .observation
+            .modified_at
+            .context("document retention requires a current modified time")?;
+        DocumentLifecycleObservationV1 {
+            observation_id: document.observation.observation_id.clone(),
+            relative_path: document.observation.relative_path.clone(),
+            size_bytes: document.observation.size_bytes,
+            modified_at: StrictUtcTimestamp::from_datetime(modified_at),
+            content_sha256: document
+                .observation
+                .content_sha256
+                .clone()
+                .context("document retention requires a current content hash")?,
+        }
+    } else {
+        retention_observation_from_artifact(
+            &root.root_id,
+            artifact.context("path selector is neither a document nor an indexed artifact")?,
+        )?
+    };
+
+    let document_id = document.and_then(|entry| entry.document_id.clone());
+    let expected_document_head_event_id =
+        document.and_then(|entry| entry.lifecycle_head_event_id.clone());
+    let source_kind = if artifact.is_some() {
+        RetentionTargetSourceKind::Artifact
+    } else {
+        RetentionTargetSourceKind::Document
+    };
+    let retention_target_id = artifact
+        .map(|entry| entry.artifact_id.clone())
+        .or_else(|| document_id.clone())
+        .context("retention target lacks canonical identity")?;
+    let target = RetentionTargetV2 {
+        retention_target_id,
+        source_kind,
+        artifact_id: artifact.map(|entry| entry.artifact_id.clone()),
+        document_id: document_id.clone(),
+        expected_document_head_event_id,
+        observation,
+    };
+
+    let before = document.and_then(|entry| entry.reviewed_state.clone());
+    let after = if requested_action == RetentionRequestAction::Promote {
+        None
+    } else {
+        before.clone().map(|mut state| {
+            state.retention_disposition = match requested_action {
+                RetentionRequestAction::Keep => RetentionDisposition::Keep,
+                RetentionRequestAction::Preserve => RetentionDisposition::Preserved,
+                RetentionRequestAction::SummaryKeep => RetentionDisposition::SummaryKept,
+                RetentionRequestAction::Archive => RetentionDisposition::RetirementCandidate,
+                RetentionRequestAction::Quarantine => RetentionDisposition::QuarantineCandidate,
+                RetentionRequestAction::Dispose => RetentionDisposition::DisposalCandidate,
+                RetentionRequestAction::Promote => unreachable!(),
+            };
+            state.summary_document_id = if requested_action == RetentionRequestAction::SummaryKeep {
+                summary_document_id.map(str::to_string)
+            } else {
+                None
+            };
+            state
+        })
+    };
+    if requested_action == RetentionRequestAction::SummaryKeep {
+        let summary_id =
+            summary_document_id.context("summary-keep requires --summary-document-id")?;
+        let summary = exact_document_entry(&catalog.entries, summary_id)?;
+        if summary.reviewed_state.as_ref().is_none_or(|state| {
+            state.activity_state != crate::document_lifecycle::ActivityState::Active
+        }) {
+            bail!("summary-keep requires one exact reviewed-active summary document");
+        }
+    }
+    let reason = operator_safe_text(reason.unwrap_or_else(|| requested_action.approval_impact()));
+    let proposal = RetentionProposalV2 {
+        project_key: project_key.to_string(),
+        root_id: root.root_id.clone(),
+        root_path_identity_sha256: root.path_identity_sha256.clone(),
+        root_instance_identity_sha256,
+        filesystem_snapshot_sha256: catalog
+            .base_catalog
+            .source_identities
+            .filesystem_snapshot
+            .content_sha256
+            .clone(),
+        artifact_snapshot_sha256: artifact_index.source_snapshot_sha256.clone(),
+        target: target.clone(),
+        requested_action: requested_action.as_v2(),
+        before: if requested_action == RetentionRequestAction::Promote {
+            None
+        } else {
+            before
+        },
+        after,
+        reason,
+    };
+    if proposal.before.is_some() && proposal.before == proposal.after {
+        if !allow_applied_state {
+            bail!("requested retention action is already the current reviewed disposition");
+        }
+    } else {
+        proposal.validate()?;
+    }
+
+    let review_item = if let Some(artifact) = artifact {
+        let legacy = legacy_index
+            .entries
+            .iter()
+            .find(|entry| entry.id == artifact.artifact_id)
+            .context("artifact-index v2 row lacks its v1 presentation row")?;
+        retention_review_item(legacy)
+    } else {
+        let document = document.context("catalog-only target lost its document row")?;
+        ArtifactRetentionReviewItem {
+            id: document_id.clone().unwrap_or_default(),
+            label: document.observation.relative_path.clone(),
+            source: "document_catalog_v2".to_string(),
+            kind: document.observation.media_type.clone(),
+            path: document.observation.relative_path.clone(),
+            relative_path: Some(document.observation.relative_path.clone()),
+            present: true,
+            bytes: Some(document.observation.size_bytes),
+            retention_class: "reviewed_document".to_string(),
+            review_status: "exact_current_head".to_string(),
+            retention_scope: "document_lifecycle".to_string(),
+            scope_reason: "Exact current lifecycle document without an artifact crosswalk."
+                .to_string(),
+            recommended_action: "review".to_string(),
+            reason: "Uses the durable document ID as the retention target.".to_string(),
+            why_it_matters: "Retention changes are projected through the lifecycle ledger."
+                .to_string(),
+            refs: vec![format!(
+                "document:{}",
+                document_id.clone().unwrap_or_default()
+            )],
+        }
+    };
+    Ok(ResolvedRetentionContextV2 {
+        resolution: CanonicalRetentionResolutionV2 {
+            schema: "retention_target_resolution.v2",
+            project_key: project_key.to_string(),
+            artifact_snapshot_sha256: artifact_index.source_snapshot_sha256.clone(),
+            artifact_index,
+            target,
+            reviewed_state: document.and_then(|entry| entry.reviewed_state.clone()),
+            selector_evidence: [
+                artifact_id_selector.map(|value| format!("artifact_id:{}", value.trim())),
+                normalized_path.map(|value| format!("relative_path:{value}")),
+                document_id_selector.map(|value| format!("document_id:{}", value.trim())),
+            ]
+            .into_iter()
+            .flatten()
+            .collect(),
+            authority: ArtifactRetentionReviewAuthority {
+                read_only: true,
+                does_not_authorize: vec!["delete", "move", "archive", "publish"],
+            },
+        },
+        proposal,
+        review_item,
     })
 }
 
@@ -3503,4 +5423,88 @@ fn rel_path(root: &Path, path: &Path) -> String {
         .to_string_lossy()
         .replace('\\', "/")
         .replace(['\n', '\r'], " ")
+}
+
+#[cfg(test)]
+mod retention_discovery_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn bounded_discovery_rejects_directory_entry_overrun() -> Result<()> {
+        let temp = tempdir()?;
+        let project = temp.path().join("project");
+        fs::create_dir_all(project.join("outputs"))?;
+        fs::write(project.join("outputs/a.tmp"), b"a")?;
+        fs::write(project.join("outputs/b.tmp"), b"b")?;
+        let root_identity = crate::document_lifecycle::root_instance_identity_sha256(&project)?;
+        let result = build_bounded_retention_artifact_index(
+            "default",
+            "bounded-test",
+            &project,
+            &root_identity,
+            Instant::now(),
+            RetentionDiscoveryBudgets {
+                max_entries: 1,
+                max_depth: 8,
+                max_elapsed_ms: 5_000,
+            },
+        );
+        assert!(result.is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn bounded_discovery_rechecks_initially_absent_sources() -> Result<()> {
+        let temp = tempdir()?;
+        let project = temp.path().join("project");
+        fs::create_dir_all(project.join("outputs"))?;
+        fs::write(project.join("outputs/report.html"), b"<h1>Report</h1>\n")?;
+        let root_identity = crate::document_lifecycle::root_instance_identity_sha256(&project)?;
+        let scan_started = Instant::now();
+        let source = build_bounded_retention_artifact_index(
+            "default",
+            "bounded-test",
+            &project,
+            &root_identity,
+            scan_started,
+            RetentionDiscoveryBudgets::default(),
+        )?;
+        fs::write(
+            project.join("DELIVERABLES.md"),
+            b"- [Report](outputs/report.html)\n",
+        )?;
+        let result = build_artifact_index_v2(
+            &project,
+            &source,
+            "root-test",
+            &"0".repeat(64),
+            &root_identity,
+            scan_started,
+        );
+        assert!(result.is_err());
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bounded_discovery_rejects_directory_symlink_cycles() -> Result<()> {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempdir()?;
+        let project = temp.path().join("project");
+        fs::create_dir_all(project.join("outputs"))?;
+        symlink(".", project.join("outputs/loop"))?;
+        let root_identity = crate::document_lifecycle::root_instance_identity_sha256(&project)?;
+        let result = build_bounded_retention_artifact_index(
+            "default",
+            "bounded-test",
+            &project,
+            &root_identity,
+            Instant::now(),
+            RetentionDiscoveryBudgets::default(),
+        );
+        assert!(result.is_err());
+        Ok(())
+    }
 }

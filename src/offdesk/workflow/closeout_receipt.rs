@@ -1,7 +1,7 @@
 //! Closeout receipt construction and accepted-truth boundary calculation.
 
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -54,14 +54,14 @@ pub struct CloseoutReceipt {
     pub source_artifacts: CloseoutReceiptArtifacts,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CloseoutReceiptDecision {
     pub kind: String,
     pub detail: String,
     pub suggested_command: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CloseoutResolvedDecision {
     pub kind: String,
     pub decision: String,
@@ -252,6 +252,18 @@ fn closeout_receipt_retention_review(plan: &Value, unsafe_operations: &[String])
 }
 
 fn closeout_receipt_wiki_promotion_state(plan: &Value) -> &'static str {
+    // Project documentation recommendations are not a wiki-promotion audit.
+    if plan
+        .as_object()
+        .is_some_and(|object| object.keys().any(|key| key.contains("wiki")))
+    {
+        "audit_unavailable"
+    } else {
+        "not_requested"
+    }
+}
+
+pub(super) fn legacy_governance_wiki_state(plan: &Value) -> &'static str {
     let Some(governance) = plan.get("documentation_governance") else {
         return "not_requested";
     };

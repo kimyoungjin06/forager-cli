@@ -11,6 +11,7 @@ results back into the session.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import datetime as dt
 import hashlib
 import json
@@ -33,7 +34,9 @@ from .schemas import (
     PLAN_CLOSEOUT_REVIEW_HANDOFF_SCHEMA,
     PLAN_CLOSEOUT_VERDICT_SCHEMA,
     PLAN_DRAFT_AUTHORITY_DENIALS,
+    PLAN_DRAFT_COMPARISON_SCHEMA,
     PLAN_DRAFT_SCHEMA,
+    PLAN_DRAFT_SELECTION_SCHEMA,
     PLAN_ENQUEUE_HANDOFF_SCHEMA,
     PLAN_ENQUEUE_RUN_SCHEMA,
     PLAN_EXECUTION_BRIEF_SCHEMA,
@@ -296,12 +299,98 @@ def run_project_init_packet(
     return run
 
 
-def build_multiturn_plan_draft(session: dict[str, Any], init_run: dict[str, Any]) -> dict[str, Any]:
+PLAN_DRAFT_STRATEGIES = (
+    {
+        "key": "balanced",
+        "label": "균형",
+        "summary": "증거와 차단 요인을 함께 확인한 뒤 등록 경계에서 멈춥니다.",
+        "strengths": ["evidence_and_blocker_coverage", "balanced_scope"],
+        "tradeoffs": ["one_additional_review_step"],
+        "tie_break_priority": 0,
+        "steps": [
+            (
+                "review_initialization_packet",
+                "Review the project initialization packet, first reads, candidate modules, and evidence before any runtime work.",
+                "Stop when the evidence inventory and requested scope are understood.",
+            ),
+            (
+                "triage_preflight_blockers",
+                "Triage module-operation preflight blockers and record unresolved human decisions.",
+                "Stop when any blocker cannot be resolved without operator input.",
+            ),
+            (
+                "prepare_registered_plan",
+                "Convert the reviewed draft into a registered Offdesk plan only after operator selection.",
+                "Stop at plan registration; council review, launch preparation, and runtime dispatch remain separate.",
+            ),
+        ],
+    },
+    {
+        "key": "evidence_first",
+        "label": "증거 우선",
+        "summary": "증거 출처와 첫 읽기를 먼저 고정한 뒤 계획 범위를 정합니다.",
+        "strengths": ["evidence_inventory", "first_read_clarity"],
+        "tradeoffs": ["blocker_triage_is_secondary"],
+        "tie_break_priority": 1,
+        "steps": [
+            (
+                "inventory_evidence_sources",
+                "Inventory initialization evidence sources and required first reads before defining work.",
+                "Stop when the evidence basis is incomplete or cannot be verified locally.",
+            ),
+            (
+                "align_request_to_evidence",
+                "Bound the Telegram request to claims supported by the observed project evidence.",
+                "Stop when the requested scope exceeds the observed evidence.",
+            ),
+            (
+                "prepare_registered_plan",
+                "Convert the evidence-bounded draft into a registered Offdesk plan only after operator selection.",
+                "Stop at plan registration; council review, launch preparation, and runtime dispatch remain separate.",
+            ),
+        ],
+    },
+    {
+        "key": "risk_first",
+        "label": "안전성 우선",
+        "summary": "차단 요인과 중지 조건을 먼저 검토해 보수적으로 범위를 제한합니다.",
+        "strengths": ["blocker_triage", "early_stop_conditions"],
+        "tradeoffs": ["evidence_inventory_is_secondary"],
+        "tie_break_priority": 2,
+        "steps": [
+            (
+                "triage_preflight_blockers",
+                "Triage module-operation preflight blockers before considering any autonomous work.",
+                "Stop immediately when a blocker requires secrets, network access, or operator context.",
+            ),
+            (
+                "review_minimum_safe_scope",
+                "Review the minimum evidence and project scope that can be handled without crossing an authority boundary.",
+                "Stop when the minimum safe scope cannot satisfy the operator request.",
+            ),
+            (
+                "prepare_registered_plan",
+                "Convert the risk-bounded draft into a registered Offdesk plan only after operator selection.",
+                "Stop at plan registration; council review, launch preparation, and runtime dispatch remain separate.",
+            ),
+        ],
+    },
+)
+
+
+def build_multiturn_plan_draft(
+    session: dict[str, Any],
+    init_run: dict[str, Any],
+    *,
+    strategy: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    selected_strategy = strategy or PLAN_DRAFT_STRATEGIES[0]
     output = init_run.get("project_init_output") if isinstance(init_run.get("project_init_output"), dict) else {}
     summary = output.get("summary") if isinstance(output.get("summary"), dict) else {}
     project_key = str(output.get("project_key") or init_run.get("project_key") or "project")
     request_text = sanitize_text(session.get("request_text") or "", max_chars=500)
-    plan_id = f"telegram_plan_{sha256_id(str(session.get('session_id') or '') + ':' + project_key)}"
+    strategy_key = str(selected_strategy.get("key") or "balanced")
+    plan_id = f"telegram_plan_{sha256_id(str(session.get('session_id') or '') + ':' + project_key + ':' + strategy_key)}"
     module_count = int(summary.get("module_candidate_count") or 0)
     evidence_count = int(summary.get("evidence_source_count") or 0)
     blocker_count = int(summary.get("module_operation_preflight_blocker_count") or 0)
@@ -323,6 +412,13 @@ def build_multiturn_plan_draft(session: dict[str, Any], init_run: dict[str, Any]
             "transport": "telegram",
             "operator_request": request_text,
         },
+        "planning_strategy": {
+            "key": strategy_key,
+            "label": selected_strategy.get("label"),
+            "summary": selected_strategy.get("summary"),
+            "strengths": list(selected_strategy.get("strengths") or []),
+            "tradeoffs": list(selected_strategy.get("tradeoffs") or []),
+        },
         "project_summary": {
             "module_candidate_count": module_count,
             "evidence_source_count": evidence_count,
@@ -337,16 +433,8 @@ def build_multiturn_plan_draft(session: dict[str, Any], init_run: dict[str, Any]
             "reason": "Telegram created a bounded draft from a project initialization packet; operator review is required before registration or launch preparation.",
         },
         "execution_sequence": [
-            {
-                "id": "review_initialization_packet",
-                "objective": "Review the project initialization packet, first reads, candidate modules, and blockers before any runtime work.",
-                "stop_condition": "Stop when the operator confirms scope, blockers, and evidence are understood.",
-            },
-            {
-                "id": "prepare_registered_plan",
-                "objective": "Convert the reviewed draft into a registered Offdesk plan only after operator review.",
-                "stop_condition": "Stop at plan registration; launch preparation and runtime dispatch remain separate approvals.",
-            },
+            {"id": step_id, "objective": objective, "stop_condition": stop_condition}
+            for step_id, objective, stop_condition in selected_strategy.get("steps") or []
         ],
         "authority": {
             "read_only_plan": True,
@@ -355,20 +443,13 @@ def build_multiturn_plan_draft(session: dict[str, Any], init_run: dict[str, Any]
     }
 
 
-def create_plan_draft(
+def _plan_validation_command(
     args: argparse.Namespace,
     *,
     session: dict[str, Any],
-    init_run: dict[str, Any],
-) -> dict[str, Any]:
-    output = init_run.get("project_init_output") if isinstance(init_run.get("project_init_output"), dict) else {}
-    project_key = str(output.get("project_key") or init_run.get("project_key") or "project")
-    artifact_dir = args.remote_plan_artifact_dir.expanduser() / str(session.get("session_id") or "session")
-    plan_path = artifact_dir / "OFFDESK_PLAN_DRAFT.json"
-    receipt_path = artifact_dir / "PLAN_DRAFT_VALIDATION.json"
-    plan = build_multiturn_plan_draft(session, init_run)
-    write_json(plan_path, plan)
-    plan_sha256 = sha256_hex(plan_path.read_bytes())
+    project_key: str,
+    plan_path: pathlib.Path,
+) -> list[str]:
     command = [args.forager_bin]
     if args.profile:
         command.extend(["--profile", args.profile])
@@ -385,19 +466,50 @@ def create_plan_draft(
             "--json",
         ]
     )
-    receipt = {
+    return command
+
+
+def _validate_plan_candidate(
+    args: argparse.Namespace,
+    *,
+    session: dict[str, Any],
+    init_run: dict[str, Any],
+    strategy: dict[str, Any],
+    artifact_dir: pathlib.Path,
+) -> dict[str, Any]:
+    output = init_run.get("project_init_output") if isinstance(init_run.get("project_init_output"), dict) else {}
+    project_key = str(output.get("project_key") or init_run.get("project_key") or "project")
+    strategy_key = str(strategy.get("key") or "balanced")
+    plan_path = artifact_dir / f"OFFDESK_PLAN_DRAFT_{strategy_key.upper()}.json"
+    plan = build_multiturn_plan_draft(session, init_run, strategy=strategy)
+    write_json(plan_path, plan)
+    command = _plan_validation_command(
+        args,
+        session=session,
+        project_key=project_key,
+        plan_path=plan_path,
+    )
+    candidate = {
         "schema": PLAN_DRAFT_SCHEMA,
         "created_at": utc_now(),
         "session_id": session.get("session_id"),
-        "profile": args.profile,
         "project_key": project_key,
+        "strategy_key": strategy_key,
+        "strategy_label": strategy.get("label"),
+        "strategy_summary": strategy.get("summary"),
+        "strengths": list(strategy.get("strengths") or []),
+        "tradeoffs": list(strategy.get("tradeoffs") or []),
+        "tie_break_priority": int(strategy.get("tie_break_priority") or 0),
         "plan_artifact_path": str(plan_path),
-        "plan_sha256": plan_sha256,
+        "plan_sha256": sha256_hex(plan_path.read_bytes()),
         "validation_command": command,
         "dry_run": True,
         "execution_authorized": False,
         "approval_authorized": False,
+        "plan_review_authorized": False,
+        "registration_authorized": False,
         "runtime_authorized": False,
+        "accepted_truth_authorized": False,
     }
     try:
         process = subprocess.run(
@@ -409,46 +521,285 @@ def create_plan_draft(
             timeout=max(1, int(args.plan_draft_timeout_sec)),
         )
     except (OSError, subprocess.TimeoutExpired) as error:
-        receipt.update(
+        candidate.update(
             {
                 "status": "error",
                 "error": sanitize_text(f"{type(error).__name__}: {error}", max_chars=400),
-                "artifact_path": str(receipt_path),
             }
         )
-        write_json(receipt_path, receipt)
-        return receipt
-    receipt["returncode"] = process.returncode
+        return candidate
+    candidate["returncode"] = process.returncode
     if process.returncode != 0:
-        receipt.update(
+        candidate.update(
             {
                 "status": "error",
                 "error": sanitize_text(process.stderr.strip() or process.stdout.strip(), max_chars=600),
-                "artifact_path": str(receipt_path),
             }
         )
-        write_json(receipt_path, receipt)
-        return receipt
+        return candidate
     try:
         validation_output = json.loads(process.stdout)
     except json.JSONDecodeError as error:
-        receipt.update(
+        candidate.update(
             {
                 "status": "error",
                 "error": sanitize_text(f"plan dry-run did not return JSON: {error}", max_chars=400),
-                "artifact_path": str(receipt_path),
+            }
+        )
+        return candidate
+    candidate.update({"status": "validated", "validation_output": validation_output})
+    return candidate
+
+
+def _score_plan_candidate(
+    candidate: dict[str, Any],
+    *,
+    session: dict[str, Any],
+    init_run: dict[str, Any],
+) -> None:
+    output = init_run.get("project_init_output") if isinstance(init_run.get("project_init_output"), dict) else {}
+    summary = output.get("summary") if isinstance(output.get("summary"), dict) else {}
+    evidence_count = int(summary.get("evidence_source_count") or 0)
+    blocker_count = int(summary.get("module_operation_preflight_blocker_count") or 0)
+    strategy_key = str(candidate.get("strategy_key") or "")
+    validation = candidate.get("validation_output") if isinstance(candidate.get("validation_output"), dict) else {}
+    components = {
+        "dry_run_validation": 40 if candidate.get("status") == "validated" else 0,
+        "authority_boundary": 20
+        if validation.get("ready_for_launch_preparation") is False
+        and validation.get("ready_for_enqueue") is False
+        else 0,
+        "operator_review_only": 15
+        if validation.get("ready_for_operator_review") is True
+        else 0,
+        "evidence_fit": (
+            10
+            if evidence_count > 0 and strategy_key in {"balanced", "evidence_first"}
+            else 8
+            if evidence_count == 0 and strategy_key in {"balanced", "evidence_first"}
+            else 6
+        ),
+        "blocker_fit": (
+            10
+            if blocker_count > 0 and strategy_key in {"balanced", "risk_first"}
+            else 10
+            if blocker_count == 0 and strategy_key == "balanced"
+            else 8
+            if blocker_count == 0 and strategy_key == "evidence_first"
+            else 5
+        ),
+        "request_alignment": 5 if str(session.get("request_text") or "").strip() else 0,
+        "operational_depth": min(
+            10,
+            2 * len(candidate.get("execution_ids") or []),
+        ),
+    }
+    candidate["comparison_components"] = components
+    candidate["quality_score"] = sum(components.values())
+
+
+def create_plan_draft(
+    args: argparse.Namespace,
+    *,
+    session: dict[str, Any],
+    init_run: dict[str, Any],
+) -> dict[str, Any]:
+    output = init_run.get("project_init_output") if isinstance(init_run.get("project_init_output"), dict) else {}
+    project_key = str(output.get("project_key") or init_run.get("project_key") or "project")
+    artifact_dir = args.remote_plan_artifact_dir.expanduser() / str(session.get("session_id") or "session")
+    receipt_path = artifact_dir / "PLAN_DRAFT_VALIDATION.json"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    receipt = {
+        "schema": PLAN_DRAFT_SCHEMA,
+        "comparison_schema": PLAN_DRAFT_COMPARISON_SCHEMA,
+        "created_at": utc_now(),
+        "session_id": session.get("session_id"),
+        "profile": args.profile,
+        "project_key": project_key,
+        "dry_run": True,
+        "execution_authorized": False,
+        "approval_authorized": False,
+        "plan_review_authorized": False,
+        "registration_authorized": False,
+        "runtime_authorized": False,
+        "accepted_truth_authorized": False,
+        "ranking_basis": [
+            "dry_run_validation",
+            "authority_boundary",
+            "operator_review_only",
+            "evidence_fit",
+            "blocker_fit",
+            "request_alignment",
+            "operational_depth",
+        ],
+    }
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(PLAN_DRAFT_STRATEGIES)) as executor:
+        candidates = list(
+            executor.map(
+                lambda strategy: _validate_plan_candidate(
+                    args,
+                    session=session,
+                    init_run=init_run,
+                    strategy=strategy,
+                    artifact_dir=artifact_dir,
+                ),
+                PLAN_DRAFT_STRATEGIES,
+            )
+        )
+    for candidate in candidates:
+        plan_path = pathlib.Path(str(candidate.get("plan_artifact_path") or ""))
+        try:
+            plan = load_json(plan_path)
+        except (OSError, json.JSONDecodeError):
+            plan = {}
+        candidate["execution_ids"] = [
+            item.get("id")
+            for item in plan.get("execution_sequence") or []
+            if isinstance(item, dict) and str(item.get("id") or "").strip()
+        ]
+        _score_plan_candidate(candidate, session=session, init_run=init_run)
+    candidates.sort(
+        key=lambda item: (
+            -int(item.get("quality_score") or 0),
+            int(item.get("tie_break_priority") or 0),
+            str(item.get("strategy_key") or ""),
+        )
+    )
+    leader = candidates[0] if candidates else {}
+    for rank, candidate in enumerate(candidates, start=1):
+        candidate["comparison_rank"] = rank
+        candidate["recommended"] = rank == 1
+        candidate["selection_label"] = f"{rank} {candidate.get('strategy_label') or candidate.get('strategy_key')}"
+        differences = []
+        if rank > 1:
+            if candidate.get("quality_score") != leader.get("quality_score"):
+                differences.append("lower_quality_score")
+            for component in ("evidence_fit", "blocker_fit", "operational_depth"):
+                candidate_value = int((candidate.get("comparison_components") or {}).get(component) or 0)
+                leader_value = int((leader.get("comparison_components") or {}).get(component) or 0)
+                if candidate_value < leader_value:
+                    differences.append(f"lower_{component}")
+            differences.append("different_planning_strategy")
+            if candidate.get("quality_score") == leader.get("quality_score"):
+                differences.append("deterministic_tie_break")
+        candidate["not_recommended_because"] = differences
+    validated = [candidate for candidate in candidates if candidate.get("status") == "validated"]
+    receipt.update(
+        {
+            "status": "compared" if len(validated) >= 2 else "error",
+            "candidate_count": len(candidates),
+            "validated_candidate_count": len(validated),
+            "recommended_strategy_key": leader.get("strategy_key") if validated else None,
+            "recommended_strategy_label": leader.get("strategy_label") if validated else None,
+            "candidates": candidates,
+            "artifact_path": str(receipt_path),
+        }
+    )
+    if len(validated) < 2:
+        receipt["error"] = "fewer than two plan candidates validated"
+    write_json(receipt_path, receipt)
+    receipt["receipt_sha256"] = sha256_hex(receipt_path.read_bytes())
+    return receipt
+
+
+def select_plan_draft(
+    args: argparse.Namespace,
+    *,
+    session: dict[str, Any],
+    comparison: dict[str, Any],
+    candidate: dict[str, Any],
+) -> dict[str, Any]:
+    artifact_dir = args.remote_plan_artifact_dir.expanduser() / str(session.get("session_id") or "session")
+    receipt_path = artifact_dir / "PLAN_DRAFT_SELECTION.json"
+    plan_path = pathlib.Path(str(candidate.get("plan_artifact_path") or ""))
+    comparison_path = pathlib.Path(str(comparison.get("artifact_path") or ""))
+    receipt = {
+        "schema": PLAN_DRAFT_SELECTION_SCHEMA,
+        "created_at": utc_now(),
+        "session_id": session.get("session_id"),
+        "profile": args.profile,
+        "project_key": candidate.get("project_key"),
+        "strategy_key": candidate.get("strategy_key"),
+        "strategy_label": candidate.get("strategy_label"),
+        "selection_rank": candidate.get("comparison_rank"),
+        "recommended": candidate.get("recommended") is True,
+        "selected_for": "plan_registration_then_council_review",
+        "plan_artifact_path": str(plan_path),
+        "expected_plan_sha256": candidate.get("plan_sha256"),
+        "plan_sha256": candidate.get("plan_sha256"),
+        "validation_command": candidate.get("validation_command"),
+        "validation_output": candidate.get("validation_output"),
+        "dry_run": True,
+        "execution_authorized": False,
+        "approval_authorized": False,
+        "plan_review_authorized": False,
+        "registration_authorized": False,
+        "runtime_authorized": False,
+        "accepted_truth_authorized": False,
+        "artifact_path": str(receipt_path),
+    }
+    try:
+        comparison_raw = comparison_path.read_bytes()
+        comparison_receipt = json.loads(comparison_raw)
+        current_comparison_sha256 = sha256_hex(comparison_raw)
+        current_plan_sha256 = sha256_hex(plan_path.read_bytes())
+    except (OSError, json.JSONDecodeError) as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(f"plan candidate unavailable: {error}", max_chars=400),
             }
         )
         write_json(receipt_path, receipt)
         return receipt
-    receipt.update(
-        {
-            "status": "validated",
-            "validation_output": validation_output,
-            "artifact_path": str(receipt_path),
-        }
+    receipt["comparison_sha256"] = current_comparison_sha256
+    receipt["expected_comparison_sha256"] = comparison.get("receipt_sha256")
+    recorded_candidates = (
+        comparison_receipt.get("candidates")
+        if isinstance(comparison_receipt, dict)
+        and isinstance(comparison_receipt.get("candidates"), list)
+        else []
     )
+    recorded_candidate = next(
+        (
+            item
+            for item in recorded_candidates
+            if isinstance(item, dict)
+            and item.get("strategy_key") == candidate.get("strategy_key")
+        ),
+        None,
+    )
+    comparison_matches = (
+        comparison.get("receipt_sha256") == current_comparison_sha256
+        and isinstance(recorded_candidate, dict)
+        and recorded_candidate.get("status") == "validated"
+        and recorded_candidate.get("plan_artifact_path")
+        == candidate.get("plan_artifact_path")
+        and recorded_candidate.get("plan_sha256") == candidate.get("plan_sha256")
+    )
+    receipt["comparison_hash_matched"] = comparison_matches
+    if not comparison_matches:
+        receipt.update(
+            {
+                "status": "stale",
+                "error": "plan comparison changed before selection",
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt["current_plan_sha256"] = current_plan_sha256
+    if candidate.get("status") != "validated" or current_plan_sha256 != candidate.get("plan_sha256"):
+        receipt.update(
+            {
+                "status": "stale",
+                "error": "plan candidate changed after comparison",
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt["status"] = "selected"
     write_json(receipt_path, receipt)
+    receipt["receipt_sha256"] = sha256_hex(receipt_path.read_bytes())
     return receipt
 
 

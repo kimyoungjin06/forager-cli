@@ -10,8 +10,8 @@ use serde::Serialize;
 
 use super::{operator_safe_json_value, shell_quote_arg, wiki_scope_label};
 use crate::offdesk::{
-    AdaptiveWikiHumanEntry, AdaptiveWikiKind, AdaptiveWikiQuery, AdaptiveWikiScope,
-    AdaptiveWikiStatus,
+    operator_safe_text, AdaptiveWikiHumanEntry, AdaptiveWikiKind, AdaptiveWikiQuery,
+    AdaptiveWikiScope, AdaptiveWikiStatus,
 };
 
 #[derive(Serialize)]
@@ -125,13 +125,16 @@ pub(super) fn present_review_after_report(
     for entry in &report.entries {
         println!(
             "{:<40} {:<12} {:<28} {:<14} {}",
-            entry.id,
-            entry.status,
+            operator_safe_text(&entry.id),
+            operator_safe_text(&entry.status),
             entry.review_after,
             entry.hours_until_review,
-            wiki_scope_label(entry.scope, &entry.scope_ref)
+            operator_safe_text(&wiki_scope_label(entry.scope, &entry.scope_ref))
         );
-        println!("  renew: {}", entry.renew_command_template);
+        println!(
+            "  renew: {}",
+            operator_safe_text(&entry.renew_command_template)
+        );
     }
     Ok(())
 }

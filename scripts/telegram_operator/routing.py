@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+import re
 from typing import Any
 
 
@@ -32,6 +33,8 @@ CORE_OR_SLASH_COMMANDS = {
     "remember",
     "wiki",
     "projects",
+    "receipts",
+    "receipt",
     "plan",
     "plan_request",
     "decisions",
@@ -43,8 +46,10 @@ CORE_OR_SLASH_COMMANDS = {
     "run",
     "tasks",
     "cancel_task",
+    "terminate_task",
     "session_approve",
     "session_deny",
+    "session_continue",
     "session_send",
     "tell",
     "pause",
@@ -70,19 +75,25 @@ COMMAND_SURFACE = (
     ("/tasks", "실행 중 작업 목록", "조회"),
     ("/wiki [project]", "프로젝트별 위키 검토 대기", "조회"),
     ("/projects [project]", "접근 가능한 프로젝트와 현재 포커스", "조회"),
+    ("/receipts [session-id]", "명령부터 closeout까지 영수증 체인", "조회"),
     ("/decision <id> <action> [메모]", "결정 처리 (확인 카드 후 실행)", "실행"),
     ("/recover <id>", "복구 실행", "실행"),
     ("/run [name]", "사전 승인된 명령 목록/실행", "실행"),
     ("/confirm", "대기 중인 확인 승인", "실행"),
     ("/cancel", "대기 중인 확인 취소", "실행"),
-    ("/cancel_task <id> [이유]", "작업 취소", "실행"),
+    ("/cancel_task <id> [이유]", "durable 작업 취소 (러너 유지)", "실행"),
+    ("/terminate_task <id> [이유]", "검증된 로컬 러너 종료 후 작업 취소", "제어"),
     ("/session_approve <id> [hash] [n]", "대기 세션 승인(기본 Enter, n=옵션 번호)", "실행"),
     ("/session_deny <id> [hash]", "대기 세션 거부 키 전송(Esc)", "실행"),
-    ("/session_send <id> [hash] -- <내용>", "실행 중인 로컬 에이전트에 평문 전달", "실행"),
+    (
+        "/session_send <id> [hash] -- <내용> | /session_continue <id> <hash>",
+        "에이전트 평문 전달 또는 검증된 다음 계획 작업 진행",
+        "실행",
+    ),
     ("/plan <내용>", "계획 후보로 기록 (로컬 Plan Mode에서 이어감)", "기록"),
     ("/feedback <내용>", "의견 기록", "기록"),
     ("/remember <내용>", "위키 후보로 기록", "기록"),
-    ("/pause [이유]", "전체 일시정지", "제어"),
+    ("/pause [이유]", "신규 작업 시작 일시정지", "제어"),
     ("/resume", "재개", "제어"),
     ("/chat <내용>", "에이전트 채팅 (평문과 동일)", "도움말"),
     ("/guide", "전체 사용 안내 (별칭: /qna)", "도움말"),
@@ -96,6 +107,10 @@ DISPATCH_BUTTON_ALIASES = {
     "확인": "/confirm",
     "취소": "/cancel",
 }
+
+SESSION_CONTINUE_BUTTON_RE = re.compile(
+    r"^다음 작업 바로 진행\s*\[([A-Za-z0-9_-]{4,32}):([0-9a-f]{8}|[0-9a-f]{16})\]$"
+)
 
 
 def normalize_command_name(raw: str) -> str:
@@ -122,6 +137,17 @@ def parse_remote_command(command_text: str) -> dict[str, Any]:
     if not text:
         return unsupported_command(text, "empty_command")
     original_text = text
+    continue_button = SESSION_CONTINUE_BUTTON_RE.fullmatch(text)
+    if continue_button:
+        return {
+            "supported": True,
+            "command": "session_continue",
+            "argv": [],
+            "reason": "identity_bound_session_continue_button",
+            "command_text": original_text,
+            "session_continue_session_id": continue_button.group(1),
+            "session_continue_hash": continue_button.group(2),
+        }
     alias = BUTTON_COMMAND_ALIASES.get(text) or DISPATCH_BUTTON_ALIASES.get(text)
     if alias:
         text = alias
@@ -212,6 +238,17 @@ def parse_remote_command(command_text: str) -> dict[str, Any]:
             "reason": "explicit_projects_command",
             "command_text": original_text,
             "project_selector": args[0].strip() if args else "",
+        }
+    if command in {"receipts", "receipt"}:
+        if len(args) > 1:
+            return unsupported_command(original_text, "receipts_accepts_zero_or_one_session")
+        return {
+            "supported": True,
+            "command": "receipts",
+            "argv": [],
+            "reason": "explicit_receipts_command",
+            "command_text": original_text,
+            "receipt_session_id": args[0].strip() if args else "",
         }
     if command in {"plan", "plan_request"}:
         plan_text = " ".join(args).strip()
@@ -332,6 +369,22 @@ def parse_remote_command(command_text: str) -> dict[str, Any]:
             "session_input_hash": args[1].strip() if len(args) > 1 else "",
             "session_input_option": args[2].strip() if len(args) > 2 and args[2].strip().isdigit() else "",
         }
+    if command == "session_continue":
+        if len(args) != 2 or not args[0].strip() or not re.fullmatch(
+            r"[0-9a-f]{8}|[0-9a-f]{16}", args[1].strip()
+        ):
+            return unsupported_command(
+                original_text, "session_continue_requires_session_id_and_prompt_hash"
+            )
+        return {
+            "supported": True,
+            "command": "session_continue",
+            "argv": [],
+            "reason": "explicit_session_continue_command",
+            "command_text": original_text,
+            "session_continue_session_id": args[0].strip(),
+            "session_continue_hash": args[1].strip(),
+        }
     if command == "cancel_task":
         if not args:
             return unsupported_command(original_text, "cancel_task_requires_task_id")
@@ -348,6 +401,22 @@ def parse_remote_command(command_text: str) -> dict[str, Any]:
             "cancel_task_id": task_id,
             "cancel_reason": reason,
         }
+    if command == "terminate_task":
+        if not args:
+            return unsupported_command(original_text, "terminate_task_requires_task_id")
+        task_id = args[0].strip()
+        reason = " ".join(args[1:]).strip()
+        if not task_id:
+            return unsupported_command(original_text, "terminate_task_requires_task_id")
+        return {
+            "supported": True,
+            "command": "terminate_task",
+            "argv": [],
+            "reason": "explicit_terminate_task_command",
+            "command_text": original_text,
+            "terminate_task_id": task_id,
+            "terminate_reason": reason,
+        }
     if command == "confirm":
         # An empty token confirms the single pending confirmation (the "확인"
         # button); an explicit token is still accepted for typed confirms.
@@ -361,12 +430,15 @@ def parse_remote_command(command_text: str) -> dict[str, Any]:
             "confirm_token": token,
         }
     if command == "cancel":
+        if len(args) > 1:
+            return unsupported_command(original_text, "cancel_accepts_zero_or_one_token")
         return {
             "supported": True,
             "command": "cancel",
             "argv": [],
             "reason": "explicit_cancel_command",
             "command_text": original_text,
+            "cancel_token": args[0].strip() if args else "",
         }
     return unsupported_command(original_text, "unsupported_remote_operator_command")
 

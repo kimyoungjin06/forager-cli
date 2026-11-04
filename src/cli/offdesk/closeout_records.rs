@@ -8,10 +8,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-use super::{
-    require_non_empty_arg, write_new_file, CloseoutDecisionArgs, CloseoutRetireArgs,
-    CloseoutReviewArgs,
-};
+mod output_boundary;
+use output_boundary::OutputBoundary;
+
+use super::{require_non_empty_arg, CloseoutDecisionArgs, CloseoutRetireArgs, CloseoutReviewArgs};
 use crate::offdesk::{
     build_closeout_decision_record as workflow_build_closeout_decision_record,
     build_closeout_retirement_record as workflow_build_closeout_retirement_record,
@@ -27,6 +27,7 @@ pub(super) fn build_closeout_decision_record(
     args: &CloseoutDecisionArgs,
 ) -> Result<CloseoutReviewRecord> {
     let profile_dir = get_profile_dir(profile)?;
+    let _guard = review_writer_guard(&profile_dir)?;
     let profile_name = profile_name(profile);
     let kind = require_non_empty_arg("--kind", args.kind.trim())?;
     let reason = require_non_empty_arg("--reason", args.reason.trim())?;
@@ -42,6 +43,52 @@ pub(super) fn build_closeout_decision_record(
 
     let (source_review_record_path, _source_reviewed_at, source_review) =
         latest_closeout_review_value(&artifact_dir)?;
+    let administrative_only =
+        args.decision != super::CloseoutDecisionResolutionArg::PreserveInPlace;
+    anyhow::ensure!(
+        source_review.get("profile").and_then(Value::as_str) == Some(profile_name),
+        "closeout review profile mismatch"
+    );
+    if administrative_only || args.expected_review_sha256.is_some() {
+        use sha2::{Digest, Sha256};
+        let expected = args
+            .expected_review_sha256
+            .as_deref()
+            .context("administrative decision requires --expected-review-sha256")?;
+        let bytes =
+            crate::offdesk::workflow::review_link::read_artifact(&source_review_record_path)?;
+        anyhow::ensure!(
+            format!("{:x}", Sha256::digest(&bytes)) == expected,
+            "closeout review version changed"
+        );
+        anyhow::ensure!(
+            serde_json::from_slice::<Value>(&bytes)? == source_review,
+            "closeout review replaced during inspection"
+        );
+    }
+    if !administrative_only {
+        use crate::offdesk::workflow::{ondesk_plan::ReviewState, review_link};
+        let refs = closeout_review_task_refs_from_plan(&plan);
+        for task in OffdeskTaskStore::new(&profile_dir).load()? {
+            if refs
+                .iter()
+                .any(|item| item.task_id == task.task_id && item.request_id == task.request_id)
+            {
+                if let Some(link) = task.review_links.last() {
+                    review_link::validate_record(&profile_dir, &task, link)?;
+                    anyhow::ensure!(
+                        link.preview.decision.disposition == ReviewState::Accepted,
+                        "recorded non-accepted result requires an administrative-only decision"
+                    );
+                }
+            }
+        }
+    }
+    anyhow::ensure!(
+        serde_json::to_value(closeout_review_task_refs_from_plan(&plan))?
+            == source_review["applies_to_tasks"],
+        "closeout plan task scope changed since source review"
+    );
     let reviewed_at = Utc::now();
     let review_id = format!("closeout_decision_{}", short_uuid());
     let artifacts =
@@ -50,7 +97,7 @@ pub(super) fn build_closeout_decision_record(
     let applies_to_tasks = closeout_review_task_refs_from_plan(&plan);
     let source_review_record_json = source_review_record_path.display().to_string();
     let artifact_dir_text = artifact_dir.display().to_string();
-    let record = workflow_build_closeout_decision_record(CloseoutDecisionRecordBuildInput {
+    let mut record = workflow_build_closeout_decision_record(CloseoutDecisionRecordBuildInput {
         plan: &plan,
         source_review: &source_review,
         source_review_record_json: &source_review_record_json,
@@ -68,7 +115,72 @@ pub(super) fn build_closeout_decision_record(
         review_id: &review_id,
     })?;
 
-    write_closeout_review_record(&record)?;
+    use crate::offdesk::workflow::CloseoutArtifactRead;
+    use sha2::{Digest, Sha256};
+    let current_bytes =
+        crate::offdesk::workflow::review_link::read_artifact(&source_review_record_path)?;
+    anyhow::ensure!(
+        serde_json::from_slice::<Value>(&current_bytes)? == source_review,
+        "source review changed before commit"
+    );
+    let source_sha256 = format!("{:x}", Sha256::digest(&current_bytes));
+    let mut read_receipts = Vec::new();
+    for reference in &args.acknowledge_read {
+        let (path, expected) = reference
+            .rsplit_once('=')
+            .context("artifact read needs ABSOLUTE_PATH=SHA256")?;
+        let path = Path::new(path);
+        anyhow::ensure!(
+            administrative_only && path.is_absolute(),
+            "artifact read acknowledgment requires an administrative decision and an absolute path"
+        );
+        let label = path.to_string_lossy().to_string();
+        anyhow::ensure!(
+            record.required_first_reads.contains(&label),
+            "acknowledged artifact is outside required reads"
+        );
+        let bytes = crate::offdesk::workflow::review_link::read_artifact(path)?;
+        let sha256 = format!("{:x}", Sha256::digest(&bytes));
+        anyhow::ensure!(sha256 == expected, "acknowledged artifact version changed");
+        record.required_first_reads.retain(|item| item != &label);
+        record
+            .closeout_receipt
+            .required_first_reads
+            .retain(|item| item != &label);
+        read_receipts.push(CloseoutArtifactRead {
+            path: label,
+            sha256,
+        });
+    }
+    if let Some(resolution) = record.decision_resolution.as_mut() {
+        resolution.artifact_reads = read_receipts;
+        resolution.source_review_sha256 = source_sha256;
+    }
+    anyhow::ensure!(
+        serde_json::from_slice::<Value>(&crate::offdesk::workflow::review_link::read_artifact(
+            &plan_path
+        )?)? == plan,
+        "closeout plan changed before commit"
+    );
+    let latest = latest_closeout_review_value(&artifact_dir)?;
+    anyhow::ensure!(
+        latest.0 == source_review_record_path && latest.2 == source_review,
+        "a newer closeout review appeared before commit"
+    );
+    for read in record
+        .decision_resolution
+        .as_ref()
+        .into_iter()
+        .flat_map(|resolution| &resolution.artifact_reads)
+    {
+        let bytes = crate::offdesk::workflow::review_link::read_artifact(Path::new(&read.path))?;
+        anyhow::ensure!(
+            format!("{:x}", Sha256::digest(&bytes)) == read.sha256,
+            "acknowledged artifact changed before commit"
+        );
+    }
+
+    write_closeout_review_record(&artifact_dir, &record)?;
     Ok(record)
 }
 
@@ -77,6 +189,7 @@ pub(super) fn build_closeout_retire_record(
     args: &CloseoutRetireArgs,
 ) -> Result<CloseoutReviewRecord> {
     let profile_dir = get_profile_dir(profile)?;
+    let _guard = review_writer_guard(&profile_dir)?;
     let profile_name = profile_name(profile);
     let reason = require_non_empty_arg("--reason", args.reason.trim())?;
     let artifact_dir = resolve_closeout_artifact_dir_for(
@@ -130,7 +243,7 @@ pub(super) fn build_closeout_retire_record(
         review_id: &review_id,
     })?;
 
-    write_closeout_review_record(&record)?;
+    write_closeout_review_record(&artifact_dir, &record)?;
     Ok(record)
 }
 
@@ -139,6 +252,7 @@ pub(super) fn build_closeout_review_record(
     args: &CloseoutReviewArgs,
 ) -> Result<CloseoutReviewRecord> {
     let profile_dir = get_profile_dir(profile)?;
+    let _guard = review_writer_guard(&profile_dir)?;
     let profile_name = profile_name(profile);
     let artifact_dir = resolve_closeout_artifact_dir_for(
         &profile_dir,
@@ -184,8 +298,18 @@ pub(super) fn build_closeout_review_record(
         review_id: &review_id,
     });
 
-    write_closeout_review_record(&record)?;
+    write_closeout_review_record(&artifact_dir, &record)?;
     Ok(record)
+}
+
+fn review_writer_guard(
+    profile_dir: &Path,
+) -> Result<crate::offdesk::tick_lock::OffdeskTickLockGuard> {
+    crate::offdesk::tick_lock::OffdeskTickLockGuard::acquire(
+        profile_dir,
+        Utc::now(),
+        chrono::Duration::minutes(30),
+    )
 }
 
 fn profile_name(profile: &str) -> &str {
@@ -198,8 +322,9 @@ fn profile_name(profile: &str) -> &str {
 
 fn read_closeout_plan(path: &Path, operation: &str) -> Result<Value> {
     let content =
-        fs::read_to_string(path).with_context(|| format!("{operation} {}", path.display()))?;
-    serde_json::from_str(&content)
+        crate::offdesk::workflow::review_link::read_artifact(&output_boundary::absolute(path)?)
+            .with_context(|| format!("{operation} {}", path.display()))?;
+    serde_json::from_slice(&content)
         .with_context(|| format!("parse closeout plan {}", path.display()))
 }
 
@@ -275,9 +400,11 @@ fn latest_closeout_review_value_optional(
         if !is_closeout_review_path(&path) {
             continue;
         }
-        let content = fs::read_to_string(&path)
-            .with_context(|| format!("read closeout review {}", path.display()))?;
-        let value: Value = serde_json::from_str(&content)
+        let content = crate::offdesk::workflow::review_link::read_artifact(
+            &output_boundary::absolute(&path)?,
+        )
+        .with_context(|| format!("read closeout review {}", path.display()))?;
+        let value: Value = serde_json::from_slice(&content)
             .with_context(|| format!("parse closeout review {}", path.display()))?;
         let Some(reviewed_at) = closeout_reviewed_at(&value) else {
             continue;
@@ -293,6 +420,7 @@ fn latest_closeout_review_value_optional(
 fn latest_closeout_acceptance_by_task(
     profile_dir: &Path,
 ) -> Result<BTreeMap<(String, String), String>> {
+    let current_tasks = OffdeskTaskStore::new(profile_dir).load()?;
     let closeouts_dir = profile_dir.join("offdesk_closeouts");
     let mut latest = BTreeMap::<(String, String), (DateTime<Utc>, String)>::new();
     let closeouts = match fs::read_dir(&closeouts_dir) {
@@ -324,8 +452,13 @@ fn latest_closeout_acceptance_by_task(
             let Some(reviewed_at) = closeout_reviewed_at(&value) else {
                 continue;
             };
-            let status = value
-                .pointer("/closeout_receipt/acceptance_status")
+            let receipt = crate::offdesk::workflow::review_link::effective_closeout_receipt(
+                profile_dir,
+                &current_tasks,
+                &value,
+            );
+            let status = receipt
+                .get("acceptance_status")
                 .and_then(Value::as_str)
                 .unwrap_or("unknown")
                 .to_string();
@@ -379,7 +512,7 @@ fn resolve_closeout_artifact_dir_for(
     artifact_dir: Option<&PathBuf>,
 ) -> Result<PathBuf> {
     if let Some(artifact_dir) = artifact_dir {
-        return Ok(artifact_dir.clone());
+        return output_boundary::absolute(artifact_dir);
     }
 
     let closeouts_dir = profile_dir.join("offdesk_closeouts");
@@ -429,9 +562,9 @@ fn allocate_closeout_review_artifacts(
     plan: &Value,
     reviewed_at: DateTime<Utc>,
 ) -> Result<CloseoutReviewArtifactPaths> {
+    let return_package_path = closeout_return_package_path(artifact_dir, plan)?;
     let review_record_path = allocate_closeout_review_record_path(artifact_dir, reviewed_at)?;
     let receipt_path = allocate_closeout_receipt_path(artifact_dir, reviewed_at)?;
-    let return_package_path = closeout_return_package_path(artifact_dir, plan);
     Ok(CloseoutReviewArtifactPaths {
         closeout_plan_json: plan_path.display().to_string(),
         review_record_json: review_record_path.display().to_string(),
@@ -440,11 +573,13 @@ fn allocate_closeout_review_artifacts(
     })
 }
 
-fn closeout_return_package_path(artifact_dir: &Path, plan: &Value) -> PathBuf {
-    plan.pointer("/artifacts/return_package_markdown")
-        .and_then(Value::as_str)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| artifact_dir.join("RETURN_PACKAGE.md"))
+fn closeout_return_package_path(artifact_dir: &Path, plan: &Value) -> Result<PathBuf> {
+    let declared = plan.pointer("/artifacts/return_package_markdown");
+    anyhow::ensure!(
+        declared.is_none_or(Value::is_string),
+        "invalid closeout return package destination"
+    );
+    OutputBoundary::open(artifact_dir)?.return_path(declared.and_then(Value::as_str).map(Path::new))
 }
 
 fn allocate_closeout_review_record_path(
@@ -493,17 +628,35 @@ fn allocate_timestamped_path(
     )
 }
 
-fn write_closeout_review_record(record: &CloseoutReviewRecord) -> Result<()> {
+fn write_closeout_review_record(artifact_dir: &Path, record: &CloseoutReviewRecord) -> Result<()> {
+    let boundary = OutputBoundary::open(artifact_dir)?;
+    boundary.return_path(Some(Path::new(&record.artifacts.return_package_markdown)))?;
+    let before = boundary.read_return()?;
+    let review_name = boundary.new_slot(
+        Path::new(&record.artifacts.review_record_json),
+        "closeout_review_",
+    )?;
+    let receipt_name = boundary.new_slot(
+        Path::new(&record.artifacts.closeout_receipt_json),
+        "closeout_receipt_",
+    )?;
+    let section =
+        render_closeout_receipt_return_section(&record.closeout_receipt, &record.artifacts);
+    let updated = replace_marked_section(
+        &before.text,
+        CLOSEOUT_RECEIPT_SECTION_START,
+        CLOSEOUT_RECEIPT_SECTION_END,
+        &section,
+    );
     let bytes = serde_json::to_vec_pretty(record)?;
-    write_new_file(Path::new(&record.artifacts.review_record_json), &bytes)
+    boundary
+        .write_new(&review_name, &bytes)
         .with_context(|| format!("write {}", record.artifacts.review_record_json))?;
     let receipt_bytes = serde_json::to_vec_pretty(&record.closeout_receipt)?;
-    write_new_file(
-        Path::new(&record.artifacts.closeout_receipt_json),
-        &receipt_bytes,
-    )
-    .with_context(|| format!("write {}", record.artifacts.closeout_receipt_json))?;
-    update_return_package_with_closeout_receipt(record)?;
+    boundary
+        .write_new(&receipt_name, &receipt_bytes)
+        .with_context(|| format!("write {}", record.artifacts.closeout_receipt_json))?;
+    boundary.replace_return(&before, updated.as_bytes())?;
     Ok(())
 }
 
@@ -530,22 +683,6 @@ fn closeout_review_stale_task_count(
         .filter(|task| targets.contains(&(task.project_key.clone(), task.task_id.clone())))
         .filter(|task| task.updated_at > generated_at)
         .count()
-}
-
-fn update_return_package_with_closeout_receipt(record: &CloseoutReviewRecord) -> Result<()> {
-    let path = Path::new(&record.artifacts.return_package_markdown);
-    let existing =
-        fs::read_to_string(path).unwrap_or_else(|_| "# Ondesk Return Package\n\n".to_string());
-    let section =
-        render_closeout_receipt_return_section(&record.closeout_receipt, &record.artifacts);
-    let updated = replace_marked_section(
-        &existing,
-        CLOSEOUT_RECEIPT_SECTION_START,
-        CLOSEOUT_RECEIPT_SECTION_END,
-        &section,
-    );
-    fs::write(path, updated).with_context(|| format!("update {}", path.display()))?;
-    Ok(())
 }
 
 const CLOSEOUT_RECEIPT_SECTION_START: &str = "<!-- forager:closeout-receipt:start -->";

@@ -1,10 +1,282 @@
-use anyhow::Result;
-use serde_json::Value;
+use anyhow::{Context, Result};
+use serde_json::{json, Value};
 use serial_test::serial;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tempfile::tempdir;
+
+fn inventory(home: &Path, roots: &[&Path], registry: &Path, extra: &[&str]) -> Result<Value> {
+    let mut command = forager_command(home);
+    command
+        .env("FORAGER_PROFILE", "../invalid-profile")
+        .args(["project", "inventory"]);
+    for root in roots {
+        command.arg(root);
+    }
+    let output = command
+        .arg("--registry")
+        .arg(registry)
+        .args(extra)
+        .arg("--json")
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(serde_json::from_slice(&output.stdout)?)
+}
+
+fn inventory_snapshot(root: &Path) -> Result<std::collections::BTreeMap<PathBuf, Vec<u8>>> {
+    fn walk(root: &Path, map: &mut std::collections::BTreeMap<PathBuf, Vec<u8>>) -> Result<()> {
+        for entry in fs::read_dir(root)? {
+            let path = entry?.path();
+            let metadata = fs::symlink_metadata(&path)?;
+            if metadata.is_symlink() {
+                map.insert(
+                    path.clone(),
+                    fs::read_link(&path)?
+                        .as_os_str()
+                        .as_encoded_bytes()
+                        .to_vec(),
+                );
+            } else if metadata.is_dir() {
+                map.insert(path.clone(), Vec::new());
+                walk(&path, map)?;
+            } else {
+                map.insert(path.clone(), fs::read(&path)?);
+            }
+        }
+        Ok(())
+    }
+    let mut result = std::collections::BTreeMap::new();
+    walk(root, &mut result)?;
+    Ok(result)
+}
+
+#[test]
+fn project_inventory_accounts_for_two_roots_and_unmarked_nested_paths_without_writes() -> Result<()>
+{
+    let temp = tempdir()?;
+    let first = temp.path().join("first");
+    let second = temp.path().join("second");
+    let home = temp.path().join("never-created-home");
+    write_file(&first.join("alpha/AGENTS.md"), "alpha\n")?;
+    write_file(&first.join("loose/README.md"), "no project marker\n")?;
+    write_file(&first.join("group/nested/Cargo.toml"), "nested\n")?;
+    write_file(&first.join(".private/Cargo.toml"), "hidden\n")?;
+    write_file(&second.join("beta/README.md"), "declared without marker\n")?;
+    let registry = temp.path().join("projects.toml");
+    write_file(&registry, "schema = 'forager_project_registry.v1'\n[projects.alpha]\nworkspace_patterns = ['alpha']\n[projects.beta]\nworkspace_patterns = ['beta']\n[projects.missing]\nworkspace_patterns = ['absent-project']\n")?;
+    let before = inventory_snapshot(temp.path())?;
+    let args = ["--project-key", "alpha", "--max-depth", "2"];
+    let report = inventory(&home, &[&first, &second], &registry, &args)?;
+    assert_eq!(
+        report,
+        inventory(&home, &[&first, &second], &registry, &args)?
+    );
+    assert_eq!(inventory_snapshot(temp.path())?, before);
+    assert!(!home.exists());
+    let entries = report["entries"].as_array().unwrap();
+    let status = |suffix: &str| {
+        entries
+            .iter()
+            .find(|entry| entry["path"].as_str().unwrap().ends_with(suffix))
+            .unwrap()["status"]
+            .clone()
+    };
+    assert_eq!(status("/alpha"), "registered_project");
+    assert_eq!(status("/beta"), "registered_project");
+    assert_eq!(status("/group/nested"), "unregistered_project_candidate");
+    assert_eq!(status("/.private"), "excluded_hidden");
+    assert_eq!(status("/loose"), "unresolved_container_inspected");
+    assert_eq!(report["summary"]["registry_entries"], 3);
+    assert_eq!(report["summary"]["unobserved_registry_entries"], 1);
+    assert_eq!(report["summary"]["enumeration_complete"], true);
+    assert_eq!(report["summary"]["offdesk_ready"], false);
+    assert_eq!(report["authorizes_dispatch"], false);
+    Ok(())
+}
+
+#[test]
+fn project_inventory_exposes_registry_errors_and_missing_roots_without_creating_profile(
+) -> Result<()> {
+    let temp = tempdir()?;
+    let workspace = temp.path().join("workspace");
+    fs::create_dir(&workspace)?;
+    let home = temp.path().join("home");
+    let missing = temp.path().join("missing-root");
+    let registry = temp.path().join("registry.toml");
+    let absent = inventory(&home, &[&workspace, &missing], &registry, &[])?;
+    assert_eq!(absent["registry"]["status"], "missing");
+    assert_eq!(absent["roots"][1]["status"], "unavailable");
+    assert_eq!(absent["summary"]["enumeration_complete"], false);
+    for text in ["bad toml [", "schema = 'wrong'", "schema = 'forager_project_registry.v1'\n[projects.bad]\nworkspace_patterns = ['bad']\naliases = [7]"] {
+        write_file(&registry, text)?;
+        let report = inventory(&home, &[&workspace], &registry, &[])?;
+        assert_eq!(report["registry"]["status"], "invalid");
+        assert!(report["registry"]["error"].is_string());
+        assert_eq!(report["summary"]["registry_complete"], false);
+    }
+    assert!(!home.exists());
+    Ok(())
+}
+
+#[test]
+fn project_inventory_reports_overlap_alias_conflicts_and_explicit_empty_selection() -> Result<()> {
+    let temp = tempdir()?;
+    let workspace = temp.path().join("workspace");
+    write_file(&workspace.join("alpha/AGENTS.md"), "alpha")?;
+    let registry = temp.path().join("registry.toml");
+    write_file(&registry, "schema = 'forager_project_registry.v1'\n[projects.a]\nworkspace_patterns = ['alpha']\naliases = ['Shared']\n[projects.b]\nworkspace_patterns = ['alpha']\naliases = ['shared']\n")?;
+    let report = inventory(temp.path(), &[&workspace], &registry, &["--no-selection"])?;
+    assert_eq!(
+        report["entries"][0]["status"],
+        "unresolved_registry_overlap"
+    );
+    assert_eq!(report["entries"][0]["project_keys"], json!(["a", "b"]));
+    assert_eq!(report["registry"]["alias_conflicts"][0]["alias"], "shared");
+    assert_eq!(report["selection"]["explicit_empty"], true);
+    assert_eq!(report["entries"][0]["selected"], false);
+    Ok(())
+}
+
+#[test]
+fn project_inventory_declared_subprojects_reuse_root_and_owning_plan_validation() -> Result<()> {
+    let temp = tempdir()?;
+    let workspace = temp.path().join("workspace");
+    let parent = workspace.join("parent");
+    write_file(&parent.join("AGENTS.md"), "parent")?;
+    write_file(&parent.join("methods/evolution/input.txt"), "owned input")?;
+    write_file(&parent.join("TODO.md"), "authored TODO\n")?;
+    let registry = temp.path().join("registry.toml");
+    write_file(&registry, "schema = 'forager_project_registry.v1'\n[projects.parent]\nworkspace_patterns = ['parent']\n")?;
+    let spec = temp.path().join("scope.json");
+    let declaration = json!({"schema":"forager_subproject_scope.v1","project_key":"parent",
+        "subproject_id":"evolution","label":"Annual evolution","anchor_path":"methods/evolution",
+        "owning_plan_path":"TODO.md","read_paths":["methods/evolution/input.txt"]});
+    write_file(&spec, &serde_json::to_string(&declaration)?)?;
+    let before = inventory_snapshot(temp.path())?;
+    let args = ["--subproject-spec", spec.to_str().unwrap()];
+    let report = inventory(temp.path(), &[&workspace], &registry, &args)?;
+    assert_eq!(inventory_snapshot(temp.path())?, before);
+    assert_eq!(
+        report["declared_subprojects"][0]["status"],
+        "declared_scope_validated"
+    );
+    assert_eq!(
+        report["declared_subprojects"][0]["owning_plan_path"],
+        "TODO.md"
+    );
+    assert_eq!(
+        report["declared_subprojects"][0]["project_root"],
+        parent.to_str().unwrap()
+    );
+    let duplicate = inventory(
+        temp.path(),
+        &[&workspace],
+        &registry,
+        &[
+            "--subproject-spec",
+            spec.to_str().unwrap(),
+            "--subproject-spec",
+            spec.to_str().unwrap(),
+        ],
+    )?;
+    assert_eq!(
+        duplicate["declared_subprojects"][1]["status"],
+        "unresolved_declaration"
+    );
+    let mut escaped = declaration;
+    escaped["anchor_path"] = json!("../outside");
+    write_file(&spec, &serde_json::to_string(&escaped)?)?;
+    let rejected = inventory(temp.path(), &[&workspace], &registry, &args)?;
+    assert_eq!(
+        rejected["declared_subprojects"][0]["status"],
+        "unresolved_declaration"
+    );
+    Ok(())
+}
+
+#[test]
+fn project_inventory_limits_are_explicit_and_exclusions_are_preserved() -> Result<()> {
+    let temp = tempdir()?;
+    let workspace = temp.path().join("workspace");
+    write_file(&workspace.join("group/deeper/Cargo.toml"), "deeper")?;
+    write_file(&workspace.join("excluded/Cargo.toml"), "excluded")?;
+    let registry = temp.path().join("registry.toml");
+    write_file(&registry, "schema = 'forager_project_registry.v1'")?;
+    let excluded = workspace.join("excluded");
+    let shallow = inventory(
+        temp.path(),
+        &[&workspace],
+        &registry,
+        &[
+            "--max-depth",
+            "1",
+            "--exclude",
+            excluded.to_str().unwrap(),
+            "--project-key",
+            "unknown",
+        ],
+    )?;
+    assert_eq!(shallow["entries"][0]["status"], "excluded_by_operator");
+    assert_eq!(
+        shallow["entries"][1]["status"],
+        "unresolved_marker_free_depth_limit"
+    );
+    assert_eq!(
+        shallow["selection"]["unknown_project_keys"],
+        json!(["unknown"])
+    );
+    let bounded = inventory(
+        temp.path(),
+        &[&workspace],
+        &registry,
+        &["--max-entries", "1"],
+    )?;
+    assert_eq!(bounded["summary"]["truncated"], true);
+    assert_eq!(bounded["summary"]["enumeration_complete"], false);
+    assert_eq!(bounded["entries"].as_array().unwrap().len(), 1);
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn project_inventory_deduplicates_symlinks_and_keeps_outside_and_unreadable_paths_visible(
+) -> Result<()> {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    let temp = tempdir()?;
+    let workspace = temp.path().join("workspace");
+    write_file(&workspace.join("alpha/AGENTS.md"), "alpha")?;
+    write_file(&temp.path().join("outside/Cargo.toml"), "outside")?;
+    symlink(workspace.join("alpha"), workspace.join("alias"))?;
+    symlink(temp.path().join("outside"), workspace.join("escape"))?;
+    let inaccessible = workspace.join("unreadable");
+    fs::create_dir(&inaccessible)?;
+    fs::set_permissions(&inaccessible, fs::Permissions::from_mode(0o0))?;
+    let actually_unreadable = fs::read_dir(&inaccessible).is_err();
+    let registry = temp.path().join("registry.toml");
+    write_file(&registry, "schema = 'forager_project_registry.v1'\n[projects.alpha]\nworkspace_patterns = ['alpha']\n")?;
+    let report = inventory(temp.path(), &[&workspace, &workspace], &registry, &[]);
+    fs::set_permissions(&inaccessible, fs::Permissions::from_mode(0o700))?;
+    let report = report?;
+    let entries = report["entries"].as_array().unwrap();
+    let by_name = |name: &str| {
+        entries
+            .iter()
+            .find(|entry| entry["path"].as_str().unwrap().ends_with(name))
+            .unwrap()
+    };
+    assert_eq!(by_name("/alias")["status"], "duplicate_path");
+    assert_eq!(by_name("/escape")["status"], "excluded_outside_roots");
+    assert_eq!(report["roots"][1]["status"], "duplicate_root");
+    if actually_unreadable {
+        assert_eq!(by_name("/unreadable")["status"], "unavailable");
+    }
+    Ok(())
+}
 
 fn forager_command(home: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_forager"));
@@ -37,6 +309,503 @@ fn write_file(path: &Path, contents: &str) -> Result<()> {
         fs::create_dir_all(parent)?;
     }
     fs::write(path, contents)?;
+    Ok(())
+}
+
+fn routing_command(home: &Path, repo: &Path, extra: &[&str]) -> Command {
+    let mut command = forager_command(home);
+    command
+        .env("FORAGER_PROFILE", "../invalid-profile")
+        .args(["project", "plan-routing"])
+        .arg(repo)
+        .args(["--project-key", "demo-project", "--json"])
+        .args(extra);
+    command
+}
+
+fn routing(home: &Path, repo: &Path, extra: &[&str]) -> Result<Value> {
+    let output = routing_command(home, repo, extra).output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(serde_json::from_slice(&output.stdout)?)
+}
+
+fn apply_routing(home: &Path, repo: &Path, extra: &[&str], preview: &Value) -> Result<Value> {
+    let output = routing_command(home, repo, extra)
+        .args([
+            "--reviewed",
+            "--expected-preview-sha256",
+            preview["preview_sha256"].as_str().unwrap(),
+        ])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(serde_json::from_slice(&output.stdout)?)
+}
+
+#[test]
+fn project_plan_routing_discovery_is_read_only_and_requires_owner_selection() -> Result<()> {
+    let temp = tempdir()?;
+    let home = temp.path().join("absent-home");
+    let repo = temp.path().join("project");
+    write_file(
+        &repo.join("PROJECT_STATE.md"),
+        "Current plan: [work](docs/team-todo.md).\n[missing](docs/missing.md)\n",
+    )?;
+    write_file(&repo.join("docs/team-todo.md"), "- [ ] Real task\n")?;
+    let before = inventory_snapshot(temp.path())?;
+    let report = routing(&home, &repo, &[])?;
+    assert_eq!(
+        report["preview"]["owner_status"],
+        "candidate_requires_selection"
+    );
+    assert_eq!(report["preview"]["action"], "held");
+    assert!(report["preview"]["first_read_links"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|link| link["target"] == "docs/missing.md" && link["status"] == "missing_or_unsafe"));
+    assert_eq!(report, routing(&home, &repo, &[])?);
+    assert_eq!(before, inventory_snapshot(temp.path())?);
+    assert!(!home.exists());
+    write_file(&repo.join("TODO.md"), "second owner?\n")?;
+    assert_eq!(
+        routing(&home, &repo, &[])?["preview"]["owner_status"],
+        "ambiguous_requires_selection"
+    );
+    let blocked = routing(
+        &home,
+        &repo,
+        &["--owning-plan", "other.md", "--create-plan"],
+    )?;
+    assert!(!blocked["preview"]["blockers"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    let result = routing_command(
+        &home,
+        &repo,
+        &["--owning-plan", "other.md", "--create-plan"],
+    )
+    .args([
+        "--reviewed",
+        "--expected-preview-sha256",
+        blocked["preview_sha256"].as_str().unwrap(),
+    ])
+    .output()?;
+    assert!(!result.status.success());
+    assert!(!repo.join("other.md").exists());
+    Ok(())
+}
+
+#[test]
+fn project_plan_routing_preserves_authored_bytes_and_is_idempotent() -> Result<()> {
+    let temp = tempdir()?;
+    let repo = temp.path().join("project");
+    let home = temp.path().join("home");
+    let authored = "# Authored instructions\r\nKeep scientific data unchanged.\r\n";
+    write_file(&repo.join("AGENTS.md"), authored)?;
+    write_file(&repo.join("TODO.md"), "- [ ] Original task\n")?;
+    write_file(&repo.join("notes.md"), "working notes\n")?;
+    fs::create_dir_all(repo.join("evidence"))?;
+    let extra = [
+        "--owning-plan",
+        "TODO.md",
+        "--document-route",
+        "working_notes=notes.md",
+        "--document-route",
+        "evidence=evidence",
+    ];
+    let before = inventory_snapshot(&repo)?;
+    let preview = routing(&home, &repo, &extra)?;
+    assert_eq!(before, inventory_snapshot(&repo)?);
+    assert_eq!(preview["preview"]["action"], "append_instructions");
+    assert_eq!(
+        apply_routing(&home, &repo, &extra, &preview)?["applied"],
+        true
+    );
+    let agents = fs::read_to_string(repo.join("AGENTS.md"))?;
+    assert!(agents.starts_with(authored));
+    assert!(agents.contains("[TODO.md](TODO.md)"));
+    assert!(agents.contains("working_notes: [notes.md](notes.md)"));
+    assert_eq!(
+        fs::read_to_string(repo.join("TODO.md"))?,
+        "- [ ] Original task\n"
+    );
+    let repeated = routing(&home, &repo, &extra)?;
+    assert_eq!(repeated["preview"]["action"], "unchanged");
+    assert!(repeated["preview"]["first_read_links"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|link| link["target"] == "evidence" && link["status"] == "present_directory"));
+    assert_eq!(
+        apply_routing(&home, &repo, &extra, &repeated)?["applied"],
+        false
+    );
+    assert_eq!(fs::read_to_string(repo.join("AGENTS.md"))?, agents);
+    assert!(!home.exists());
+    Ok(())
+}
+
+#[test]
+fn project_plan_routing_fresh_project_establishes_one_file_before_instructions() -> Result<()> {
+    let temp = tempdir()?;
+    let repo = temp.path().join("project");
+    let home = temp.path().join("home");
+    fs::create_dir_all(repo.join("docs"))?;
+    let establish = ["--owning-plan", "docs/TODO.md", "--create-plan"];
+    let preview = routing(&home, &repo, &establish)?;
+    assert!(!repo.join("docs/TODO.md").exists());
+    assert_eq!(
+        preview["preview"]["action"],
+        "establish_plan_then_review_routing"
+    );
+    apply_routing(&home, &repo, &establish, &preview)?;
+    assert!(repo.join("docs/TODO.md").exists());
+    assert!(!repo.join("AGENTS.md").exists());
+    let extra = ["--owning-plan", "docs/TODO.md"];
+    let preview = routing(&home, &repo, &extra)?;
+    apply_routing(&home, &repo, &extra, &preview)?;
+    assert!(fs::read_to_string(repo.join("AGENTS.md"))?.contains("[docs/TODO.md](docs/TODO.md)"));
+    assert!(!repo.join("NEXT_ACTIONS.md").exists());
+    assert_eq!(
+        routing(&home, &repo, &[])?["preview"]["owner_status"],
+        "candidate_requires_selection"
+    );
+    Ok(())
+}
+
+#[test]
+fn project_plan_routing_refuses_stale_hashes_and_generated_section_drift() -> Result<()> {
+    let temp = tempdir()?;
+    let repo = temp.path().join("project");
+    let home = temp.path().join("home");
+    write_file(&repo.join("AGENTS.md"), "original\n")?;
+    write_file(&repo.join("TODO.md"), "original TODO\n")?;
+    let extra = ["--owning-plan", "TODO.md"];
+    for (path, changed) in [
+        ("TODO.md", "new TODO\n"),
+        ("AGENTS.md", "new instructions\n"),
+    ] {
+        let preview = routing(&home, &repo, &extra)?;
+        write_file(&repo.join(path), changed)?;
+        let snapshot = inventory_snapshot(&repo)?;
+        let result = routing_command(&home, &repo, &extra)
+            .args([
+                "--reviewed",
+                "--expected-preview-sha256",
+                preview["preview_sha256"].as_str().unwrap(),
+            ])
+            .output()?;
+        assert!(!result.status.success());
+        assert!(String::from_utf8_lossy(&result.stderr).contains("preview hash changed"));
+        assert_eq!(snapshot, inventory_snapshot(&repo)?);
+    }
+    let preview = routing(&home, &repo, &extra)?;
+    apply_routing(&home, &repo, &extra, &preview)?;
+    let agents = fs::read_to_string(repo.join("AGENTS.md"))?
+        .replace("Default to Ondesk.", "Default to Offdesk.");
+    write_file(&repo.join("AGENTS.md"), &agents)?;
+    let drift = routing(&home, &repo, &extra)?;
+    assert_eq!(drift["preview"]["action"], "held");
+    assert!(drift["preview"]["blockers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|b| b
+            .as_str()
+            .unwrap()
+            .contains("generated routing section differs")));
+    let result = routing_command(&home, &repo, &extra)
+        .args([
+            "--reviewed",
+            "--expected-preview-sha256",
+            drift["preview_sha256"].as_str().unwrap(),
+        ])
+        .output()?;
+    assert!(!result.status.success());
+    assert_eq!(fs::read_to_string(repo.join("AGENTS.md"))?, agents);
+    Ok(())
+}
+
+#[test]
+fn project_plan_routing_declared_subproject_routes_only_its_anchor() -> Result<()> {
+    let temp = tempdir()?;
+    let repo = temp.path().join("project");
+    let home = temp.path().join("home");
+    write_file(&repo.join("AGENTS.md"), "parent instructions\n")?;
+    write_file(
+        &repo.join("methods/evolution/AGENTS.md"),
+        "evolution instructions\n",
+    )?;
+    write_file(&repo.join("methods/evolution/TODO.md"), "evolution tasks\n")?;
+    write_file(&repo.join("methods/other/TODO.md"), "other tasks\n")?;
+    let spec = temp.path().join("scope.json");
+    fs::write(
+        &spec,
+        serde_json::to_vec(
+            &json!({"schema":"forager_subproject_scope.v1","project_key":"demo-project","subproject_id":"evolution","label":"Evolution","anchor_path":"methods/evolution","owning_plan_path":"methods/evolution/TODO.md"}),
+        )?,
+    )?;
+    let extra = ["--subproject-spec", spec.to_str().unwrap()];
+    let preview = routing(&home, &repo, &extra)?;
+    assert_eq!(preview["preview"]["scope_anchor"], "methods/evolution");
+    assert!(preview["preview"]["subproject_spec_sha256"]
+        .as_str()
+        .is_some());
+    apply_routing(&home, &repo, &extra, &preview)?;
+    assert_eq!(
+        fs::read_to_string(repo.join("AGENTS.md"))?,
+        "parent instructions\n"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.join("methods/other/TODO.md"))?,
+        "other tasks\n"
+    );
+    assert!(
+        fs::read_to_string(repo.join("methods/evolution/AGENTS.md"))?
+            .contains("(../../methods/evolution/TODO.md)")
+    );
+    let conflict = routing_command(
+        &home,
+        &repo,
+        &[
+            "--subproject-spec",
+            spec.to_str().unwrap(),
+            "--owning-plan",
+            "methods/other/TODO.md",
+        ],
+    )
+    .output()?;
+    assert!(!conflict.status.success());
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn project_plan_routing_preserves_claude_symlink_and_refuses_unsafe_targets() -> Result<()> {
+    use std::os::unix::fs::symlink;
+    let temp = tempdir()?;
+    let repo = temp.path().join("project");
+    let home = temp.path().join("home");
+    write_file(&repo.join("AGENTS.md"), "authored\n")?;
+    write_file(&repo.join("TODO.md"), "tasks\n")?;
+    symlink("AGENTS.md", repo.join("CLAUDE.md"))?;
+    let extra = ["--owning-plan", "TODO.md"];
+    let preview = routing(&home, &repo, &extra)?;
+    assert_eq!(
+        preview["preview"]["claude_route"],
+        "symlink_to_agents_preserved"
+    );
+    apply_routing(&home, &repo, &extra, &preview)?;
+    assert_eq!(
+        fs::read_link(repo.join("CLAUDE.md"))?,
+        PathBuf::from("AGENTS.md")
+    );
+    assert_eq!(
+        fs::read(repo.join("CLAUDE.md"))?,
+        fs::read(repo.join("AGENTS.md"))?
+    );
+    let outside = temp.path().join("outside.md");
+    write_file(&outside, "outside canary\n")?;
+    symlink(&outside, repo.join("linked-todo.md"))?;
+    let held = routing(&home, &repo, &["--owning-plan", "linked-todo.md"])?;
+    assert_eq!(
+        held["preview"]["owner_status"],
+        "selected_missing_or_unsafe"
+    );
+    fs::remove_file(repo.join("AGENTS.md"))?;
+    symlink(&outside, repo.join("AGENTS.md"))?;
+    let held = routing(&home, &repo, &extra)?;
+    assert_eq!(held["preview"]["action"], "held");
+    assert_eq!(fs::read_to_string(&outside)?, "outside canary\n");
+    Ok(())
+}
+
+#[test]
+fn project_plan_routing_reports_missing_document_routes_and_malformed_markers() -> Result<()> {
+    let temp = tempdir()?;
+    let repo = temp.path().join("project");
+    let home = temp.path().join("home");
+    write_file(&repo.join("TODO.md"), "tasks\n")?;
+    let extra = [
+        "--owning-plan",
+        "TODO.md",
+        "--document-route",
+        "canonical=missing.md",
+    ];
+    let held = routing(&home, &repo, &extra)?;
+    assert!(!held["preview"]["blockers"].as_array().unwrap().is_empty());
+    let result = routing_command(&home, &repo, &extra)
+        .args([
+            "--reviewed",
+            "--expected-preview-sha256",
+            held["preview_sha256"].as_str().unwrap(),
+        ])
+        .output()?;
+    assert!(!result.status.success());
+    assert!(!repo.join("AGENTS.md").exists());
+    write_file(
+        &repo.join("AGENTS.md"),
+        "authored\n<!-- forager:plan-routing:start -->\ntruncated\n",
+    )?;
+    assert_eq!(
+        routing(&home, &repo, &["--owning-plan", "TODO.md"])?["preview"]["action"],
+        "held"
+    );
+    for args in [
+        ["--owning-plan", "../outside.md"],
+        ["--document-route", "unknown=TODO.md"],
+    ] {
+        assert!(!routing_command(&home, &repo, &args)
+            .output()?
+            .status
+            .success());
+    }
+    Ok(())
+}
+
+#[test]
+fn project_plan_routing_handles_spaced_paths_and_rejects_replaced_project_identity() -> Result<()> {
+    let temp = tempdir()?;
+    let repo = temp.path().join("project");
+    let home = temp.path().join("home");
+    write_file(&repo.join("docs/team todo.md"), "- [ ] Agreed work\n")?;
+    let extra = ["--owning-plan", "docs/team todo.md"];
+    let preview = routing(&home, &repo, &extra)?;
+    apply_routing(&home, &repo, &extra, &preview)?;
+    assert!(fs::read_to_string(repo.join("AGENTS.md"))?
+        .contains("[docs/team todo.md](<docs/team todo.md>)"));
+    let repeated = routing(&home, &repo, &extra)?;
+    assert_eq!(repeated["preview"]["action"], "unchanged");
+    assert!(repeated["preview"]["first_read_links"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|link| link["target"] == "docs/team todo.md" && link["status"] == "present"));
+    let agents = fs::read(repo.join("AGENTS.md"))?;
+    fs::rename(&repo, temp.path().join("old-project"))?;
+    write_file(&repo.join("docs/team todo.md"), "- [ ] Agreed work\n")?;
+    fs::write(repo.join("AGENTS.md"), agents)?;
+    let before = inventory_snapshot(&repo)?;
+    let result = routing_command(&home, &repo, &extra)
+        .args([
+            "--reviewed",
+            "--expected-preview-sha256",
+            repeated["preview_sha256"].as_str().unwrap(),
+        ])
+        .output()?;
+    assert!(!result.status.success());
+    assert_eq!(before, inventory_snapshot(&repo)?);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn project_init_links_explicit_existing_owner_without_project_writes() -> Result<()> {
+    let temp = tempdir()?;
+    let repo = temp.path().join("project");
+    let home = temp.path().join("home");
+    write_file(&repo.join("AGENTS.md"), "authored\n")?;
+    write_file(&repo.join("docs/TODO.md"), "- [ ] Existing work\n")?;
+    write_file(
+        &repo.join("PROJECT_STATE.md"),
+        &format!(
+            "Owning plan: [TODO](docs/TODO.md)\n{}",
+            "Preserved history\n".repeat(5000)
+        ),
+    )?;
+    let before = inventory_snapshot(&repo)?;
+    let output = forager_command(&home)
+        .args(["project", "init"])
+        .arg(&repo)
+        .args([
+            "--project-key",
+            "demo-project",
+            "--owning-plan",
+            "docs/TODO.md",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let packet: Value = serde_json::from_slice(&output.stdout)?;
+    let profile: Value = serde_json::from_slice(&fs::read(
+        packet["artifacts"]["operation_profile_json"]
+            .as_str()
+            .unwrap(),
+    )?)?;
+    assert_eq!(
+        profile["scope_model"]["project_target"]["owning_plan_path"],
+        "docs/TODO.md"
+    );
+    assert_eq!(
+        profile["owning_plan_routing"]["owner_status"],
+        "explicit_existing_owner"
+    );
+    assert!(profile["owning_plan_routing"]["blockers"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    assert_eq!(before, inventory_snapshot(&repo)?);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn project_governance_hints_reuse_existing_owner_and_hold_missing_owner_links() -> Result<()> {
+    let temp = tempdir()?;
+    let repo = temp.path().join("project");
+    let home = temp.path().join("home");
+    write_file(
+        &repo.join("PROJECT_STATE.md"),
+        "Owning plan: [roadmap](docs/roadmap.md)\n",
+    )?;
+    write_file(&repo.join("docs/roadmap.md"), "- [ ] Real agreed work\n")?;
+    let command = |home: &Path, repo: &Path| {
+        let mut cmd = forager_command(home);
+        cmd.args(["project", "apply-governance-hints"])
+            .arg(repo)
+            .args([
+                "--project-key",
+                "demo-project",
+                "--surface",
+                "next-actions",
+                "--reviewed",
+                "--json",
+            ]);
+        cmd
+    };
+    let output = command(&home, &repo).output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let applied: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(applied["operations"][0]["status"], "skipped_existing");
+    assert_eq!(applied["operations"][0]["path"], "docs/roadmap.md");
+    assert!(!repo.join("NEXT_ACTIONS.md").exists());
+    fs::remove_file(repo.join("docs/roadmap.md"))?;
+    let output = command(&home, &repo).output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let applied: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(applied["operations"][0]["status"], "held_owner_resolution");
+    assert!(!repo.join("NEXT_ACTIONS.md").exists());
     Ok(())
 }
 
@@ -331,6 +1100,154 @@ fn project_init_rejects_unknown_operation_target() -> Result<()> {
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("operation target not found"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn project_init_selects_one_declared_subproject_without_cross_scope_authority() -> Result<()> {
+    let temp = tempdir()?;
+    let repo = temp.path().join("project");
+    write_synthetic_project(&repo)?;
+    write_file(&repo.join("TODO.md"), "# Tasks\n")?;
+    write_file(&repo.join("wiki/methods/annual/README.md"), "# Annual\n")?;
+    write_file(&repo.join("configs/annual.json"), "{}\n")?;
+    write_file(&repo.join("pipelines/mapping/README.md"), "# Mapping\n")?;
+    let annual_spec = temp.path().join("annual-scope.json");
+    let mapping_spec = temp.path().join("mapping-scope.json");
+    write_file(
+        &annual_spec,
+        &serde_json::json!({
+            "schema": "forager_subproject_scope.v1",
+            "project_key": "demo-project",
+            "subproject_id": "annual-evolution",
+            "label": "Annual evolution",
+            "anchor_path": "wiki/methods/annual",
+            "read_paths": ["configs/annual.json"],
+            "owning_plan_path": "TODO.md"
+        })
+        .to_string(),
+    )?;
+    write_file(
+        &mapping_spec,
+        &serde_json::json!({
+            "schema": "forager_subproject_scope.v1",
+            "project_key": "demo-project",
+            "subproject_id": "mapping",
+            "label": "Mapping",
+            "anchor_path": "pipelines/mapping",
+            "owning_plan_path": "TODO.md"
+        })
+        .to_string(),
+    )?;
+    let before_entries = fs::read_dir(&repo)?.count();
+    let out_dir = temp.path().join("init-packet");
+    let output = forager_command(temp.path())
+        .args([
+            "project",
+            "init",
+            repo.to_str().unwrap(),
+            "--project-key",
+            "demo-project",
+            "--subproject-spec",
+            annual_spec.to_str().unwrap(),
+            "--subproject-spec",
+            mapping_spec.to_str().unwrap(),
+            "--operation-target",
+            "annual-evolution",
+            "--out",
+            out_dir.to_str().unwrap(),
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(json["summary"]["operation_target_count"], 1);
+    let profile: Value = serde_json::from_str(&fs::read_to_string(
+        out_dir.join("PROJECT_OPERATION_PROFILE.json"),
+    )?)?;
+    assert_eq!(
+        profile["scope_model"]["project_target"]["scope_ref"],
+        "demo-project"
+    );
+    let target = &profile["scope_model"]["operation_targets"][0];
+    assert_eq!(target["scope_kind"], "subproject");
+    assert_eq!(target["scope_ref"], "annual-evolution");
+    assert_eq!(target["owning_plan_path"], "TODO.md");
+    assert_eq!(
+        target["read_paths"],
+        serde_json::json!(["configs/annual.json", "wiki/methods/annual"])
+    );
+    let preflight: Value = serde_json::from_str(&fs::read_to_string(
+        out_dir.join("MODULE_OPERATION_PREFLIGHT.json"),
+    )?)?;
+    assert_eq!(
+        preflight["operation_targets"][0]["scope_ref"],
+        "annual-evolution"
+    );
+    assert_eq!(
+        preflight["operation_targets"][0]["scope_kind"],
+        "subproject"
+    );
+    assert_eq!(preflight["ready_for_offdesk_runtime"], false);
+    let candidates: Value =
+        serde_json::from_str(&fs::read_to_string(out_dir.join("MODULE_CANDIDATES.json"))?)?;
+    assert!(candidates["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|candidate| {
+            candidate["scope_ref"] == "mapping" && candidate["selected_operation_target"] == false
+        }));
+    assert_eq!(fs::read_dir(&repo)?.count(), before_entries);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn project_init_rejects_subproject_path_outside_project() -> Result<()> {
+    let temp = tempdir()?;
+    let repo = temp.path().join("project");
+    write_synthetic_project(&repo)?;
+    write_file(&repo.join("TODO.md"), "# Tasks\n")?;
+    let outside = temp.path().join("outside");
+    write_file(&outside.join("README.md"), "# Outside\n")?;
+    let spec = temp.path().join("scope.json");
+    write_file(
+        &spec,
+        &serde_json::json!({
+            "schema": "forager_subproject_scope.v1",
+            "project_key": "demo-project",
+            "subproject_id": "outside",
+            "label": "Outside",
+            "anchor_path": "../outside",
+            "owning_plan_path": "TODO.md"
+        })
+        .to_string(),
+    )?;
+    let output = forager_command(temp.path())
+        .args([
+            "project",
+            "init",
+            repo.to_str().unwrap(),
+            "--project-key",
+            "demo-project",
+            "--subproject-spec",
+            spec.to_str().unwrap(),
+            "--operation-target",
+            "outside",
+            "--out",
+            temp.path().join("init-packet").to_str().unwrap(),
+            "--json",
+        ])
+        .output()?;
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("outside scope"));
     Ok(())
 }
 
@@ -1233,6 +2150,7 @@ fn project_artifact_index_tracks_human_outputs_and_missing_refs() -> Result<()> 
             && item["recommended_action"] == "promote_to_deliverables_or_mark_disposable"
             && item["retention_scope"] == "project_surface"
     }));
+    assert!(!profile_dir(temp.path()).exists());
 
     let request_output = forager_command(temp.path())
         .args([
@@ -1255,7 +2173,7 @@ fn project_artifact_index_tracks_human_outputs_and_missing_refs() -> Result<()> 
         String::from_utf8_lossy(&request_output.stderr)
     );
     let request: Value = serde_json::from_slice(&request_output.stdout)?;
-    assert_eq!(request["schema"], "artifact_retention_approval_request.v1");
+    assert_eq!(request["schema"], "artifact_retention_approval_request.v2");
     assert_eq!(request["status"], "pending_approval");
     assert_eq!(request["action"], "maintenance.artifact_cleanup");
     assert_eq!(request["requested_action"], "promote");
@@ -1280,9 +2198,19 @@ fn project_artifact_index_tracks_human_outputs_and_missing_refs() -> Result<()> 
     let approval = &request["approval"];
     assert_eq!(approval["status"], "pending");
     assert_eq!(approval["source_surface"], "project.retention_request");
-    assert_eq!(approval["metadata"]["kind"], "artifact_retention");
-    assert_eq!(approval["metadata"]["artifact_kind"], "png");
-    assert_eq!(approval["metadata"]["requested_action"], "promote");
+    assert_eq!(approval["metadata"]["kind"], "retention_v2");
+    assert_eq!(
+        approval["metadata"]["proposal"]["target"]["source_kind"],
+        "artifact"
+    );
+    assert_eq!(
+        approval["metadata"]["proposal"]["requested_action"],
+        "promote"
+    );
+    assert_eq!(
+        approval["metadata"]["proposal"]["target"]["observation"]["relative_path"],
+        "outputs/plot.png"
+    );
     assert_eq!(
         approval["metadata"]["approval_brief"]["schema"],
         "approval_brief.v1"
@@ -1368,7 +2296,7 @@ fn project_artifact_index_tracks_human_outputs_and_missing_refs() -> Result<()> 
         pending_stdout.contains("prompt: promote recommendation for artifact retention promote")
     );
     assert!(pending_stdout.contains("Approve the promote retention follow-up?"));
-    assert!(pending_stdout.contains("artifact: Unreferenced human-facing output"));
+    assert!(pending_stdout.contains("retention target:"));
     assert!(!pending_stdout.contains("outputs/plot.png"));
 
     let approval_id = approval["approval_id"].as_str().expect("approval id");
@@ -1416,6 +2344,27 @@ fn project_artifact_index_tracks_human_outputs_and_missing_refs() -> Result<()> 
             .unwrap_or_default()
             .contains("retention-apply")));
 
+    let approved_rows: Value = serde_json::from_str(&fs::read_to_string(&approvals_path)?)?;
+    let mut tampered_rows = approved_rows.clone();
+    tampered_rows[0]["request_id"] = Value::String("tampered-request".to_string());
+    fs::write(&approvals_path, serde_json::to_vec_pretty(&tampered_rows)?)?;
+    let tampered_apply = forager_command(temp.path())
+        .args([
+            "project",
+            "retention-apply",
+            repo.to_str().expect("utf-8 repo path"),
+            "--project-key",
+            "demo-project",
+            "--approval-id",
+            approval_id,
+            "--json",
+        ])
+        .output()?;
+    assert!(!tampered_apply.status.success());
+    assert!(String::from_utf8_lossy(&tampered_apply.stderr)
+        .contains("approval identity is not one exact retention v2 authority"));
+    fs::write(&approvals_path, serde_json::to_vec_pretty(&approved_rows)?)?;
+
     let deliverables_before = fs::read_to_string(repo.join("DELIVERABLES.md"))?;
     let apply_output = forager_command(temp.path())
         .args([
@@ -1436,7 +2385,7 @@ fn project_artifact_index_tracks_human_outputs_and_missing_refs() -> Result<()> 
         String::from_utf8_lossy(&apply_output.stderr)
     );
     let application: Value = serde_json::from_slice(&apply_output.stdout)?;
-    assert_eq!(application["schema"], "artifact_retention_application.v1");
+    assert_eq!(application["schema"], "artifact_retention_application.v2");
     assert_eq!(application["status"], "applied_plan_recorded");
     assert_eq!(application["approval_id"], approval_id);
     assert_eq!(application["requested_action"], "promote");
@@ -1450,7 +2399,7 @@ fn project_artifact_index_tracks_human_outputs_and_missing_refs() -> Result<()> 
         .any(|blocker| blocker
             .as_str()
             .unwrap_or_default()
-            .contains("DELIVERABLES.md")));
+            .contains("separate mutation workflow")));
     assert_eq!(application["approval"]["before_status"], "approved");
     assert_eq!(application["approval"]["after_status"], "superseded");
     assert_eq!(application["approval"]["consumed"], true);
@@ -1460,117 +2409,51 @@ fn project_artifact_index_tracks_human_outputs_and_missing_refs() -> Result<()> 
     assert!(Path::new(receipt_path).exists());
     let receipt: Value = serde_json::from_str(&fs::read_to_string(receipt_path)?)?;
     assert_eq!(receipt["approval_id"], approval_id);
+    assert_eq!(receipt["schema"], "artifact_retention_application.v2");
+    assert_eq!(receipt["file_mutation_performed"], false);
     assert_eq!(
         fs::read_to_string(repo.join("DELIVERABLES.md"))?,
         deliverables_before
-    );
-
-    let promote_plan_output = forager_command(temp.path())
-        .args([
-            "project",
-            "retention-promote",
-            repo.to_str().expect("utf-8 repo path"),
-            "--project-key",
-            "demo-project",
-            "--approval-id",
-            approval_id,
-            "--json",
-        ])
-        .output()?;
-    assert!(
-        promote_plan_output.status.success(),
-        "stdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&promote_plan_output.stdout),
-        String::from_utf8_lossy(&promote_plan_output.stderr)
-    );
-    let promote_plan: Value = serde_json::from_slice(&promote_plan_output.stdout)?;
-    assert_eq!(promote_plan["schema"], "artifact_retention_promotion.v1");
-    assert_eq!(promote_plan["status"], "planned_review_required");
-    assert_eq!(promote_plan["mutation_performed"], false);
-    assert_eq!(promote_plan["authority"]["writes_project_state"], false);
-    assert_eq!(
-        promote_plan["deliverables_entry"],
-        "- Unreferenced human-facing output: `outputs/plot.png`"
-    );
-    assert_eq!(
-        fs::read_to_string(repo.join("DELIVERABLES.md"))?,
-        deliverables_before
-    );
-
-    let promote_output = forager_command(temp.path())
-        .args([
-            "project",
-            "retention-promote",
-            repo.to_str().expect("utf-8 repo path"),
-            "--project-key",
-            "demo-project",
-            "--approval-id",
-            approval_id,
-            "--reviewed",
-            "--json",
-        ])
-        .output()?;
-    assert!(
-        promote_output.status.success(),
-        "stdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&promote_output.stdout),
-        String::from_utf8_lossy(&promote_output.stderr)
-    );
-    let promotion: Value = serde_json::from_slice(&promote_output.stdout)?;
-    assert_eq!(promotion["schema"], "artifact_retention_promotion.v1");
-    assert_eq!(promotion["status"], "promoted");
-    assert_eq!(promotion["mutation_performed"], true);
-    assert_eq!(promotion["reviewed"], true);
-    assert_eq!(promotion["authority"]["writes_project_state"], true);
-    assert_eq!(
-        promotion["snapshot_verification"]["rollback_available"],
-        true
-    );
-    assert_eq!(promotion["restore_plan"]["rollback_available"], true);
-    assert!(promotion["promotion_receipt_path"]
-        .as_str()
-        .map(Path::new)
-        .is_some_and(Path::exists));
-    let snapshot_id = promotion["snapshot_verification"]["mutation_id"]
-        .as_str()
-        .expect("snapshot mutation id");
-    assert!(profile_dir(temp.path())
-        .join("mutation_snapshots")
-        .join(format!("{snapshot_id}.json"))
-        .exists());
-    let promoted_deliverables = fs::read_to_string(repo.join("DELIVERABLES.md"))?;
-    assert!(promoted_deliverables.contains("`outputs/plot.png`"));
-
-    let promote_again_output = forager_command(temp.path())
-        .args([
-            "project",
-            "retention-promote",
-            repo.to_str().expect("utf-8 repo path"),
-            "--project-key",
-            "demo-project",
-            "--approval-id",
-            approval_id,
-            "--reviewed",
-            "--json",
-        ])
-        .output()?;
-    assert!(
-        promote_again_output.status.success(),
-        "stdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&promote_again_output.stdout),
-        String::from_utf8_lossy(&promote_again_output.stderr)
-    );
-    let promote_again: Value = serde_json::from_slice(&promote_again_output.stdout)?;
-    assert_eq!(promote_again["status"], "already_promoted");
-    assert_eq!(promote_again["mutation_performed"], false);
-    assert_eq!(
-        fs::read_to_string(repo.join("DELIVERABLES.md"))?,
-        promoted_deliverables
     );
 
     let stored_after_apply: Value = serde_json::from_str(&fs::read_to_string(&approvals_path)?)?;
     assert_eq!(stored_after_apply[0]["approval_id"], approval_id);
     assert_eq!(stored_after_apply[0]["status"], "superseded");
+
+    let mut crash_rows = stored_after_apply.clone();
+    crash_rows[0]["status"] = Value::String("approved".to_string());
+    let created_at = chrono::DateTime::parse_from_rfc3339(
+        crash_rows[0]["created_at"]
+            .as_str()
+            .context("approval created_at")?,
+    )?;
+    crash_rows[0]["expires_at"] = Value::String(
+        (created_at + chrono::Duration::microseconds(1))
+            .to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true),
+    );
+    fs::write(&approvals_path, serde_json::to_vec_pretty(&crash_rows)?)?;
+    let receipt_reuse_output = forager_command(temp.path())
+        .args([
+            "project",
+            "retention-request",
+            repo.to_str().expect("utf-8 repo path"),
+            "--project-key",
+            "demo-project",
+            "--path",
+            "outputs/plot.png",
+            "--action",
+            "promote",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        receipt_reuse_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&receipt_reuse_output.stdout),
+        String::from_utf8_lossy(&receipt_reuse_output.stderr)
+    );
+    let receipt_reuse: Value = serde_json::from_slice(&receipt_reuse_output.stdout)?;
+    assert_eq!(receipt_reuse["approval"]["approval_id"], approval_id);
 
     let apply_again_output = forager_command(temp.path())
         .args([
@@ -1584,8 +2467,68 @@ fn project_artifact_index_tracks_human_outputs_and_missing_refs() -> Result<()> 
             "--json",
         ])
         .output()?;
-    assert!(!apply_again_output.status.success());
-    assert!(String::from_utf8_lossy(&apply_again_output.stderr)
-        .contains("must be approved before retention-apply"));
+    assert!(
+        apply_again_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&apply_again_output.stdout),
+        String::from_utf8_lossy(&apply_again_output.stderr)
+    );
+    let application_again: Value = serde_json::from_slice(&apply_again_output.stdout)?;
+    assert_eq!(application_again["status"], "reconciled_existing");
+    assert_eq!(application_again["receipt_path"], receipt_path);
+
+    write_file(
+        repo.join("outputs/plot.png").as_path(),
+        "changed-png-bytes\n",
+    )?;
+    let drift_retry_output = forager_command(temp.path())
+        .args([
+            "project",
+            "retention-apply",
+            repo.to_str().expect("utf-8 repo path"),
+            "--project-key",
+            "demo-project",
+            "--approval-id",
+            approval_id,
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        drift_retry_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&drift_retry_output.stdout),
+        String::from_utf8_lossy(&drift_retry_output.stderr)
+    );
+    let drift_retry: Value = serde_json::from_slice(&drift_retry_output.stdout)?;
+    assert_eq!(drift_retry["status"], "reconciled_existing");
+    assert_eq!(drift_retry["receipt_path"], receipt_path);
+
+    let changed_snapshot_request_output = forager_command(temp.path())
+        .args([
+            "project",
+            "retention-request",
+            repo.to_str().expect("utf-8 repo path"),
+            "--project-key",
+            "demo-project",
+            "--path",
+            "outputs/plot.png",
+            "--action",
+            "promote",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        changed_snapshot_request_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&changed_snapshot_request_output.stdout),
+        String::from_utf8_lossy(&changed_snapshot_request_output.stderr)
+    );
+    let changed_snapshot_request: Value =
+        serde_json::from_slice(&changed_snapshot_request_output.stdout)?;
+    assert_eq!(changed_snapshot_request["status"], "pending_approval");
+    assert_ne!(
+        changed_snapshot_request["approval"]["approval_id"],
+        approval_id
+    );
     Ok(())
 }

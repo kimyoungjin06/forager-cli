@@ -16,11 +16,13 @@ from typing import Any
 from .agent import agent_runtime_status as resolve_agent_runtime_status
 from .common import load_json, unique_nonempty, utc_now
 from .persistence import RemoteOperatorStateError, load_state, parse_utc_timestamp
+from .config import public_control_generation_id
 from .project_candidates import workspace_roots
 from .projects import find_project_dir, load_registry
 from .rendering import sanitize_text
 from .reply_outbox import outbox_health_issue, outbox_inspection
 from .update_journal import journal_health_issue
+from .transport_health import classify_transport_issues, failure_age, TRANSPORT_FAILURE_COUNT, TRANSPORT_FAILURE_SECONDS
 
 HEALTH_SCHEMA = "remote_operator_telegram_health.v1"
 ACTION_READINESS_SCHEMA = "telegram_action_readiness.v1"
@@ -219,10 +221,24 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
         transport_issues.append("telegram_bot_token_missing")
     if not config.get("chat_allowlist_configured"):
         transport_issues.append("telegram_chat_allowlist_missing")
+    if not config.get("user_allowlist_configured"):
+        transport_issues.append("telegram_user_allowlist_missing")
+    transport_issues.extend(
+        str(issue) for issue in config.get("operator_config_issues") or []
+    )
+    listener_state: dict[str, Any] = {}
     try:
-        load_state(args.state_file)
+        listener_state = load_state(args.state_file)
     except RemoteOperatorStateError:
         transport_issues.append("listener_state_unreadable")
+    configured_generation = str(
+        config.get("_control_generation_sha256") or ""
+    ).strip()
+    bound_generation = str(
+        listener_state.get("control_generation_sha256") or ""
+    ).strip()
+    if bound_generation and bound_generation != configured_generation:
+        transport_issues.append("control_generation_mismatch")
     try:
         journal_issue = journal_health_issue(args.update_journal_file)
     except RemoteOperatorStateError:
@@ -246,6 +262,8 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
         try:
             loaded = load_json(status_path)
             loop_status = loaded if isinstance(loaded, dict) else {}
+            if not loop_status:
+                transport_issues.append("loop_status_unreadable")
         except (OSError, json.JSONDecodeError):
             transport_issues.append("loop_status_unreadable")
     else:
@@ -271,7 +289,11 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
     if str(last_result.get("status") or "") == "loop_error":
         transport_issues.append("last_loop_internal_error")
     if str(last_result.get("status") or "") == "state_error":
-        transport_issues.append("last_listener_state_error")
+        transport_issues.append("last_loop_state_error")
+    transport_issues, transport_warnings = classify_transport_issues(
+        transport_issues, count=loop_status.get("consecutive_error_count"),
+        age=failure_age(loop_status, dt.datetime.now(dt.timezone.utc)),
+    )
     agent_runtime_status = resolve_agent_runtime_status(args)
     tmux_available = shutil.which("tmux") is not None
     roots = workspace_roots(args)
@@ -292,7 +314,7 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
         issues.append(project_scan_issue)
     if transport_issues:
         health_status = "unhealthy"
-    elif agent_issue or project_scan_issue:
+    elif agent_issue or project_scan_issue or transport_warnings:
         health_status = "degraded"
     else:
         health_status = "healthy"
@@ -309,6 +331,9 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
         "health_status": health_status,
         "issues": issues,
         "transport_issues": transport_issues,
+        "transport_warnings": transport_warnings,
+        "transport_failure_policy": {"minimum_consecutive_errors": TRANSPORT_FAILURE_COUNT,
+            "minimum_seconds_without_success": TRANSPORT_FAILURE_SECONDS},
         "env_file": str(args.env_file),
         "status_file": str(status_path),
         "state_file": str(args.state_file),
@@ -316,6 +341,16 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
         "reply_outbox_file": str(args.reply_outbox_file),
         "reply_outbox": reply_outbox,
         "token_configured": token_configured,
+        "control_generation_id": public_control_generation_id(
+            configured_generation
+        ),
+        "bound_control_generation_id": public_control_generation_id(
+            bound_generation
+        ),
+        "operator_mode": config.get("operator_mode"),
+        "operator_identity_configured": bool(
+            config.get("operator_identity_configured")
+        ),
         "chat_allowlist_configured": bool(config.get("chat_allowlist_configured")),
         "user_allowlist_configured": bool(config.get("user_allowlist_configured")),
         "listener_status": loop_status.get("status"),

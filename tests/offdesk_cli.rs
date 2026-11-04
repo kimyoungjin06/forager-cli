@@ -274,6 +274,184 @@ fn durable_task_with(
     })
 }
 
+#[test]
+fn queue_cli_mutations_refuse_a_tick_lock_held_by_another_process() -> Result<()> {
+    let temp = tempdir()?;
+    let profile = profile_dir(temp.path());
+    fs::create_dir_all(&profile)?;
+    let queue = profile.join("offdesk_tasks.json");
+    fs::write(
+        &queue,
+        serde_json::to_vec(&json!([durable_task(
+            "queued",
+            Utc::now(),
+            "true",
+            temp.path()
+        )]))?,
+    )?;
+    let before = fs::read(&queue)?;
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(profile.join("offdesk_tick.lock"))?;
+    lock.lock_exclusive()?;
+    for command in ["cancel-task", "retry-task", "resume-task", "abandon-task"] {
+        let output = forager_command(temp.path())
+            .args(["offdesk", command, "task", "--json"])
+            .output()?;
+        assert!(!output.status.success(), "{command} bypassed tick lock");
+        assert_eq!(fs::read(&queue)?, before);
+    }
+    FileExt::unlock(&lock)?;
+    let output = forager_command(temp.path())
+        .args(["offdesk", "cancel-task", "task", "--json"])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(())
+}
+
+fn record_fixture_exit_evidence(profile: &Path) -> Result<()> {
+    use forager::offdesk::{
+        BackgroundProbe, BackgroundRunStore, BackgroundRunnerKind, OffdeskTask,
+    };
+    let tasks: Vec<OffdeskTask> =
+        serde_json::from_slice(&fs::read(profile.join("offdesk_tasks.json"))?)?;
+    let mut probes = Vec::new();
+    for task in tasks {
+        let Some(ticket) = task.background_ticket_id else {
+            continue;
+        };
+        let (mut command, receipt) =
+            forager::offdesk::local_exit::command(Path::new(&task.workdir), "exit 0")?;
+        let mut child = command.spawn()?;
+        let pid = child.id();
+        child.wait()?;
+        let mut probe = BackgroundProbe::new(ticket, BackgroundRunnerKind::LocalBackground);
+        probe.task_id = Some(task.task_id);
+        probe.project_key = Some(task.project_key);
+        probe.request_id = Some(task.request_id);
+        probe.working_dir = Some(task.workdir);
+        probe.runtime_pid = Some(pid);
+        probe.runtime_identity = Some("fixture-exited-process".into());
+        probe.local_exit_receipt = Some(receipt);
+        probes.push(probe);
+    }
+    BackgroundRunStore::new(profile).save(&probes)?;
+    Ok(())
+}
+
+#[test]
+fn offdesk_task_recovery_missing_profile_does_not_initialize_state() -> Result<()> {
+    let temp = tempdir()?;
+    let output = forager_command(temp.path())
+        .args(["offdesk", "task-recovery", "missing", "--json"])
+        .output()?;
+    assert!(!output.status.success());
+    assert!(!app_dir(temp.path()).exists());
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn offdesk_task_recovery_reports_evidence_without_mutating_state() -> Result<()> {
+    use forager::offdesk::BackgroundRunStore;
+    let temp = tempdir()?;
+    let profile = profile_dir(temp.path());
+    fs::create_dir_all(&profile)?;
+    let queue = profile.join("offdesk_tasks.json");
+    fs::write(
+        &queue,
+        serde_json::to_vec(&json!([durable_task(
+            "failed",
+            Utc::now(),
+            "exit 0",
+            temp.path()
+        )]))?,
+    )?;
+    record_fixture_exit_evidence(&profile)?;
+    let store = BackgroundRunStore::new(&profile);
+    let original = store.load()?;
+    for expected in [
+        "descendant_wait_receipt_verified",
+        "supervisor_lost_descendants_unverified",
+        "supervisor_alive",
+        "supervisor_pid_reused",
+        "containment_binding_missing_or_invalid",
+        "runtime_binding_unsupported_or_mismatched",
+        "runtime_probe_missing_or_ambiguous",
+    ] {
+        let mut probes = original.clone();
+        match expected {
+            "containment_binding_missing_or_invalid" => {
+                let receipt = probes[0].local_exit_receipt.as_mut().unwrap();
+                receipt.wait_scope = Some("linux_subreaper_children_cgroup_v1".into());
+                // Even a complete matching shell receipt cannot bypass missing
+                // containment evidence after a prepared launch loses its PID.
+                let receipt_path = temp.path().join(&receipt.relative_path);
+                let mut value: serde_json::Value =
+                    serde_json::from_slice(&fs::read(&receipt_path)?)?;
+                value["wait_scope"] = json!("linux_subreaper_children_cgroup_v1");
+                fs::write(receipt_path, serde_json::to_vec(&value)?)?;
+                probes[0].runtime_pid = None;
+            }
+            "supervisor_lost_descendants_unverified" => probes[0].local_exit_receipt = None,
+            "supervisor_alive" | "supervisor_pid_reused" => {
+                probes[0].runtime_pid = Some(std::process::id());
+                probes[0].runtime_identity = Some(if expected == "supervisor_alive" {
+                    forager::process::process_identity(std::process::id()).unwrap()
+                } else {
+                    "not-the-current-process".into()
+                });
+            }
+            "runtime_binding_unsupported_or_mismatched" => probes[0].task_id = Some("other".into()),
+            "runtime_probe_missing_or_ambiguous" => probes.push(probes[0].clone()),
+            _ => {}
+        }
+        store.save(&probes)?;
+        let before: std::collections::BTreeMap<_, _> = fs::read_dir(&profile)?
+            .map(|entry| {
+                let path = entry?.path();
+                Ok((path.clone(), fs::read(path)?))
+            })
+            .collect::<std::io::Result<_>>()?;
+        for _ in 0..2 {
+            let output = forager_command(temp.path())
+                .args(["offdesk", "task-recovery", "task", "--json"])
+                .output()?;
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let value: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+            assert_eq!(value["reason"], expected);
+            assert_eq!(
+                value["release_verified"],
+                expected == "descendant_wait_receipt_verified"
+            );
+            assert_eq!(value["automatic_recovery"], false);
+            assert_eq!(
+                value["does_not_authorize"],
+                json!(["signal", "terminate", "clear_ticket", "retry", "launch"])
+            );
+        }
+        let after: std::collections::BTreeMap<_, _> = fs::read_dir(&profile)?
+            .map(|entry| {
+                let path = entry?.path();
+                Ok((path.clone(), fs::read(path)?))
+            })
+            .collect::<std::io::Result<_>>()?;
+        assert_eq!(before, after);
+    }
+    Ok(())
+}
+
 fn denied_approval(action: &str, now: chrono::DateTime<Utc>) -> serde_json::Value {
     json!({
         "approval_id": "approval_denied",
@@ -371,6 +549,195 @@ fn offdesk_pending_and_ok_resolve_approval() -> Result<()> {
     assert!(audit.contains("\"action_id\":\"approval_one\""));
     assert!(audit.contains("\"result\":\"approved\""));
     assert!(audit.contains("\"resolved_by\":\"cli\""));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_pending_presentation_redacts_legacy_json_and_human_state() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    let secret = "sk-secretsecretsecretsecret";
+    let approvals_path = profile_dir.join("pending_action_approvals.json");
+    fs::write(
+        &approvals_path,
+        serde_json::to_string_pretty(&json!([
+            {
+                "approval_id": format!("approval-token={secret}"),
+                "status": "pending",
+                "scope": "once",
+                "project_key": format!("project-token={secret}"),
+                "request_id": format!("request-token={secret}"),
+                "task_id": format!("task-token={secret}"),
+                "action": format!("dispatch.runtime token={secret}"),
+                "risk_level": "runtime_mutation",
+                "approval_mode": "operator_required",
+                "preview": format!("legacy preview token={secret}"),
+                "reason": format!("legacy reason token={secret}"),
+                "created_at": now,
+                "expires_at": now + Duration::minutes(10),
+                "source_surface": format!("legacy token={secret}")
+            }
+        ]))?,
+    )?;
+    let before = fs::read(&approvals_path)?;
+
+    let json_output = forager_command(temp.path())
+        .args(["offdesk", "pending", "--json"])
+        .output()?;
+    assert!(json_output.status.success());
+    let json_stdout = String::from_utf8_lossy(&json_output.stdout);
+    assert!(!json_stdout.contains(secret));
+    let approvals: serde_json::Value = serde_json::from_slice(&json_output.stdout)?;
+    assert!(approvals[0]["preview"]
+        .as_str()
+        .expect("approval preview")
+        .contains("[REDACTED]"));
+    assert!(approvals[0]["next_safe_action"]["commands"]
+        .as_array()
+        .expect("next safe action commands")
+        .iter()
+        .all(|command| !command.as_str().unwrap_or_default().contains(secret)));
+    assert_eq!(fs::read(&approvals_path)?, before);
+
+    let human_output = forager_command(temp.path())
+        .args(["offdesk", "pending"])
+        .output()?;
+    assert!(human_output.status.success());
+    let human_stdout = String::from_utf8_lossy(&human_output.stdout);
+    assert!(human_stdout.contains("APPROVAL ID"));
+    assert!(human_stdout.contains("preview: legacy preview token=[REDACTED]"));
+    assert!(human_stdout.contains("command: forager offdesk ok approval-token=[REDACTED]"));
+    assert!(!human_stdout.contains(secret));
+    assert_eq!(fs::read(&approvals_path)?, before);
+
+    fs::write(&approvals_path, "[]\n")?;
+    let empty_output = forager_command(temp.path())
+        .args(["offdesk", "pending"])
+        .output()?;
+    assert!(empty_output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&empty_output.stdout).trim(),
+        "No offdesk approvals found."
+    );
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_approval_resolution_presentation_redacts_legacy_state_and_preserves_authority(
+) -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    let secret = "sk-secretsecretsecretsecret";
+    let approved_id = format!("approval-ok-token={secret}");
+    let denied_id = format!("approval-deny-token={secret}");
+    let approvals_path = profile_dir.join("pending_action_approvals.json");
+    fs::write(
+        &approvals_path,
+        serde_json::to_string_pretty(&json!([
+            {
+                "approval_id": approved_id,
+                "status": "pending",
+                "scope": "once",
+                "project_key": "project",
+                "request_id": "request-ok",
+                "task_id": "task-ok",
+                "action": format!("dispatch.runtime token={secret}"),
+                "risk_level": "runtime_mutation",
+                "approval_mode": "operator_required",
+                "preview": format!("legacy preview token={secret}"),
+                "reason": "outside envelope",
+                "created_at": now,
+                "expires_at": now + Duration::minutes(10),
+                "source_surface": "test"
+            },
+            {
+                "approval_id": denied_id,
+                "status": "pending",
+                "scope": "once",
+                "project_key": "project",
+                "request_id": "request-deny",
+                "task_id": "task-deny",
+                "action": format!("canonical.sync token={secret}"),
+                "risk_level": "canonical_mutation",
+                "approval_mode": "operator_required",
+                "preview": "safe preview",
+                "reason": format!("legacy reason token={secret}"),
+                "created_at": now + Duration::seconds(1),
+                "expires_at": now + Duration::minutes(10),
+                "source_surface": "test"
+            }
+        ]))?,
+    )?;
+
+    let approve_output = forager_command(temp.path())
+        .args(["offdesk", "ok", &approved_id, "--json"])
+        .output()?;
+    assert!(approve_output.status.success());
+    let approve_stdout = String::from_utf8_lossy(&approve_output.stdout);
+    assert!(!approve_stdout.contains(secret));
+    let approved: serde_json::Value = serde_json::from_slice(&approve_output.stdout)?;
+    assert_eq!(approved["status"], "approved");
+    assert_eq!(approved["approval_id"], "approval-ok-token=[REDACTED]");
+    assert_eq!(approved["action"], "dispatch.runtime token=[REDACTED]");
+    assert_eq!(approved["preview"], "legacy preview token=[REDACTED]");
+
+    let deny_output = forager_command(temp.path())
+        .args(["offdesk", "deny", &denied_id])
+        .output()?;
+    assert!(deny_output.status.success());
+    let deny_stdout = String::from_utf8_lossy(&deny_output.stdout);
+    assert!(!deny_stdout.contains(secret));
+    assert!(deny_stdout.contains(
+        "Denied offdesk approval approval-deny-token=[REDACTED]: canonical.sync token=[REDACTED] (CanonicalMutation)"
+    ));
+
+    let approvals: serde_json::Value = serde_json::from_slice(&fs::read(&approvals_path)?)?;
+    assert_eq!(approvals[0]["status"], "approved");
+    assert_eq!(approvals[0]["resolved_by"], "cli");
+    assert_eq!(approvals[1]["status"], "denied");
+    assert_eq!(approvals[1]["resolved_by"], "cli");
+
+    let audit = fs::read_to_string(profile_dir.join("action_audit.jsonl"))?;
+    assert_eq!(audit.matches("\"transition\":\"approve\"").count(), 1);
+    assert_eq!(audit.matches("\"transition\":\"deny\"").count(), 1);
+    let candidates_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "wiki",
+            "candidates",
+            "--project-key",
+            "project",
+            "--json",
+        ])
+        .output()?;
+    assert!(candidates_output.status.success());
+    let candidates: serde_json::Value = serde_json::from_slice(&candidates_output.stdout)?;
+    assert_eq!(candidates.as_array().expect("candidates").len(), 1);
+    assert_eq!(candidates[0]["signal_kind"], "approval_denial");
+
+    let empty_output = forager_command(temp.path())
+        .args(["offdesk", "ok"])
+        .output()?;
+    assert!(empty_output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&empty_output.stdout).trim(),
+        "No pending offdesk approvals."
+    );
+
+    let missing_id = format!("missing-token={secret}");
+    let missing_output = forager_command(temp.path())
+        .args(["offdesk", "ok", &missing_id])
+        .output()?;
+    assert!(!missing_output.status.success());
+    let missing_stderr = String::from_utf8_lossy(&missing_output.stderr);
+    assert!(!missing_stderr.contains(secret));
+    assert!(missing_stderr.contains("Pending offdesk approval not found: missing-token=[REDACTED]"));
     Ok(())
 }
 
@@ -623,6 +990,216 @@ fn offdesk_decision_resolve_and_receipt_append_handoff_records() -> Result<()> {
     assert_eq!(ledger.lines().count(), 3);
     assert!(ledger.contains("\"status\":\"handoff_ready\""));
     assert!(ledger.contains("\"status\":\"receipted\""));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_task_and_decision_presentation_redacts_legacy_state_and_preserves_authority(
+) -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    let secret = "sk-secretsecretsecretsecret";
+
+    let task_id = format!("task-token={secret}");
+    let capability_id = format!("dispatch-token={secret}");
+    let mut task = durable_task_with(
+        &task_id,
+        &capability_id,
+        "failed",
+        now,
+        &format!("printf token={secret}"),
+        temp.path(),
+    );
+    task["project_key"] = json!(format!("project-token={secret}"));
+    task["request_id"] = json!(format!("request-token={secret}"));
+    task["background_ticket_id"] = json!(format!("ticket-token={secret}"));
+    task["workdir"] = json!(temp
+        .path()
+        .join(format!("work-token={secret}"))
+        .to_str()
+        .expect("utf-8 workdir"));
+    let tasks_path = profile_dir.join("offdesk_tasks.json");
+    fs::write(&tasks_path, serde_json::to_string_pretty(&json!([task]))?)?;
+    let tasks_before = fs::read(&tasks_path)?;
+
+    let task_json_output = forager_command(temp.path())
+        .args(["offdesk", "tasks", "--task-id", &task_id, "--json"])
+        .output()?;
+    assert!(task_json_output.status.success());
+    let task_json_stdout = String::from_utf8_lossy(&task_json_output.stdout);
+    assert!(!task_json_stdout.contains(secret));
+    let tasks: serde_json::Value = serde_json::from_slice(&task_json_output.stdout)?;
+    assert!(tasks[0]["task_id"]
+        .as_str()
+        .expect("task id")
+        .contains("[REDACTED]"));
+    assert!(tasks[0]["workdir"]
+        .as_str()
+        .expect("workdir")
+        .contains("[REDACTED]"));
+
+    let task_human_output = forager_command(temp.path())
+        .args(["offdesk", "tasks", "--task-id", &task_id])
+        .output()?;
+    assert!(task_human_output.status.success());
+    let task_human_stdout = String::from_utf8_lossy(&task_human_output.stdout);
+    assert!(task_human_stdout.contains("Open tasks:"));
+    assert!(task_human_stdout.contains("[REDACTED]"));
+    assert!(!task_human_stdout.contains(secret));
+    assert_eq!(fs::read(&tasks_path)?, tasks_before);
+
+    let decision_id = format!("decision-token={secret}");
+    let decision = json!({
+        "schema": "decision_record.v1",
+        "decision_id": decision_id,
+        "project_key": format!("project-token={secret}"),
+        "request_id": format!("request-token={secret}"),
+        "task_id": format!("task-token={secret}"),
+        "raised_by": "council",
+        "source_surface": format!("offdesk.council token={secret}"),
+        "materiality": "high",
+        "status": "user_pending",
+        "created_at": now,
+        "updated_at": now,
+        "decision_request": {
+            "kind": format!("episode_continuation token={secret}"),
+            "summary": format!("Revise before continuing token={secret}"),
+            "decision_needed": format!("Choose the next direction token={secret}"),
+            "why_now": [format!("Council returned revise token={secret}")],
+            "current_scope": format!("Next episode only token={secret}"),
+            "non_authorized_scope": [format!("cleanup token={secret}")]
+        },
+        "council_review": {
+            "recommendation": format!("revise token={secret}"),
+            "agreement": true,
+            "reviewer_decisions": {
+                format!("reviewer-token={secret}"): format!("revise token={secret}")
+            }
+        },
+        "route": {
+            "materiality": "high",
+            "target": "user",
+            "reason": format!("Direction changes token={secret}"),
+            "default_if_no_reply": format!("defer token={secret}")
+        },
+        "approval_brief": {
+            "schema": "approval_brief.v1",
+            "recommendation": "revise",
+            "subject": format!("continuation token={secret}"),
+            "summary_lines": [format!("Revise before continuing token={secret}")],
+            "scope": format!("Next episode only token={secret}"),
+            "question": format!("How should the run proceed token={secret}")
+        }
+    });
+    let decisions_path = profile_dir.join("offdesk_decisions.jsonl");
+    fs::write(
+        &decisions_path,
+        format!("{}\n", serde_json::to_string(&decision)?),
+    )?;
+    let decisions_before = fs::read(&decisions_path)?;
+
+    let list_json_output = forager_command(temp.path())
+        .args(["offdesk", "decisions", "--status", "user_pending", "--json"])
+        .output()?;
+    assert!(list_json_output.status.success());
+    let list_json_stdout = String::from_utf8_lossy(&list_json_output.stdout);
+    assert!(!list_json_stdout.contains(secret));
+    let listed: serde_json::Value = serde_json::from_slice(&list_json_output.stdout)?;
+    assert!(listed[0]["record"]["decision_id"]
+        .as_str()
+        .expect("decision id")
+        .contains("[REDACTED]"));
+
+    let list_human_output = forager_command(temp.path())
+        .args(["offdesk", "decisions", "--status", "user_pending"])
+        .output()?;
+    assert!(list_human_output.status.success());
+    let list_human_stdout = String::from_utf8_lossy(&list_human_output.stdout);
+    assert!(list_human_stdout.contains("DECISION"));
+    assert!(list_human_stdout.contains("[REDACTED]"));
+    assert!(!list_human_stdout.contains(secret));
+
+    for json in [false, true] {
+        let mut command = forager_command(temp.path());
+        command.args(["offdesk", "decision", "show", &decision_id]);
+        if json {
+            command.arg("--json");
+        }
+        let show_output = command.output()?;
+        assert!(show_output.status.success());
+        let show_stdout = String::from_utf8_lossy(&show_output.stdout);
+        assert!(show_stdout.contains("[REDACTED]"));
+        assert!(!show_stdout.contains(secret));
+    }
+    assert_eq!(fs::read(&decisions_path)?, decisions_before);
+
+    let missing_id = format!("missing-token={secret}");
+    let missing_output = forager_command(temp.path())
+        .args(["offdesk", "decision", "show", &missing_id])
+        .output()?;
+    assert!(!missing_output.status.success());
+    let missing_stderr = String::from_utf8_lossy(&missing_output.stderr);
+    assert!(missing_stderr.contains("missing-token=[REDACTED]"));
+    assert!(!missing_stderr.contains(secret));
+
+    let resolve_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "decision",
+            "resolve",
+            &decision_id,
+            "--decision",
+            "revise",
+            "--note",
+            &format!("Inspect the gate token={secret}"),
+            "--by",
+            &format!("operator-token={secret}"),
+            "--json",
+        ])
+        .output()?;
+    assert!(resolve_output.status.success());
+    let resolve_stdout = String::from_utf8_lossy(&resolve_output.stdout);
+    assert!(!resolve_stdout.contains(secret));
+    let resolved: serde_json::Value = serde_json::from_slice(&resolve_output.stdout)?;
+    assert_eq!(resolved["record"]["status"], "handoff_ready");
+
+    let receipt_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "decision",
+            "receipt",
+            &decision_id,
+            "--by",
+            &format!("operator-token={secret}"),
+            "--result-status",
+            "applied",
+            "--evidence",
+            &format!("Handoff checked token={secret}"),
+            "--remaining-review",
+            &format!("Closeout remains token={secret}"),
+        ])
+        .output()?;
+    assert!(receipt_output.status.success());
+    let receipt_stdout = String::from_utf8_lossy(&receipt_output.stdout);
+    assert!(receipt_stdout.contains("Decision receipt:"));
+    assert!(receipt_stdout.contains("status:   receipted"));
+    assert!(!receipt_stdout.contains(secret));
+
+    let ledger = fs::read_to_string(&decisions_path)?;
+    let records = ledger
+        .lines()
+        .map(serde_json::from_str::<serde_json::Value>)
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    assert_eq!(records.len(), 3);
+    assert_eq!(records[0]["status"], "user_pending");
+    assert_eq!(records[1]["status"], "handoff_ready");
+    assert_eq!(records[2]["status"], "receipted");
+    assert!(records
+        .iter()
+        .all(|record| record["decision_id"] == decision_id));
     Ok(())
 }
 
@@ -1489,6 +2066,120 @@ fn offdesk_provider_capacity_json_is_operator_safe() -> Result<()> {
 
 #[test]
 #[serial]
+fn offdesk_provider_presentation_redacts_human_outputs_and_stays_read_only() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    let secret = "sk-secretsecretsecretsecret";
+    let capacity_path = profile_dir.join("provider_capacity.json");
+    fs::write(
+        &capacity_path,
+        serde_json::to_string_pretty(&json!([
+            {
+                "provider_id": format!("provider-token={secret}"),
+                "model": format!("model-token={secret}"),
+                "status": "cooling_down",
+                "reason": "rate_limit",
+                "cooldown_until": now + Duration::minutes(1),
+                "last_error_summary": format!("rate limit token={secret}"),
+                "updated_at": now
+            }
+        ]))?,
+    )?;
+    let source_before = fs::read(&capacity_path)?;
+
+    let capacity_output = forager_command(temp.path())
+        .args(["offdesk", "provider-capacity"])
+        .output()?;
+    assert!(capacity_output.status.success());
+    let capacity_stdout = String::from_utf8_lossy(&capacity_output.stdout);
+    assert!(capacity_stdout.contains("PROVIDER"));
+    assert!(capacity_stdout.contains("provider-token=[REDACTED]"));
+    assert!(capacity_stdout.contains("model-token=[REDACTED]"));
+    assert!(capacity_stdout.contains("summary: rate limit token=[REDACTED]"));
+    assert!(!capacity_stdout.contains(secret));
+    assert_eq!(fs::read(&capacity_path)?, source_before);
+
+    let fallback_output = forager_command(temp.path())
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("ANTHROPIC_API_KEY")
+        .args([
+            "offdesk",
+            "provider-fallback",
+            "--provider-id",
+            "openai",
+            "--model",
+            "gpt-4.1",
+        ])
+        .output()?;
+    assert!(fallback_output.status.success());
+    let fallback_stdout = String::from_utf8_lossy(&fallback_output.stdout);
+    assert!(fallback_stdout.contains("Provider fallback for openai model gpt-4.1"));
+    assert!(fallback_stdout.contains("RECOMMENDED"));
+    assert!(fallback_stdout.contains("gpt-4.1-mini"));
+    assert_eq!(fs::read(&capacity_path)?, source_before);
+
+    let provider_id = format!("provider-token={secret}");
+    let model = format!("model-token={secret}");
+    let fallback_json_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "provider-fallback",
+            "--provider-id",
+            &provider_id,
+            "--model",
+            &model,
+            "--runner-role",
+            "no-candidates",
+            "--json",
+        ])
+        .output()?;
+    assert!(fallback_json_output.status.success());
+    let fallback_json_stdout = String::from_utf8_lossy(&fallback_json_output.stdout);
+    assert!(!fallback_json_stdout.contains(secret));
+    let fallback: serde_json::Value = serde_json::from_slice(&fallback_json_output.stdout)?;
+    assert_eq!(fallback["current_provider_id"], "provider-token=[REDACTED]");
+    assert_eq!(fallback["current_model"], "model-token=[REDACTED]");
+    assert!(fallback.get("candidates").is_none());
+    assert_eq!(fs::read(&capacity_path)?, source_before);
+
+    let fallback_empty_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "provider-fallback",
+            "--provider-id",
+            &provider_id,
+            "--model",
+            &model,
+            "--runner-role",
+            "no-candidates",
+        ])
+        .output()?;
+    assert!(fallback_empty_output.status.success());
+    let fallback_empty_stdout = String::from_utf8_lossy(&fallback_empty_output.stdout);
+    assert!(fallback_empty_stdout
+        .contains("Provider fallback for provider-token=[REDACTED] model model-token=[REDACTED]"));
+    assert!(fallback_empty_stdout.contains("no fallback candidates found"));
+    assert!(!fallback_empty_stdout.contains(secret));
+    assert_eq!(fs::read(&capacity_path)?, source_before);
+
+    fs::write(&capacity_path, "[]\n")?;
+    let empty_source_before = fs::read(&capacity_path)?;
+    let empty_output = forager_command(temp.path())
+        .args(["offdesk", "provider-capacity"])
+        .output()?;
+    assert!(empty_output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&empty_output.stdout).trim(),
+        "No provider capacity state found."
+    );
+    assert_eq!(fs::read(&capacity_path)?, empty_source_before);
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn offdesk_capabilities_json_exposes_artifact_contracts() -> Result<()> {
     let temp = tempdir()?;
 
@@ -1524,6 +2215,46 @@ fn offdesk_capabilities_json_exposes_artifact_contracts() -> Result<()> {
         .expect("produced artifacts")
         .iter()
         .any(|artifact| artifact["artifact_id"] == "background_run"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_capability_and_harness_human_presentation_is_read_only() -> Result<()> {
+    let temp = tempdir()?;
+    let secret = "sk-secretsecretsecretsecret";
+    assert!(!profile_dir(temp.path()).exists());
+
+    let capabilities_output = forager_command(temp.path())
+        .env("OPENAI_API_KEY", secret)
+        .args(["offdesk", "capabilities"])
+        .output()?;
+    assert!(capabilities_output.status.success());
+    let capabilities_stdout = String::from_utf8_lossy(&capabilities_output.stdout);
+    assert!(capabilities_stdout.contains("CAPABILITY"));
+    assert!(capabilities_stdout.contains("inspect.status"));
+    assert!(capabilities_stdout.contains("canonical.syncback"));
+    assert!(capabilities_stdout.contains("Inspect Status"));
+    assert!(!capabilities_stdout.contains(secret));
+    assert!(!profile_dir(temp.path()).exists());
+
+    let harnesses_output = forager_command(temp.path())
+        .env("OPENAI_API_KEY", secret)
+        .args(["offdesk", "harnesses"])
+        .output()?;
+    assert!(harnesses_output.status.success());
+    let harnesses_stdout = String::from_utf8_lossy(&harnesses_output.stdout);
+    assert!(harnesses_stdout.contains("Hosted harness agent profiles"));
+    assert!(harnesses_stdout.contains("Current support target: Codex CLI and Claude Code"));
+    assert!(harnesses_stdout.contains("- Codex CLI (codex) [supported]"));
+    assert!(harnesses_stdout.contains("- Claude Code (claude) [supported]"));
+    assert!(harnesses_stdout.contains("- Gemini CLI (gemini) [planned]"));
+    assert!(harnesses_stdout.contains("launch:  manual integration"));
+    assert!(harnesses_stdout.contains(
+        "prompt:  compact_prompt_with_first_read_artifacts (inline <= 4096 bytes, first-read <= 262144 bytes total)"
+    ));
+    assert!(!harnesses_stdout.contains(secret));
+    assert!(!profile_dir(temp.path()).exists());
     Ok(())
 }
 
@@ -1898,6 +2629,1313 @@ fn offdesk_gate_json_filters_adaptive_wiki_projection_by_agent_mode() -> Result<
         .map(|entry| entry["id"].as_str().unwrap())
         .collect::<Vec<_>>();
     assert_eq!(review_ids, vec!["wiki_shared"]);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_wiki_brief_defaults_to_shared_mode_and_json_is_read_only() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let entries_path = profile_dir.join("adaptive_wiki_entries.json");
+    fs::write(
+        &entries_path,
+        serde_json::to_string_pretty(&json!({
+            "version": "2026-05-14.v0",
+            "entries": [
+                {
+                    "id": "wiki_shared",
+                    "kind": "procedure",
+                    "scope": "project",
+                    "scope_ref": "project",
+                    "status": "promoted",
+                    "activation_mode": "confirm",
+                    "claim": "Shared project rule",
+                    "ai_instruction": "Use shared project guidance.",
+                    "evidence_refs": ["task:shared"],
+                    "confidence": "explicit"
+                },
+                {
+                    "id": "wiki_development",
+                    "kind": "procedure",
+                    "scope": "project",
+                    "scope_ref": "project",
+                    "status": "promoted",
+                    "activation_mode": "confirm",
+                    "agent_modes": ["development"],
+                    "claim": "Development project rule",
+                    "ai_instruction": "Use development-only project guidance.",
+                    "evidence_refs": ["task:development"],
+                    "confidence": "explicit"
+                },
+                {
+                    "id": "wiki_critique",
+                    "kind": "procedure",
+                    "scope": "project",
+                    "scope_ref": "project",
+                    "status": "promoted",
+                    "activation_mode": "confirm",
+                    "agent_modes": ["critique"],
+                    "claim": "Critique project rule",
+                    "ai_instruction": "Use critique-only project guidance.",
+                    "evidence_refs": ["task:critique"],
+                    "confidence": "explicit"
+                }
+            ]
+        }))?,
+    )?;
+    let project_root = temp.path().join("project");
+    fs::create_dir_all(&project_root)?;
+    let project_state = project_root.join("PROJECT_STATE.md");
+    fs::write(&project_state, "project truth\n")?;
+    let entries_before = fs::read(&entries_path)?;
+    let project_state_before = fs::read(&project_state)?;
+
+    let shared_output = forager_command(temp.path())
+        .current_dir(&project_root)
+        .args([
+            "offdesk",
+            "wiki",
+            "brief",
+            "--project-key",
+            "project",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        shared_output.status.success(),
+        "shared brief failed: {}",
+        String::from_utf8_lossy(&shared_output.stderr)
+    );
+    let shared: serde_json::Value = serde_json::from_slice(&shared_output.stdout)?;
+    assert_eq!(shared["agent_mode"], "shared");
+    let shared_ids = shared["entries"]
+        .as_array()
+        .expect("shared entries")
+        .iter()
+        .map(|entry| entry["id"].as_str().expect("entry id"))
+        .collect::<Vec<_>>();
+    assert_eq!(shared_ids, vec!["wiki_shared"]);
+
+    let development_output = forager_command(temp.path())
+        .current_dir(&project_root)
+        .args([
+            "offdesk",
+            "wiki",
+            "brief",
+            "--project-key",
+            "project",
+            "--agent-mode",
+            "development",
+            "--json",
+        ])
+        .output()?;
+    assert!(development_output.status.success());
+    let development: serde_json::Value = serde_json::from_slice(&development_output.stdout)?;
+    assert_eq!(development["agent_mode"], "development");
+    let development_ids = development["entries"]
+        .as_array()
+        .expect("development entries")
+        .iter()
+        .map(|entry| entry["id"].as_str().expect("entry id"))
+        .collect::<Vec<_>>();
+    assert_eq!(development_ids.len(), 2);
+    assert!(development_ids.contains(&"wiki_shared"));
+    assert!(development_ids.contains(&"wiki_development"));
+    assert!(!development_ids.contains(&"wiki_critique"));
+
+    assert_eq!(fs::read(&entries_path)?, entries_before);
+    assert_eq!(fs::read(&project_state)?, project_state_before);
+    assert!(!project_root.join(".wiki-brief.md").exists());
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+#[serial]
+fn offdesk_wiki_brief_rejects_symlink_with_failure_manifest() -> Result<()> {
+    use std::os::unix::fs::symlink;
+
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    fs::write(
+        profile_dir.join("adaptive_wiki_entries.json"),
+        serde_json::to_string_pretty(&json!({
+            "version": "2026-05-14.v0",
+            "entries": [{
+                "id": "wiki_shared",
+                "kind": "procedure",
+                "scope": "project",
+                "scope_ref": "project",
+                "status": "promoted",
+                "activation_mode": "confirm",
+                "claim": "Shared project rule",
+                "ai_instruction": "Use shared project guidance.",
+                "evidence_refs": ["task:shared"],
+                "confidence": "explicit"
+            }]
+        }))?,
+    )?;
+    let project_root = temp.path().join("project");
+    fs::create_dir(&project_root)?;
+    let outside = temp.path().join("outside.md");
+    fs::write(&outside, "outside truth\n")?;
+    let target = project_root.join(".wiki-brief.md");
+    symlink(&outside, &target)?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "wiki",
+            "brief",
+            "--project-key",
+            "project",
+            "--out",
+            target.to_str().expect("utf-8 target"),
+            "--json",
+        ])
+        .output()?;
+    assert!(!output.status.success());
+    let manifest: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(manifest["schema"], "wiki_context_manifest.v1");
+    assert_eq!(
+        manifest["outcome"]["projection_status"],
+        "unsafe_output_path"
+    );
+    assert_eq!(fs::read_to_string(&outside)?, "outside truth\n");
+
+    let over_budget = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "wiki",
+            "brief",
+            "--project-key",
+            "project",
+            "--max-entries",
+            "13",
+            "--json",
+        ])
+        .output()?;
+    assert!(!over_budget.status.success());
+    assert!(String::from_utf8_lossy(&over_budget.stderr).contains("between 1 and 12"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_wiki_brief_does_not_replace_output_for_corrupt_source() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    fs::write(
+        profile_dir.join("adaptive_wiki_entries.json"),
+        b"{not valid json",
+    )?;
+    let project_root = temp.path().join("project");
+    fs::create_dir(&project_root)?;
+    let target = project_root.join(".wiki-brief.md");
+    fs::write(&target, b"previous trusted brief\n")?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "wiki",
+            "brief",
+            "--project-key",
+            "project",
+            "--out",
+            target.to_str().expect("utf-8 target"),
+            "--json",
+        ])
+        .output()?;
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("parse bounded adaptive wiki context entries"));
+    assert_eq!(fs::read(&target)?, b"previous trusted brief\n");
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_wiki_candidate_record_presentation_redacts_and_preserves_recurrence_authority(
+) -> Result<()> {
+    let temp = tempdir()?;
+    let secret = "sk-secretsecretsecretsecret";
+    let scope_ref = format!("project-token={secret}");
+    let claim = format!("Keep candidate review explicit token={secret}");
+    let ai_instruction = format!("Ask before promotion token={secret}");
+    let human_summary = format!("Operator review required token={secret}");
+    let evidence_ref = format!("task:task-token={secret}");
+    let core_tag = format!("harness/token={secret}");
+    let proposed_tag = format!("risk/token={secret}");
+    let review_reason = format!("Repeated operator correction token={secret}");
+
+    let json_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "wiki",
+            "record-candidate",
+            "--kind",
+            "fact",
+            "--scope",
+            "project",
+            "--scope-ref",
+            &scope_ref,
+            "--claim",
+            &claim,
+            "--ai-instruction",
+            &ai_instruction,
+            "--human-summary",
+            &human_summary,
+            "--evidence-ref",
+            &evidence_ref,
+            "--agent-mode",
+            "critique",
+            "--core-tag",
+            &core_tag,
+            "--proposed-tag",
+            &proposed_tag,
+            "--confidence",
+            "explicit",
+            "--origin",
+            "operator_explicit",
+            "--signal-kind",
+            "operator_correction",
+            "--review-reason",
+            &review_reason,
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        json_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&json_output.stderr)
+    );
+    let json_stdout = String::from_utf8_lossy(&json_output.stdout);
+    assert!(!json_stdout.contains(secret));
+    let candidate: serde_json::Value = serde_json::from_slice(&json_output.stdout)?;
+    let candidate_id = candidate["id"].as_str().expect("candidate id").to_string();
+    assert!(candidate_id.starts_with("wiki_candidate_"));
+    for field in [
+        "scope_ref",
+        "claim",
+        "suggested_ai_instruction",
+        "human_summary",
+        "review_reason",
+    ] {
+        assert!(candidate[field]
+            .as_str()
+            .expect("redacted candidate field")
+            .contains("[REDACTED]"));
+    }
+    assert!(candidate["evidence_refs"][0]
+        .as_str()
+        .expect("evidence ref")
+        .contains("[REDACTED]"));
+    assert!(candidate["core_tags"][0]
+        .as_str()
+        .expect("core tag")
+        .contains("[REDACTED]"));
+    assert_eq!(candidate["occurrence_count"], 1);
+
+    let human_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "wiki",
+            "record-candidate",
+            "--kind",
+            "fact",
+            "--scope",
+            "project",
+            "--scope-ref",
+            &scope_ref,
+            "--claim",
+            &claim,
+            "--ai-instruction",
+            &ai_instruction,
+            "--human-summary",
+            &human_summary,
+            "--evidence-ref",
+            &evidence_ref,
+            "--agent-mode",
+            "critique",
+            "--core-tag",
+            &core_tag,
+            "--proposed-tag",
+            &proposed_tag,
+            "--confidence",
+            "explicit",
+            "--origin",
+            "operator_explicit",
+            "--signal-kind",
+            "operator_correction",
+            "--review-reason",
+            &review_reason,
+        ])
+        .output()?;
+    assert!(human_output.status.success());
+    let human_stdout = String::from_utf8_lossy(&human_output.stdout);
+    assert!(human_stdout.contains(&format!("Recorded candidate {candidate_id}")));
+    assert!(human_stdout.contains("Project:project-token=[REDACTED]"));
+    assert!(human_stdout.contains("claim: Keep candidate review explicit token=[REDACTED]"));
+    assert!(human_stdout.contains("occurrences: 2"));
+    assert!(human_stdout.contains(&format!(
+        "forager -p default offdesk wiki promote {candidate_id}"
+    )));
+    assert!(!human_stdout.contains(secret));
+
+    let profile_dir = profile_dir(temp.path());
+    let stored: serde_json::Value = serde_json::from_slice(&fs::read(
+        profile_dir.join("adaptive_wiki_candidates.json"),
+    )?)?;
+    let stored_candidates = stored["candidates"].as_array().expect("stored candidates");
+    assert_eq!(stored_candidates.len(), 1);
+    let stored_candidate = &stored_candidates[0];
+    assert_eq!(stored_candidate["id"], candidate_id);
+    assert_eq!(stored_candidate["scope_ref"], scope_ref);
+    assert_eq!(stored_candidate["claim"], claim);
+    assert_eq!(stored_candidate["suggested_ai_instruction"], ai_instruction);
+    assert_eq!(stored_candidate["human_summary"], human_summary);
+    assert_eq!(stored_candidate["evidence_refs"][0], evidence_ref);
+    assert_eq!(stored_candidate["source_refs"][0], evidence_ref);
+    assert_eq!(stored_candidate["core_tags"][0], core_tag);
+    assert_eq!(stored_candidate["proposed_tags"][0], proposed_tag);
+    assert_eq!(stored_candidate["review_reason"], review_reason);
+    assert_eq!(stored_candidate["occurrence_count"], 2);
+
+    let corrections = fs::read_to_string(profile_dir.join("adaptive_wiki_corrections.jsonl"))?;
+    assert_eq!(corrections.lines().count(), 2);
+    assert!(!corrections.contains(secret));
+    let correction_rows = corrections
+        .lines()
+        .map(serde_json::from_str::<serde_json::Value>)
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    assert!(correction_rows
+        .iter()
+        .all(|row| row["candidate_id"] == candidate_id));
+    assert!(!profile_dir.join("adaptive_wiki_entries.json").exists());
+    assert!(!profile_dir.join("adaptive_wiki_audit.jsonl").exists());
+    assert!(!profile_dir
+        .join("adaptive_wiki_promotion_receipts")
+        .exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_wiki_catalog_presentation_redacts_legacy_ids_tags_and_stays_read_only() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    let secret = "sk-secretsecretsecretsecret";
+    let entry_id = format!("wiki_entry_token={secret}");
+    let candidate_id = format!("wiki_candidate_token={secret}");
+    let entries_path = profile_dir.join("adaptive_wiki_entries.json");
+    let candidates_path = profile_dir.join("adaptive_wiki_candidates.json");
+    fs::write(
+        &entries_path,
+        serde_json::to_string_pretty(&json!({
+            "version": "2026-05-14.v0",
+            "entries": [{
+                "id": entry_id,
+                "kind": "procedure",
+                "scope": "project",
+                "scope_ref": format!("project-token={secret}"),
+                "status": "promoted",
+                "activation_mode": "confirm",
+                "claim": format!("Review catalog output token={secret}"),
+                "ai_instruction": "Review catalog output.",
+                "human_summary": format!("Legacy summary token={secret}"),
+                "evidence_refs": [format!("task:task-token={secret}")],
+                "support_refs": [format!("docs/runbook.md?token={secret}")],
+                "capability_ids": [format!("capability-token={secret}")],
+                "required_artifact_kinds": [format!("report-token={secret}")],
+                "core_tags": [format!("facet/token={secret}")],
+                "proposed_tags": [format!("risk/token={secret}")],
+                "confidence": "explicit",
+                "created_at": now,
+                "updated_at": now
+            }]
+        }))?,
+    )?;
+    fs::write(
+        &candidates_path,
+        serde_json::to_string_pretty(&json!({
+            "version": "2026-05-14.v0",
+            "candidates": [{
+                "id": candidate_id,
+                "kind": "policy_rule",
+                "scope": "project",
+                "scope_ref": format!("project-token={secret}"),
+                "claim": format!("Review candidate token={secret}"),
+                "suggested_ai_instruction": "Ask before promotion.",
+                "human_summary": format!("Legacy candidate token={secret}"),
+                "evidence_refs": [format!("approval:approval-token={secret}")],
+                "signal_kind": "operator_correction",
+                "origin": "operator_explicit",
+                "source_refs": [format!("task:task-token={secret}")],
+                "source_hashes": ["sha256:abc"],
+                "core_tags": [format!("facet/token={secret}")],
+                "proposed_tags": [format!("risk/token={secret}")],
+                "review_reason": format!("Legacy review token={secret}"),
+                "occurrence_count": 2,
+                "confidence": "explicit",
+                "created_at": now,
+                "updated_at": now,
+                "last_seen_at": now
+            }]
+        }))?,
+    )?;
+    let entries_before = fs::read(&entries_path)?;
+    let candidates_before = fs::read(&candidates_path)?;
+
+    let entries_json_output = forager_command(temp.path())
+        .args(["offdesk", "wiki", "entries", "--json"])
+        .output()?;
+    assert!(entries_json_output.status.success());
+    let entries_json_stdout = String::from_utf8_lossy(&entries_json_output.stdout);
+    assert!(!entries_json_stdout.contains(secret));
+    let entries: serde_json::Value = serde_json::from_slice(&entries_json_output.stdout)?;
+    assert!(entries[0]["id"]
+        .as_str()
+        .expect("entry id")
+        .starts_with("redacted_id_sha256_"));
+    assert!(entries[0]["core_tags"][0]
+        .as_str()
+        .expect("core tag")
+        .contains("[REDACTED"));
+
+    let candidates_json_output = forager_command(temp.path())
+        .args(["offdesk", "wiki", "candidates", "--json"])
+        .output()?;
+    assert!(candidates_json_output.status.success());
+    let candidates_json_stdout = String::from_utf8_lossy(&candidates_json_output.stdout);
+    assert!(!candidates_json_stdout.contains(secret));
+    let candidates: serde_json::Value = serde_json::from_slice(&candidates_json_output.stdout)?;
+    assert!(candidates[0]["id"]
+        .as_str()
+        .expect("candidate id")
+        .starts_with("redacted_id_sha256_"));
+    assert!(candidates[0]["proposed_tags"][0]
+        .as_str()
+        .expect("proposed tag")
+        .contains("[REDACTED"));
+
+    for args in [
+        vec!["offdesk", "wiki", "entries"],
+        vec!["offdesk", "wiki", "candidates"],
+        vec!["offdesk", "wiki", "show", entry_id.as_str()],
+    ] {
+        let output = forager_command(temp.path()).args(args).output()?;
+        assert!(output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("[REDACTED"));
+        assert!(!stdout.contains(secret));
+    }
+
+    let show_candidate_output = forager_command(temp.path())
+        .args(["offdesk", "wiki", "show", &candidate_id, "--json"])
+        .output()?;
+    assert!(show_candidate_output.status.success());
+    assert!(!String::from_utf8_lossy(&show_candidate_output.stdout).contains(secret));
+
+    let missing_id = format!("wiki_missing_token={secret}");
+    let missing_output = forager_command(temp.path())
+        .args(["offdesk", "wiki", "show", &missing_id])
+        .output()?;
+    assert!(!missing_output.status.success());
+    let missing_stderr = String::from_utf8_lossy(&missing_output.stderr);
+    assert!(missing_stderr.contains("[REDACTED"));
+    assert!(!missing_stderr.contains(secret));
+
+    assert_eq!(fs::read(&entries_path)?, entries_before);
+    assert_eq!(fs::read(&candidates_path)?, candidates_before);
+    assert!(!profile_dir.join("adaptive_wiki_audit.jsonl").exists());
+    assert!(!profile_dir.join("adaptive_wiki_corrections.jsonl").exists());
+    assert!(!profile_dir
+        .join("adaptive_wiki_promotion_receipts")
+        .exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_wiki_mutation_human_presentation_redacts_without_moving_authority() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    let secret = "sk-secretsecretsecretsecret";
+    let entry_id = format!("wiki_entry_token={secret}");
+    let candidate_id = format!("wiki_candidate_token={secret}");
+    let core_tag = format!("facet/token={secret}");
+    let proposed_tag = format!("risk/token={secret}");
+    let entries_path = profile_dir.join("adaptive_wiki_entries.json");
+    let candidates_path = profile_dir.join("adaptive_wiki_candidates.json");
+    fs::write(
+        &entries_path,
+        serde_json::to_string_pretty(&json!({
+            "version": "2026-05-14.v0",
+            "entries": [{
+                "id": entry_id,
+                "kind": "procedure",
+                "scope": "project",
+                "scope_ref": "project",
+                "status": "promoted",
+                "activation_mode": "confirm",
+                "claim": "Keep mutation authority in the store.",
+                "ai_instruction": "Keep mutation authority in the store.",
+                "human_summary": "Mutation fixture",
+                "evidence_refs": [],
+                "confidence": "explicit",
+                "created_at": now,
+                "updated_at": now
+            }]
+        }))?,
+    )?;
+    fs::write(
+        &candidates_path,
+        serde_json::to_string_pretty(&json!({
+            "version": "2026-05-14.v0",
+            "candidates": [{
+                "id": candidate_id,
+                "kind": "fact",
+                "scope": "project",
+                "scope_ref": "project",
+                "claim": "Reject this legacy candidate.",
+                "suggested_ai_instruction": "Do not promote.",
+                "human_summary": "Mutation fixture",
+                "evidence_refs": [],
+                "signal_kind": "operator_correction",
+                "origin": "operator_explicit",
+                "source_refs": [],
+                "source_hashes": [],
+                "review_reason": "Review required.",
+                "occurrence_count": 1,
+                "confidence": "explicit",
+                "created_at": now,
+                "updated_at": now,
+                "last_seen_at": now
+            }]
+        }))?,
+    )?;
+
+    let retag_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "wiki",
+            "add-tag",
+            &entry_id,
+            "--core-tag",
+            &core_tag,
+            "--proposed-tag",
+            &proposed_tag,
+            "--reason",
+            &format!("Classify token={secret}"),
+        ])
+        .output()?;
+    assert!(retag_output.status.success());
+    let retag_stdout = String::from_utf8_lossy(&retag_output.stdout);
+    assert!(retag_stdout.contains("Retagged adaptive wiki entry"));
+    assert!(retag_stdout.contains("[REDACTED"));
+    assert!(!retag_stdout.contains(secret));
+
+    let reject_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "wiki",
+            "reject",
+            &candidate_id,
+            "--reason",
+            &format!("Reject token={secret}"),
+        ])
+        .output()?;
+    assert!(reject_output.status.success());
+    let reject_stdout = String::from_utf8_lossy(&reject_output.stdout);
+    assert!(reject_stdout.contains("Rejected adaptive wiki candidate"));
+    assert!(reject_stdout.contains("[REDACTED"));
+    assert!(!reject_stdout.contains(secret));
+
+    let entries: serde_json::Value = serde_json::from_slice(&fs::read(&entries_path)?)?;
+    assert_eq!(entries["entries"][0]["id"], entry_id);
+    assert!(entries["entries"][0]["core_tags"]
+        .as_array()
+        .expect("core tags")
+        .iter()
+        .any(|tag| tag == &core_tag));
+    assert!(entries["entries"][0]["proposed_tags"]
+        .as_array()
+        .expect("proposed tags")
+        .iter()
+        .any(|tag| tag == &proposed_tag));
+    let candidates: serde_json::Value = serde_json::from_slice(&fs::read(&candidates_path)?)?;
+    assert!(candidates["candidates"]
+        .as_array()
+        .expect("candidates")
+        .is_empty());
+
+    let audit = fs::read_to_string(profile_dir.join("adaptive_wiki_audit.jsonl"))?;
+    let audit_rows: Vec<serde_json::Value> = audit
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<std::result::Result<_, _>>()?;
+    assert_eq!(audit_rows.len(), 2);
+    assert_eq!(audit_rows[0]["action"], "retag");
+    assert_eq!(audit_rows[0]["subject_id"], entry_id);
+    assert_eq!(audit_rows[0]["entry_id"], entry_id);
+    assert!(!audit_rows[0]["reason"]
+        .as_str()
+        .expect("safe retag reason")
+        .contains(secret));
+    assert_eq!(audit_rows[1]["action"], "reject");
+    assert_eq!(audit_rows[1]["subject_id"], candidate_id);
+    assert_eq!(audit_rows[1]["candidate_id"], candidate_id);
+    assert!(!audit_rows[1]["reason"]
+        .as_str()
+        .expect("safe reject reason")
+        .contains(secret));
+    assert!(!profile_dir
+        .join("adaptive_wiki_promotion_receipts")
+        .exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_wiki_review_presentation_redacts_without_changing_report_or_source_bytes() -> Result<()>
+{
+    let temp = tempdir()?;
+    let secret = "sk-secretsecretsecretsecret";
+    let home = temp.path().join(format!("home-token={secret}"));
+    let profile_dir = profile_dir(&home);
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    let candidates_path = profile_dir.join("adaptive_wiki_candidates.json");
+    fs::write(
+        &candidates_path,
+        serde_json::to_string_pretty(&json!({
+            "version": "2026-05-14.v0",
+            "candidates": [{
+                "id": format!("wiki_candidate_token={secret}"),
+                "kind": "policy_rule",
+                "scope": "project",
+                "scope_ref": format!("project-token={secret}"),
+                "claim": format!("Review this candidate token={secret}"),
+                "suggested_ai_instruction": "Ask before promotion.",
+                "human_summary": "Review fixture",
+                "evidence_refs": [format!("task:task-token={secret}")],
+                "signal_kind": "operator_correction",
+                "origin": "operator_explicit",
+                "source_refs": [],
+                "source_hashes": [],
+                "review_reason": format!("Review reason token={secret}"),
+                "occurrence_count": 2,
+                "confidence": "explicit",
+                "created_at": now,
+                "updated_at": now,
+                "last_seen_at": now
+            }]
+        }))?,
+    )?;
+    let candidates_before = fs::read(&candidates_path)?;
+
+    let json_output = forager_command(&home)
+        .args(["offdesk", "wiki", "review", "--json"])
+        .output()?;
+    assert!(json_output.status.success());
+    let json_stdout = String::from_utf8_lossy(&json_output.stdout);
+    assert!(!json_stdout.contains(secret));
+    let report: serde_json::Value = serde_json::from_slice(&json_output.stdout)?;
+    assert_eq!(report["dry_run"], false);
+    assert_eq!(report["summary"]["files_written"], 2);
+    assert!(report["report_dir"]
+        .as_str()
+        .expect("operator report dir")
+        .contains("[REDACTED"));
+    assert!(report["proposals"][0]["subject_id"]
+        .as_str()
+        .expect("proposal subject")
+        .starts_with("redacted_id_sha256_"));
+
+    let review_root = profile_dir.join("adaptive_wiki_review_reports");
+    let report_dirs = fs::read_dir(&review_root)?
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    assert_eq!(report_dirs.len(), 1);
+    let report_dir = &report_dirs[0];
+    let stored_report_bytes = fs::read(report_dir.join("report.json"))?;
+    let stored_report: serde_json::Value = serde_json::from_slice(&stored_report_bytes)?;
+    assert!(stored_report["report_dir"]
+        .as_str()
+        .expect("stored report dir")
+        .contains(secret));
+    assert!(report_dir.join("REPORT.md").is_file());
+
+    let human_output = forager_command(&home)
+        .args(["offdesk", "wiki", "review", "--dry-run"])
+        .output()?;
+    assert!(human_output.status.success());
+    let human_stdout = String::from_utf8_lossy(&human_output.stdout);
+    assert!(human_stdout.contains("Adaptive wiki review report planned"));
+    assert!(human_stdout.contains("[REDACTED"));
+    assert!(!human_stdout.contains(secret));
+
+    assert_eq!(fs::read(&candidates_path)?, candidates_before);
+    assert_eq!(
+        fs::read(report_dir.join("report.json"))?,
+        stored_report_bytes
+    );
+    assert!(!profile_dir.join("adaptive_wiki_entries.json").exists());
+    assert!(!profile_dir.join("adaptive_wiki_audit.jsonl").exists());
+    assert!(!profile_dir.join("adaptive_wiki_corrections.jsonl").exists());
+    assert!(!profile_dir
+        .join("adaptive_wiki_promotion_receipts")
+        .exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_wiki_evidence_presentation_redacts_and_preserves_report_write_authority() -> Result<()> {
+    let temp = tempdir()?;
+    let secret = "sk-secretsecretsecretsecret";
+    let home = temp.path().join(format!("evidence-home-token={secret}"));
+    let profile_dir = profile_dir(&home);
+    fs::create_dir_all(&profile_dir)?;
+    let entry_id = format!("wiki_entry_token={secret}");
+    let project_key = format!("project-token={secret}");
+    let request_id = format!("request-token={secret}");
+    let commands = vec![
+        vec![
+            "offdesk".to_string(),
+            "wiki".to_string(),
+            "evaluate-episode".to_string(),
+            entry_id.clone(),
+            "--project-key".to_string(),
+            project_key.clone(),
+            "--out-project-key".to_string(),
+            format!("other-token={secret}"),
+            "--dry-run".to_string(),
+        ],
+        vec![
+            "offdesk".to_string(),
+            "wiki".to_string(),
+            "episode-trace".to_string(),
+            "--request-id".to_string(),
+            request_id,
+            "--project-key".to_string(),
+            project_key,
+            "--dry-run".to_string(),
+        ],
+        vec![
+            "offdesk".to_string(),
+            "wiki".to_string(),
+            "evaluate-recurrence".to_string(),
+            entry_id.clone(),
+            "--dry-run".to_string(),
+        ],
+        vec![
+            "offdesk".to_string(),
+            "wiki".to_string(),
+            "promotion-chain".to_string(),
+            entry_id.clone(),
+            "--dry-run".to_string(),
+        ],
+    ];
+
+    for base_args in &commands {
+        for json in [false, true] {
+            let mut args = base_args.clone();
+            if json {
+                args.push("--json".to_string());
+            }
+            let output = forager_command(&home).args(&args).output()?;
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(stdout.contains("[REDACTED") || stdout.contains("redacted_id_sha256_"));
+            assert!(!stdout.contains(secret));
+            if json {
+                let _: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+            }
+        }
+    }
+
+    for report_dir in [
+        "adaptive_wiki_episode_reports",
+        "adaptive_wiki_episode_traces",
+        "adaptive_wiki_recurrence_reports",
+        "adaptive_wiki_promotion_chains",
+    ] {
+        assert!(!profile_dir.join(report_dir).exists());
+    }
+
+    let written_output = forager_command(&home)
+        .args(["offdesk", "wiki", "promotion-chain", &entry_id, "--json"])
+        .output()?;
+    assert!(written_output.status.success());
+    let written_stdout = String::from_utf8_lossy(&written_output.stdout);
+    assert!(written_stdout.contains("[REDACTED"));
+    assert!(!written_stdout.contains(secret));
+    let written: serde_json::Value = serde_json::from_slice(&written_output.stdout)?;
+    assert_eq!(written["dry_run"], false);
+    assert_eq!(written["summary"]["files_written"], 3);
+
+    let chain_root = profile_dir.join("adaptive_wiki_promotion_chains");
+    let report_dirs = fs::read_dir(&chain_root)?
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    assert_eq!(report_dirs.len(), 1);
+    let report_dir = &report_dirs[0];
+    let stored_report = fs::read_to_string(report_dir.join("report.json"))?;
+    assert!(stored_report.contains(secret));
+    assert!(report_dir.join("chain.jsonl").is_file());
+    assert!(report_dir.join("REPORT.md").is_file());
+    assert!(!profile_dir.join("adaptive_wiki_entries.json").exists());
+    assert!(!profile_dir.join("adaptive_wiki_candidates.json").exists());
+    assert!(!profile_dir.join("adaptive_wiki_audit.jsonl").exists());
+    assert!(!profile_dir.join("adaptive_wiki_usage.jsonl").exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_wiki_audit_export_and_projection_outputs_are_operator_safe() -> Result<()> {
+    let temp = tempdir()?;
+    let secret = "sk-secretsecretsecretsecret";
+    let home = temp.path().join(format!("wiki-home-{secret}"));
+    let profile_dir = profile_dir(&home);
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    let entry_id = format!("wiki-entry-{secret}");
+    let project_key = format!("project-{secret}");
+    let entries_path = profile_dir.join("adaptive_wiki_entries.json");
+    fs::write(
+        &entries_path,
+        serde_json::to_string_pretty(&json!({
+            "version": "2026-05-14.v0",
+            "entries": [{
+                "id": entry_id,
+                "kind": "procedure",
+                "scope": "project",
+                "scope_ref": project_key,
+                "status": "promoted",
+                "activation_mode": "confirm",
+                "claim": "Audit and export presentation fixture",
+                "ai_instruction": "Review the bounded projection before acting.",
+                "human_summary": "Operator-safe export fixture",
+                "evidence_refs": [],
+                "core_tags": [format!("risk/{secret}")],
+                "confidence": "inferred",
+                "created_at": now,
+                "updated_at": now,
+                "review_after": now - Duration::minutes(1)
+            }]
+        }))?,
+    )?;
+    let entries_before = fs::read(&entries_path)?;
+
+    let projection_commands = vec![
+        vec![
+            "offdesk".to_string(),
+            "wiki".to_string(),
+            "projection".to_string(),
+            "--project-key".to_string(),
+            project_key.clone(),
+        ],
+        vec![
+            "offdesk".to_string(),
+            "wiki".to_string(),
+            "projection".to_string(),
+            "--project-key".to_string(),
+            project_key.clone(),
+            "--report".to_string(),
+        ],
+        vec![
+            "offdesk".to_string(),
+            "wiki".to_string(),
+            "projection".to_string(),
+            "--project-key".to_string(),
+            project_key.clone(),
+            "--compare-review-expired-policy".to_string(),
+        ],
+    ];
+    for base_args in &projection_commands {
+        for json in [false, true] {
+            let mut args = base_args.clone();
+            if json {
+                args.push("--json".to_string());
+            }
+            let output = forager_command(&home).args(&args).output()?;
+            assert!(
+                output.status.success(),
+                "stdout:\n{}\nstderr:\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(stdout.contains("[REDACTED") || stdout.contains("redacted_id_sha256_"));
+            assert!(!stdout.contains(secret));
+            if json {
+                let _: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+            }
+        }
+    }
+
+    for json in [false, true] {
+        let mut args = vec!["offdesk", "wiki", "lint"];
+        if json {
+            args.push("--json");
+        }
+        let output = forager_command(&home).args(args).output()?;
+        assert!(output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("[REDACTED") || stdout.contains("redacted_id_sha256_"));
+        assert!(!stdout.contains(secret));
+        if json {
+            let _: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+        }
+    }
+
+    let vault_dir = home.join(format!("vault-{secret}"));
+    for json in [false, true] {
+        let mut args = vec![
+            "offdesk",
+            "wiki",
+            "export-markdown",
+            "--output",
+            vault_dir.to_str().expect("vault path"),
+            "--dry-run",
+        ];
+        if json {
+            args.push("--json");
+        }
+        let output = forager_command(&home).args(args).output()?;
+        assert!(output.status.success());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("[REDACTED"));
+        assert!(!stdout.contains(secret));
+        if json {
+            let _: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+        }
+    }
+    assert!(!vault_dir.exists());
+
+    let export_output = forager_command(&home)
+        .args([
+            "offdesk",
+            "wiki",
+            "export-markdown",
+            "--output",
+            vault_dir.to_str().expect("vault path"),
+            "--json",
+        ])
+        .output()?;
+    assert!(export_output.status.success());
+    let export_stdout = String::from_utf8_lossy(&export_output.stdout);
+    assert!(export_stdout.contains("[REDACTED"));
+    assert!(!export_stdout.contains(secret));
+    let export: serde_json::Value = serde_json::from_slice(&export_output.stdout)?;
+    assert_eq!(export["dry_run"], false);
+    assert_eq!(
+        export["summary"]["files_written"],
+        export["summary"]["files_planned"]
+    );
+    let vault_index = fs::read_to_string(vault_dir.join("index.md"))?;
+    assert!(vault_index.contains("[REDACTED"));
+    assert!(!vault_index.contains(secret));
+
+    let graph_dir = home.join(format!("graph-{secret}"));
+    let graph_output = forager_command(&home)
+        .args([
+            "offdesk",
+            "wiki",
+            "graph",
+            "--output",
+            graph_dir.to_str().expect("graph path"),
+            "--json",
+        ])
+        .output()?;
+    assert!(graph_output.status.success());
+    let graph_stdout = String::from_utf8_lossy(&graph_output.stdout);
+    assert!(graph_stdout.contains("redacted_id_sha256_"));
+    assert!(!graph_stdout.contains(secret));
+    let _: serde_json::Value = serde_json::from_slice(&graph_output.stdout)?;
+    for file_name in ["graph.json", "graph.md"] {
+        let content = fs::read_to_string(graph_dir.join(file_name))?;
+        assert!(content.contains("redacted_id_sha256_"));
+        assert!(!content.contains(secret));
+    }
+
+    let graph_human_dir = home.join(format!("graph-human-{secret}"));
+    let graph_human_output = forager_command(&home)
+        .args([
+            "offdesk",
+            "wiki",
+            "graph",
+            "--output",
+            graph_human_dir.to_str().expect("graph human path"),
+            "--dry-run",
+        ])
+        .output()?;
+    assert!(graph_human_output.status.success());
+    let graph_human_stdout = String::from_utf8_lossy(&graph_human_output.stdout);
+    assert!(
+        graph_human_stdout.contains("[REDACTED")
+            || graph_human_stdout.contains("redacted_id_sha256_")
+    );
+    assert!(!graph_human_stdout.contains(secret));
+    assert!(!graph_human_dir.exists());
+
+    assert_eq!(fs::read(&entries_path)?, entries_before);
+    assert!(!profile_dir.join("adaptive_wiki_candidates.json").exists());
+    assert!(!profile_dir.join("adaptive_wiki_audit.jsonl").exists());
+    assert!(!profile_dir.join("adaptive_wiki_usage.jsonl").exists());
+    assert!(!profile_dir
+        .join("adaptive_wiki_promotion_receipts")
+        .exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_wiki_remaining_presenters_redact_and_preserve_authority() -> Result<()> {
+    let temp = tempdir()?;
+    let secret = "sk-secretsecretsecretsecret";
+    let profile = format!("profile-{secret}");
+    let project_key = format!("project-{secret}");
+    let entry_id = format!("wiki-entry-{secret}");
+    let profile_dir = profile_dir_for(temp.path(), &profile);
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+
+    let entries_path = profile_dir.join("adaptive_wiki_entries.json");
+    fs::write(
+        &entries_path,
+        serde_json::to_string_pretty(&json!({
+            "version": "2026-05-14.v0",
+            "entries": [{
+                "id": entry_id,
+                "kind": "procedure",
+                "scope": "project",
+                "scope_ref": project_key,
+                "status": "promoted",
+                "activation_mode": "confirm",
+                "claim": "Remaining presentation boundary fixture",
+                "ai_instruction": "Read the bounded brief before acting.",
+                "human_summary": "Brief and attention fixture",
+                "evidence_refs": ["task:fixture"],
+                "confidence": "explicit",
+                "created_at": now - Duration::days(2),
+                "updated_at": now - Duration::days(2),
+                "review_after": now - Duration::days(1)
+            }]
+        }))?,
+    )?;
+
+    let events_path = profile_dir.join("adaptive_wiki_review_events.jsonl");
+    fs::write(
+        &events_path,
+        format!(
+            "{}\n",
+            serde_json::to_string(&json!({
+                "id": format!("wiki-event-{secret}"),
+                "proposal_id": format!("wiki-proposal-{secret}"),
+                "decision": "accepted",
+                "proposal_action": "promote",
+                "subject_kind": format!("candidate-{secret}"),
+                "subject_id": format!("wiki-candidate-{secret}"),
+                "actor": format!("operator-{secret}"),
+                "reason": format!("accepted token={secret}"),
+                "evidence_refs": [format!("review:fixture?token={secret}")],
+                "created_at": now
+            }))?
+        ),
+    )?;
+    let corrections_path = profile_dir.join("adaptive_wiki_corrections.jsonl");
+    fs::write(
+        &corrections_path,
+        format!(
+            "{}\n",
+            serde_json::to_string(&json!({
+                "id": format!("wiki-correction-{secret}"),
+                "correction_kind": "operator_correction",
+                "entry_id": format!("wiki-entry-{secret}"),
+                "task_id": format!("task-{secret}"),
+                "request_id": format!("request-{secret}"),
+                "project_key": format!("project-{secret}"),
+                "summary": format!("correction token={secret}"),
+                "created_at": now
+            }))?
+        ),
+    )?;
+    let acknowledgements_path =
+        profile_dir.join("adaptive_wiki_runtime_policy_acknowledgements.jsonl");
+    fs::write(
+        &acknowledgements_path,
+        format!(
+            "{}\n",
+            serde_json::to_string(&json!({
+                "id": format!("wiki-runtime-ack-{secret}"),
+                "scope_mode": "exact_query",
+                "query": {
+                    "session_id": format!("session-{secret}"),
+                    "project_key": format!("project-{secret}"),
+                    "artifact_kind": format!("report-{secret}")
+                },
+                "budget": {
+                    "max_entries": 8,
+                    "max_context_chars": 4000,
+                    "max_instruction_chars": 500
+                },
+                "policy": {"review_expired": "exclude"},
+                "comparison_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "selected_only_in_warn": [format!("wiki-entry-{secret}")],
+                "selected_only_in_strict": [],
+                "review_expired_excluded": [format!("wiki-entry-{secret}")],
+                "reason": format!("legacy acknowledgement token={secret}"),
+                "created_at": now - Duration::days(2),
+                "expires_at": now - Duration::days(1)
+            }))?
+        ),
+    )?;
+
+    let entries_before = fs::read(&entries_path)?;
+    let events_before = fs::read(&events_path)?;
+    let corrections_before = fs::read(&corrections_path)?;
+    let acknowledgements_before = fs::read(&acknowledgements_path)?;
+
+    let read_only_commands = vec![
+        vec!["offdesk", "wiki", "proposal-events"],
+        vec!["offdesk", "wiki", "corrections"],
+        vec![
+            "offdesk",
+            "wiki",
+            "review-after-report",
+            "--project-key",
+            &project_key,
+        ],
+        vec!["offdesk", "wiki", "runtime-policy-acks"],
+        vec!["offdesk", "wiki", "runtime-policy-ack-report"],
+        vec!["offdesk", "wiki", "brief", "--project-key", &project_key],
+    ];
+    for base_args in &read_only_commands {
+        for json in [false, true] {
+            let mut args = vec!["-p", profile.as_str()];
+            args.extend(base_args.iter().copied());
+            if json {
+                args.push("--json");
+            }
+            let output = forager_command(temp.path()).args(args).output()?;
+            assert!(
+                output.status.success(),
+                "stdout:\n{}\nstderr:\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(stdout.contains("[REDACTED") || stdout.contains("redacted_id_sha256_"));
+            assert!(!stdout.contains(secret));
+            if json {
+                let _: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+            }
+        }
+    }
+
+    let recorded_event_output = forager_command(temp.path())
+        .args([
+            "-p",
+            &profile,
+            "offdesk",
+            "wiki",
+            "record-proposal-event",
+            &format!("new-proposal-{secret}"),
+            "--decision",
+            "rejected",
+            "--subject-kind",
+            &format!("entry-{secret}"),
+            "--subject-id",
+            &format!("new-entry-{secret}"),
+            "--reason",
+            &format!("rejected token={secret}"),
+        ])
+        .output()?;
+    assert!(recorded_event_output.status.success());
+    let recorded_event_stdout = String::from_utf8_lossy(&recorded_event_output.stdout);
+    assert!(recorded_event_stdout.contains("redacted_id_sha256_"));
+    assert!(!recorded_event_stdout.contains(secret));
+    let events_after_append = fs::read(&events_path)?;
+    assert!(events_after_append.starts_with(&events_before));
+    assert_eq!(
+        String::from_utf8_lossy(&events_after_append)
+            .lines()
+            .count(),
+        2
+    );
+
+    let project_root = temp.path().join(format!("brief-project-{secret}"));
+    fs::create_dir_all(&project_root)?;
+    let brief_path = project_root.join(format!("brief-{secret}.md"));
+    let write_output = forager_command(temp.path())
+        .args([
+            "-p",
+            &profile,
+            "offdesk",
+            "wiki",
+            "brief",
+            "--project-key",
+            &project_key,
+            "--out",
+            brief_path.to_str().expect("brief path"),
+            "--json",
+        ])
+        .output()?;
+    assert!(write_output.status.success());
+    let write_stdout = String::from_utf8_lossy(&write_output.stdout);
+    assert!(write_stdout.contains("[REDACTED"));
+    assert!(!write_stdout.contains(secret));
+    let manifest: serde_json::Value = serde_json::from_slice(&write_output.stdout)?;
+    assert_eq!(manifest["schema"], "wiki_context_manifest.v1");
+
+    let brief = fs::read_to_string(&brief_path)?;
+    assert!(brief.contains("[REDACTED"));
+    assert!(brief.contains("**STALE**"));
+    assert!(!brief.contains(secret));
+
+    let confirmation_output = forager_command(temp.path())
+        .args([
+            "-p",
+            &profile,
+            "offdesk",
+            "wiki",
+            "brief",
+            "--project-key",
+            &project_key,
+            "--out",
+            brief_path.to_str().expect("brief path"),
+        ])
+        .output()?;
+    assert!(confirmation_output.status.success());
+    let confirmation_stdout = String::from_utf8_lossy(&confirmation_output.stdout);
+    assert!(confirmation_stdout.contains("[REDACTED"));
+    assert!(!confirmation_stdout.contains(secret));
+
+    assert_eq!(fs::read(&entries_path)?, entries_before);
+    assert_eq!(fs::read(&events_path)?, events_after_append);
+    assert_eq!(fs::read(&corrections_path)?, corrections_before);
+    assert_eq!(fs::read(&acknowledgements_path)?, acknowledgements_before);
+    assert!(!profile_dir.join("adaptive_wiki_candidates.json").exists());
+    assert!(!profile_dir.join("adaptive_wiki_audit.jsonl").exists());
+    assert!(!profile_dir.join("adaptive_wiki_usage.jsonl").exists());
+    assert!(!profile_dir
+        .join("adaptive_wiki_promotion_receipts")
+        .exists());
     Ok(())
 }
 
@@ -2366,6 +4404,7 @@ fn offdesk_wiki_read_only_commands_expose_candidates_entries_projection_and_lint
     assert!(!brief_human_stdout.contains(secret));
 
     let brief_path = temp.path().join("generated/wiki/.wiki-brief.md");
+    fs::create_dir_all(brief_path.parent().expect("brief parent"))?;
     let brief_file_output = forager_command(temp.path())
         .args([
             "offdesk",
@@ -2385,10 +4424,59 @@ fn offdesk_wiki_read_only_commands_expose_candidates_entries_projection_and_lint
     assert!(brief_file_stdout.contains(&brief_path.display().to_string()));
     let brief_file = fs::read_to_string(&brief_path)?;
     assert!(brief_file.contains("# Wiki Brief: default / project"));
+    assert!(brief_file.contains("Schema: wiki_brief.v1"));
+    assert!(brief_file.contains("Agent mode: shared"));
+    assert!(brief_file.contains("Projection: sha256:"));
+    assert!(brief_file.contains("Entries: 2 (1 stale)"));
     assert!(brief_file.contains("Review this entry. **STALE**"));
     assert!(brief_file.contains("[REDACTED]"));
     assert!(!brief_file.contains("wiki_other_project"));
     assert!(!brief_file.contains(secret));
+
+    let brief_metadata = fs::metadata(&brief_path)?;
+    let unchanged_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "wiki",
+            "brief",
+            "--project-key",
+            "project",
+            "--max-entries",
+            "2",
+            "--out",
+            brief_path.to_str().expect("utf-8 brief path"),
+        ])
+        .output()?;
+    assert!(unchanged_output.status.success());
+    assert!(String::from_utf8_lossy(&unchanged_output.stdout).contains("Wiki brief unchanged"));
+    assert_eq!(fs::read_to_string(&brief_path)?, brief_file);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        assert_eq!(fs::metadata(&brief_path)?.ino(), brief_metadata.ino());
+    }
+
+    let manifest_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "wiki",
+            "brief",
+            "--project-key",
+            "project",
+            "--max-entries",
+            "2",
+            "--out",
+            brief_path.to_str().expect("utf-8 brief path"),
+            "--json",
+        ])
+        .output()?;
+    assert!(manifest_output.status.success());
+    let manifest: serde_json::Value = serde_json::from_slice(&manifest_output.stdout)?;
+    assert_eq!(manifest["schema"], "wiki_context_manifest.v1");
+    assert_eq!(manifest["outcome"]["projection_status"], "unchanged");
+    assert_eq!(manifest["outcome"]["detail"]["project_key"], "project");
+    assert_eq!(manifest["outcome"]["detail"]["agent_mode"], "shared");
+    assert_eq!(manifest["outcome"]["detail"]["entry_count"], 2);
 
     let empty_brief_output = forager_command(temp.path())
         .args([
@@ -2809,6 +4897,203 @@ fn offdesk_wiki_read_only_commands_expose_candidates_entries_projection_and_lint
 }
 
 #[test]
+fn offdesk_wiki_read_only_dispatch_is_migration_free() -> Result<()> {
+    let temp = tempdir()?;
+    let read_only_commands: &[&[&str]] = &[
+        &["offdesk", "wiki", "corrections", "--json"],
+        &["offdesk", "wiki", "proposal-events", "--json"],
+        &["offdesk", "wiki", "candidates", "--json"],
+        &["offdesk", "wiki", "entries", "--json"],
+        &["offdesk", "wiki", "projection", "--json"],
+        &["offdesk", "wiki", "brief", "--json"],
+        &["offdesk", "wiki", "runtime-policy-acks", "--json"],
+        &["offdesk", "wiki", "runtime-policy-ack-report", "--json"],
+        &["offdesk", "wiki", "review-after-report", "--json"],
+        &["offdesk", "wiki", "lint", "--json"],
+        &["offdesk", "wiki", "export-markdown", "--dry-run", "--json"],
+        &["offdesk", "wiki", "graph", "--json"],
+        &["offdesk", "wiki", "review", "--dry-run", "--json"],
+    ];
+
+    for args in read_only_commands {
+        let output = forager_command(temp.path()).args(*args).output()?;
+        assert!(
+            output.status.success(),
+            "read-only command failed: {args:?}\nstderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            !app_dir(temp.path()).exists(),
+            "read-only command created app state: {args:?}"
+        );
+    }
+
+    let failed_lookup = forager_command(temp.path())
+        .args(["offdesk", "wiki", "show", "missing", "--json"])
+        .output()?;
+    assert!(!failed_lookup.status.success());
+    assert!(!app_dir(temp.path()).exists());
+
+    let dry_graph_dir = temp.path().join("dry-graph");
+    let dry_graph_dir_text = dry_graph_dir.to_str().expect("UTF-8 graph path");
+    let read_only_probes = [
+        vec!["offdesk", "wiki", "proposal-handoff", "missing", "--json"],
+        vec![
+            "offdesk",
+            "wiki",
+            "proposal-receipt",
+            "missing",
+            "--audit-id",
+            "missing-audit",
+            "--event-id",
+            "missing-event",
+            "--command",
+            "preview",
+            "--json",
+        ],
+        vec![
+            "offdesk",
+            "wiki",
+            "graph",
+            "--output",
+            dry_graph_dir_text,
+            "--dry-run",
+            "--json",
+        ],
+        vec![
+            "offdesk",
+            "wiki",
+            "evaluate-episode",
+            "missing",
+            "--dry-run",
+            "--json",
+        ],
+        vec!["offdesk", "wiki", "episode-trace", "--dry-run", "--json"],
+        vec![
+            "offdesk",
+            "wiki",
+            "evaluate-recurrence",
+            "missing",
+            "--dry-run",
+            "--json",
+        ],
+        vec![
+            "offdesk",
+            "wiki",
+            "promotion-chain",
+            "missing",
+            "--dry-run",
+            "--json",
+        ],
+    ];
+    for args in read_only_probes {
+        let _ = forager_command(temp.path()).args(&args).output()?;
+        assert!(
+            !app_dir(temp.path()).exists(),
+            "read-only probe created app state: {args:?}"
+        );
+    }
+    assert!(!dry_graph_dir.exists());
+
+    let mutating_temp = tempdir()?;
+    let mutation = forager_command(mutating_temp.path())
+        .args([
+            "offdesk",
+            "wiki",
+            "record-candidate",
+            "--kind",
+            "procedure",
+            "--scope",
+            "user_global",
+            "--claim",
+            "Migration-bearing wiki mutation",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        mutation.status.success(),
+        "wiki mutation failed: {}",
+        String::from_utf8_lossy(&mutation.stderr)
+    );
+    assert!(app_dir(mutating_temp.path())
+        .join(".schema_version")
+        .exists());
+    assert!(profile_dir(mutating_temp.path())
+        .join("adaptive_wiki_candidates.json")
+        .exists());
+    Ok(())
+}
+
+#[test]
+fn offdesk_wiki_terminal_error_boundary_redacts_both_binaries_and_error_chains() -> Result<()> {
+    let temp = tempdir()?;
+    let secret = "sk-secretsecretsecretsecret";
+    let selector = format!("wiki_review_missing-{secret}");
+
+    for (binary, mut command) in [
+        ("forager", forager_command(temp.path())),
+        ("aoe", legacy_aoe_command(temp.path())),
+    ] {
+        let output = command
+            .args(["offdesk", "wiki", "proposal-handoff", &selector, "--json"])
+            .output()?;
+        assert!(!output.status.success(), "{binary} unexpectedly succeeded");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(
+            "Error: Adaptive wiki review proposal not found: wiki_review_missing-[REDACTED_API_KEY]"
+        ));
+        assert!(!stderr.contains(secret), "{binary} leaked: {stderr}");
+    }
+    assert!(!app_dir(temp.path()).exists());
+
+    let unknown = format!("--unknown-{secret}");
+    let parse_output = forager_command(temp.path())
+        .args(["offdesk", "wiki", "entries", &unknown])
+        .output()?;
+    assert_eq!(parse_output.status.code(), Some(2));
+    let parse_stderr = String::from_utf8_lossy(&parse_output.stderr);
+    assert!(parse_stderr.contains("unexpected argument"));
+    assert!(parse_stderr.contains("[REDACTED_API_KEY]"));
+    assert!(!parse_stderr.contains(secret));
+    assert!(!app_dir(temp.path()).exists());
+
+    let help_output = forager_command(temp.path()).arg("--help").output()?;
+    assert!(help_output.status.success());
+    assert!(String::from_utf8_lossy(&help_output.stdout).contains("Usage: forager"));
+    assert!(help_output.stderr.is_empty());
+    assert!(!app_dir(temp.path()).exists());
+
+    let path_temp = tempdir()?;
+    let blocked_parent = path_temp.path().join(format!("blocked-{secret}"));
+    fs::write(&blocked_parent, b"sentinel")?;
+    let output_path = blocked_parent.join("receipt.json");
+    let path_output = forager_command(path_temp.path())
+        .args([
+            "offdesk",
+            "wiki",
+            "proposal-receipt",
+            "missing",
+            "--audit-id",
+            "missing-audit",
+            "--event-id",
+            "missing-event",
+            "--command",
+            "preview",
+            "--output",
+            output_path.to_str().expect("UTF-8 output path"),
+        ])
+        .output()?;
+    assert!(!path_output.status.success());
+    let path_stderr = String::from_utf8_lossy(&path_output.stderr);
+    assert!(path_stderr.contains("create adaptive wiki proposal receipt export directory"));
+    assert!(path_stderr.contains("blocked-[REDACTED_API_KEY]"));
+    assert!(!path_stderr.contains(secret));
+    assert_eq!(fs::read(&blocked_parent)?, b"sentinel");
+    assert!(!output_path.exists());
+    Ok(())
+}
+
+#[test]
 #[serial]
 fn offdesk_wiki_export_markdown_defaults_to_profile_vault_and_reports_stale_state() -> Result<()> {
     let temp = tempdir()?;
@@ -2870,6 +5155,46 @@ fn offdesk_wiki_export_markdown_defaults_to_profile_vault_and_reports_stale_stat
     assert_eq!(export["projection_status"]["state"], "fresh");
     assert_eq!(export["projection_status"]["reexport_recommended"], false);
     assert!(profile_dir.join("wiki-vault/index.md").exists());
+
+    let relative_output = forager_command(temp.path())
+        .current_dir(temp.path())
+        .args([
+            "offdesk",
+            "wiki",
+            "export-markdown",
+            "--output",
+            "relative-vault",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        relative_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&relative_output.stdout),
+        String::from_utf8_lossy(&relative_output.stderr)
+    );
+    assert!(temp.path().join("relative-vault/index.md").is_file());
+
+    let relative_work_dir = temp.path().join("relative-work");
+    fs::create_dir(&relative_work_dir)?;
+    let parent_relative_output = forager_command(temp.path())
+        .current_dir(&relative_work_dir)
+        .args([
+            "offdesk",
+            "wiki",
+            "export-markdown",
+            "--output",
+            "../sibling-vault",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        parent_relative_output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&parent_relative_output.stdout),
+        String::from_utf8_lossy(&parent_relative_output.stderr)
+    );
+    assert!(temp.path().join("sibling-vault/index.md").is_file());
 
     thread::sleep(StdDuration::from_millis(1100));
     fs::write(
@@ -3987,7 +6312,12 @@ fn offdesk_wiki_proposal_handoff_previews_ready_manual_and_blocked() -> Result<(
         .as_array()
         .expect("ready evidence refs")
         .iter()
-        .any(|value| value.as_str().expect("evidence ref").contains("[REDACTED]")));
+        .any(|value| {
+            value
+                .as_str()
+                .expect("evidence ref")
+                .contains("redacted_id_sha256_")
+        }));
     assert!(ready["required_inputs"]
         .as_array()
         .expect("ready required inputs")
@@ -4468,6 +6798,521 @@ fn offdesk_wiki_proposal_receipt_links_preview_audit_and_event_without_mutation(
                 .contains("audit metadata unavailable")));
     assert_eq!(fs::read_to_string(&audit_path)?, audit_before);
     assert_eq!(fs::read_to_string(&events_path)?, events_before);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_wiki_handoff_and_receipt_redact_legacy_sources_without_authority_drift() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    let secret = "sk-secretsecretsecretsecret";
+    let proposal_id = "wiki_review_promote_candidate_wiki-candidate";
+    let candidates_path = profile_dir.join("adaptive_wiki_candidates.json");
+    fs::write(
+        &candidates_path,
+        serde_json::to_string_pretty(&json!({
+            "version": "2026-05-14.v0",
+            "candidates": [{
+                "id": "wiki_candidate",
+                "kind": "failure_pattern",
+                "scope": "project",
+                "scope_ref": "project",
+                "claim": "Legacy candidate requires a safe handoff",
+                "suggested_ai_instruction": "Review the legacy candidate before promotion.",
+                "human_summary": "Legacy handoff candidate.",
+                "evidence_refs": [format!("task:legacy?token={secret}")],
+                "signal_kind": "operator_correction",
+                "origin": "runtime_observed",
+                "occurrence_count": 2,
+                "confidence": "repeated",
+                "created_at": now,
+                "updated_at": now,
+                "last_seen_at": now
+            }]
+        }))?,
+    )?;
+    let candidates_before = fs::read(&candidates_path)?;
+
+    for json_output in [false, true] {
+        let mut command = forager_command(temp.path());
+        command.args(["offdesk", "wiki", "proposal-handoff", proposal_id]);
+        if json_output {
+            command.arg("--json");
+        }
+        let output = command.output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(!stdout.contains(secret));
+        assert!(stdout.contains("redacted_id_sha256_"));
+        if json_output {
+            let preview: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+            assert_eq!(preview["status"], "ready");
+        } else {
+            assert!(stdout.contains("Adaptive wiki proposal handoff"));
+            assert!(stdout.contains("evidence:"));
+        }
+    }
+    assert_eq!(fs::read(&candidates_path)?, candidates_before);
+    assert!(!profile_dir
+        .join("adaptive_wiki_review_events.jsonl")
+        .exists());
+    assert!(!profile_dir.join("adaptive_wiki_audit.jsonl").exists());
+
+    let audit_id = format!("wiki_audit_{secret}");
+    let event_id = format!("wiki_review_event_{secret}");
+    let audit_path = profile_dir.join("adaptive_wiki_audit.jsonl");
+    let events_path = profile_dir.join("adaptive_wiki_review_events.jsonl");
+    fs::write(
+        &audit_path,
+        format!(
+            "{}\n",
+            serde_json::to_string(&json!({
+                "id": audit_id,
+                "action": "promote",
+                "subject_id": "wiki_candidate",
+                "candidate_id": "wiki_candidate",
+                "entry_id": "wiki_entry",
+                "actor": format!("legacy-actor-{secret}"),
+                "reason": format!("legacy audit token={secret}"),
+                "evidence_ref": format!("task:legacy?token={secret}"),
+                "created_at": now
+            }))?
+        ),
+    )?;
+    fs::write(
+        &events_path,
+        format!(
+            "{}\n",
+            serde_json::to_string(&json!({
+                "id": event_id,
+                "proposal_id": proposal_id,
+                "decision": "accepted",
+                "proposal_action": "promote",
+                "subject_kind": "candidate",
+                "subject_id": "wiki_candidate",
+                "actor": format!("legacy-actor-{secret}"),
+                "reason": format!("legacy event token={secret}"),
+                "evidence_refs": [format!("task:legacy?token={secret}")],
+                "created_at": now
+            }))?
+        ),
+    )?;
+    let audit_before = fs::read(&audit_path)?;
+    let events_before = fs::read(&events_path)?;
+    let executed_command =
+        format!("forager offdesk wiki promote wiki_candidate --reason token={secret}");
+
+    for json_output in [false, true] {
+        let mut command = forager_command(temp.path());
+        command.args([
+            "offdesk",
+            "wiki",
+            "proposal-receipt",
+            proposal_id,
+            "--audit-id",
+            &audit_id,
+            "--event-id",
+            &event_id,
+            "--command",
+            &executed_command,
+        ]);
+        if json_output {
+            command.arg("--json");
+        }
+        let output = command.output()?;
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(!stdout.contains(secret), "secret leaked:\n{stdout}");
+        assert!(stdout.contains("[REDACTED]"));
+        if json_output {
+            let receipt: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+            assert_eq!(receipt["status"], "linked");
+            assert_eq!(receipt["read_only"], true);
+        } else {
+            assert!(stdout.contains("Adaptive wiki proposal receipt"));
+            assert!(stdout.contains("linked"));
+        }
+    }
+
+    let output_path = temp
+        .path()
+        .join("exports")
+        .join(format!("proposal-receipt-{secret}.json"));
+    let export_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "wiki",
+            "proposal-receipt",
+            proposal_id,
+            "--audit-id",
+            &audit_id,
+            "--event-id",
+            &event_id,
+            "--command",
+            &executed_command,
+            "--output",
+            output_path.to_str().expect("utf-8 output path"),
+        ])
+        .output()?;
+    assert!(
+        export_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&export_output.stderr)
+    );
+    let export_stdout = String::from_utf8_lossy(&export_output.stdout);
+    assert!(!export_stdout.contains(secret));
+    assert!(export_stdout.contains("[REDACTED]"));
+    let exported_bytes = fs::read(&output_path)?;
+    assert!(!String::from_utf8_lossy(&exported_bytes).contains(secret));
+    let exported: serde_json::Value = serde_json::from_slice(&exported_bytes)?;
+    assert_eq!(exported["status"], "linked");
+    assert!(exported["audit"]["id"]
+        .as_str()
+        .expect("safe audit id")
+        .contains("[REDACTED_API_KEY]"));
+    assert!(exported["event"]["id"]
+        .as_str()
+        .expect("safe event id")
+        .contains("[REDACTED_API_KEY]"));
+
+    assert_eq!(fs::read(&candidates_path)?, candidates_before);
+    assert_eq!(fs::read(&audit_path)?, audit_before);
+    assert_eq!(fs::read(&events_path)?, events_before);
+    for path in [
+        "adaptive_wiki_entries.json",
+        "adaptive_wiki_corrections.jsonl",
+        "adaptive_wiki_usage.jsonl",
+        "adaptive_wiki_promotion_receipts",
+        "adaptive_wiki_proposal_receipts",
+    ] {
+        assert!(!profile_dir.join(path).exists(), "unexpected write: {path}");
+    }
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_wiki_public_identity_aliases_are_distinct_and_actionable() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    let first_raw = "wiki-entry-sk-aaaaaaaaaaaaaaaa";
+    let second_raw = "wiki-entry-sk-bbbbbbbbbbbbbbbb";
+    let first_alias = format!(
+        "redacted_id_sha256_{}",
+        sha256_hex(format!("forager.operator-safe-identity.v1\0{first_raw}").as_bytes())
+    );
+    let reserved_raw = first_alias.clone();
+    let reserved_alias = format!(
+        "redacted_id_sha256_{}",
+        sha256_hex(
+            format!("forager.operator-safe-identity.reserved.v1\0{reserved_raw}").as_bytes()
+        )
+    );
+    let entries_path = profile_dir.join("adaptive_wiki_entries.json");
+    fs::write(
+        &entries_path,
+        serde_json::to_string_pretty(&json!({
+            "version": "2026-05-14.v0",
+            "entries": [{
+                "id": first_raw,
+                "kind": "procedure",
+                "scope": "project",
+                "scope_ref": "project",
+                "status": "promoted",
+                "activation_mode": "confirm",
+                "claim": "First legacy entry needs review.",
+                "ai_instruction": "Review the first entry.",
+                "human_summary": "First legacy entry.",
+                "evidence_refs": [],
+                "confidence": "explicit",
+                "created_at": now,
+                "updated_at": now
+            }, {
+                "id": second_raw,
+                "kind": "procedure",
+                "scope": "project",
+                "scope_ref": "project",
+                "status": "promoted",
+                "activation_mode": "confirm",
+                "claim": "Second legacy entry needs review.",
+                "ai_instruction": "Review the second entry.",
+                "human_summary": "Second legacy entry.",
+                "evidence_refs": [],
+                "confidence": "explicit",
+                "created_at": now,
+                "updated_at": now
+            }, {
+                "id": reserved_raw,
+                "kind": "procedure",
+                "scope": "project",
+                "scope_ref": "project",
+                "status": "promoted",
+                "activation_mode": "confirm",
+                "claim": "Reserved-prefix legacy entry needs review.",
+                "ai_instruction": "Review the reserved-prefix entry.",
+                "human_summary": "Reserved-prefix legacy entry.",
+                "evidence_refs": [],
+                "confidence": "explicit",
+                "created_at": now,
+                "updated_at": now
+            }]
+        }))?,
+    )?;
+
+    let list_output = forager_command(temp.path())
+        .args(["offdesk", "wiki", "entries", "--json"])
+        .output()?;
+    assert!(
+        list_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&list_output.stderr)
+    );
+    let list_stdout = String::from_utf8_lossy(&list_output.stdout);
+    assert!(!list_stdout.contains(first_raw));
+    assert!(!list_stdout.contains(second_raw));
+    let entries: serde_json::Value = serde_json::from_slice(&list_output.stdout)?;
+    let public_ids: Vec<_> = entries
+        .as_array()
+        .expect("entry array")
+        .iter()
+        .map(|entry| entry["id"].as_str().expect("public entry id").to_string())
+        .collect();
+    assert_eq!(public_ids.len(), 3);
+    assert_eq!(
+        public_ids
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        3
+    );
+    assert!(public_ids
+        .iter()
+        .all(|id| id.starts_with("redacted_id_sha256_") && id.len() == 83));
+    assert!(public_ids.contains(&first_alias));
+    assert!(public_ids.contains(&reserved_alias));
+
+    for public_id in [&first_alias, &reserved_alias] {
+        let show_output = forager_command(temp.path())
+            .args(["offdesk", "wiki", "show", public_id, "--json"])
+            .output()?;
+        assert!(
+            show_output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&show_output.stderr)
+        );
+        let shown: serde_json::Value = serde_json::from_slice(&show_output.stdout)?;
+        assert_eq!(shown["entry"]["id"], *public_id);
+    }
+
+    let vault = temp.path().join("wiki-vault");
+    let export_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "wiki",
+            "export-markdown",
+            "--output",
+            vault.to_str().expect("UTF-8 vault path"),
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        export_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&export_output.stderr)
+    );
+    let export: serde_json::Value = serde_json::from_slice(&export_output.stdout)?;
+    assert_eq!(export["summary"]["entries_exported"], 3);
+    assert_eq!(export["summary"]["files_written"], 6);
+    for public_id in [&first_alias, &reserved_alias] {
+        let slug = public_id.replace('_', "-");
+        assert!(vault
+            .join("entries")
+            .join("procedure")
+            .join(format!("{slug}.md"))
+            .is_file());
+    }
+
+    let episode_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "wiki",
+            "evaluate-episode",
+            &first_alias,
+            "--project-key",
+            "project",
+            "--out-project-key",
+            "other-project",
+            "--dry-run",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        episode_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&episode_output.stderr)
+    );
+    let episode: serde_json::Value = serde_json::from_slice(&episode_output.stdout)?;
+    assert_eq!(episode["target_entry_id"], first_alias);
+    assert!(episode["trace"][0]["entry_ids"]
+        .as_array()
+        .expect("in-scope trace ids")
+        .iter()
+        .any(|entry_id| entry_id == &first_alias));
+    for public_id in [&first_alias, &reserved_alias] {
+        let trace_output = forager_command(temp.path())
+            .args([
+                "offdesk",
+                "wiki",
+                "episode-trace",
+                "--entry-id",
+                public_id,
+                "--dry-run",
+                "--json",
+            ])
+            .output()?;
+        assert!(trace_output.status.success());
+        let trace: serde_json::Value = serde_json::from_slice(&trace_output.stdout)?;
+        assert_eq!(trace["filter"]["entry_id"], *public_id);
+    }
+
+    let review_output = forager_command(temp.path())
+        .args(["offdesk", "wiki", "review", "--dry-run", "--json"])
+        .output()?;
+    assert!(
+        review_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&review_output.stderr)
+    );
+    let review: serde_json::Value = serde_json::from_slice(&review_output.stdout)?;
+    let deprecations: Vec<_> = review["proposals"]
+        .as_array()
+        .expect("proposal array")
+        .iter()
+        .filter(|proposal| proposal["action"] == "deprecate")
+        .collect();
+    assert_eq!(deprecations.len(), 3);
+    assert_eq!(
+        deprecations
+            .iter()
+            .map(|proposal| proposal["id"].as_str().expect("proposal id"))
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        3
+    );
+    let first_proposal_id = deprecations
+        .iter()
+        .find(|proposal| proposal["subject_id"] == first_alias)
+        .expect("first proposal")["id"]
+        .as_str()
+        .expect("proposal id");
+
+    let handoff_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "wiki",
+            "proposal-handoff",
+            first_proposal_id,
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        handoff_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&handoff_output.stderr)
+    );
+    let handoff: serde_json::Value = serde_json::from_slice(&handoff_output.stdout)?;
+    assert_eq!(handoff["status"], "ready");
+    let command = handoff["command"].as_str().expect("handoff command");
+    assert!(command.contains(&first_alias));
+    assert!(!command.contains("[REDACTED_API_KEY]"));
+
+    let parameterized_handoff_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "wiki",
+            "proposal-handoff",
+            first_proposal_id,
+            "--mutation",
+            "deprecate",
+            "--reason",
+            "exercise manual selector",
+            "--json",
+        ])
+        .output()?;
+    assert!(parameterized_handoff_output.status.success());
+    let parameterized_handoff: serde_json::Value =
+        serde_json::from_slice(&parameterized_handoff_output.stdout)?;
+    let parameterized_command = parameterized_handoff["command"]
+        .as_str()
+        .expect("parameterized handoff command");
+    assert!(parameterized_command.contains(&first_alias));
+    assert!(!parameterized_command.contains(&reserved_alias));
+
+    let deprecate_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "wiki",
+            "deprecate",
+            &first_alias,
+            "--reason",
+            "exercise public identity selector",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        deprecate_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&deprecate_output.stderr)
+    );
+    let deprecate_stdout = String::from_utf8_lossy(&deprecate_output.stdout);
+    assert!(!deprecate_stdout.contains(first_raw));
+    assert!(!deprecate_stdout.contains(second_raw));
+
+    let canonical: serde_json::Value = serde_json::from_str(&fs::read_to_string(&entries_path)?)?;
+    assert_eq!(canonical["entries"][0]["id"], first_raw);
+    assert_eq!(canonical["entries"][0]["status"], "deprecated");
+    assert_eq!(canonical["entries"][1]["id"], second_raw);
+    assert_eq!(canonical["entries"][1]["status"], "promoted");
+    assert_eq!(canonical["entries"][2]["id"], reserved_raw);
+    assert_eq!(canonical["entries"][2]["status"], "promoted");
+
+    let reserved_deprecate_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "wiki",
+            "deprecate",
+            &reserved_alias,
+            "--reason",
+            "exercise escaped reserved identity selector",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        reserved_deprecate_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&reserved_deprecate_output.stderr)
+    );
+    let canonical: serde_json::Value = serde_json::from_str(&fs::read_to_string(&entries_path)?)?;
+    assert_eq!(canonical["entries"][0]["status"], "deprecated");
+    assert_eq!(canonical["entries"][1]["status"], "promoted");
+    assert_eq!(canonical["entries"][2]["status"], "deprecated");
+    let audit = fs::read_to_string(profile_dir.join("adaptive_wiki_audit.jsonl"))?;
+    assert!(audit.contains(first_raw));
+    assert!(audit.contains(&reserved_raw));
+    assert!(!audit.contains(second_raw));
     Ok(())
 }
 
@@ -5761,6 +8606,50 @@ fn offdesk_launch_executes_local_background_command_and_poll_completes() -> Resu
 
 #[test]
 #[serial]
+fn offdesk_enqueue_resolves_relative_artifacts_from_task_workdir() -> Result<()> {
+    let temp = tempdir()?;
+    let workdir = temp.path().join("packet");
+    fs::create_dir_all(&workdir)?;
+    fs::write(workdir.join("plan.json"), b"{}")?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "enqueue",
+            "dispatch.runtime",
+            "--runner",
+            "local-background",
+            "--project-key",
+            "project",
+            "--request-id",
+            "request",
+            "--task-id",
+            "task",
+            "--cmd",
+            "true",
+            "--workdir",
+            workdir.to_str().expect("utf-8 workdir"),
+            "--artifact",
+            "plan=plan.json",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let task: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(
+        task["artifact_refs"][0]["path"].as_str(),
+        workdir.join("plan.json").to_str()
+    );
+    assert_eq!(task["artifact_refs"][0]["present"], true);
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn offdesk_enqueue_tasks_json_redacts_command() -> Result<()> {
     let temp = tempdir()?;
     write_implementation_packet_fixture(temp.path(), "project", "packet-offdesk-test")?;
@@ -5822,6 +8711,241 @@ fn offdesk_enqueue_tasks_json_redacts_command() -> Result<()> {
         .as_str()
         .expect("command")
         .contains("sk-secret"));
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_enqueue_and_tick_presentation_redacts_without_moving_authority() -> Result<()> {
+    let temp = tempdir()?;
+    let secret = "sk-secretsecretsecretsecret";
+    let project_key = "project".to_string();
+    let request_id = format!("request-token={secret}");
+    let json_task_id = format!("task-json-token={secret}");
+    let human_task_id = format!("task-human-token={secret}");
+    let packet_id = "packet-offdesk-test".to_string();
+    let provider_id = format!("provider-token={secret}");
+    let model = format!("model-token={secret}");
+    let artifact_kind = format!("report-token={secret}");
+    let preview = format!("Launch preview token={secret}");
+    let reason = format!("Operator gate token={secret}");
+    let command = format!("printf token={secret}");
+    let workdir = temp.path().join(format!("work-token={secret}"));
+    fs::create_dir_all(&workdir)?;
+    let packet_dir = write_implementation_packet_fixture(temp.path(), &project_key, &packet_id)?;
+
+    let enqueue_json = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "enqueue",
+            "dispatch.runtime",
+            "--runner",
+            "local-background",
+            "--project-key",
+            &project_key,
+            "--request-id",
+            &request_id,
+            "--task-id",
+            &json_task_id,
+            "--cmd",
+            &command,
+            "--workdir",
+            workdir.to_str().expect("utf-8 workdir"),
+            "--provider-id",
+            &provider_id,
+            "--model",
+            &model,
+            "--artifact-kind",
+            &artifact_kind,
+            "--implementation-packet",
+            packet_dir.to_str().expect("utf-8 packet directory"),
+            "--preview",
+            &preview,
+            "--reason",
+            &reason,
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        enqueue_json.status.success(),
+        "{}",
+        String::from_utf8_lossy(&enqueue_json.stderr)
+    );
+    let enqueue_json_stdout = String::from_utf8_lossy(&enqueue_json.stdout);
+    assert!(!enqueue_json_stdout.contains(secret));
+    let enqueued: serde_json::Value = serde_json::from_slice(&enqueue_json.stdout)?;
+    for field in [
+        "task_id",
+        "request_id",
+        "workdir",
+        "provider_id",
+        "model",
+        "artifact_kind",
+        "preview",
+        "reason",
+    ] {
+        assert!(enqueued[field]
+            .as_str()
+            .expect("redacted task field")
+            .contains("[REDACTED]"));
+    }
+    assert_eq!(
+        enqueued["implementation_packet"]["packet_id"],
+        "packet-offdesk-test"
+    );
+    assert!(enqueued["artifact_refs"]
+        .as_array()
+        .expect("artifact refs")
+        .iter()
+        .all(|artifact| !artifact.to_string().contains(secret)));
+
+    let enqueue_human = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "enqueue",
+            "dispatch.runtime",
+            "--runner",
+            "local-background",
+            "--project-key",
+            &project_key,
+            "--request-id",
+            &request_id,
+            "--task-id",
+            &human_task_id,
+            "--cmd",
+            &command,
+            "--workdir",
+            workdir.to_str().expect("utf-8 workdir"),
+            "--implementation-packet",
+            packet_dir.to_str().expect("utf-8 packet directory"),
+        ])
+        .output()?;
+    assert!(enqueue_human.status.success());
+    let enqueue_human_stdout = String::from_utf8_lossy(&enqueue_human.stdout);
+    assert!(enqueue_human_stdout.contains("Enqueued offdesk task task-human-token=[REDACTED]"));
+    assert!(enqueue_human_stdout.contains("packet-offdesk-test (pass)"));
+    assert!(!enqueue_human_stdout.contains(secret));
+
+    let profile_dir = profile_dir(temp.path());
+    let tasks_path = profile_dir.join("offdesk_tasks.json");
+    let tasks_before_tick = fs::read(&tasks_path)?;
+    let persisted: serde_json::Value = serde_json::from_slice(&tasks_before_tick)?;
+    assert_eq!(persisted.as_array().expect("tasks").len(), 2);
+    assert!(persisted
+        .as_array()
+        .expect("tasks")
+        .iter()
+        .any(|task| task["task_id"] == json_task_id
+            && task["project_key"] == project_key
+            && task["request_id"] == request_id
+            && task["provider_id"] == provider_id
+            && task["model"] == model
+            && task["command"] == command));
+
+    let pause_reason = format!("emergency token={secret}");
+    let pause = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "pause",
+            "--reason",
+            &pause_reason,
+            "--by",
+            "test",
+            "--json",
+        ])
+        .output()?;
+    assert!(pause.status.success());
+
+    let paused_tick = forager_command(temp.path())
+        .args(["offdesk", "tick", "--limit", "5"])
+        .output()?;
+    assert!(paused_tick.status.success());
+    let paused_tick_stdout = String::from_utf8_lossy(&paused_tick.stdout);
+    assert!(paused_tick_stdout.contains("dispatch paused: 2 held"));
+    assert!(paused_tick_stdout.contains("pause reason: emergency token=[REDACTED]"));
+    assert!(!paused_tick_stdout.contains(secret));
+    assert_eq!(fs::read(&tasks_path)?, tasks_before_tick);
+
+    let unpause = forager_command(temp.path())
+        .args(["offdesk", "unpause", "--by", "test", "--json"])
+        .output()?;
+    assert!(unpause.status.success());
+
+    let tick_json = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "tick",
+            "--project-key",
+            &project_key,
+            "--task-id",
+            &json_task_id,
+            "--json",
+        ])
+        .output()?;
+    assert!(tick_json.status.success());
+    let tick_json_stdout = String::from_utf8_lossy(&tick_json.stdout);
+    assert!(!tick_json_stdout.contains(secret));
+    let tick: serde_json::Value = serde_json::from_slice(&tick_json.stdout)?;
+    assert_eq!(tick["pending_approval"], 1);
+    assert!(tick["updated_task_ids"][0]
+        .as_str()
+        .expect("updated task id")
+        .contains("[REDACTED]"));
+
+    let tick_human = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "tick",
+            "--project-key",
+            &project_key,
+            "--task-id",
+            &human_task_id,
+        ])
+        .output()?;
+    assert!(tick_human.status.success());
+    let tick_human_stdout = String::from_utf8_lossy(&tick_human.stdout);
+    assert!(tick_human_stdout.contains("1 pending approval"));
+    assert!(tick_human_stdout.contains("updated tasks: task-human-token=[REDACTED]"));
+    assert!(tick_human_stdout.contains("Next safe actions:"));
+    assert!(!tick_human_stdout.contains(secret));
+
+    let persisted: serde_json::Value = serde_json::from_slice(&fs::read(&tasks_path)?)?;
+    assert!(persisted
+        .as_array()
+        .expect("tasks")
+        .iter()
+        .all(|task| task["status"] == "pending_approval"));
+    assert!(persisted
+        .as_array()
+        .expect("tasks")
+        .iter()
+        .any(|task| task["task_id"] == json_task_id));
+    assert!(persisted
+        .as_array()
+        .expect("tasks")
+        .iter()
+        .any(|task| task["task_id"] == human_task_id));
+
+    let approvals: serde_json::Value = serde_json::from_slice(&fs::read(
+        profile_dir.join("pending_action_approvals.json"),
+    )?)?;
+    assert_eq!(approvals.as_array().expect("approvals").len(), 2);
+    assert!(approvals
+        .as_array()
+        .expect("approvals")
+        .iter()
+        .any(|approval| approval["task_id"] == json_task_id));
+    assert!(approvals
+        .as_array()
+        .expect("approvals")
+        .iter()
+        .any(|approval| approval["task_id"] == human_task_id));
+    let background_runs: serde_json::Value =
+        serde_json::from_slice(&fs::read(profile_dir.join("background_runs.json"))?)?;
+    assert!(background_runs
+        .as_array()
+        .expect("background runs")
+        .is_empty());
     Ok(())
 }
 
@@ -6402,6 +9526,129 @@ fn offdesk_maintenance_request_creates_deduped_approval_without_execution() -> R
 
 #[test]
 #[serial]
+fn offdesk_maintenance_presentation_redacts_outputs_and_preserves_approval_authority() -> Result<()>
+{
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let secret = "sk-secretsecretsecretsecret";
+    let project_key = format!("project-token={secret}");
+    let request_id = format!("request-token={secret}");
+    let task_id = format!("task-token={secret}");
+    let target_id = format!("debug-token={secret}");
+    let preview = format!("Remove old bundles token={secret}");
+    let reason = format!("Operator review token={secret}");
+    let source_surface = "legacy-test".to_string();
+
+    let json_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "maintenance-request",
+            "--kind",
+            "artifact-cleanup",
+            "--project-key",
+            &project_key,
+            "--request-id",
+            &request_id,
+            "--task-id",
+            &task_id,
+            "--target-id",
+            &target_id,
+            "--preview",
+            &preview,
+            "--reason",
+            &reason,
+            "--source-surface",
+            &source_surface,
+            "--json",
+        ])
+        .output()?;
+    assert!(json_output.status.success());
+    let json_stdout = String::from_utf8_lossy(&json_output.stdout);
+    assert!(!json_stdout.contains(secret));
+    let request_report: serde_json::Value = serde_json::from_slice(&json_output.stdout)?;
+    assert!(request_report["project_key"]
+        .as_str()
+        .expect("project key")
+        .contains("[REDACTED]"));
+    assert!(request_report["approval"]["preview"]
+        .as_str()
+        .expect("approval preview")
+        .contains("[REDACTED]"));
+
+    let human_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "maintenance-request",
+            "--kind",
+            "artifact-cleanup",
+            "--project-key",
+            &project_key,
+            "--request-id",
+            &request_id,
+            "--task-id",
+            &task_id,
+            "--target-id",
+            &target_id,
+            "--preview",
+            &preview,
+            "--reason",
+            &reason,
+            "--source-surface",
+            &source_surface,
+        ])
+        .output()?;
+    assert!(human_output.status.success());
+    let human_stdout = String::from_utf8_lossy(&human_output.stdout);
+    assert!(human_stdout.contains("Offdesk maintenance approval request"));
+    assert!(human_stdout.contains("project_key:  project-token=[REDACTED]"));
+    assert!(human_stdout.contains("request_id:   request-token=[REDACTED]"));
+    assert!(human_stdout.contains("task_id:      task-token=[REDACTED]"));
+    assert!(human_stdout.contains("target_id:    debug-token=[REDACTED]"));
+    assert!(!human_stdout.contains(secret));
+
+    let approvals_path = profile_dir.join("pending_action_approvals.json");
+    let approvals: serde_json::Value = serde_json::from_slice(&fs::read(&approvals_path)?)?;
+    assert_eq!(approvals.as_array().expect("approvals").len(), 1);
+    assert_eq!(approvals[0]["project_key"], project_key);
+    assert_eq!(approvals[0]["request_id"], request_id);
+    assert_eq!(approvals[0]["task_id"], task_id);
+    assert_eq!(
+        approvals[0]["preview"],
+        "Remove old bundles token=[REDACTED]"
+    );
+    assert_eq!(approvals[0]["reason"], "Operator review token=[REDACTED]");
+    assert_eq!(approvals[0]["source_surface"], source_surface);
+    let approvals_before_reports = fs::read(&approvals_path)?;
+
+    let report_json_output = forager_command(temp.path())
+        .args(["offdesk", "maintenance-report", "--json"])
+        .output()?;
+    assert!(report_json_output.status.success());
+    let report_json_stdout = String::from_utf8_lossy(&report_json_output.stdout);
+    assert!(!report_json_stdout.contains(secret));
+    let report: serde_json::Value = serde_json::from_slice(&report_json_output.stdout)?;
+    assert_eq!(report["read_only"], true);
+    assert_eq!(report["approvals"]["pending"], 1);
+
+    let report_human_output = forager_command(temp.path())
+        .args(["offdesk", "maintenance-report"])
+        .output()?;
+    assert!(report_human_output.status.success());
+    let report_human_stdout = String::from_utf8_lossy(&report_human_output.stdout);
+    assert!(report_human_stdout.contains("Offdesk maintenance report"));
+    assert!(report_human_stdout.contains("Recommended actions:"));
+    assert!(report_human_stdout.contains("pending_approval"));
+    assert!(!report_human_stdout.contains(secret));
+
+    assert_eq!(fs::read(&approvals_path)?, approvals_before_reports);
+    assert!(!profile_dir.join("offdesk_tasks.json").exists());
+    assert!(!profile_dir.join("background_runs.json").exists());
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn offdesk_debug_bundle_includes_wiki_attention_summaries_read_only() -> Result<()> {
     let temp = tempdir()?;
     let profile_dir = profile_dir(temp.path());
@@ -6634,8 +9881,9 @@ fn offdesk_debug_bundle_output_json_receipt_writes_custom_file() -> Result<()> {
     fs::create_dir_all(&profile_dir)?;
     let now = Utc::now();
     let secret = "sk-secretsecretsecretsecret";
+    let approvals_path = profile_dir.join("pending_action_approvals.json");
     fs::write(
-        profile_dir.join("pending_action_approvals.json"),
+        &approvals_path,
         serde_json::to_string_pretty(&json!([
             {
                 "approval_id": "approval_custom_export",
@@ -6655,7 +9903,11 @@ fn offdesk_debug_bundle_output_json_receipt_writes_custom_file() -> Result<()> {
             }
         ]))?,
     )?;
-    let output_path = temp.path().join("exports").join("custom-bundle.json");
+    let approvals_before = fs::read(&approvals_path)?;
+    let output_path = temp
+        .path()
+        .join("exports")
+        .join(format!("custom-bundle-token={secret}.json"));
 
     let output = forager_command(temp.path())
         .args([
@@ -6671,10 +9923,10 @@ fn offdesk_debug_bundle_output_json_receipt_writes_custom_file() -> Result<()> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(!stdout.contains(secret));
     let receipt: serde_json::Value = serde_json::from_slice(&output.stdout)?;
-    assert_eq!(
-        receipt["exported_to"],
-        output_path.to_str().expect("utf-8 path")
-    );
+    assert!(receipt["exported_to"]
+        .as_str()
+        .expect("export path")
+        .contains("[REDACTED]"));
     assert_eq!(receipt["bundle"]["read_only"], true);
     assert_eq!(
         receipt["bytes_written"].as_u64().expect("bytes written"),
@@ -6684,6 +9936,29 @@ fn offdesk_debug_bundle_output_json_receipt_writes_custom_file() -> Result<()> {
         serde_json::from_str(&fs::read_to_string(&output_path)?)?;
     assert_eq!(exported_bundle, receipt["bundle"]);
     assert!(!fs::read_to_string(&output_path)?.contains(secret));
+    assert_eq!(fs::read(&approvals_path)?, approvals_before);
+
+    let human_output_path = temp
+        .path()
+        .join("exports")
+        .join(format!("human-bundle-token={secret}.json"));
+    let human_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "debug-bundle",
+            "--output",
+            human_output_path.to_str().expect("utf-8 path"),
+        ])
+        .output()?;
+    assert!(human_output.status.success());
+    let human_stdout = String::from_utf8_lossy(&human_output.stdout);
+    assert!(human_stdout.contains("Offdesk debug bundle"));
+    assert!(human_stdout.contains("exported_to:"));
+    assert!(human_stdout.contains("[REDACTED]"));
+    assert!(!human_stdout.contains(secret));
+    assert!(human_output_path.exists());
+    assert!(!fs::read_to_string(&human_output_path)?.contains(secret));
+    assert_eq!(fs::read(&approvals_path)?, approvals_before);
 
     let overwrite_output = forager_command(temp.path())
         .args([
@@ -6698,6 +9973,9 @@ fn offdesk_debug_bundle_output_json_receipt_writes_custom_file() -> Result<()> {
     let stderr = String::from_utf8_lossy(&overwrite_output.stderr);
     assert!(stderr.contains("write debug bundle export"));
     assert!(stderr.contains("exists") || stderr.contains("AlreadyExists"));
+    assert!(stderr.contains("[REDACTED]"));
+    assert!(!stderr.contains(secret));
+    assert_eq!(fs::read(&approvals_path)?, approvals_before);
     Ok(())
 }
 
@@ -9754,6 +13032,65 @@ fn offdesk_cancel_task_updates_task_json_and_redacts_output() -> Result<()> {
 
 #[test]
 #[serial]
+fn offdesk_terminate_task_records_stopped_runtime_and_cancels_task() -> Result<()> {
+    let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    fs::create_dir_all(&profile_dir)?;
+    let now = Utc::now();
+    fs::write(
+        profile_dir.join("offdesk_tasks.json"),
+        serde_json::to_string_pretty(&json!([durable_task("running", now, "true", temp.path(),)]))?,
+    )?;
+    fs::write(
+        profile_dir.join("background_runs.json"),
+        serde_json::to_string_pretty(&json!([{
+            "ticket_id": "ticket",
+            "project_key": "project",
+            "request_id": "request",
+            "task_id": "task",
+            "runner_kind": "local_background",
+            "phase": "launched"
+        }]))?,
+    )?;
+
+    let output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "terminate-task",
+            "task",
+            "--reason",
+            "operator stop",
+            "--by",
+            "test",
+            "--json",
+        ])
+        .output()?;
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+    assert_eq!(report["schema"], "offdesk_task_termination_report.v1");
+    assert_eq!(report["task"]["status"], "cancelled");
+    assert_eq!(report["background"]["phase"], "terminated");
+    assert_eq!(report["background"]["changed"], false);
+
+    let tasks: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(profile_dir.join("offdesk_tasks.json"))?)?;
+    assert_eq!(tasks[0]["status"], "cancelled");
+    let probes: serde_json::Value = serde_json::from_str(&fs::read_to_string(
+        profile_dir.join("background_runs.json"),
+    )?)?;
+    assert_eq!(probes[0]["phase"], "terminated");
+    assert_eq!(probes[0]["termination"]["terminated_by"], "test");
+    assert_eq!(probes[0]["termination"]["reason"], "operator stop");
+    Ok(())
+}
+
+#[test]
+#[serial]
 fn offdesk_task_lifecycle_presentation_redacts_legacy_json_and_human_reports() -> Result<()> {
     let temp = tempdir()?;
     let profile_dir = profile_dir(temp.path());
@@ -9813,6 +13150,8 @@ fn offdesk_task_lifecycle_presentation_redacts_legacy_json_and_human_reports() -
         serde_json::to_string_pretty(&json!([failed_task]))?,
     )?;
 
+    record_fixture_exit_evidence(&profile_dir)?;
+
     let retry_json_output = forager_command(temp.path())
         .args([
             "offdesk",
@@ -9859,6 +13198,8 @@ fn offdesk_retry_task_requeues_failed_task_and_tick_launches() -> Result<()> {
         )]))?,
     )?;
 
+    record_fixture_exit_evidence(&profile_dir)?;
+
     let retry_output = forager_command(temp.path())
         .args(["offdesk", "retry-task", "task", "--json"])
         .output()?;
@@ -9904,6 +13245,8 @@ fn offdesk_plain_retry_preserves_denied_approval_and_tick_denies() -> Result<()>
         profile_dir.join("pending_action_approvals.json"),
         serde_json::to_string_pretty(&json!([denied_approval("dispatch.runtime", now)]))?,
     )?;
+
+    record_fixture_exit_evidence(&profile_dir)?;
 
     let retry_output = forager_command(temp.path())
         .args(["offdesk", "retry-task", "task", "--json"])
@@ -9952,6 +13295,8 @@ fn offdesk_retry_new_approval_supersedes_denied_and_tick_creates_pending() -> Re
         profile_dir.join("pending_action_approvals.json"),
         serde_json::to_string_pretty(&json!([denied_approval("dispatch.runtime", now)]))?,
     )?;
+
+    record_fixture_exit_evidence(&profile_dir)?;
 
     let retry_output = forager_command(temp.path())
         .args(["offdesk", "retry-task", "task", "--new-approval", "--json"])
@@ -10045,6 +13390,8 @@ fn offdesk_resume_task_marks_resume_artifact_resumed_and_tick_launches() -> Resu
         profile_dir.join("task_resume_state.json"),
         serde_json::to_string_pretty(&json!([resume_state(now)]))?,
     )?;
+
+    record_fixture_exit_evidence(&profile_dir)?;
 
     let resume_output = forager_command(temp.path())
         .args(["offdesk", "resume-task", "task", "--json"])
@@ -10179,16 +13526,139 @@ fn offdesk_snapshot_commands_report_verify_and_restore_plan() -> Result<()> {
 
 #[test]
 #[serial]
-fn offdesk_snapshot_unknown_id_reports_error() -> Result<()> {
+fn offdesk_mutation_snapshot_presentation_redacts_legacy_state_and_stays_read_only() -> Result<()> {
     let temp = tempdir()?;
+    let profile_dir = profile_dir(temp.path());
+    let snapshot_dir = profile_dir.join("mutation_snapshots");
+    fs::create_dir_all(&snapshot_dir)?;
+    let now = Utc::now();
+    let secret = "sk-secretsecretsecretsecret";
+    let mutation_id = format!("mutation-token={secret}");
+    let target = temp.path().join(format!("target-token={secret}.txt"));
+    let before_path = snapshot_dir.join(format!("before-token={secret}.bin"));
+    fs::write(&target, "after")?;
+    fs::write(&before_path, "before")?;
+    let snapshot_path = snapshot_dir.join(format!("{mutation_id}.json"));
+    fs::write(
+        &snapshot_path,
+        serde_json::to_string_pretty(&json!({
+            "snapshot_schema_version": 1,
+            "mutation_id": mutation_id,
+            "project_key": format!("project-token={secret}"),
+            "request_id": format!("request-token={secret}"),
+            "task_id": format!("task-token={secret}"),
+            "target_path": target.to_str().expect("utf-8 path"),
+            "mutation_kind": format!("canonical_syncback token={secret}"),
+            "target_exists_before": true,
+            "before_size_bytes": 6,
+            "before_hash": sha256_hex(b"before"),
+            "before_excerpt_or_snapshot_path": before_path.to_str().expect("utf-8 path"),
+            "snapshot_truncated": false,
+            "rollback_available": true,
+            "rollback_blockers": [],
+            "diff_preview": format!("legacy diff token={secret}"),
+            "created_at": now,
+            "created_by": format!("legacy worker token={secret}")
+        }))?,
+    )?;
+    let snapshot_before = fs::read(&snapshot_path)?;
+    let before_artifact_before = fs::read(&before_path)?;
+    let target_before = fs::read(&target)?;
+
+    let list_json_output = forager_command(temp.path())
+        .args(["offdesk", "snapshots", "--json"])
+        .output()?;
+    assert!(list_json_output.status.success());
+    let list_json_stdout = String::from_utf8_lossy(&list_json_output.stdout);
+    assert!(!list_json_stdout.contains(secret));
+    let list: serde_json::Value = serde_json::from_slice(&list_json_output.stdout)?;
+    assert!(list[0]["mutation_id"]
+        .as_str()
+        .expect("mutation id")
+        .contains("[REDACTED]"));
+
+    let list_human_output = forager_command(temp.path())
+        .args(["offdesk", "snapshots"])
+        .output()?;
+    assert!(list_human_output.status.success());
+    let list_human_stdout = String::from_utf8_lossy(&list_human_output.stdout);
+    assert!(list_human_stdout.contains("MUTATION ID"));
+    assert!(list_human_stdout.contains("[REDACTED]"));
+    assert!(!list_human_stdout.contains(secret));
+
+    let snapshot_json_output = forager_command(temp.path())
+        .args(["offdesk", "snapshot", &mutation_id, "--json"])
+        .output()?;
+    assert!(snapshot_json_output.status.success());
+    let snapshot_json_stdout = String::from_utf8_lossy(&snapshot_json_output.stdout);
+    assert!(!snapshot_json_stdout.contains(secret));
+    let verification: serde_json::Value = serde_json::from_slice(&snapshot_json_output.stdout)?;
+    assert_eq!(verification["snapshot_present"], true);
+    assert!(verification["snapshot"]["target_path"]
+        .as_str()
+        .expect("target path")
+        .contains("[REDACTED]"));
+
+    let snapshot_human_output = forager_command(temp.path())
+        .args(["offdesk", "snapshot", &mutation_id])
+        .output()?;
+    assert!(snapshot_human_output.status.success());
+    let snapshot_human_stdout = String::from_utf8_lossy(&snapshot_human_output.stdout);
+    assert!(snapshot_human_stdout.contains("Snapshot mutation-token=[REDACTED]"));
+    assert!(!snapshot_human_stdout.contains(secret));
+
+    let plan_json_output = forager_command(temp.path())
+        .args(["offdesk", "restore-plan", &mutation_id, "--json"])
+        .output()?;
+    assert!(plan_json_output.status.success());
+    let plan_json_stdout = String::from_utf8_lossy(&plan_json_output.stdout);
+    assert!(!plan_json_stdout.contains(secret));
+    let plan: serde_json::Value = serde_json::from_slice(&plan_json_output.stdout)?;
+    assert_eq!(plan["operation"], "restore_file");
+    assert!(plan["before_snapshot_path"]
+        .as_str()
+        .expect("before snapshot path")
+        .contains("[REDACTED]"));
+
+    let plan_human_output = forager_command(temp.path())
+        .args(["offdesk", "restore-plan", &mutation_id])
+        .output()?;
+    assert!(plan_human_output.status.success());
+    let plan_human_stdout = String::from_utf8_lossy(&plan_human_output.stdout);
+    assert!(plan_human_stdout.contains("Restore plan mutation-token=[REDACTED]"));
+    assert!(!plan_human_stdout.contains(secret));
+
+    assert_eq!(fs::read(&snapshot_path)?, snapshot_before);
+    assert_eq!(fs::read(&before_path)?, before_artifact_before);
+    assert_eq!(fs::read(&target)?, target_before);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_snapshot_unknown_id_reports_operator_safe_error() -> Result<()> {
+    let temp = tempdir()?;
+    let secret = "sk-secretsecretsecretsecret";
+    let mutation_id = format!("mutation_missing-token={secret}");
 
     let output = forager_command(temp.path())
-        .args(["offdesk", "snapshot", "mutation_missing", "--json"])
+        .args(["offdesk", "snapshot", &mutation_id, "--json"])
         .output()?;
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Mutation snapshot not found: mutation_missing"));
+    assert!(!stderr.contains(secret));
+    assert!(stderr.contains("Mutation snapshot not found: mutation_missing-token=[REDACTED]"));
+
+    let restore_output = forager_command(temp.path())
+        .args(["offdesk", "restore-plan", &mutation_id])
+        .output()?;
+    assert!(!restore_output.status.success());
+    let restore_stderr = String::from_utf8_lossy(&restore_output.stderr);
+    assert!(!restore_stderr.contains(secret));
+    assert!(
+        restore_stderr.contains("Mutation snapshot not found: mutation_missing-token=[REDACTED]")
+    );
     Ok(())
 }
 
@@ -10328,6 +13798,7 @@ fn offdesk_harness_prompt_builds_first_read_packet() -> Result<()> {
     assert_eq!(packet["first_reads"][0]["size_bytes"], 14);
     assert_eq!(packet["first_reads"][0]["over_file_budget"], false);
     assert_eq!(packet["first_read_budget_status"], "ok");
+    assert_eq!(packet["read_scope_enforced"], false);
     assert_eq!(packet["first_read_total_bytes"], 14);
     assert_eq!(
         packet["result_artifact"],
@@ -10343,6 +13814,7 @@ fn offdesk_harness_prompt_builds_first_read_packet() -> Result<()> {
         .is_empty());
     let prompt = fs::read_to_string(output_path)?;
     assert!(prompt.contains("## First-Read Artifacts"));
+    assert!(prompt.contains("Do not consult local memory or unrelated workspace files"));
     assert!(prompt.contains("Do not ask the operator to paste full git diffs"));
     assert!(prompt.contains(first_read.to_str().expect("utf-8 first read")));
     Ok(())
@@ -10404,6 +13876,108 @@ fn offdesk_harness_prompt_warns_and_strict_fails_on_budget() -> Result<()> {
     assert!(
         String::from_utf8_lossy(&strict_output.stderr).contains("first-read budget guard failed")
     );
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn offdesk_harness_prompt_presentation_redacts_outputs_and_preserves_written_packet() -> Result<()>
+{
+    let temp = tempdir()?;
+    let secret = "sk-secretsecretsecretsecret";
+    let first_read = temp.path().join(format!("first-read-token={secret}.md"));
+    fs::write(&first_read, "review evidence")?;
+    let source_before = fs::read(&first_read)?;
+    let task = format!("Review legacy task token={secret}");
+
+    let human_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "harness-prompt",
+            "claude",
+            "--task",
+            &task,
+            "--first-read",
+            first_read.to_str().expect("utf-8 first read"),
+        ])
+        .output()?;
+    assert!(human_output.status.success());
+    let human_stdout = String::from_utf8_lossy(&human_output.stdout);
+    assert!(human_stdout.contains("# Hosted Harness Start Packet"));
+    assert!(human_stdout.contains("Review legacy task token=[REDACTED]"));
+    assert!(human_stdout.contains("first-read-token=[REDACTED]"));
+    assert!(!human_stdout.contains(secret));
+    assert_eq!(fs::read(&first_read)?, source_before);
+
+    let json_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "harness-prompt",
+            "claude",
+            "--task",
+            &task,
+            "--first-read",
+            first_read.to_str().expect("utf-8 first read"),
+            "--json",
+        ])
+        .output()?;
+    assert!(json_output.status.success());
+    let json_stdout = String::from_utf8_lossy(&json_output.stdout);
+    assert!(!json_stdout.contains(secret));
+    let packet: serde_json::Value = serde_json::from_slice(&json_output.stdout)?;
+    assert_eq!(packet["task"], "Review legacy task token=[REDACTED]");
+    assert!(packet["first_reads"][0]["path"]
+        .as_str()
+        .expect("first-read path")
+        .contains("first-read-token=[REDACTED]"));
+    assert!(!packet["prompt_markdown"]
+        .as_str()
+        .expect("prompt markdown")
+        .contains(secret));
+    assert_eq!(fs::read(&first_read)?, source_before);
+
+    let output_path = temp.path().join(format!("prompt-token={secret}.md"));
+    let file_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "harness-prompt",
+            "claude",
+            "--task",
+            &task,
+            "--first-read",
+            first_read.to_str().expect("utf-8 first read"),
+            "--output",
+            output_path.to_str().expect("utf-8 output path"),
+        ])
+        .output()?;
+    assert!(file_output.status.success());
+    let file_stdout = String::from_utf8_lossy(&file_output.stdout);
+    assert!(file_stdout.contains("Wrote hosted harness prompt:"));
+    assert!(file_stdout.contains("[REDACTED]"));
+    assert!(!file_stdout.contains(secret));
+    let written_prompt = fs::read_to_string(&output_path)?;
+    assert!(written_prompt.contains(&task));
+    assert!(written_prompt.contains(first_read.to_str().expect("utf-8 first read")));
+
+    let oversized = temp.path().join(format!("oversized-token={secret}.md"));
+    fs::write(&oversized, vec![b'x'; 65_537])?;
+    let strict_output = forager_command(temp.path())
+        .args([
+            "offdesk",
+            "harness-prompt",
+            "claude",
+            "--task",
+            "Review strict budget.",
+            "--first-read",
+            oversized.to_str().expect("utf-8 oversized first read"),
+            "--strict-first-read-budget",
+        ])
+        .output()?;
+    assert!(!strict_output.status.success());
+    let strict_stderr = String::from_utf8_lossy(&strict_output.stderr);
+    assert!(strict_stderr.contains("first-read budget guard failed"));
+    assert!(strict_stderr.contains("[REDACTED]"));
+    assert!(!strict_stderr.contains(secret));
     Ok(())
 }
 

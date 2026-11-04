@@ -8,10 +8,12 @@ mod groups;
 mod instance;
 pub mod profile_config;
 pub mod project_registry;
+pub mod remote_identity;
 pub mod repo_config;
 mod storage;
 
 pub use crate::sound::{SoundConfig, SoundConfigOverride};
+pub use auto_orchestrator::AutoOrchestratorStartupPreflightV1;
 pub use config::{
     load_config, load_config_read_only, save_config, ClaudeConfig, Config, DiffConfig,
     SandboxConfig, SessionConfig, ThemeConfig, TmuxMouseMode, TmuxStatusBarMode, UpdatesConfig,
@@ -26,6 +28,7 @@ pub use profile_config::{
     SessionConfigOverride, ThemeConfigOverride, TmuxConfigOverride, UpdatesConfigOverride,
     WorktreeConfigOverride,
 };
+pub use remote_identity::{RemoteSessionIdentityV1, RemoteSessionWorktreeKindV1};
 pub use repo_config::{
     check_hook_trust, execute_hooks, load_repo_config, merge_repo_config_unchecked,
     profile_to_repo_config, repo_config_to_profile, resolve_config_with_repo, save_repo_config,
@@ -167,13 +170,17 @@ pub fn normalize_profile_name(profile: &str) -> Result<String> {
 }
 
 pub fn get_profile_dir(profile: &str) -> Result<PathBuf> {
-    let base = get_app_dir()?;
-    let profile_name = normalize_profile_name(profile)?;
-    let dir = base.join("profiles").join(profile_name);
+    let dir = profile_dir_path(profile)?;
     if !dir.exists() {
         fs::create_dir_all(&dir)?;
     }
     Ok(dir)
+}
+
+pub fn profile_dir_path(profile: &str) -> Result<PathBuf> {
+    let base = resolved_app_dir_path()?;
+    let profile_name = normalize_profile_name(profile)?;
+    Ok(base.join("profiles").join(profile_name))
 }
 
 pub fn list_profiles() -> Result<Vec<String>> {

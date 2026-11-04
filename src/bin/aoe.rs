@@ -1,6 +1,5 @@
-use anyhow::Result;
+use std::process::ExitCode;
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    forager::run_cli().await
+fn main() -> ExitCode {
+    forager::entrypoint::run_cli_with_runtime()
 }

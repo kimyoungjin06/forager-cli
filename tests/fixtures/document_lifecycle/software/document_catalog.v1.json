@@ -1,0 +1,169 @@
+{
+  "schema": "document_catalog.v1",
+  "generated_at": "2026-08-19T01:00:00Z",
+  "project_key": "fixture-software",
+  "roots": [
+    {
+      "root_id": "root_software",
+      "source_kind": "explicit",
+      "project_key": "fixture-software",
+      "canonical_path": "/fixtures/software",
+      "path_identity_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "scan": {
+    "complete": true,
+    "budgets": {
+      "max_files": 1000,
+      "max_directory_entries": 10000,
+      "max_total_bytes": 10485760,
+      "max_file_bytes": 1048576,
+      "max_elapsed_ms": 5000
+    },
+    "usage": {
+      "files_observed": 2,
+      "directory_entries_observed": 4,
+      "bytes_hashed": 4480,
+      "bytes_extracted": 4480,
+      "largest_file_bytes_read": 3200,
+      "elapsed_ms": 18
+    },
+    "reached_limits": [],
+    "excluded_scope": [
+      {
+        "relative_path": ".git",
+        "reason": "vcs_metadata",
+        "detail": "Git internals are outside the document catalog."
+      },
+      {
+        "relative_path": "target",
+        "reason": "build_output",
+        "detail": "Compiler output is rebuildable."
+      }
+    ],
+    "incomplete_scope": []
+  },
+  "coverage": [
+    {
+      "media_family": "markdown",
+      "observed_files": 2,
+      "metadata_complete_files": 2,
+      "body_searchable_files": 2,
+      "body_extracted_files": 2,
+      "extraction_errors": 0,
+      "body_coverage": "complete"
+    }
+  ],
+  "source_identities": {
+    "filesystem_snapshot": {
+      "schema": "filesystem_observation.v1",
+      "identity": "fs_software_001",
+      "content_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "observed_at": "2026-08-19T01:00:00Z"
+    },
+    "lifecycle_ledger": null,
+    "artifact_index": null
+  },
+  "authority_boundary": {
+    "projection_only": true,
+    "filesystem_observation_owns": ["relative_path", "size_bytes", "content_sha256", "git_state"],
+    "lifecycle_ledger_owns": ["document_id", "activity_state", "retention_disposition"],
+    "artifact_index_owns": ["artifact_id", "artifact_role", "artifact_retention_evidence"],
+    "search_visibility_mutation_authorized": false,
+    "file_mutation_authorized": false
+  },
+  "entries": [
+    {
+      "observation_id": "doc_observation_software_readme",
+      "document_id": null,
+      "artifact_id": null,
+      "project_key": "fixture-software",
+      "root_id": "root_software",
+      "relative_path": "README.md",
+      "media_family": "markdown",
+      "media_type": "text/markdown",
+      "size_bytes": 3200,
+      "modified_at": "2026-08-18T20:00:00Z",
+      "content_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "git_state": "tracked",
+      "role": "entrypoint",
+      "role_authority": "observed",
+      "subject_key": "project-overview",
+      "subject_authority": "declared",
+      "audience": ["developer", "operator"],
+      "scope_ref": "fixture-software",
+      "owner_entrypoint_ref": null,
+      "activity_state": "unknown",
+      "activity_authority": null,
+      "retention_disposition": "unclassified",
+      "retention_authority": null,
+      "generated": false,
+      "generated_authority": "declared",
+      "rebuild_ref": null,
+      "entrypoint_refs": [],
+      "outbound_refs": [
+        {"kind": "relative_path", "value": "docs/architecture.md"}
+      ],
+      "inbound_ref_count": 0,
+      "exact_duplicate_refs": [],
+      "possible_predecessor_refs": [],
+      "review_after": null,
+      "scan_findings": []
+    },
+    {
+      "observation_id": "doc_observation_software_architecture",
+      "document_id": null,
+      "artifact_id": null,
+      "project_key": "fixture-software",
+      "root_id": "root_software",
+      "relative_path": "docs/architecture.md",
+      "media_family": "markdown",
+      "media_type": "text/markdown",
+      "size_bytes": 1280,
+      "modified_at": "2026-08-18T20:10:00Z",
+      "content_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "git_state": "tracked",
+      "role": "reference",
+      "role_authority": "declared",
+      "subject_key": "runtime-architecture",
+      "subject_authority": "declared",
+      "audience": ["developer"],
+      "scope_ref": "runtime",
+      "owner_entrypoint_ref": {"kind": "observation", "value": "doc_observation_software_readme"},
+      "activity_state": "unknown",
+      "activity_authority": null,
+      "retention_disposition": "unclassified",
+      "retention_authority": null,
+      "generated": false,
+      "generated_authority": "declared",
+      "rebuild_ref": null,
+      "entrypoint_refs": [
+        {"kind": "observation", "value": "doc_observation_software_readme"}
+      ],
+      "outbound_refs": [],
+      "inbound_ref_count": 1,
+      "exact_duplicate_refs": [],
+      "possible_predecessor_refs": [],
+      "review_after": null,
+      "scan_findings": []
+    }
+  ],
+  "crosswalk_findings": [
+    {
+      "observation_id": "doc_observation_software_readme",
+      "document_id": null,
+      "artifact_id": null,
+      "status": "catalog_only",
+      "conflict": null,
+      "message": "No reviewed durable or artifact identity is present."
+    },
+    {
+      "observation_id": "doc_observation_software_architecture",
+      "document_id": null,
+      "artifact_id": null,
+      "status": "catalog_only",
+      "conflict": null,
+      "message": "No reviewed durable or artifact identity is present."
+    }
+  ]
+}

@@ -150,6 +150,57 @@ def render_plan_draft_required_message(*, profile: Any) -> str:
     )
 
 
+def render_plan_draft_compared_message(
+    *, profile: Any, session: dict[str, Any]
+) -> str:
+    comparison = (
+        session.get("plan_draft_comparison")
+        if isinstance(session.get("plan_draft_comparison"), dict)
+        else {}
+    )
+    rows = [
+        candidate
+        for candidate in comparison.get("candidates") or []
+        if isinstance(candidate, dict) and candidate.get("status") == "validated"
+    ]
+    lines = [title_with_profile("계획 초안 비교됨", profile)]
+    for candidate in rows[:3]:
+        rank = int(candidate.get("comparison_rank") or 0)
+        label = truncate_label(
+            candidate.get("strategy_label") or candidate.get("strategy_key") or "후보",
+            max_chars=18,
+        )
+        score = int(candidate.get("quality_score") or 0)
+        recommended = " · 추천" if candidate.get("recommended") is True else ""
+        lines.append(
+            f"{rank}. {html.escape(label)} · {score}점{recommended}"
+        )
+    lines.append("다음 조치: 후보 선택 · 등록/승인/실행 권한 없음")
+    return "\n".join(lines)
+
+
+def render_plan_draft_selected_message(
+    *, profile: Any, session: dict[str, Any]
+) -> str:
+    draft = session.get("plan_draft") if isinstance(session.get("plan_draft"), dict) else {}
+    label = truncate_label(
+        draft.get("strategy_label") or draft.get("strategy_key") or "후보",
+        max_chars=20,
+    )
+    rank = int(draft.get("selection_rank") or 0)
+    plan_sha256 = str(draft.get("plan_sha256") or "").strip().lower()
+    hash_hint = plan_sha256[:12] if len(plan_sha256) == 64 else "확인 필요"
+    return "\n".join(
+        [
+            title_with_profile("계획 초안 선택됨", profile),
+            f"{rank}. {html.escape(label)} · 등록 후보",
+            f"계획 지문 {html.escape(hash_hint)}",
+            "검토/승인/실행 권한 없음",
+            "아래 버튼으로 계획 등록",
+        ]
+    )
+
+
 def render_plan_draft_validated_message(*, profile: Any, session: dict[str, Any]) -> str:
     draft = session.get("plan_draft") if isinstance(session.get("plan_draft"), dict) else {}
     output = draft.get("validation_output") if isinstance(draft.get("validation_output"), dict) else {}
@@ -208,13 +259,15 @@ def render_plan_registered_message(*, profile: Any, session: dict[str, Any]) -> 
     registration = session.get("plan_registration") if isinstance(session.get("plan_registration"), dict) else {}
     output = registration.get("registration_output") if isinstance(registration.get("registration_output"), dict) else {}
     project_key = truncate_label(output.get("project_key") or registration.get("project_key") or "프로젝트", max_chars=24)
+    source_sha256 = str(output.get("source_sha256") or "").strip().lower()
+    hash_hint = source_sha256[:12] if len(source_sha256) == 64 else "확인 필요"
     return "\n".join(
         [
             title_with_profile("계획 등록됨", profile),
             f"{html.escape(project_key)} · 검토 대기",
-            "계획을 등록했습니다.",
+            f"계획 지문 {html.escape(hash_hint)}",
             "아직 실행은 시작하지 않았습니다.",
-            "로컬에서 계획 검토",
+            "아래 버튼으로 승인·수정·거절 선택",
         ]
     )
 
@@ -242,6 +295,58 @@ def render_plan_review_approved_message(*, profile: Any, session: dict[str, Any]
             "계획 검토를 기록했습니다.",
             "실행 준비는 아직 하지 않았습니다.",
             "아래 버튼으로 실행 준비 검토",
+        ]
+    )
+
+
+def render_plan_review_hash_required_message(*, profile: Any) -> str:
+    return "\n".join(
+        [
+            title_with_profile("계획 검토 갱신 필요", profile),
+            "등록 계획 지문과 연결되지 않은 입력입니다.",
+            "계획 검토는 기록하지 않았습니다.",
+            "실행 준비는 계속 차단됩니다.",
+            "아래 버튼으로 최신 결정을 선택하세요.",
+        ]
+    )
+
+
+def render_plan_review_revision_required_message(
+    *, profile: Any, session: dict[str, Any]
+) -> str:
+    review = (
+        session.get("plan_review")
+        if isinstance(session.get("plan_review"), dict)
+        else {}
+    )
+    project_key = truncate_label(review.get("project_key") or "프로젝트", max_chars=24)
+    return "\n".join(
+        [
+            title_with_profile("계획 수정 필요", profile),
+            f"{html.escape(project_key)} · 검토 기록됨",
+            "현재 계획은 실행 준비 대상이 아닙니다.",
+            "새 계획 등록 전 실행 준비 단계는 차단됩니다.",
+            "다음 조치: 다시 선택 또는 /plan으로 새 계획 요청",
+        ]
+    )
+
+
+def render_plan_review_rejected_message(
+    *, profile: Any, session: dict[str, Any]
+) -> str:
+    review = (
+        session.get("plan_review")
+        if isinstance(session.get("plan_review"), dict)
+        else {}
+    )
+    project_key = truncate_label(review.get("project_key") or "프로젝트", max_chars=24)
+    return "\n".join(
+        [
+            title_with_profile("계획 거절됨", profile),
+            f"{html.escape(project_key)} · 검토 기록됨",
+            "현재 계획 방향을 종료했습니다.",
+            "실행 준비 단계는 계속 차단됩니다.",
+            "다음 조치: 다시 선택 또는 /plan으로 대안 요청",
         ]
     )
 
@@ -304,13 +409,15 @@ def render_plan_gate_request_created_message(*, profile: Any, session: dict[str,
     output = gate_request.get("gate_output") if isinstance(gate_request.get("gate_output"), dict) else {}
     approval = output.get("approval") if isinstance(output.get("approval"), dict) else {}
     approval_id = truncate_label(approval.get("approval_id") or "approval", max_chars=28)
+    observed_hash = str(gate_request.get("observed_hash") or "").strip().lower()
+    hash_hint = observed_hash.removeprefix("sha256:")[:12] if observed_hash else "확인 필요"
     return "\n".join(
         [
             title_with_profile("게이트 요청 생성됨", profile),
             f"{html.escape(approval_id)} · 승인 대기",
-            "승인 대기열에 올렸습니다.",
+            f"준비 지문 {html.escape(hash_hint)}",
             "실행은 아직 시작하지 않았습니다.",
-            "로컬에서 approval 확인",
+            "아래 버튼으로 최신 승인/거절 선택",
         ]
     )
 
@@ -337,6 +444,18 @@ def render_plan_gate_resolution_required_message(*, profile: Any) -> str:
             "승인/거절은 아직 기록하지 않았습니다.",
             "아직 실행은 시작하지 않았습니다.",
             "버튼 또는 의견 직접 입력",
+        ]
+    )
+
+
+def render_plan_gate_resolution_hash_required_message(*, profile: Any) -> str:
+    return "\n".join(
+        [
+            title_with_profile("게이트 결정 갱신 필요", profile),
+            "실행 준비 지문과 연결되지 않은 입력입니다.",
+            "승인/거절은 기록하지 않았습니다.",
+            "실행은 계속 차단됩니다.",
+            "아래 버튼으로 최신 결정을 선택하세요.",
         ]
     )
 

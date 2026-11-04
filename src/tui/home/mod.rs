@@ -2,6 +2,8 @@
 
 pub(super) mod attention;
 mod input;
+mod morning;
+mod night;
 mod operations;
 pub(super) mod projects;
 mod render;
@@ -12,9 +14,12 @@ mod tests;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
+use ratatui::{layout::Rect, widgets::ListState};
 use tui_input::Input;
 
-use crate::offdesk::{OffdeskCloseoutStateSummary, OffdeskNextSafeAction};
+use crate::offdesk::{
+    OffdeskCloseoutStateSummary, OffdeskNextSafeAction, OffdeskShiftReviewProjectionV1,
+};
 use crate::session::{
     config::{load_config, save_config},
     flatten_tree, get_profile_dir, resolve_config, Group, GroupTree, Instance, Item, Storage,
@@ -47,6 +52,8 @@ pub(super) struct PreviewCache {
     pub(super) last_refresh: Instant,
     pub(super) dimensions: (u16, u16),
     pub(super) terminal_running: bool,
+    pub(super) wiki_context_summary: String,
+    pub(super) wiki_context_last_refresh: Option<Instant>,
 }
 
 impl Default for PreviewCache {
@@ -57,6 +64,8 @@ impl Default for PreviewCache {
             last_refresh: Instant::now(),
             dimensions: (0, 0),
             terminal_running: false,
+            wiki_context_summary: String::new(),
+            wiki_context_last_refresh: None,
         }
     }
 }
@@ -112,6 +121,8 @@ pub(super) struct OffdeskResumeSummary {
     pub(super) closeout_required: usize,
     pub(super) closeout_state: OffdeskCloseoutStateSummary,
     pub(super) next_safe_actions: Vec<OffdeskNextSafeAction>,
+    pub(super) shift_review: Option<OffdeskShiftReviewProjectionV1>,
+    pub(super) shift_review_error: Option<String>,
 }
 
 impl OffdeskResumeSummary {
@@ -125,6 +136,8 @@ impl OffdeskResumeSummary {
             || self.stale_background > 0
             || self.failed_background > 0
             || self.closeout_required > 0
+            || self.shift_review.is_some()
+            || self.shift_review_error.is_some()
     }
 
     pub(super) fn has_morning_review(&self) -> bool {
@@ -140,6 +153,8 @@ impl OffdeskResumeSummary {
             || self.stale_background > 0
             || self.failed_background > 0
             || self.closeout_required > 0
+            || self.shift_attention_count() > 0
+            || self.shift_review_error.is_some()
     }
 
     pub(super) fn focus_label(&self) -> &'static str {
@@ -152,12 +167,22 @@ impl OffdeskResumeSummary {
             "resume decision pending"
         } else if self.stale_background > 0 {
             "stale background run"
+        } else if self.shift_review_error.is_some() {
+            "bounded shift review unavailable"
+        } else if self.shift_attention_count() > 0 {
+            "bounded shift review pending"
         } else if self.closeout_required > 0 {
             self.closeout_focus_label()
         } else if self.active_tasks > 0 {
             "active offdesk work"
         } else if self.queued_tasks > 0 {
             "queued offdesk work"
+        } else if self
+            .shift_review
+            .as_ref()
+            .is_some_and(|review| review.review_status == "closed_failure_history")
+        {
+            "closed failure history"
         } else if self.cancelled_tasks > 0 {
             "cancelled work archived"
         } else {
@@ -188,15 +213,49 @@ impl OffdeskResumeSummary {
             "Recover: forager offdesk resume"
         } else if self.stale_background > 0 || self.failed_background > 0 {
             "Inspect: forager offdesk poll"
+        } else if self.shift_review_error.is_some() {
+            "Inspect: forager offdesk shift review"
+        } else if self.shift_attention_count() > 0 {
+            "Review: forager offdesk shift review"
         } else if self.closeout_required > 0 {
             "Closeout: forager offdesk closeout"
         } else if self.active_tasks > 0 || self.queued_tasks > 0 {
             "Monitor: forager offdesk poll"
+        } else if self
+            .shift_review
+            .as_ref()
+            .is_some_and(|review| review.review_status == "closed_failure_history")
+        {
+            "Inspect: M saved report history"
         } else if self.cancelled_tasks > 0 {
             "Review: forager offdesk tasks"
         } else {
             "Plan: forager offdesk maintenance-report"
         }
+    }
+
+    pub(super) fn shift_attention_count(&self) -> usize {
+        self.shift_review
+            .as_ref()
+            .map_or(0, |review| review.attention_reasons.len())
+    }
+
+    pub(super) fn shift_review_label(&self) -> String {
+        if let Some(error) = self.shift_review_error.as_deref() {
+            return format!("unavailable  {error}");
+        }
+        let Some(review) = self.shift_review.as_ref() else {
+            return "no bounded shift".to_string();
+        };
+        format!(
+            "{}  task terminal {}/{}  routine terminal {}/{}  attention {}",
+            review.review_status,
+            review.summary.task_attempts_terminal,
+            review.summary.task_attempts_reserved,
+            review.summary.routine_runs_terminal,
+            review.summary.routine_runs_reserved,
+            review.attention_reasons.len()
+        )
     }
 
     pub(super) fn closeout_label(&self) -> String {
@@ -306,6 +365,9 @@ pub struct HomeView {
 
     // UI state
     pub(super) cursor: usize,
+    pub(super) list_state: ListState,
+    pub(super) list_area: Rect,
+    pub(super) session_tab_areas: Vec<(Rect, String)>,
     pub(super) selected_session: Option<String>,
     pub(super) selected_group: Option<String>,
     pub(super) view_mode: ViewMode,
@@ -361,6 +423,8 @@ pub struct HomeView {
     pub(super) settings_view: Option<SettingsView>,
     pub(super) attention_view: Option<attention::AttentionView>,
     pub(super) projects_view: Option<projects::ProjectsView>,
+    pub(super) night_view: Option<night::NightView>,
+    pub(super) morning_view: Option<morning::MorningView>,
     /// Flag to indicate we're confirming settings close (unsaved changes)
     pub(super) settings_close_confirm: bool,
 
@@ -427,6 +491,9 @@ impl HomeView {
             group_tree,
             flat_items,
             cursor: 0,
+            list_state: ListState::default(),
+            list_area: Rect::default(),
+            session_tab_areas: Vec::new(),
             selected_session: None,
             selected_group: None,
             view_mode: ViewMode::default(),
@@ -460,6 +527,8 @@ impl HomeView {
             settings_view: None,
             attention_view: None,
             projects_view: None,
+            night_view: None,
+            morning_view: None,
             settings_close_confirm: false,
             diff_view: None,
             list_width: load_config()
@@ -478,6 +547,8 @@ impl HomeView {
     }
 
     pub fn reload(&mut self) -> anyhow::Result<()> {
+        let selected_session = self.selected_session.clone();
+        let selected_group = self.selected_group.clone();
         let (mut instances, groups) = self.storage.load_with_groups()?;
         let resolved = resolve_config(self.storage.profile())?;
 
@@ -517,11 +588,27 @@ impl HomeView {
             build_instance_configs(self.storage.profile(), &self.instances, &resolved);
         self.effective_config = resolved;
 
-        if self.cursor >= self.flat_items.len() && !self.flat_items.is_empty() {
-            self.cursor = self.flat_items.len() - 1;
+        if self.filtered_items.is_some() {
+            self.update_filter();
+        } else {
+            self.cursor = self.cursor.min(self.flat_items.len().saturating_sub(1));
         }
 
         self.update_selected();
+        if let Some(id) = selected_session {
+            if self.visible_session_ids().contains(&id) {
+                self.select_session_by_id(&id);
+            }
+        } else if let Some(path) = selected_group {
+            let indices = self
+                .filtered_items
+                .clone()
+                .unwrap_or_else(|| (0..self.flat_items.len()).collect());
+            if let Some(index) = indices.iter().position(|&idx| matches!(self.flat_items.get(idx), Some(Item::Group { path: group, .. }) if group == &path)) {
+                self.cursor = index;
+                self.update_selected();
+            }
+        }
         Ok(())
     }
 
@@ -557,11 +644,16 @@ impl HomeView {
         let Some(instance) = self.instance_map.get(&session_id).cloned() else {
             return;
         };
+        let refresh_wiki_context = cache
+            .wiki_context_last_refresh
+            .is_none_or(|last| last.elapsed() >= std::time::Duration::from_secs(10));
         self.pending_preview_refresh = self.preview_poller.request_refresh(PreviewRequest {
             instance,
+            profile: self.storage.profile().to_string(),
             kind,
             width,
             height,
+            refresh_wiki_context,
         });
     }
 
@@ -586,6 +678,10 @@ impl HomeView {
             cache.content = update.content;
             cache.dimensions = update.dimensions;
             cache.terminal_running = update.terminal_running;
+            if let Some(summary) = update.wiki_context_summary {
+                cache.wiki_context_summary = summary;
+                cache.wiki_context_last_refresh = Some(Instant::now());
+            }
             cache.last_refresh = Instant::now();
         }
 
@@ -851,6 +947,8 @@ impl HomeView {
             || self.info_dialog.is_some()
             || self.settings_view.is_some()
             || self.attention_view.is_some()
+            || self.night_view.is_some()
+            || self.morning_view.is_some()
             || self.diff_view.is_some()
     }
 
@@ -954,32 +1052,26 @@ impl HomeView {
     }
 
     pub fn select_session_by_id(&mut self, session_id: &str) {
-        for (idx, item) in self.flat_items.iter().enumerate() {
-            if let Item::Session { id, .. } = item {
-                if id == session_id {
-                    self.cursor = idx;
-                    self.update_selected();
-                    return;
-                }
+        let Some(item_idx) = self
+            .flat_items
+            .iter()
+            .position(|item| matches!(item, Item::Session { id, .. } if id == session_id))
+        else {
+            return;
+        };
+        self.cursor = if let Some(filtered) = &self.filtered_items {
+            if let Some(display_idx) = filtered.iter().position(|&idx| idx == item_idx) {
+                display_idx
+            } else {
+                self.filtered_items = None;
+                self.search_query = Input::default();
+                self.search_active = false;
+                item_idx
             }
-        }
-    }
-
-    /// Select a session by ID while respecting the active filtered view.
-    pub(super) fn select_session_by_id_in_current_view(&mut self, session_id: &str) {
-        if let Some(ref filtered) = self.filtered_items {
-            for (display_idx, &item_idx) in filtered.iter().enumerate() {
-                if let Some(Item::Session { id, .. }) = self.flat_items.get(item_idx) {
-                    if id == session_id {
-                        self.cursor = display_idx;
-                        self.update_selected();
-                        return;
-                    }
-                }
-            }
-        }
-
-        self.select_session_by_id(session_id);
+        } else {
+            item_idx
+        };
+        self.update_selected();
     }
 
     /// Refresh all config-dependent state from the current profile's config.
@@ -1022,9 +1114,9 @@ fn load_offdesk_summary(profile: &str) -> OffdeskResumeSummary {
     let Ok(profile_dir) = get_profile_dir(profile) else {
         return OffdeskResumeSummary::default();
     };
-    let Ok(states) = crate::offdesk::TaskResumeStore::new(&profile_dir).load() else {
-        return OffdeskResumeSummary::default();
-    };
+    let states = crate::offdesk::TaskResumeStore::new(&profile_dir)
+        .load()
+        .unwrap_or_default();
     let now = chrono::Utc::now();
     let mut summary = states
         .iter()
@@ -1052,6 +1144,13 @@ fn load_offdesk_summary(profile: &str) -> OffdeskResumeSummary {
     }
     if summary.fresh_pending > 0 || summary.stale_pending > 0 {
         crate::offdesk::ensure_resume_review_next_safe_action(&mut summary.next_safe_actions);
+    }
+    match crate::offdesk::build_offdesk_shift_review_projection(profile, None, None, now) {
+        Ok(review) => summary.shift_review = review,
+        Err(error) => {
+            summary.shift_review_error =
+                Some(crate::offdesk::operator_safe_text(&format!("{error:#}")))
+        }
     }
     summary
 }

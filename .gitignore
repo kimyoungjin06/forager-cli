@@ -38,6 +38,13 @@ Thumbs.db
 # Local config
 .env
 .env.local
+.mcp.json
+
+# Local experiment/runtime state and plan transaction files
+/.forager/
+/tmp/
+*.forager-plan-journal.json
+*.forager-plan.lock
 
 # Legacy compatibility data created by older development runs
 .agent-of-empires/
