@@ -8,6 +8,13 @@ The requested maintenance sequence now has implementation candidates for
 QA.1, Release.2, Release.3 and Ops.1, with local verification completed. Results
 remain pending operator review in the existing continuity plan.
 
+The subsequent source review corrects two edge cases: pending reply delivery
+still reports a failure when an unrelated delivery is uncertain, and the Linux
+maintenance helper matches the frontend's HOME fallback for relative XDG data
+paths. The corrections pass nine attention-domain cases, sixteen maintenance
+cases, six health CLI regressions, formatting and strict all-target Clippy.
+They do not select a new installed runtime or accept the maintenance tasks.
+
 The branch incorporates remote main `2c8a01f` through reviewed reconciliation,
 retaining the qualified core's output, acceptance, runtime and containment
 boundaries. The original exact source checkpoint remains at `3e01fbc`.

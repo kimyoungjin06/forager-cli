@@ -263,6 +263,9 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
         delivery_warnings.append(outbox_issue)
     elif outbox_issue:
         transport_issues.append(outbox_issue)
+    # An uncertain delivery must not mask a separate response still awaiting delivery.
+    if reply_outbox.get("pending_count") and "reply_delivery_pending" not in transport_issues:
+        transport_issues.append("reply_delivery_pending")
     proactive_holds = hold_summary(listener_state if listener_state_valid else None)
     if proactive_holds["status"] == "unreadable":
         transport_issues.append("notification_hold_ledger_unreadable")

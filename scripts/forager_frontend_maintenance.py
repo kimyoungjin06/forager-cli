@@ -27,7 +27,9 @@ def directory(create):
     if sys.platform == 'darwin':
         data = Path.home() / 'Library/Application Support'
     elif sys.platform.startswith('linux'):
-        data = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share')
+        configured = Path(os.environ.get('XDG_DATA_HOME') or '')
+        # Match Rust dirs: relative XDG paths fall back to the user's data directory.
+        data = configured if configured.is_absolute() else Path.home() / '.local/share'
     else:
         raise ValueError('frontend maintenance is unsupported on this platform')
     if not data.exists():

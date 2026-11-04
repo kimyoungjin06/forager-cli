@@ -81,7 +81,7 @@ class AttentionDomains(unittest.TestCase):
                             confirmed=True, reason='fixture invalid retry')
                 self.assertEqual(state.read_bytes(), before)
 
-    def health_fixture(self, *, reply_uncertain=False, poll_error=False):
+    def health_fixture(self, *, reply_uncertain=False, pending_reply=False, poll_error=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             stamp = dt.datetime.now(dt.timezone.utc)
@@ -91,7 +91,11 @@ class AttentionDomains(unittest.TestCase):
             outbox = root / 'outbox'
             row = dict(schema='remote_operator_telegram_reply_outbox.v1', delivery_id='telegram_update:1',
                        status='failed', update_id=1, input_hash='i', payload_hash='p', delivery_unconfirmed=True)
-            outbox.write_text(json.dumps(row) + '\n' if reply_uncertain else '')
+            rows = [row] if reply_uncertain else []
+            if pending_reply:
+                rows.append({**row, 'delivery_id': 'telegram_update:2', 'update_id': 2,
+                             'delivery_unconfirmed': False})
+            outbox.write_text(''.join(json.dumps(item) + '\n' for item in rows))
             journal = root / 'journal'
             journal.write_text('')
             loop = root / 'loop'
@@ -123,6 +127,23 @@ class AttentionDomains(unittest.TestCase):
         report = self.health_fixture(poll_error=True)
         self.assertEqual(report['health_status'], 'unhealthy')
         self.assertIn('last_poll_transport_error', report['transport_issues'])
+
+    def test_pending_reply_is_unhealthy_even_alongside_uncertain_delivery(self):
+        report = self.health_fixture(reply_uncertain=True, pending_reply=True)
+        self.assertEqual(report['health_status'], 'unhealthy')
+        self.assertIn('reply_delivery_pending', report['transport_issues'])
+        self.assertEqual(report['attention_domains']['listener']['status'], 'healthy')
+        self.assertEqual(report['attention_domains']['delivery']['status'], 'blocked')
+        self.assertIn('reply_delivery_unconfirmed', report['attention_domains']['delivery']['warnings'])
+        self.assertEqual(report['reply_outbox']['pending_count'], 1)
+        self.assertEqual(report['reply_outbox']['unconfirmed_count'], 1)
+
+    def test_pending_reply_alone_keeps_the_delivery_failure_visible(self):
+        report = self.health_fixture(pending_reply=True)
+        self.assertEqual(report['health_status'], 'unhealthy')
+        self.assertIn('reply_delivery_pending', report['transport_issues'])
+        self.assertEqual(report['attention_domains']['listener']['status'], 'healthy')
+        self.assertEqual(report['attention_domains']['delivery']['status'], 'blocked')
 
     def test_corrupt_delivery_metadata_is_unknown_instead_of_zero(self):
         summary = hold_summary({'notification_unconfirmed_events': []})

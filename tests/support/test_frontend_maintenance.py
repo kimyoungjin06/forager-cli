@@ -211,6 +211,27 @@ class StateTests(Fixture, unittest.TestCase):
 
 @unittest.skipUnless(os.name == 'posix' and shutil.which('tmux') and os.environ.get('FORAGER_MAINTENANCE_TEST_BINARY'), 'requires compiled frontend and tmux')
 class FrontendTests(Fixture, unittest.TestCase):
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'XDG namespace is Linux only')
+    def test_relative_xdg_uses_the_same_home_fallback_as_both_frontends(self):
+        previous = Path.cwd()
+        try:
+            os.chdir(self.root)
+            with patch.dict(os.environ, {'XDG_DATA_HOME': 'relative-data'}):
+                maintenance.begin('relative-xdg', 'fixture')
+                for binary in [os.environ['FORAGER_MAINTENANCE_TEST_BINARY'],
+                               os.environ['FORAGER_MAINTENANCE_TEST_ALIAS']]:
+                    output = subprocess.run([binary, 'session', 'attach', 'missing-fixture'],
+                                            capture_output=True, timeout=10)
+                    self.assertNotEqual(output.returncode, 0)
+                    self.assertIn(b'maintenance is active', output.stderr)
+                self.assertEqual(maintenance.directory(False),
+                                 self.root / 'home/.local/share/forager/frontend-maintenance')
+                self.assertFalse((self.root / 'relative-data').exists())
+                self.assertFalse((self.root / 'config').exists())
+                maintenance.finish('relative-xdg', cancel=True)
+        finally:
+            os.chdir(previous)
+
     def test_idle_tui_exits_through_terminal_cleanup(self):
         app = self.root / 'config/forager' if sys.platform.startswith('linux') else self.root / 'home/.forager'
         app.mkdir(parents=True)
