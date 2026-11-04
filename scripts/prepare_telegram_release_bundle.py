@@ -60,7 +60,7 @@ def prepare(source, inventory, installed, output, *, installed_binary):
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(origin, target)
         files[name] = digest(target)
-    for name in ("prepare_telegram_release_bundle.py", "telegram_rollback_guard.py"):
+    for name in ("prepare_telegram_release_bundle.py", "telegram_rollback_guard.py", "forager_frontend_maintenance.py"):
         target = output / "tools" / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(Path(__file__).with_name(name), target)

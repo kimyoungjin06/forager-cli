@@ -1,5 +1,34 @@
 # Installation
 
+## Coordinated frontend replacement
+
+For a reviewed local cutover, `scripts/forager_frontend_maintenance.py` supplies
+`begin`, `status`, `guard`, `verify`, `finish`, and `cancel`. Begin records an
+operation ID and requests cooperative frontend exit. New TUI, go, and attach
+entrypoints hold before initialization. An attached client detaches only when
+its session and server retain sessions after detachment; agent input is untouched.
+
+Run the exact release-specific operator command under `guard`, after the
+approved stopped-writer, backup, queue/marker compatibility, and delivery-hold
+preflight. Declare every retained reader executable with `--reader-executable`.
+The guard retains original image identities across selector changes, checks
+before and after that command, and rechecks at finish. A late old reader keeps
+admission held; `verify` inspects again without rerunning the cutover command.
+State and offsets have no automatic rollback or replay path in this helper.
+
+Unknown or failed command outcomes retain the gate and audit history. Releasing
+such a gate requires an exact current record hash, an operator reason, and
+`--confirm-state-reviewed`. An unattempted operation can be cancelled directly.
+This is local operator coordination; Offdesk execution authority stays with the
+existing task and approval records.
+
+The legacy reader inventory currently supports Linux. It covers declared image
+identities and their expected native process names. Unreadable candidate readers
+hold the transition; other unreadable process-name observations remain counted.
+Arbitrary process renaming, direct old binaries, unrelated editors, and OS-wide
+write fencing remain outside this cooperative contract. Retain old payloads for
+identity checks and apply the release-specific compatibility decision to rollback.
+
 ## Prerequisites
 
 - [tmux](https://github.com/tmux/tmux/wiki) (required)

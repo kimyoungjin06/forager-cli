@@ -128,6 +128,17 @@ async fn run_parsed_cli(cli: Cli) -> Result<()> {
         normalize_profile_name(&selected)?
     };
     maybe_warn_legacy_alias(&cli);
+    let _frontend = if matches!(
+        cli.command.as_ref(),
+        Some(Commands::Go(_))
+            | Some(Commands::Session {
+                command: cli::session::SessionCommands::Attach(_)
+            })
+    ) {
+        Some(crate::maintenance::admit_frontend()?)
+    } else {
+        None
+    };
 
     // Handle commands that don't need app data or migrations.
     // These work in read-only/sandboxed environments (e.g. Nix builds).

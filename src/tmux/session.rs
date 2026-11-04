@@ -166,6 +166,7 @@ impl Session {
     }
 
     pub fn attach(&self) -> Result<()> {
+        let _frontend = crate::maintenance::admit_frontend()?;
         if !self.exists() {
             bail!("Session does not exist: {}", self.name);
         }
@@ -181,18 +182,23 @@ impl Session {
                 // This handles cases where TMUX env var is inherited but we're
                 // not actually inside a tmux client (e.g., terminal spawned
                 // from within tmux via `open -a Terminal`).
-                let status = Command::new("tmux")
-                    .args(["attach-session", "-t", target_name])
-                    .status()?;
+                let status =
+                    super::maintenance_client::attach_status(Command::new("tmux").args([
+                        "attach-session",
+                        "-t",
+                        target_name,
+                    ]))?;
 
                 if !status.success() {
                     bail!("Failed to attach to tmux session");
                 }
             }
         } else {
-            let status = Command::new("tmux")
-                .args(["attach-session", "-t", target_name])
-                .status()?;
+            let status = super::maintenance_client::attach_status(Command::new("tmux").args([
+                "attach-session",
+                "-t",
+                target_name,
+            ]))?;
 
             if !status.success() {
                 bail!("Failed to attach to tmux session");

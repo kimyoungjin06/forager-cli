@@ -309,6 +309,11 @@ Show session status summary
 
 Diagnose Forager paths, profile env, and legacy AoE compatibility state
 
+The build section reports the selected executable's SHA256 independently of its
+version string. Linux reads the running image through `/proc/self/exe`. Other
+platforms label the current executable path as an unverified running-image
+observation. An unreadable, changed, or oversized image keeps an unknown digest.
+
 **Usage:** `forager doctor [OPTIONS]`
 
 ###### **Options:**

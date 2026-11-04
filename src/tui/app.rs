@@ -137,6 +137,9 @@ impl App {
         const DISK_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 
         loop {
+            if crate::maintenance::requested()? {
+                break;
+            }
             // Force full redraw if needed (e.g., after returning from tmux)
             if self.needs_redraw {
                 terminal.clear()?;

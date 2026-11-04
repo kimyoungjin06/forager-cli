@@ -113,6 +113,7 @@ impl TerminalSession {
     }
 
     pub fn attach(&self) -> Result<()> {
+        let _frontend = crate::maintenance::admit_frontend()?;
         if !self.exists() {
             bail!("Terminal session does not exist: {}", self.name);
         }
@@ -124,18 +125,23 @@ impl TerminalSession {
                 .status()?;
 
             if !status.success() {
-                let status = Command::new("tmux")
-                    .args(["attach-session", "-t", target_name])
-                    .status()?;
+                let status =
+                    super::maintenance_client::attach_status(Command::new("tmux").args([
+                        "attach-session",
+                        "-t",
+                        target_name,
+                    ]))?;
 
                 if !status.success() {
                     bail!("Failed to attach to terminal session");
                 }
             }
         } else {
-            let status = Command::new("tmux")
-                .args(["attach-session", "-t", target_name])
-                .status()?;
+            let status = super::maintenance_client::attach_status(Command::new("tmux").args([
+                "attach-session",
+                "-t",
+                target_name,
+            ]))?;
 
             if !status.success() {
                 bail!("Failed to attach to terminal session");
