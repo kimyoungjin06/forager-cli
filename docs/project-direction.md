@@ -245,10 +245,12 @@ The north star is being met when these internal criteria are true:
 
 ### Maintenance sequence after the 2026-11-04 core checkpoint
 
-The published source checkpoint preserves the qualified core snapshot. It is
-based on `8172701`; the newer remote-session policy commit `2c8a01f` needs a
-separate integration review. Publishing this branch does not merge it into
-`main`, issue a new version, or qualify additional executors.
+The original source checkpoint `3e01fbc` preserves the qualified core snapshot
+based on `8172701`. This branch now incorporates remote-session policy commit
+`2c8a01f` through explicit reconciliation. The four maintenance packages below
+have implementation candidates and local regression evidence, pending operator
+review. Main integration, production selection and additional executor
+qualification retain their separate decision boundaries.
 
 The task IDs below belong to the existing operator-owned continuity plan.
 This section explains their product outcomes; it is not a second execution
@@ -263,7 +265,7 @@ queue. New work stays Ondesk until its exact selection is approved for Offdesk.
 | 5 | C5.1a | Independently qualify actual local-model edits, checks, and recovery across a real context transition using the explicitly selected adapter and budget. | Estimate after adapter and scope selection |
 | 6 | C6.3-local | After C5.1a acceptance, qualify the local adapter through the complete two-project selection, execution, return, and TODO agreement cycle. | Estimate after qualification |
 
-QA.1 is the first implementation package. Each range includes verification and
+QA.1 is the first package in this implemented sequence. Each range includes verification and
 closeout; stop when the outcome is complete. Release.2 includes a read-only
 mapping of the older aggregate night task to existing evidence, so completed
 subwork is not repeated or silently accepted. Release.3's cooperative gate

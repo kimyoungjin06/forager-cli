@@ -23,6 +23,7 @@ from .rendering import sanitize_text
 from .reply_outbox import outbox_health_issue, outbox_inspection
 from .update_journal import journal_health_issue
 from .transport_health import classify_transport_issues, failure_age, TRANSPORT_FAILURE_COUNT, TRANSPORT_FAILURE_SECONDS
+from .delivery_attention import hold_summary
 
 HEALTH_SCHEMA = "remote_operator_telegram_health.v1"
 ACTION_READINESS_SCHEMA = "telegram_action_readiness.v1"
@@ -227,9 +228,11 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
         str(issue) for issue in config.get("operator_config_issues") or []
     )
     listener_state: dict[str, Any] = {}
+    listener_state_valid = True
     try:
         listener_state = load_state(args.state_file)
     except RemoteOperatorStateError:
+        listener_state_valid = False
         transport_issues.append("listener_state_unreadable")
     configured_generation = str(
         config.get("_control_generation_sha256") or ""
@@ -255,8 +258,18 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
             "status": "unreadable",
         }
         outbox_issue = "reply_outbox_unreadable"
-    if outbox_issue:
+    delivery_warnings = []
+    if outbox_issue == "reply_delivery_unconfirmed":
+        delivery_warnings.append(outbox_issue)
+    elif outbox_issue:
         transport_issues.append(outbox_issue)
+    proactive_holds = hold_summary(listener_state if listener_state_valid else None)
+    if proactive_holds["status"] == "unreadable":
+        transport_issues.append("notification_hold_ledger_unreadable")
+    elif proactive_holds["uncertain_count"]:
+        delivery_warnings.append("proactive_delivery_unconfirmed")
+    elif proactive_holds["confirmed_commit_pending_count"]:
+        delivery_warnings.append("proactive_delivery_commit_pending")
     loop_status: dict[str, Any] = {}
     if status_path.exists():
         try:
@@ -307,6 +320,7 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
     elif registry and resolvable_projects < len(registry):
         project_scan_issue = "registered_projects_partially_unresolvable"
     issues.extend(transport_issues)
+    issues.extend(delivery_warnings)
     agent_issue = agent_runtime_issue(agent_runtime_status)
     if agent_issue:
         issues.append(agent_issue)
@@ -314,7 +328,7 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
         issues.append(project_scan_issue)
     if transport_issues:
         health_status = "unhealthy"
-    elif agent_issue or project_scan_issue or transport_warnings:
+    elif agent_issue or project_scan_issue or transport_warnings or delivery_warnings:
         health_status = "degraded"
     else:
         health_status = "healthy"
@@ -324,6 +338,8 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
         project_scan_issue=project_scan_issue,
         tmux_available=tmux_available,
     )
+    delivery_issues = [issue for issue in transport_issues if issue in {"reply_delivery_pending", "last_send_transport_error"}]
+    listener_issues = [issue for issue in transport_issues if issue not in delivery_issues]
     return {
         "schema": HEALTH_SCHEMA,
         "generated_at": utc_now(),
@@ -332,6 +348,18 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
         "issues": issues,
         "transport_issues": transport_issues,
         "transport_warnings": transport_warnings,
+        "attention_domains": {
+            "listener": {
+                "status": "unhealthy" if listener_issues else "degraded" if transport_warnings else "healthy",
+                "issues": listener_issues, "warnings": transport_warnings,
+            },
+            "delivery": {
+                "status": "unknown" if reply_outbox.get("status") == "unreadable" or proactive_holds["status"] == "unreadable" else "blocked" if reply_outbox.get("pending_count") or delivery_issues else "attention" if delivery_warnings else "clear",
+                "issues": delivery_issues, "warnings": delivery_warnings, "proactive_holds": proactive_holds,
+                "reply_unconfirmed_count": reply_outbox.get("unconfirmed_count"),
+            },
+            "project_review": {"status": "not_inspected", "source": "project-scoped review surfaces"},
+        },
         "transport_failure_policy": {"minimum_consecutive_errors": TRANSPORT_FAILURE_COUNT,
             "minimum_seconds_without_success": TRANSPORT_FAILURE_SECONDS},
         "env_file": str(args.env_file),

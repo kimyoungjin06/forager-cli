@@ -3345,7 +3345,7 @@ fn remote_operator_telegram_attention_summarizes_waiting_work() -> Result<()> {
     assert_eq!(result["parsed_command"]["command"], "attention");
     let preview = result["message_preview"].as_str().expect("preview");
     assert!(
-        preview.contains("조치 필요 요약"),
+        preview.contains("프로젝트 검토·작업 요약"),
         "unexpected attention preview: {preview}"
     );
     // One decision and one review-flagged task are aggregated.
@@ -11228,7 +11228,7 @@ fn remote_operator_telegram_health_blocks_unresolvable_registered_projects() -> 
         .arg(&out)
         .output()?;
 
-    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.status.code(), Some(0));
     let result: Value = serde_json::from_slice(&fs::read(&out)?)?;
     assert_eq!(result["health_status"], "degraded");
     assert_eq!(result["registered_project_count"], 1);
@@ -11292,7 +11292,7 @@ fn remote_operator_telegram_health_degrades_when_agent_runtime_unavailable() -> 
         .output()?;
 
     assert!(
-        !output.status.success(),
+        output.status.success(),
         "stdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)

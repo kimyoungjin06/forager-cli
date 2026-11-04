@@ -8,7 +8,8 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Any, Callable
 
-from .common import RemoteOperatorTelegramError
+from .common import RemoteOperatorTelegramError, utc_now
+from .delivery_attention import new_hold
 from .config import TelegramControlRevokedError
 from .rendering import sanitize_text
 from .transport import TelegramDeliveryUnconfirmed
@@ -128,7 +129,7 @@ class NotificationCycle:
         })
         digest = self._result["selected_event_sha256"]
         if not self._dry_run:
-            self._unconfirmed_events[digest] = {"status": "delivery_inflight"}
+            self._unconfirmed_events[digest] = new_hold(selected, digest)
             try:
                 if self._persist is not None:
                     self._persist()
@@ -156,9 +157,10 @@ class NotificationCycle:
             self._result["status"] = "send_failed"
             return self._result
         if not self._dry_run and (type(message_id) is not int or message_id <= 0):
-            self._unconfirmed_events[hashlib.sha256(selected.event_key.encode()).hexdigest()] = {
-                "status": "delivery_unconfirmed",
-            }
+            self._unconfirmed_events[digest].update(
+                status="delivery_unconfirmed", observed_at=utc_now(), attempt_count=1,
+                attempt_evidence="send_returned_without_confirmed_receipt", delivery_outcome="unconfirmed",
+            )
             self._result.update({"status": "delivery_unconfirmed", "send_status": "unconfirmed"})
             selected.report.update({
                 "status": "delivery_unconfirmed", "send_status": "unconfirmed",
@@ -177,6 +179,14 @@ class NotificationCycle:
             "delivered_count": 1,
         })
         try:
+            if not self._dry_run:
+                self._unconfirmed_events[digest].update(
+                    status="delivery_confirmed_pending_commit", observed_at=utc_now(),
+                    attempt_count=1, confirmed_message_id=message_id,
+                    attempt_evidence="telegram_message_id_received", delivery_outcome="confirmed",
+                )
+                if self._persist is not None:
+                    self._persist()
             selected.on_delivered(message_id)
             if not self._dry_run:
                 self._release_hold(digest)

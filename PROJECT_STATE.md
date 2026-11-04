@@ -4,24 +4,29 @@ Updated: 2026-11-04
 
 ## Current focus
 
-This branch publishes the qualified Forager core snapshot used for the local
-maintenance cutover. The source checkpoint commit `3e01fbc` is based on
-`8172701` and preserves the exact 487 core source, test, helper, and
-configuration inputs. A publication cleanup trims EOF blank lines in five
-Python files with identical parsed ASTs. It is not a new tagged release.
-The newer `origin/main` remote-session policy commit `2c8a01f` needs a separate
-integration review before merging this snapshot into main.
+The requested maintenance sequence now has implementation candidates for
+QA.1, Release.2, Release.3 and Ops.1, with local verification completed. Results
+remain pending operator review in the existing continuity plan.
 
-The checkpoint covers constrained closeout writes, exact accepted-review
-summaries, weekly allowance checks, bounded default Tokio workers, and shared
-forager/aoe dispatch. The qualification boundary and practical limits are in the
-[v0.14.0 maintenance notes](docs/releases/v0.14.0.md).
+The branch incorporates remote main `2c8a01f` through reviewed reconciliation,
+retaining the qualified core's output, acceptance, runtime and containment
+boundaries. The original exact source checkpoint remains at `3e01fbc`.
 
-The next implementation package is **QA.1: isolate integration fixtures and
-prove cleanup after success and failure**. Continue with source integration and
-build identity, repeatable frontend replacement, and clearer review/delivery
-holds. The sequence and completion criteria are in the existing
-[project direction](docs/project-direction.md#maintenance-sequence-after-the-2026-11-04-core-checkpoint).
+- Return integration fixtures use a supervised private HOME/XDG/tmux worker
+  with failure and parent-interruption cleanup.
+- `doctor` identifies the selected executable independently of its version tag.
+- Cooperative frontend admission, reader leases and guarded cutover checks
+  preserve agent sessions and restore terminals. The reviewed candidate SHA256
+  and retained reader images stay pinned across alias changes and finalization.
+- Health separates listener faults, delivery uncertainty and project review.
+  New holds retain content-free attempt evidence; legacy evidence stays unknown.
+
+Implementation and validation details are in the
+[maintenance sequence](docs/project-direction.md#maintenance-sequence-after-the-2026-11-04-core-checkpoint),
+[coordinated replacement contract](docs/installation.md#coordinated-frontend-replacement),
+and [operator health domains](docs/remote-operator.md#health-and-review-domains).
+Production selection, main integration and local-model qualification have their
+own review and authorization boundaries.
 
 ## Plan ownership and execution boundaries
 
@@ -47,9 +52,10 @@ a new Offdesk run or authorize another service cutover.
 
 ## Validation
 
-The core snapshot was qualified with targeted core tests, strict all-target
-Clippy, formatting, and an optimized dev-release build. Publication checks run
-from an isolated source worktree with private HOME/XDG directories, a separate
-build directory, and denied provider/SSH command paths. The maintenance commit
-records the exact checks and results. No website or cross-platform CI result is
-inferred from those local checks.
+Local checks cover strict all-target Clippy, formatting, 146 Python syntax
+checks, remote policy contracts, both executable aliases, core closeout and
+review-link regressions, supervised return fixtures, frontend cutover/PTY
+regressions, and notification/health arbitration. Checks use private state and
+owned local fixtures. Cross-platform CI and a final release build remain separate
+qualification evidence. No broader local-model or scientific acceptance is
+inferred from these checks.

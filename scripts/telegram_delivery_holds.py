@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 from telegram_operator.common import append_jsonl, utc_now
+from telegram_operator.delivery_attention import hold_detail
 from contextlib import contextmanager, ExitStack
 from telegram_operator.persistence import load_state, save_state
 from telegram_operator.reply_outbox import latest_delivery_records
@@ -21,6 +22,8 @@ def snapshot(state_path, outbox_path):
     sessions = state.get("waiting_notified_by_session", {})
     if not isinstance(holds, dict) or not isinstance(sessions, dict):
         raise ValueError("invalid hold ledger")
+    if any(not isinstance(row, dict) for row in holds.values()):
+        raise ValueError("invalid notification hold record")
     if any(not isinstance(row, dict) for row in sessions.values()):
         raise ValueError("invalid session ledger")
     after = hashlib.sha256(state_path.read_bytes() + b"\0" + outbox_path.read_bytes()).hexdigest()
@@ -29,6 +32,8 @@ def snapshot(state_path, outbox_path):
     view = {
         "schema": "telegram_delivery_holds.v1", "snapshot_sha256": after,
         "proactive": sorted(holds),
+        "proactive_details": [hold_detail(key, row) for key, row in sorted(holds.items())[:256]
+                              if isinstance(row, dict)],
         "sessions": sorted(sid for sid, row in sessions.items() if row.get("delivery_unconfirmed")),
         "replies": sorted(key for key, row in replies.items()
                           if row.get("status") in {"queued", "failed"}
@@ -50,6 +55,11 @@ def release(state_path, outbox_path, lock_path, *, scope, key, expected, reason,
             raise ValueError("stale snapshot; inspect again")
         if key not in view[scope]:
             raise ValueError("exact held target not found")
+        if scope == "proactive":
+            record = state.get("notification_unconfirmed_events", {}).get(key, {})
+            if (record.get("status") == "delivery_confirmed_pending_commit"
+                    or type(record.get("confirmed_message_id")) is int and record["confirmed_message_id"] > 0):
+                raise ValueError("confirmed notification cannot be released for retry")
         audit = {"at": utc_now(), "scope": scope, "key": key,
                  "decision": "retry_verified_not_delivered",
                  "reason_sha256": hashlib.sha256(reason.encode()).hexdigest(),
@@ -81,6 +91,13 @@ def release(state_path, outbox_path, lock_path, *, scope, key, expected, reason,
                 del holds[key]
             for sid in targets:
                 row = sessions[sid]
+                identity = row.get("remote_session_identity") or {}
+                prompt = row.get("prompt_identity") or row.get("prompt_hash") or ""
+                event = f"waiting:{sid}:{prompt}:{identity.get('binding_sha256') or ''}"
+                held = holds.get(hashlib.sha256(event.encode()).hexdigest(), {})
+                if (held.get("status") == "delivery_confirmed_pending_commit"
+                        or type(held.get("confirmed_message_id")) is int and held["confirmed_message_id"] > 0):
+                    raise ValueError("confirmed notification cannot be released for retry")
                 if type(row.get("message_id")) is int and row["message_id"] > 0:
                     raise ValueError("acknowledged delivery cannot be released for retry")
                 del sessions[sid]

@@ -828,7 +828,7 @@ def render_run_confirm_message(
 
 
 def render_attention_summary_message(*, profile: Any, generated_at: Any, summary: dict[str, Any]) -> str:
-    lines = [title_with_profile("조치 필요 요약", profile)]
+    lines = [title_with_profile("프로젝트 검토·작업 요약", profile)]
     total = int(summary.get("total") or 0)
     if total == 0:
         lines.append("지금 조치가 필요한 항목이 없습니다.")
@@ -842,6 +842,8 @@ def render_attention_summary_message(*, profile: Any, generated_at: Any, summary
     )
     top = summary.get("top")
     if isinstance(top, dict):
+        if top.get("project_key"):
+            lines.append("프로젝트: " + html.escape(sanitize_text(str(top["project_key"]), max_chars=80)))
         title = sanitize_text(str(top.get("title") or ""), max_chars=60)
         lines.append(f"먼저: {html.escape(title)} → {html.escape(str(top.get('command_hint') or ''))}")
     lines.append("다음 조치: /decisions · /recovery · /tasks · /wiki")

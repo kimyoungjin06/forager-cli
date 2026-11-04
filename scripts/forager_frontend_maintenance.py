@@ -234,28 +234,38 @@ def begin(operation, reason):
         return record
 
 
-def guard(operation, paths, command):
-    if not command:
-        raise ValueError('an exact operator command is required')
+def guard(operation, paths, command, *, candidate, expected_candidate_sha256):
+    if not command or not candidate or not isinstance(expected_candidate_sha256, str) or not re.fullmatch('[a-f0-9]{64}', expected_candidate_sha256):
+        raise ValueError('an exact operator command and reviewed candidate SHA256 are required')
     with store() as root, exclusive_readers(root):
         record = load(root)
         bound(record, operation)
         if record['phase'] != 'prepared':
             raise ValueError('an attempted command cannot be automatically replayed')
         pins = pin_images(paths)
-        before = inventory(pins)
+        selected_candidate = pin_images([candidate])[0]
+        if selected_candidate['sha256'] != expected_candidate_sha256:
+            raise ValueError('candidate does not match the reviewed executable SHA256')
+        before = inventory([*pins, selected_candidate])
         if not quiescent(before):
             return dict(status='held_before_command', before=before, command_executed=False)
         record.update(phase='executing', started_at=now(), selected_readers=pins, before=before,
+                      candidate=selected_candidate,
                       command_sha256=hashlib.sha256(json.dumps(command).encode()).hexdigest())
         write(root, record)
         try:
             # Only this explicit operator command runs; no session input or service action is inferred.
             child = subprocess.Popen(command, stdout=sys.stderr, stderr=sys.stderr, close_fds=True)
             code = child.wait()
-            after = inventory(pins)
+            after = inventory([*pins, selected_candidate])
+            try:
+                recheck_images([selected_candidate])
+                candidate_verified = True
+            except (OSError, ValueError):
+                candidate_verified = False
             record.update(command_exit_code=code, after=after, finished_at=now(),
-                          phase='verified' if code == 0 and quiescent(after) else 'needs_attention')
+                          candidate_verified=candidate_verified,
+                          phase='verified' if code == 0 and quiescent(after) and candidate_verified else 'needs_attention')
         except BaseException:
             record.update(phase='needs_attention', command_outcome='unknown', observed_at=now())
             write(root, record)
@@ -271,8 +281,10 @@ def verify(operation):
         if record.get('command_exit_code') != 0 or record['phase'] not in ['verified', 'needs_attention']:
             raise ValueError('command outcome requires operator review; do not replay')
         pins = recheck_images(record['selected_readers'])
-        observed = inventory(pins)
+        recheck_images([record['candidate']])
+        observed = inventory([*pins, record['candidate']])
         record.update(after=observed, observed_at=now(),
+                      candidate_verified=True,
                       phase='verified' if quiescent(observed) else 'needs_attention')
         write(root, record)
         return record
@@ -295,7 +307,8 @@ def finish(operation, cancel=False, expected=None, reviewed=False, reason=''):
                 if record['phase'] not in ['verified', 'finished']:
                     raise ValueError('cutover verification is incomplete')
                 pins = recheck_images(record['selected_readers'])
-                if not quiescent(inventory(pins)):
+                recheck_images([record['candidate']])
+                if not quiescent(inventory([*pins, record['candidate']])):
                     raise ValueError('a retained reader reopened or changed before finish')
                 record['phase'] = 'finished'
             record['closed_at'] = now()
@@ -339,6 +352,8 @@ def main():
     parser.add_argument('--operation-id')
     parser.add_argument('--reason', default='')
     parser.add_argument('--reader-executable', action='append', default=[])
+    parser.add_argument('--candidate-executable')
+    parser.add_argument('--expected-candidate-sha256')
     parser.add_argument('--expected-sha256')
     parser.add_argument('--confirm-state-reviewed', action='store_true')
     tokens = sys.argv[1:]
@@ -353,7 +368,9 @@ def main():
         elif args.action == 'begin':
             result = begin(args.operation_id or '', args.reason)
         elif args.action == 'guard':
-            result = guard(args.operation_id, args.reader_executable, command)
+            result = guard(args.operation_id, args.reader_executable, command,
+                           candidate=args.candidate_executable,
+                           expected_candidate_sha256=args.expected_candidate_sha256)
         elif args.action == 'verify':
             result = verify(args.operation_id)
         else:

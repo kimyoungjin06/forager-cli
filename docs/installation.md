@@ -2,6 +2,10 @@
 
 ## Coordinated frontend replacement
 
+Cooperative admission applies to builds containing this feature. The first
+transition from older builds uses the reviewed legacy-reader refresh and final
+inventory; subsequent transitions can also drain the instrumented frontends.
+
 For a reviewed local cutover, `scripts/forager_frontend_maintenance.py` supplies
 `begin`, `status`, `guard`, `verify`, `finish`, and `cancel`. Begin records an
 operation ID and requests cooperative frontend exit. New TUI, go, and attach
@@ -11,6 +15,9 @@ its session and server retain sessions after detachment; agent input is untouche
 Run the exact release-specific operator command under `guard`, after the
 approved stopped-writer, backup, queue/marker compatibility, and delivery-hold
 preflight. Declare every retained reader executable with `--reader-executable`.
+Bind the immutable selected payload through `--candidate-executable` and its
+reviewed `--expected-candidate-sha256`. Its original identity and bytes are
+checked before and after the command and again when the gate is finished.
 The guard retains original image identities across selector changes, checks
 before and after that command, and rechecks at finish. A late old reader keeps
 admission held; `verify` inspects again without rerunning the cutover command.

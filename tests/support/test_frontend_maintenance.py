@@ -1,5 +1,6 @@
 import fcntl
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -21,10 +22,16 @@ spec.loader.exec_module(maintenance)
 
 
 class Fixture:
+    def guard(self, operation, paths, command, *, candidate=None):
+        selected = candidate or self.old
+        return maintenance.guard(operation, paths, command, candidate=selected,
+                                 expected_candidate_sha256=hashlib.sha256(selected.read_bytes()).hexdigest())
+
     def setUp(self):
         temp = tempfile.TemporaryDirectory(prefix='fg-mnt-', dir='/tmp')
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name).resolve()
+        (self.root / 'tmux').mkdir(mode=0o700)
         env = dict(HOME=str(self.root / 'home'), XDG_DATA_HOME=str(self.root / 'data'),
                    XDG_CONFIG_HOME=str(self.root / 'config'), XDG_STATE_HOME=str(self.root / 'state'),
                    XDG_CACHE_HOME=str(self.root / 'cache'), TMUX_TMPDIR=str(self.root / 'tmux'), TERM='xterm-256color')
@@ -48,12 +55,37 @@ class Fixture:
 
 @unittest.skipUnless(sys.platform.startswith('linux'), 'legacy inventory is Linux only')
 class StateTests(Fixture, unittest.TestCase):
+    def test_changed_candidate_is_held_without_automatic_restore_or_replay(self):
+        maintenance.begin('candidate', 'fixture')
+        original = self.old.read_bytes()
+        program = 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); p.write_bytes(p.read_bytes()+b"changed")'
+        result = self.guard('candidate', [self.old], [sys.executable, '-c', program, str(self.old)])
+        self.assertEqual(result['command_exit_code'], 0)
+        self.assertFalse(result['candidate_verified'])
+        self.assertEqual(result['phase'], 'needs_attention')
+        self.assertEqual(self.old.read_bytes(), original + b'changed')
+        with self.assertRaises(ValueError):
+            maintenance.verify('candidate')
+        self.old.write_bytes(original)
+        self.assertTrue(maintenance.verify('candidate')['candidate_verified'])
+        maintenance.finish('candidate')
+
+    def test_wrong_reviewed_candidate_digest_prevents_the_operator_command(self):
+        maintenance.begin('wrong-candidate', 'fixture')
+        output = self.root / 'must-not-exist'
+        with self.assertRaises(ValueError):
+            maintenance.guard('wrong-candidate', [self.old], ['touch', str(output)],
+                              candidate=self.old, expected_candidate_sha256='0' * 64)
+        self.assertFalse(output.exists())
+        self.assertEqual(maintenance.status()['phase'], 'prepared')
+
     def test_status_remains_available_while_the_guarded_command_is_running(self):
         maintenance.begin('status', 'fixture')
         ready, done = self.root / 'ready', self.root / 'done'
         program = "import pathlib,sys,time; r,d=map(pathlib.Path,sys.argv[1:]); r.touch(); end=time.monotonic()+5\nwhile not d.exists() and time.monotonic()<end: time.sleep(.01)\n"
         proc = subprocess.Popen([sys.executable, str(SCRIPT), 'guard', '--operation-id', 'status',
-                                 '--reader-executable', str(self.old), '--', sys.executable, '-c',
+                                 '--reader-executable', str(self.old), '--candidate-executable', str(self.old),
+                                 '--expected-candidate-sha256', hashlib.sha256(self.old.read_bytes()).hexdigest(), '--', sys.executable, '-c',
                                  program, str(ready), str(done)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
             end = time.monotonic() + 5
@@ -94,7 +126,7 @@ class StateTests(Fixture, unittest.TestCase):
         thread.start()
         program = "import pathlib,shutil,sys,time; s,b,r,a,done=map(pathlib.Path,sys.argv[1:]); shutil.copyfile(s,b); r.touch(); end=time.monotonic()+5\nwhile not done.exists() and time.monotonic()<end: time.sleep(.01)\na.write_text('new selected image')\n"
         try:
-            result = maintenance.guard('window', [self.old], [sys.executable, '-c', program,
+            result = self.guard('window', [self.old], [sys.executable, '-c', program,
                                        str(state), str(backup), str(ready), str(alias), str(resumed)])
         finally:
             thread.join(timeout=6)
@@ -103,7 +135,7 @@ class StateTests(Fixture, unittest.TestCase):
         self.assertEqual(state.read_bytes(), backup.read_bytes())
         self.assertIsNone(agent.poll())
         with self.assertRaises(ValueError):
-            maintenance.guard('window', [self.old], ['false'])
+            self.guard('window', [self.old], ['false'])
         workers[0].terminate()
         workers[0].wait(timeout=5)
         self.assertEqual(maintenance.verify('window')['phase'], 'verified')
@@ -115,7 +147,7 @@ class StateTests(Fixture, unittest.TestCase):
 
     def test_a_reopen_after_guard_is_rechecked_before_finish(self):
         maintenance.begin('late', 'fixture')
-        self.assertEqual(maintenance.guard('late', [self.old], ['true'])['phase'], 'verified')
+        self.assertEqual(self.guard('late', [self.old], ['true'])['phase'], 'verified')
         old = self.spawn_old()
         with self.assertRaises(ValueError):
             maintenance.finish('late')
@@ -131,8 +163,8 @@ class StateTests(Fixture, unittest.TestCase):
         replacement.chmod(0o700)
         maintenance.begin('alias', 'fixture')
         program = 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); p.unlink(); p.symlink_to(sys.argv[2])'
-        self.assertEqual(maintenance.guard('alias', [alias], [sys.executable, '-c', program,
-                         str(alias), str(replacement)])['phase'], 'verified')
+        self.assertEqual(self.guard('alias', [alias], [sys.executable, '-c', program,
+                         str(alias), str(replacement)], candidate=replacement)['phase'], 'verified')
         self.assertEqual(alias.resolve(), replacement)
         self.assertEqual(maintenance.verify('alias')['phase'], 'verified')
         maintenance.finish('alias')
@@ -141,7 +173,7 @@ class StateTests(Fixture, unittest.TestCase):
         state = self.root / 'offset'
         state.write_bytes(b'unchanged')
         maintenance.begin('failed', 'fixture')
-        result = maintenance.guard('failed', [self.old], ['false'])
+        result = self.guard('failed', [self.old], ['false'])
         self.assertEqual(result['phase'], 'needs_attention')
         with self.assertRaises(ValueError):
             maintenance.verify('failed')
@@ -172,13 +204,46 @@ class StateTests(Fixture, unittest.TestCase):
                 raise PermissionError('fixture unavailable reader')
             return actual_stat(path, *args, **kwargs)
         with patch.object(Path, 'stat', deny):
-            result = maintenance.guard('unreadable', [self.old], ['false'])
+            result = self.guard('unreadable', [self.old], ['false'])
         self.assertFalse(result['command_executed'])
         self.assertIn(old.pid, result['before']['unreadable_live_processes'])
 
 
 @unittest.skipUnless(os.name == 'posix' and shutil.which('tmux') and os.environ.get('FORAGER_MAINTENANCE_TEST_BINARY'), 'requires compiled frontend and tmux')
 class FrontendTests(Fixture, unittest.TestCase):
+    def test_idle_tui_exits_through_terminal_cleanup(self):
+        app = self.root / 'config/forager' if sys.platform.startswith('linux') else self.root / 'home/.forager'
+        app.mkdir(parents=True)
+        (app / '.schema_version').write_text('11')
+        (app / 'config.toml').write_text('[updates]\ncheck_enabled = false\n[session]\nauto_orchestrator = false\n')
+        tools = self.root / 'bin'
+        tools.mkdir()
+        cli = tools / 'claude'
+        cli.write_text('#!/bin/sh\nif [ "$1" = "--version" ]; then echo "fixture 1.0"; exit 0; fi\nexit 97\n')
+        cli.chmod(0o700)
+        env = {**os.environ, 'PATH': str(tools) + ':' + os.environ['PATH']}
+        master, slave = pty.openpty()
+        self.addCleanup(os.close, master)
+        self.addCleanup(os.close, slave)
+        before = termios.tcgetattr(slave)
+        def terminal():
+            os.setsid()
+            fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+        proc = subprocess.Popen([os.environ['FORAGER_MAINTENANCE_TEST_BINARY']], env=env,
+                                stdin=slave, stdout=slave, stderr=slave, preexec_fn=terminal)
+        self.addCleanup(lambda: proc.poll() is None and (proc.terminate(), proc.wait(timeout=5)))
+        end = time.monotonic() + 10
+        while time.monotonic() < end and proc.poll() is None:
+            if not termios.tcgetattr(slave)[3] & termios.ICANON:
+                break
+            time.sleep(.05)
+        else:
+            self.fail('TUI did not enter raw terminal mode')
+        maintenance.begin('idle-tui', 'fixture')
+        self.assertEqual(proc.wait(timeout=10), 0)
+        self.assertEqual(termios.tcgetattr(slave), before)
+        maintenance.finish('idle-tui', cancel=True)
+
     def test_unsafe_gate_symlink_blocks_startup_without_touching_external_file(self):
         maintenance.begin('symlink', 'fixture')
         gate = maintenance.directory(False) / maintenance.GATE
@@ -216,12 +281,13 @@ class FrontendTests(Fixture, unittest.TestCase):
 
     def attached_case(self, unsafe_policy=None):
         tmux_root = self.root / 'tmux'
-        tmux_root.mkdir(mode=0o700)
+        tmux_root.mkdir(mode=0o700, exist_ok=True)
         subprocess.run(['tmux', '-f', '/dev/null', 'new-session', '-d', '-s',
                         'forager_agent_abcdefgh', 'sleep 60'], check=True)
         self.addCleanup(lambda: subprocess.run(['tmux', 'kill-server'], capture_output=True))
         session = 'forager_agent_abcdefgh'
         pid = subprocess.check_output(['tmux', 'display-message', '-p', '-t', session, '#{pane_pid}'])
+        identity = maintenance.process_identity(int(pid))[1] if sys.platform.startswith('linux') else None
         app = self.root / 'config/forager' if sys.platform.startswith('linux') else self.root / 'home/.forager'
         profile = app / 'profiles/default'
         profile.mkdir(parents=True)
@@ -260,6 +326,8 @@ class FrontendTests(Fixture, unittest.TestCase):
             subprocess.run(['tmux', 'detach-client', '-s', session], check=True)
         self.assertEqual(proc.wait(timeout=10), 0)
         self.assertEqual(subprocess.check_output(['tmux', 'display-message', '-p', '-t', session, '#{pane_pid}']), pid)
+        if identity is not None:
+            self.assertEqual(maintenance.process_identity(int(pid))[1], identity)
         self.assertEqual(termios.tcgetattr(slave), before)
         if not unsafe_policy:
             maintenance.finish('attached', cancel=True)

@@ -6089,7 +6089,7 @@ def main() -> int:
             config = resolve_telegram_config(args.env_file, required=False)
             result = listener_health(args, config)
             emit_result(args, result)
-            return 0 if result.get("health_status") == "healthy" else 1
+            return 0 if result.get("health_status") in {"healthy", "degraded"} else 1
         if args.dry_run:
             config = resolve_telegram_config(args.env_file, required=False)
             if args.replay_update_file:

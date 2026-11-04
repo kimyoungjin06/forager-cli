@@ -1,5 +1,22 @@
 # Remote Operator
 
+## Health and review domains
+
+The health report separates `attention_domains.listener`, `.delivery`, and
+`.project_review`. Project review is inspected through its scoped review surface;
+the listener probe reports it as uninspected. Delivery uncertainty and pending
+bookkeeping remain visible while healthy polling can continue. The health CLI
+returns exit 0 for `healthy` and `degraded`; genuine unhealthy receiver or delivery
+pipeline failures retain a nonzero exit. Action-readiness gates remain explicit
+when a model or project scan is unavailable.
+
+New proactive delivery holds record a safe event hash, source/event kind, UTC
+observation time and adapter-call attempt evidence. A reservation keeps an
+unknown attempt count until the send call is observed. Message bodies and button
+payloads are excluded. Existing digest-only records retain unknown times and
+attempts. A confirmed Telegram receipt survives failed local bookkeeping and
+prevents release for retry through either notification or session hold paths.
+
 The Remote Operator layer lets an operator supervise Offdesk work from a
 remote surface such as Telegram, Slack, a mobile app, or a small web console.
 It is not a remote shell. It is a transport-agnostic control surface for
