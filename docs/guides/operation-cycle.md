@@ -1,5 +1,9 @@
 # Operation Cycle Guide
 
+This guide describes interface contracts and versioned qualification examples.
+Those examples preserve their recorded test state. Use current local `status`,
+`doctor`, and operator deployment records to identify the selected runtime.
+
 ## Inspecting a stopped task's runtime
 
 Use `forager -p <profile> offdesk task-recovery <exact-task-id> --json`
@@ -57,8 +61,8 @@ wiki promotion.
 
 When several reviewed tasks and fixed routines are grouped into one unattended
 window, use the immutable manifest and receipt model described in
-the [bounded-shift contract](../../src/offdesk/shift.rs). The current timer script is a
-prototype until it consumes that contract.
+the [bounded-shift contract](../../src/offdesk/shift.rs). Review the exact selected
+manifest before arming a window; timer execution consumes its bound routine claims.
 
 ## Stage Contract
 
@@ -219,7 +223,7 @@ Plans are limited to 1 MiB and 1024 tasks; an empty task list is valid.
 Existing Markdown plans are not automatically converted. Do not create a
 parallel plan merely to use this command. Automatic ownership discovery remains
 work in the existing operator-owned continuity plan. See
-[plan ownership](../project-direction.md#plans-and-meaningful-work).
+[plan ownership](../../PROJECT_STATE.md#plan-ownership-and-execution-boundaries).
 
 ### Explicit adoption of an existing TODO
 

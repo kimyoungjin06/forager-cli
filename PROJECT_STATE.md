@@ -5,8 +5,10 @@ Updated: 2026-11-04
 ## Current focus
 
 This branch publishes the qualified Forager core snapshot used for the local
-maintenance cutover. It is based on `8172701`, preserving the exact 487 core
-source, test, helper, and configuration inputs. It is not a new tagged release.
+maintenance cutover. The source checkpoint commit `3e01fbc` is based on
+`8172701` and preserves the exact 487 core source, test, helper, and
+configuration inputs. A publication cleanup trims EOF blank lines in five
+Python files with identical parsed ASTs. It is not a new tagged release.
 The newer `origin/main` remote-session policy commit `2c8a01f` needs a separate
 integration review before merging this snapshot into main.
 

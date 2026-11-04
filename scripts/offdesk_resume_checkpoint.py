@@ -405,4 +405,3 @@ def inspect_publication(root, contract_path, contract_pin, receipt_path, receipt
         return {"byte_binding_verified": True, "accounting": costs, "attempts": measured,
                 "window_start": start, "boot_id": value["boot_id"], "measurement_scope": PUBLICATION_SCOPE,
                 "resume_authorized": False, "scientific_acceptance": False}
-

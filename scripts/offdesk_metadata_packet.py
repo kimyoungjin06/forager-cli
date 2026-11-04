@@ -160,4 +160,3 @@ def verify_packet(payload_raw, provenance_raw, manifest, policy_raw):
                  and gate.encode(manifest) == gate.encode(expected_manifest),
                  "packet interpretation differs from source and policy")
     return reconstructed
-
