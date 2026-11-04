@@ -276,6 +276,22 @@ does not establish arbitrary local-model coding, context recovery, or scientific
 acceptance. Plan preparation does not authorize a new model call, deployment,
 event replay, or modification of another project's accepted records.
 
+During native qualification, give the model time to finish its response. Actual
+reasoning, answer text and tool-argument generation keep the response active
+even when no command has completed. Response activity has its own clock and
+does not increment tool or verified-work counts. Metadata, transport heartbeats,
+empty deltas and repeated native message events do not count as generation.
+The default inactivity interval remains 180 seconds, measured from the latest
+response activity or completed command. Selected phase/window deadlines and
+active-command timeouts remain separate bounds.
+
+Native evidence now records the `response_completion.v1` supervision policy,
+activity state and response timing alongside tool timing. The inactivity stop
+reason changes from `no_tool_progress` to `response_inactive`; consumers matching
+the old reason must handle the new value. Completing a response alone does not
+pass source-edit, check, recovery or acceptance gates. Production runtime
+selection and real-model qualification still need their own evidence.
+
 The current implementation should prioritize:
 
 - Offdesk closeout and review closure;

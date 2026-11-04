@@ -4,6 +4,16 @@ Updated: 2026-11-04
 
 ## Current focus
 
+Native supervision now prioritizes completing a response. Nonempty reasoning,
+answer text and tool-argument generation can outlast the tool-idle interval
+without being counted as completed work. Silence still has a 180-second default
+inactivity bound; selected phase/window deadlines, command timeouts and tool
+budgets remain in force. Heartbeats, metadata, empty deltas and native message
+replays do not extend the response clock. The inactivity reason changes from
+`no_tool_progress` to `response_inactive`, with separate response/tool timing in
+status and result evidence. This source change has local fixture verification;
+it does not repeat a model trial, qualify C5.1a or replace an installed runtime.
+
 The requested maintenance sequence now has implementation candidates for
 QA.1, Release.2, Release.3 and Ops.1, with local verification completed. Results
 remain pending operator review in the existing continuity plan.

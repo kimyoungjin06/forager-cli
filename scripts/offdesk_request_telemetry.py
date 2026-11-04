@@ -109,6 +109,12 @@ class RequestTelemetry:
         self.last_compaction_at = self.last_compaction_monotonic = None
         self.seen_tools, self.seen_notices = set(), set()
         self.metadata_fallback_observed = False
+        self.last_response_progress = None
+
+    def response_progress(self):
+        """Semantic generation activity, independent of capped detail logging."""
+        with self.lock:
+            return None if self.last_response_progress is None else dict(self.last_response_progress)
 
     def record(self, event: str, **fields):
         with self.lock:
@@ -173,6 +179,10 @@ class RequestTelemetry:
                     "seconds_since_compaction_notice": None if self.last_compaction_monotonic is None else tick - self.last_compaction_monotonic},
                 "post_compaction_inference_requests": post_compaction,
                 "metadata_fallback_observed": self.metadata_fallback_observed,
+                "response_progress": (None if self.last_response_progress is None else
+                    {"kind": self.last_response_progress["kind"],
+                     "observed_at": self.last_response_progress["observed_at"],
+                     "seconds_since_progress": max(0, tick - self.last_response_progress["monotonic"])}),
                 "local_observation_only": True, "backend_cancellation_acknowledged": None, "gpu_load_observed": False}
             snapshot = {"schema": "offdesk_native_stop_snapshot.v1", "native_stop": self.native_stop,
                 "accounting_before_stop_event": {"events_written": self.events, "events_dropped": self.dropped,
@@ -453,6 +463,7 @@ class RequestTelemetry:
 
     def frame(self, row, raw):
         raw = raw.strip()
+        progress_kind = None
         if raw.startswith(b"data:"):
             raw = raw[5:].strip()
         if raw == b"[DONE]":
@@ -470,16 +481,37 @@ class RequestTelemetry:
             delta = delta if isinstance(delta, dict) else {}
             kind = ("terminal" if packet.get("done") is True or packet.get("type") == "response.completed"
                     or choice.get("finish_reason") is not None else
-                    "reasoning" if delta.get("reasoning_content") or delta.get("thinking")
+                    "reasoning" if delta.get("reasoning_content") or delta.get("thinking") or packet.get("thinking")
                     or packet.get("type") in ("response.reasoning_summary_text.delta", "response.reasoning_text.delta") else
-                    "tool" if delta.get("tool_calls") else
-                    "content" if delta.get("content") or packet.get("type") == "response.output_text.delta" else "other")
+                    "tool" if delta.get("tool_calls") or packet.get("type") == "response.function_call_arguments.delta" else
+                    "content" if delta.get("content") or packet.get("response")
+                    or packet.get("type") == "response.output_text.delta" else "other")
+            text = lambda value: isinstance(value, str) and bool(value.strip())
+            if kind != "terminal":
+                if any(text(value) for value in (delta.get("reasoning_content"), delta.get("thinking"), packet.get("thinking"))):
+                    progress_kind = "reasoning"
+                elif any(text(value) for value in (delta.get("content"), packet.get("response"))):
+                    progress_kind = "content"
+                elif text(packet.get("delta")) and isinstance(packet.get("type"), str):
+                    progress_kind = {"response.reasoning_summary_text.delta": "reasoning",
+                        "response.reasoning_text.delta": "reasoning", "response.output_text.delta": "content",
+                        "response.function_call_arguments.delta": "tool"}.get(packet.get("type"))
+                if progress_kind is None and isinstance(delta.get("tool_calls"), list):
+                    for call in delta["tool_calls"]:
+                        function = call.get("function") if isinstance(call, dict) else None
+                        if isinstance(function, dict) and any(text(function.get(key)) for key in ("name", "arguments")):
+                            progress_kind = "tool"
+                            break
         with self.lock:
             row["frames"] += 1
             row["terminal_frame_observed"] |= kind == "terminal"
             counts = row.setdefault("frame_kind_counts", {})
             counts[kind] = counts.get(kind, 0) + 1
             row.update(last_frame_kind=kind, last_frame_at=time.time())
+            if (progress_kind is not None and row.get("method") == "POST" and row.get("path") in INFERENCE
+                    and type(row.get("status")) is int and 200 <= row["status"] < 300):
+                self.last_response_progress = {"monotonic": time.monotonic(), "observed_at": time.time(),
+                                               "kind": progress_kind}
             self.record("stream_frame", request_id=row["request_id"], kind=kind)
 
     def __exit__(self, *args):

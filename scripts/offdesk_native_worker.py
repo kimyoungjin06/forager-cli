@@ -790,7 +790,8 @@ def supervise(argv: list[str], prompt: str, root: Path, output: Path, deadline: 
         selected_env = dict(env, CODEX_OSS_BASE_URL=probe.base_url)
         result = _supervise_native(argv, prompt, root, output, deadline, guard, selected_env,
                                    native_event_observer=probe.native_event,
-                                   native_stop_observer=probe.observe_stop, **options)
+                                   native_stop_observer=probe.observe_stop,
+                                   response_progress_observer=probe.response_progress, **options)
     result["request_telemetry"] = {"summary": str(evidence / "summary.json"),
                                    "events": str(evidence / "events.jsonl"),
                                    "control_events": str(evidence / "control-events.jsonl"),
@@ -806,7 +807,8 @@ def supervise(argv: list[str], prompt: str, root: Path, output: Path, deadline: 
 def _supervise_native(argv: list[str], prompt: str, root: Path, output: Path, deadline: float,
                       guard: ProgressGuard, env: dict, idle_seconds: float = 180,
                       command_seconds: float = 900, progress_observer=None, source_observer=None,
-                      native_event_observer=None, native_stop_observer=None) -> dict:
+                      native_event_observer=None, native_stop_observer=None,
+                      response_progress_observer=None) -> dict:
     if any(not math.isfinite(v) or v <= 0 for v in (idle_seconds, command_seconds)):
         raise ValueError("Positive finite idle and active-command timeouts required")
     if output.exists() or not math.isfinite(deadline) or deadline <= time.time():
@@ -824,15 +826,21 @@ def _supervise_native(argv: list[str], prompt: str, root: Path, output: Path, de
     logs = {name: (output / (name + ".log")).open("wb") for name in buffers}
     reason = None
     stop_observed = False
+    stop_supervision = None
 
     def observe_stop_once():
-        nonlocal stop_observed
-        if not stop_observed and native_stop_observer is not None:
+        nonlocal stop_observed, stop_supervision
+        if not stop_observed:
             stop_observed = True
-            with contextlib.suppress(Exception):
-                native_stop_observer(reason)
+            if stop_supervision is None:
+                stop_supervision = supervision_snapshot()
+            if native_stop_observer is not None:
+                with contextlib.suppress(Exception):
+                    native_stop_observer(reason)
 
     last_progress = time.monotonic()
+    last_response = None
+    seen_response_updates = set()
     last_tool_completed_at = None
     completed_turn = False
     turn_finished_at = None
@@ -840,6 +848,26 @@ def _supervise_native(argv: list[str], prompt: str, root: Path, output: Path, de
     logged_bytes = 0
     prompt_bytes = prompt.encode()
     prompt_sent = 0
+
+    def supervision_snapshot():
+        nonlocal last_response
+        if response_progress_observer is not None:
+            observed = response_progress_observer()
+            if observed is not None and (last_response is None or observed["monotonic"] > last_response["monotonic"]):
+                last_response = observed
+        now = time.monotonic()
+        response_age = None if last_response is None else max(0, now - last_response["monotonic"])
+        activity_age = max(0, now - max(last_progress, last_response["monotonic"] if last_response else last_progress))
+        state = ("turn_completed" if completed_turn else "command_in_flight" if active_commands else
+                 "response_inactive" if activity_age >= idle_seconds else
+                 "recent_response_progress" if response_age is not None and response_age < idle_seconds else
+                 "awaiting_response")
+        return {"policy": "response_completion.v1", "observed_at": time.time(), "activity_state": state,
+                "response_idle_seconds": idle_seconds, "seconds_without_response_progress": response_age,
+                "seconds_without_activity": activity_age,
+                "last_response_progress_at": None if last_response is None else last_response["observed_at"],
+                "last_response_kind": None if last_response is None else last_response["kind"]}
+
     previous_term = signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(128 + signum))
     try:
         if prompt_bytes:
@@ -858,9 +886,10 @@ def _supervise_native(argv: list[str], prompt: str, root: Path, output: Path, de
             if turn_finished_at is not None and now - turn_finished_at >= 5:
                 reason = "worker_did_not_exit"
                 break
+            supervision = supervision_snapshot()
             next_timeout = (turn_finished_at + 5 if turn_finished_at is not None
                             else min(started + command_seconds for started in active_commands.values())
-                            if active_commands else last_progress + idle_seconds)
+                            if active_commands else now + max(0, idle_seconds - supervision["seconds_without_activity"]))
             wait = min(1, max(0, deadline - time.time()), max(0, next_timeout - now))
             for key, _ in selector.select(wait):
                 name = key.data
@@ -907,6 +936,16 @@ def _supervise_native(argv: list[str], prompt: str, root: Path, output: Path, de
                     if native_event_observer is not None:
                         native_event_observer(event)
                     item = event.get("item", {})
+                    text = item.get("text")
+                    if (event["type"] in ("item.updated", "item.completed")
+                            and item.get("type") in ("reasoning", "agent_message")
+                            and isinstance(text, str) and text.strip()):
+                        identity = (str(item.get("id", "")), item["type"],
+                                    hashlib.sha256(text.encode(errors="replace")).digest())
+                        if identity not in seen_response_updates:
+                            seen_response_updates.add(identity)
+                            last_response = {"monotonic": time.monotonic(), "observed_at": time.time(),
+                                             "kind": "reasoning" if item["type"] == "reasoning" else "content"}
                     new_completion = (event.get("type") == "item.completed"
                                       and item.get("type") == "command_execution"
                                       and item.get("id") not in guard.seen_items)
@@ -939,15 +978,20 @@ def _supervise_native(argv: list[str], prompt: str, root: Path, output: Path, de
                             reason = "native_turn_completed_with_active_commands"
             # Drain queued events before declaring idle. Slow scheduling or
             # local log I/O must not discard already-available tool completion.
+            # Streaming generation can outlast the tool-idle interval. Its
+            # activity never increments useful-work counters or extends deadline.
+            supervision = supervision_snapshot()
             if (reason is None and not completed_turn and not active_commands
-                    and time.monotonic() - last_progress >= idle_seconds):
-                reason = "no_tool_progress"
+                    and supervision["seconds_without_activity"] >= idle_seconds):
+                reason = "response_inactive"
+                stop_supervision = supervision
             write_json(output / "status.json", {"pid": process.pid, "tool_calls": guard.calls,
                                                "started_tool_calls": len(guard.started_items),
                                                "completed_tool_calls": len(guard.seen_items),
                                                "in_flight_tool_calls": len(guard.started_items - guard.seen_items),
                                                "last_tool_completed_at": last_tool_completed_at,
                                                "seconds_without_tool_progress": time.monotonic() - last_progress,
+                                               "supervision": supervision,
                                                "stop_reason": reason, "deadline": deadline})
         if reason:
             observe_stop_once()
@@ -985,6 +1029,7 @@ def _supervise_native(argv: list[str], prompt: str, root: Path, output: Path, de
               "in_flight_tool_calls": len(guard.started_items - guard.seen_items),
               "last_tool_completed_at": last_tool_completed_at,
               "seconds_without_tool_progress": time.monotonic() - last_progress,
+              "supervision": stop_supervision,
               "failed_check_counts": {hashlib.sha256(json.dumps(check).encode()).hexdigest(): count
                                       for check, count in guard.failed_checks.items()},
               "failed_check_source_generation": guard.source_generation,
@@ -993,6 +1038,7 @@ def _supervise_native(argv: list[str], prompt: str, root: Path, output: Path, de
     write_json(output / "status.json", {"pid": process.pid, "tool_calls": guard.calls,
                "started_tool_calls": len(guard.started_items), "completed_tool_calls": len(guard.seen_items),
                "in_flight_tool_calls": len(guard.started_items - guard.seen_items),
+               "supervision": result["supervision"],
                "stop_reason": reason, "deadline": deadline, "terminal": True})
     write_json(output / "result.json", result)
     if reason:

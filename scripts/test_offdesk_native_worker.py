@@ -676,9 +676,49 @@ class LifecycleTests(unittest.TestCase):
         result=self.run_fake(code);self.assertEqual(result['stop_reason'],'tool_protocol_parse_error')
         self.assertTrue((self.root/'run/council-request.json').exists())
 
-    def test_messages_only_idle_loop_stops(self):
+    def test_replayed_messages_do_not_keep_a_response_alive(self):
         code="import sys,json,time;sys.stdin.read();\nfor i in range(100): print(json.dumps({'type':'item.completed','item':{'type':'agent_message','text':'working'}}),flush=True);time.sleep(.02)"
-        self.assertEqual(self.run_fake(code,idle=.12)['stop_reason'],'no_tool_progress')
+        self.assertEqual(self.run_fake(code,idle=.12)['stop_reason'],'response_inactive')
+
+    def test_native_generation_can_finish_an_answer_without_tools_after_idle_interval(self):
+        code = ("import sys,json,time;sys.stdin.read();\nfor i in range(12):\n"
+                " print(json.dumps({'type':'item.updated','item':{'id':'thought','type':'reasoning','text':str(i)}}),flush=True);time.sleep(.03)\n"
+                "print(json.dumps({'type':'item.completed','item':{'id':'answer','type':'agent_message','text':'answer complete'}}),flush=True)\n"
+                "print(json.dumps({'type':'turn.completed'}),flush=True)")
+        result = self.run_fake(code, idle=.12)
+        self.assertIsNone(result['stop_reason'])
+        self.assertTrue(result['turn_completed'])
+        self.assertEqual(result['completed_tool_calls'], 0)
+        self.assertGreater(result['seconds_without_tool_progress'], .12)
+        self.assertEqual(result['supervision']['last_response_kind'], 'content')
+        self.assertEqual(result['supervision']['activity_state'], 'turn_completed')
+
+    def test_native_generation_can_reach_tools_after_idle_interval(self):
+        code = ("import sys,json,time;sys.stdin.read();\nfor i in range(12):\n"
+                " print(json.dumps({'type':'item.updated','item':{'id':'thought','type':'reasoning','text':str(i)}}),flush=True);time.sleep(.03)\n"
+                f"print(json.dumps({command_event('after-thinking')!r}),flush=True)\n"
+                "print(json.dumps({'type':'turn.completed'}),flush=True)")
+        result = self.run_fake(code, idle=.12)
+        self.assertIsNone(result['stop_reason'])
+        self.assertEqual(result['completed_tool_calls'], 1)
+
+    def test_native_response_activity_never_extends_the_selected_deadline(self):
+        code = ("import sys,json,time;sys.stdin.read();\nfor i in range(200):\n"
+                " print(json.dumps({'type':'item.updated','item':{'id':'thought','type':'reasoning','text':str(i)}}),flush=True);time.sleep(.02)\n")
+        result = self.run_fake(code, idle=.1, deadline_seconds=.3)
+        self.assertEqual(result['stop_reason'], 'deadline_reached')
+        self.assertFalse(result['turn_completed'])
+        self.assertEqual(result['completed_tool_calls'], 0)
+        self.assertEqual(result['supervision']['last_response_kind'], 'reasoning')
+
+    def test_response_silence_after_generation_still_stops(self):
+        code = ("import sys,json,time;sys.stdin.read();"
+                "print(json.dumps({'type':'item.completed','item':{'id':'thought','type':'reasoning','text':'first part'}}),flush=True);time.sleep(10)")
+        result = self.run_fake(code, idle=.12)
+        self.assertEqual(result['stop_reason'], 'response_inactive')
+        self.assertEqual(result['supervision']['activity_state'], 'response_inactive')
+        self.assertGreaterEqual(result['supervision']['seconds_without_response_progress'], .12)
+        self.assert_failure_packet('response_inactive')
 
     def test_success_requires_completed_native_turn(self):
         result=self.run_fake("import sys,json;sys.stdin.read();print(json.dumps({'type':'turn.completed'}))")
@@ -765,7 +805,7 @@ class LifecycleTests(unittest.TestCase):
 
     def test_completed_command_restarts_model_idle_timer(self):
         code="import sys,json,time;sys.stdin.read();print(json.dumps("+repr(command_event('done'))+"),flush=True);time.sleep(10)"
-        self.assertEqual(self.run_fake(code,idle=.04)['stop_reason'],'no_tool_progress')
+        self.assertEqual(self.run_fake(code,idle=.04)['stop_reason'],'response_inactive')
 
     def test_review_is_bound_one_shot_and_cannot_resume(self):
         self.run_fake("import sys,json;sys.stdin.read();print(json.dumps({'type':'error','message':'XML syntax error'}))")
@@ -811,7 +851,7 @@ class LifecycleTests(unittest.TestCase):
         code = ("import sys,json,time;sys.stdin.read();\nfor _ in range(50):\n"
                 f" print(json.dumps({event!r}),flush=True);time.sleep(.02)\n")
         result = self.run_fake(code, idle=.09)
-        self.assertEqual(result['stop_reason'], 'no_tool_progress')
+        self.assertEqual(result['stop_reason'], 'response_inactive')
         self.assertEqual(result['completed_tool_calls'], 1)
         self.assertGreaterEqual(result['seconds_without_tool_progress'], .09)
         self.assertLess(result['seconds_without_tool_progress'], .8)

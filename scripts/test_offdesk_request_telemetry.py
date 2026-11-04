@@ -57,6 +57,21 @@ class RelayTests(unittest.TestCase):
                         test.ready.set()
                         time.sleep(.5)
                         self.wfile.write(b'0\r\n\r\n')
+                    elif body in (b'answer-stream', b'heartbeat-stream', b'answer-stalls'):
+                        self.send_response(200)
+                        self.send_header('Content-Type', 'text/event-stream')
+                        self.send_header('Connection', 'close')
+                        self.end_headers()
+                        for index in range(30):
+                            frame = (b': keep-alive\n\n' if body == b'heartbeat-stream' else
+                                b'data: ' + json.dumps({'type':'response.reasoning_text.delta',
+                                    'delta':str(index)}).encode() + b'\n\n')
+                            self.wfile.write(frame)
+                            self.wfile.flush()
+                            test.ready.set()
+                            time.sleep(.6 if body == b'answer-stalls' else .03)
+                        self.wfile.write(b'data: {"type":"response.completed"}\n\n')
+                        self.close_connection = True
                     elif body in (b'stream', b'holdstream'):
                         self.send_response(200)
                         self.send_header('Content-Type', 'text/event-stream')
@@ -104,6 +119,91 @@ class RelayTests(unittest.TestCase):
 
     def summary(self, name='probe'):
         return json.loads((self.root/name/'summary.json').read_text())
+
+    def run_streaming_native(self, body, *, idle=.2, deadline_seconds=5):
+        root = self.root/'native'
+        root.mkdir()
+        code = ("import os,json,sys,urllib.request;sys.stdin.read();"
+                "urllib.request.urlopen(urllib.request.Request(os.environ['CODEX_OSS_BASE_URL']+'/responses',data="
+                + repr(body) + ")).read();print(json.dumps({'type':'turn.completed'}),flush=True)")
+        original_popen = subprocess.Popen
+        readers = []
+
+        def ready_process(*args, **kwargs):
+            process = original_popen(*args, **kwargs)
+            try:
+                process.stdin.write(b'prompt')
+                process.stdin.close()
+                self.assertTrue(self.ready.wait(3))
+                reader, writer = os.pipe()
+                readers.append(reader)
+                process.stdin = os.fdopen(writer, 'wb')
+                return process
+            except BaseException:
+                worker.stop_group(process)
+                raise
+
+        try:
+            with mock.patch.object(worker.subprocess, 'Popen', side_effect=ready_process):
+                return worker.supervise([sys.executable, '-I', '-S', '-u', '-c', code], 'prompt',
+                    root, root/'.night/run', time.time()+deadline_seconds, worker.ProgressGuard(),
+                    dict(os.environ, CODEX_OSS_BASE_URL=self.upstream), idle_seconds=idle,
+                    request_telemetry=True)
+        finally:
+            for reader in readers:
+                os.close(reader)
+
+    def test_streaming_response_finishes_after_tool_idle_without_claiming_tool_work(self):
+        result = self.run_streaming_native(b'answer-stream')
+        self.assertIsNone(result['stop_reason'])
+        self.assertTrue(result['turn_completed'])
+        self.assertEqual(result['completed_tool_calls'], 0)
+        self.assertGreater(result['seconds_without_tool_progress'], .2)
+        self.assertEqual(result['supervision']['last_response_kind'], 'reasoning')
+
+    def test_streaming_response_remains_bounded_by_the_selected_deadline(self):
+        result = self.run_streaming_native(b'answer-stream', deadline_seconds=.4)
+        self.assertEqual(result['stop_reason'], 'deadline_reached')
+        self.assertFalse(result['turn_completed'])
+        self.assertEqual(result['completed_tool_calls'], 0)
+        self.assertEqual(result['supervision']['last_response_kind'], 'reasoning')
+
+    def test_transport_heartbeats_do_not_replace_response_generation(self):
+        result = self.run_streaming_native(b'heartbeat-stream')
+        self.assertEqual(result['stop_reason'], 'response_inactive')
+        self.assertIsNone(result['supervision']['last_response_progress_at'])
+        self.assertEqual(result['supervision']['activity_state'], 'response_inactive')
+
+    def test_streaming_response_silence_uses_its_own_inactivity_clock(self):
+        result = self.run_streaming_native(b'answer-stalls')
+        self.assertEqual(result['stop_reason'], 'response_inactive')
+        self.assertEqual(result['supervision']['last_response_kind'], 'reasoning')
+        self.assertGreaterEqual(result['supervision']['seconds_without_response_progress'], .2)
+        snapshot = json.loads(Path(result['request_telemetry']['native_stop_snapshot']).read_text())
+        self.assertEqual(snapshot['native_stop']['response_progress']['kind'], 'reasoning')
+
+    def test_only_nonempty_semantic_inference_deltas_update_generation_progress(self):
+        with RequestTelemetry(self.upstream, self.root/'probe', time.time()+5) as probe:
+            row = {'request_id':1, 'method':'POST', 'path':'/v1/responses', 'status':200,
+                   'frames':0, 'terminal_frame_observed':False}
+            for packet in ({'type':'response.in_progress'}, {'type':'response.reasoning_text.delta','delta':''},
+                    {'type':'response.output_text.delta','delta':False}, {'type':[], 'delta':'text'},
+                    {'type':'unknown','delta':'text'}, {'choices':[{'delta':{'tool_calls':[]}}]}):
+                probe.frame(row, json.dumps(packet).encode())
+                self.assertIsNone(probe.response_progress())
+            for packet, kind in (({'type':'response.reasoning_text.delta','delta':'thought'}, 'reasoning'),
+                    ({'type':'response.output_text.delta','delta':'answer'}, 'content'),
+                    ({'type':'response.function_call_arguments.delta','delta':'{"cmd":'}, 'tool'),
+                    ({'choices':[{'delta':{'tool_calls':[{'function':{'arguments':'text'}}]}}]}, 'tool'),
+                    ({'message':{'thinking':'thought'}}, 'reasoning'),
+                    ({'response':'answer'}, 'content')):
+                probe.frame(row, json.dumps(packet).encode())
+                self.assertEqual(probe.response_progress()['kind'], kind)
+            saved = probe.response_progress()
+            for path, status in (('/api/tags', 200), ('/v1/responses', 500)):
+                row.update(path=path, status=status)
+                probe.frame(row, b'{"type":"response.output_text.delta","delta":"ignored"}')
+                self.assertEqual(probe.response_progress(), saved)
 
     def policy(self):
         return {'schema': 'offdesk_ollama_responses_generation.v1',
@@ -281,6 +381,7 @@ class RelayTests(unittest.TestCase):
             while probe.active and time.monotonic()<until:
                 time.sleep(.005)
             probe.observe_stop(None)
+            self.assertEqual(probe.response_progress()['kind'], 'reasoning')
         expected = b'data: {"type":"response.reasoning_text.delta","delta":"RESPONSE_SECRET"}\n\n' * 12000 + b'data: [DONE]\n\n'
         self.assertEqual(actual, expected)
         summary = self.summary()
@@ -488,7 +589,7 @@ class RelayTests(unittest.TestCase):
         finally:
             for descriptor in input_readers:
                 os.close(descriptor)
-        self.assertEqual(result['stop_reason'],'no_tool_progress')
+        self.assertEqual(result['stop_reason'],'response_inactive')
         summary = json.loads(Path(result['request_telemetry']['summary']).read_text())
         self.assertTrue(Path(result['request_telemetry']['control_events']).is_file())
         self.assertTrue(Path(result['request_telemetry']['native_stop_snapshot']).is_file())
