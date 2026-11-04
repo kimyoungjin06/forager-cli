@@ -20,6 +20,7 @@ pub struct DoctorArgs {
 
 #[derive(Serialize)]
 struct DoctorReport {
+    build: crate::build_identity::BuildIdentity,
     profile: ProfileReport,
     global_data: GlobalDataReport,
     repo_config: RepoConfigReport,
@@ -167,6 +168,7 @@ fn build_report(cli_profile: Option<&str>, project_path: &Path) -> Result<Doctor
     };
 
     Ok(DoctorReport {
+        build: crate::build_identity::report(),
         profile,
         global_data: GlobalDataReport {
             active_path: display_path(&app_dir.active_path),
@@ -201,6 +203,21 @@ fn display_path(path: impl AsRef<Path>) -> String {
 
 fn print_human(report: &DoctorReport) {
     println!("Forager doctor\n");
+    println!("Build");
+    println!("  version: {}", report.build.version);
+    println!(
+        "  executable SHA256: {}",
+        report
+            .build
+            .executable_sha256
+            .as_deref()
+            .unwrap_or("unavailable")
+    );
+    println!("  identity source: {}", report.build.identity_source);
+    println!(
+        "  running image verified: {}\n",
+        report.build.running_image_verified
+    );
 
     println!("Profile");
     println!(

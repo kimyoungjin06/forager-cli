@@ -508,6 +508,7 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn live_tmux_observation_binds_every_identity_plane_when_available() -> Result<()> {
         if std::process::Command::new("tmux")
@@ -518,8 +519,9 @@ mod tests {
             return Ok(());
         }
         let temp = tempdir()?;
-        let project_root = temp.path().join("project-root");
-        let worktree = temp.path().join("worktree");
+        let canonical_temp = std::fs::canonicalize(temp.path())?;
+        let project_root = canonical_temp.join("project-root");
+        let worktree = canonical_temp.join("worktree");
         std::fs::create_dir(&project_root)?;
         std::fs::create_dir(&worktree)?;
         let mut instance = Instance::new("remote-identity", &worktree.to_string_lossy());
@@ -572,5 +574,11 @@ mod tests {
             crate::offdesk::remote_session_policy_harness_launch_sha256(&launch_profile)?
         );
         Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn machine_identity_remains_fail_closed_until_macos_observation_is_implemented() {
+        assert!(machine_identity_sha256().is_err());
     }
 }

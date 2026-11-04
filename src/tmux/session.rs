@@ -351,16 +351,15 @@ impl Session {
             ])
             .output()?;
         if !output.status.success() {
-            bail!(
-                "failed to inspect tmux runtime identity: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            );
+            bail!("failed to observe tmux runtime identity");
         }
-        let identity = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if identity.is_empty() {
-            bail!("tmux returned an empty runtime identity");
+        let identity = String::from_utf8(output.stdout)?;
+        let identity = identity.trim();
+        let fields = identity.split('|').collect::<Vec<_>>();
+        if fields.len() != 4 || fields.iter().any(|field| field.is_empty()) {
+            bail!("tmux runtime identity is incomplete");
         }
-        Ok(identity)
+        Ok(identity.to_string())
     }
 
     pub fn detect_status(&self, tool: &str) -> Result<Status> {

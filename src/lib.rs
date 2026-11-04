@@ -1,6 +1,7 @@
 //! Forager library - Core functionality for offdesk agent orchestration
 
 pub mod agents;
+pub mod build_identity;
 pub mod cli;
 pub mod containers;
 pub mod document_lifecycle;
