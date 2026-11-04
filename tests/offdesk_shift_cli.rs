@@ -9,6 +9,9 @@ use chrono::{Duration, SecondsFormat, Utc};
 use serde_json::{json, Value};
 use tempfile::tempdir;
 
+#[path = "support/isolated_process.rs"]
+mod isolated_process;
+
 #[path = "offdesk_shift_cli/local_review.rs"]
 mod local_review;
 #[path = "offdesk_shift_cli/proposal.rs"]
@@ -21,6 +24,9 @@ mod weekly;
 fn forager_command(home: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_forager"));
     command.env("HOME", home);
+    command.env("XDG_STATE_HOME", home.join(".local/state"));
+    command.env("XDG_CACHE_HOME", home.join(".cache"));
+    command.env("XDG_DATA_HOME", home.join(".local/share"));
     // Exercise the production default without inheriting a host override.
     command.env_remove("TOKIO_WORKER_THREADS");
     command.env_remove("FORAGER_PROFILE");
@@ -2392,6 +2398,10 @@ fn ondesk_bound_shift_rechecks_source_before_real_background_launch() -> Result<
 #[test]
 #[ignore = "requires an isolated disposable container with tmux and no host state"]
 fn ondesk_cycle_disposable_receiver_reads_agreed_plan_without_relaunch() -> Result<()> {
+    if isolated_process::run("ondesk_cycle_disposable_receiver_reads_agreed_plan_without_relaunch")?
+    {
+        return Ok(());
+    }
     assert!(Path::new("/.dockerenv").is_file());
     assert!(!Path::new("/var/run/docker.sock").exists());
     qualify_bound_shift_cycle(true, false)
@@ -2400,6 +2410,11 @@ fn ondesk_cycle_disposable_receiver_reads_agreed_plan_without_relaunch() -> Resu
 #[test]
 #[ignore = "requires an isolated disposable container with tmux and no host state"]
 fn ondesk_return_disposable_cli_preserves_one_attempt_and_observes_read_claim() -> Result<()> {
+    if isolated_process::run(
+        "ondesk_return_disposable_cli_preserves_one_attempt_and_observes_read_claim",
+    )? {
+        return Ok(());
+    }
     assert!(Path::new("/.dockerenv").is_file());
     assert!(!Path::new("/var/run/docker.sock").exists());
     qualify_bound_shift_cycle(true, true)
@@ -2408,6 +2423,9 @@ fn ondesk_return_disposable_cli_preserves_one_attempt_and_observes_read_claim() 
 #[test]
 #[ignore = "requires an owned disposable VM with native Codex and sandbox preflight"]
 fn ondesk_return_native_tui_reads_context_without_task_authority() -> Result<()> {
+    if isolated_process::run("ondesk_return_native_tui_reads_context_without_task_authority")? {
+        return Ok(());
+    }
     assert_eq!(
         std::env::var("FORAGER_RETURN_NATIVE_TUI_TRIAL").as_deref(),
         Ok("1")
@@ -2425,6 +2443,9 @@ fn ondesk_return_native_tui_reads_context_without_task_authority() -> Result<()>
 #[test]
 #[ignore = "requires an owned disposable container with Codex, exact mounts and read-scope preflight"]
 fn ondesk_return_container_tui_reads_context_without_task_authority() -> Result<()> {
+    if isolated_process::run("ondesk_return_container_tui_reads_context_without_task_authority")? {
+        return Ok(());
+    }
     assert_eq!(
         std::env::var("FORAGER_RETURN_CONTAINER_TUI_TRIAL").as_deref(),
         Ok("1")
@@ -2469,6 +2490,9 @@ fn qualify_bound_shift_cycle_with_read_policy(
 
 #[test]
 fn bound_shift_tmux_read_policy_and_restricted_morning_return() -> Result<()> {
+    if isolated_process::run("bound_shift_tmux_read_policy_and_restricted_morning_return")? {
+        return Ok(());
+    }
     if forager::offdesk::read_policy::report()["status"] != "verified"
         || !forager::tmux::is_tmux_available()
     {
@@ -2479,6 +2503,11 @@ fn bound_shift_tmux_read_policy_and_restricted_morning_return() -> Result<()> {
 
 #[test]
 fn bound_shift_tmux_read_policy_preserves_failure_and_uncertainty_gates() -> Result<()> {
+    if isolated_process::run(
+        "bound_shift_tmux_read_policy_preserves_failure_and_uncertainty_gates",
+    )? {
+        return Ok(());
+    }
     if forager::offdesk::read_policy::report()["status"] != "verified"
         || !forager::tmux::is_tmux_available()
     {
@@ -2506,6 +2535,11 @@ fn qualify_bound_shift_cycle_options(
 
 #[test]
 fn bound_shift_reconciles_narrative_drift_and_returns_all_review_dispositions() -> Result<()> {
+    if isolated_process::run(
+        "bound_shift_reconciles_narrative_drift_and_returns_all_review_dispositions",
+    )? {
+        return Ok(());
+    }
     if !forager::tmux::is_tmux_available()
         || forager::offdesk::read_policy::report()["status"] != "verified"
     {
@@ -7143,6 +7177,11 @@ fn removing_read_policy_invalidates_existing_arm_approval() -> Result<()> {
 #[cfg(target_os = "linux")]
 #[ignore = "requires explicit native Codex model-call opt-in and staged credentials"]
 fn ondesk_return_landlock_native_tui_reads_context_without_task_authority() -> Result<()> {
+    if isolated_process::run(
+        "ondesk_return_landlock_native_tui_reads_context_without_task_authority",
+    )? {
+        return Ok(());
+    }
     anyhow::ensure!(
         std::env::var("FORAGER_RETURN_LANDLOCK_NATIVE_TRIAL").as_deref() == Ok("1"),
         "native read-policy trial requires explicit opt-in"

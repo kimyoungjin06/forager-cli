@@ -113,6 +113,11 @@ implemented. They do not install templates into other projects.
 - Use unit tests in-module (`#[cfg(test)]`) for pure logic; use `tests/*.rs` for end-to-end behavior.
 - Tests must be deterministic and clean up after themselves (tmux tests should use unique names like `forager_test_*`).
 - Avoid reading/writing real user state; prefer temp dirs (see `tempfile` usage in `src/session/storage.rs`).
+- Tests that call tmux from the Rust test body must use
+  `tests/support/isolated_process.rs`, not just set HOME on individual CLI calls.
+  Its supervising process owns private HOME/XDG and tmux state and cleans up
+  after failure, worker termination, or a closed parent control pipe. Native
+  model trials keep their separate explicit opt-in and credential gates.
 
 ## Commit & Pull Request Guidelines
 
