@@ -292,6 +292,12 @@ the old reason must handle the new value. Completing a response alone does not
 pass source-edit, check, recovery or acceptance gates. Production runtime
 selection and real-model qualification still need their own evidence.
 
+Private helper selections can bind a `reasoning_policy` to the exact selected
+model with effort `none`, `low`, `medium` or `xhigh`. Both native contexts receive
+the same explicit value. An omitted policy keeps the backend default; invalid
+policies are rejected before native launch. This qualification artifact is not a
+production settings field and does not select a new run or an output-token cap.
+
 The current implementation should prioritize:
 
 - Offdesk closeout and review closure;

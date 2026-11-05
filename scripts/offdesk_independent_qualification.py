@@ -531,12 +531,31 @@ def selected_generation_policy(phase, model, helper):
     return policy
 
 
+def selected_reasoning_policy(phase, model, helper):
+    if 'reasoning_policy' not in phase:
+        return None
+    policy = phase['reasoning_policy']
+    if (not helper or not isinstance(policy, dict)
+            or set(policy) != {'schema', 'model', 'effort'}
+            or policy.get('schema') != 'offdesk_native_reasoning_effort.v1'
+            or not isinstance(policy.get('model'), str) or policy['model'] != model
+            or policy.get('effort') not in ('none', 'low', 'medium', 'xhigh')):
+        raise ValueError('Reasoning policy must bind the selected helper model and explicit supported effort')
+    return dict(policy)
+
+
 def qualify(run,phase,deadline,batch,worker):
     selected_read_paths(phase['read_paths'])
     run.bindings();packet,delivery=load_packet(run.root,phase['delivery_packet'])
     stage = selected_stage_packet(phase, packet)
     helper = stage == packet_module.HELPER_STAGE
     generation_policy = selected_generation_policy(phase, run.selection['model'], helper)
+    reasoning_policy = selected_reasoning_policy(phase, run.selection['model'], helper)
+    reasoning_options = {} if reasoning_policy is None else {'reasoning_effort': reasoning_policy['effort']}
+    if reasoning_policy is not None:
+        run.record('NATIVE_REASONING_POLICY.json', {'policy': reasoning_policy,
+            'scope': 'both native contexts; independent of output-token limit',
+            'wire_or_backend_effect_qualified': False, 'launch_authorized_by_this_record': False})
     generation_options = {} if generation_policy is None else {'generation_policy': generation_policy}
     if generation_policy is not None:
         run.record('NATIVE_GENERATION_POLICY.json', {'policy': generation_policy,
@@ -567,7 +586,7 @@ def qualify(run,phase,deadline,batch,worker):
         +delivery+'\nTask index: '+str(context.relative_to(run.root))+'\n'
         +plain_progress_instructions(str(context.relative_to(run.root)),context_sha)+instructions)
     out1=run.output/'context-1';guard1=worker.ProgressGuard(max_calls=8)
-    first=supervise_counted(run,'context-1',worker,worker.native_argv(str(run.root/run.selection['native_codex']),run.root,run.selection['model'],out1/'final.txt',True,helper),first_prompt,run.root,out1,min(deadline,time.time()+180),guard1,env,command_seconds=60,progress_observer=observer,request_telemetry=True,**generation_options);run.record('CONTEXT_1_RESULT.json',first)
+    first=supervise_counted(run,'context-1',worker,worker.native_argv(str(run.root/run.selection['native_codex']),run.root,run.selection['model'],out1/'final.txt',True,helper,**reasoning_options),first_prompt,run.root,out1,min(deadline,time.time()+180),guard1,env,command_seconds=60,progress_observer=observer,request_telemetry=True,**generation_options);run.record('CONTEXT_1_RESULT.json',first)
     if first.get('stop_reason') or not first.get('turn_completed'):first['verification_state']='failed';return first
     if batch.inventory(run.root)!=before:raise ValueError('Checkpoint context must not edit source')
     observation=observer()
@@ -592,7 +611,7 @@ def qualify(run,phase,deadline,batch,worker):
         +'Keep other source, tests and frozen runtime unchanged; the host owns the report.\n'
         +second_delivery)
     out2=run.output/'context-2';guard2=ImplementationGuard(phase['max_tool_calls']-guard1.calls,lambda:batch.inventory(run.root),observer,run.record,read_paths=phase['read_paths'])
-    second=supervise_counted(run,'context-2',worker,worker.native_argv(str(run.root/run.selection['native_codex']),run.root,run.selection['model'],out2/'final.txt',True,helper),second_prompt,run.root,out2,deadline,guard2,env,command_seconds=60,progress_observer=observer,request_telemetry=True,**generation_options);run.record('SECOND_CONTEXT_NATIVE_RESULT.json',dict(second));run.bindings()
+    second=supervise_counted(run,'context-2',worker,worker.native_argv(str(run.root/run.selection['native_codex']),run.root,run.selection['model'],out2/'final.txt',True,helper,**reasoning_options),second_prompt,run.root,out2,deadline,guard2,env,command_seconds=60,progress_observer=observer,request_telemetry=True,**generation_options);run.record('SECOND_CONTEXT_NATIVE_RESULT.json',dict(second));run.bindings()
     for key in ('tool_calls','started_tool_calls','completed_tool_calls','in_flight_tool_calls'):second[key]+=first[key]
     run.record('CONTEXT_2_RESULT.json',second)
     if second.get('stop_reason') or not second.get('turn_completed'):second['verification_state']='failed';return second

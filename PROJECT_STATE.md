@@ -4,6 +4,13 @@ Updated: 2026-11-04
 
 ## Current focus
 
+Private helper qualifications can now bind an explicit model and reasoning
+effort in the selected phase. The same effort reaches both native contexts,
+without adding an output-token cap. Unselected runs retain the backend default;
+unsupported or mismatched policies fail before model metadata or native launch.
+The selected real trial remains a separate bounded execution and does not accept
+C5.1a or activate a production setting.
+
 Native supervision now prioritizes completing a response. Nonempty reasoning,
 answer text and tool-argument generation can outlast the tool-idle interval
 without being counted as completed work. Silence still has a 180-second default

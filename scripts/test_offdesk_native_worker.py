@@ -304,6 +304,24 @@ class RootTests(unittest.TestCase):
                     worker.ProgressGuard(), {}, generation_policy={'max_output_tokens':2048})
             native.assert_not_called()
 
+    def test_explicit_reasoning_effort_is_a_config_argument_without_output_cap(self):
+        default = worker.native_argv('codex', self.root, 'fixture', self.root/'final.txt')
+        self.assertFalse(any('model_reasoning_effort' in item for item in default))
+        for effort in ('none', 'low', 'medium', 'xhigh'):
+            with self.subTest(effort=effort):
+                argv = worker.native_argv('codex', self.root, 'fixture', self.root/'final.txt',
+                                          True, True, reasoning_effort=effort)
+                option = 'model_reasoning_effort='+json.dumps(effort)
+                self.assertEqual(argv[argv.index(option)-1], '-c')
+                self.assertEqual(argv[-1], '-')
+                self.assertIn('--strict-config', argv)
+                self.assertFalse(any('max_output_tokens' in item or 'num_predict' in item for item in argv))
+
+    def test_invalid_reasoning_effort_is_rejected_before_launch(self):
+        for effort in ('', 'default', 'high', 'low"; run', True, 1, [], {}):
+            with self.subTest(effort=effort), self.assertRaises(ValueError):
+                worker.native_argv('codex', self.root, 'fixture', self.root/'final.txt', reasoning_effort=effort)
+
     def test_source_excerpt_bounds_large_files_and_rejects_escapes(self):
         source=self.root/'long.rs';source.write_text(('x'*200+'\n')*300)
         result=worker.source_excerpt(self.root,'long.rs',2,60)

@@ -652,6 +652,39 @@ class HelperStageWiringTests(unittest.TestCase):
         self.assertFalse(self.records['NATIVE_TOOL_PROFILE.json']['strict_command_only_qualified'])
         self.assertEqual([call.args[-1] for call in self.fake.native_argv.call_args_list], [True, True])
         self.assertTrue(all('generation_policy' not in options for options in self.native_options))
+        self.assertNotIn('NATIVE_REASONING_POLICY.json', self.records)
+        self.assertTrue(all(not call.kwargs for call in self.fake.native_argv.call_args_list))
+
+    def test_selected_reasoning_policy_binds_both_native_contexts_without_output_cap(self):
+        policy = {'schema':'offdesk_native_reasoning_effort.v1',
+                  'model':self.run.selection['model'], 'effort':'low'}
+        self.phase['reasoning_policy'] = policy
+        self.fake.native_argv = mock.Mock(return_value=[])
+        result = self.execute()
+        self.assertEqual(result['verification_state'], 'passed')
+        self.assertEqual([call.kwargs for call in self.fake.native_argv.call_args_list],
+                         [{'reasoning_effort':'low'}, {'reasoning_effort':'low'}])
+        self.assertTrue(all('generation_policy' not in options for options in self.native_options))
+        record = self.records['NATIVE_REASONING_POLICY.json']
+        self.assertEqual(record['policy'], policy)
+        self.assertFalse(record['wire_or_backend_effect_qualified'])
+        self.assertFalse(record['launch_authorized_by_this_record'])
+
+    def test_invalid_reasoning_policy_refuses_before_metadata_or_native(self):
+        base = {'schema':'offdesk_native_reasoning_effort.v1',
+                'model':self.run.selection['model'], 'effort':'low'}
+        for policy in (None, {}, dict(base, model='unselected'), dict(base, effort='high'),
+                       dict(base, effort=True), dict(base, extra='unselected')):
+            self.phase['reasoning_policy'] = policy
+            with self.assertRaises(ValueError):
+                self.execute()
+            self.metadata_check.assert_not_called()
+            self.assertEqual(self.prompts, [])
+
+    def test_reasoning_policy_is_only_for_an_explicit_helper_selection(self):
+        policy = {'schema':'offdesk_native_reasoning_effort.v1', 'model':'fixture', 'effort':'low'}
+        with self.assertRaisesRegex(ValueError, 'helper model'):
+            driver.selected_reasoning_policy({'reasoning_policy':policy}, 'fixture', False)
 
     def test_selected_generation_policy_is_bound_to_both_helper_contexts(self):
         policy = {'schema':'offdesk_ollama_responses_generation.v1',

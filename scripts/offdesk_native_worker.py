@@ -756,9 +756,11 @@ def verify_outer_boundary(root: Path, canary: Path) -> None:
 
 
 def native_argv(executable: str, root: Path, model: str, final: Path, external: bool = False,
-                helper_tool_profile: bool = False) -> list[str]:
+                helper_tool_profile: bool = False, *, reasoning_effort: str | None = None) -> list[str]:
     if type(helper_tool_profile) is not bool:
         raise ValueError("Explicit helper tool-profile selection required")
+    if reasoning_effort is not None and reasoning_effort not in ("none", "low", "medium", "xhigh"):
+        raise ValueError("Explicit supported native reasoning effort required")
     return [executable, "exec", "--oss", "--local-provider", "ollama", "--model", model,
             "--ignore-user-config", "--ignore-rules", "--ephemeral", "--json", "--skip-git-repo-check",
             *( ["--dangerously-bypass-approvals-and-sandbox"] if external else ["--sandbox", "workspace-write", "-c", 'approval_policy="never"'] ), "--disable", "goals",
@@ -769,6 +771,7 @@ def native_argv(executable: str, root: Path, model: str, final: Path, external: 
             "-c", "check_for_update_on_startup=false",
             *( ["-c", 'web_search="disabled"', "--disable", "view_image",
                 "-c", "tools.experimental_request_user_input.enabled=false", "--strict-config"] if helper_tool_profile else [] ),
+            *(["-c", "model_reasoning_effort=" + json.dumps(reasoning_effort)] if reasoning_effort is not None else []),
             "-C", str(root), "-o", str(final), "-"]
 
 
