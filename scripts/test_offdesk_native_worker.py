@@ -333,6 +333,61 @@ class RootTests(unittest.TestCase):
         source.unlink();source.symlink_to(self.origin/'Cargo.toml')
         with self.assertRaises(ValueError):worker.source_excerpt(self.root,'long.rs')
 
+    def test_inspect_refuses_oversized_ranges_before_reading_source(self):
+        with mock.patch.object(worker, 'source_excerpt', side_effect=AssertionError('must not read')):
+            for start, lines in ((1, 122), (1, 0), (0, 40), (True, 40), (1, True)):
+                with self.subTest(start=start, lines=lines):
+                    result = worker.inspect_source(self.root, '.runtime/check_stream_helper.py', start, lines)
+                    self.assertEqual(result, worker.inspection_refusal('inspection_range_limit'))
+        runtime = self.root / '.runtime/offdesk_native_worker.py'
+        runtime.write_bytes(Path(worker.__file__).read_bytes())
+        process = subprocess.run([sys.executable, '-I', '-S', str(runtime), 'inspect',
+            '--root', str(self.root), '--path', '.runtime/check_stream_helper.py', '--lines', '122'],
+            capture_output=True, text=True, timeout=10)
+        self.assertEqual(process.returncode, 0)
+        self.assertEqual(json.loads(process.stdout), result)
+        self.assertEqual(process.stderr, '')
+
+    def test_inspect_bounds_complete_serialized_utf8_and_escaped_output(self):
+        path = self.root / 'source.py'
+        for text in (('한' * 1200 + '\n') * 3, ('\x01' * 1000 + '\n') * 3):
+            with self.subTest(text_kind=ord(text[0])):
+                path.write_text(text)
+                result = worker.inspect_source(self.root, 'source.py')
+                self.assertEqual(result['status'], 'ok')
+                self.assertLessEqual(len((json.dumps(result, ensure_ascii=False) + '\n').encode()), 8192)
+                self.assertEqual(result['lines_emitted'], len(result['text'].splitlines()))
+                self.assertGreater(result['lines_emitted'], 0)
+                self.assertLess(result['lines_emitted'], 3)
+                self.assertTrue(result['truncated'])
+                self.assertEqual(result['next_start'], 1 + result['lines_emitted'])
+
+    def test_inspect_refuses_a_single_unemittable_line_and_preserves_path_rules(self):
+        path = self.root / 'source.py'
+        for text in ('한' * 3000, '\x01' * 3000, 'x' * 5000):
+            path.write_text(text)
+            self.assertEqual(worker.inspect_source(self.root, 'source.py'),
+                             worker.inspection_refusal('inspection_line_too_large'))
+        for relative in ('../origin/Cargo.toml', str(path), '.runtime/offdesk_native_worker.py'):
+            with self.subTest(relative=relative), self.assertRaises(ValueError):
+                worker.inspect_source(self.root, relative)
+        path.unlink(); path.symlink_to(self.origin / 'Cargo.toml')
+        with self.assertRaises(ValueError):
+            worker.inspect_source(self.root, 'source.py')
+
+    def test_inspect_returns_exact_bounded_source_and_eof(self):
+        path = self.root / 'source.py'; path.write_text(''.join(f'line {i}\n' for i in range(1, 123)))
+        result = worker.inspect_source(self.root, 'source.py', 2, 60)
+        self.assertEqual(result['lines_emitted'], 60)
+        self.assertTrue(result['text'].startswith('2: line 2\n'))
+        self.assertTrue(result['text'].endswith('61: line 61\n'))
+        self.assertEqual(result['next_start'], 62)
+        self.assertFalse(result['truncated'])
+        eof = worker.inspect_source(self.root, 'source.py', 123, 60)
+        self.assertEqual(eof['status'], 'ok')
+        self.assertEqual(eof['lines_emitted'], 0)
+        self.assertEqual(eof['text'], '')
+
     def test_checked_edit_rejects_drift_ambiguity_and_no_effect(self):
         path=self.root/'source.py';path.write_text('value = 1\n')
         request={'path':'source.py','expected_sha256':worker.sha(path),'old':'value = 1','new':'value = 2'}
@@ -874,6 +929,75 @@ class LifecycleTests(unittest.TestCase):
         self.assertGreaterEqual(result['seconds_without_tool_progress'], .09)
         self.assertLess(result['seconds_without_tool_progress'], .8)
         self.assertIsNotNone(result['last_tool_completed_at'])
+
+    def inspection_guard_fixture(self, responses=False):
+        from offdesk_independent_qualification import ImplementationGuard
+        source = {'source.py': 'before'}
+        guard = ImplementationGuard(128, lambda: dict(source), lambda: {}, lambda *a: None)
+        source['source.py'] = 'after'
+        refusal = json.dumps(worker.inspection_refusal('inspection_range_limit'))
+        events = [command_event(i, output=refusal, command=
+            'python3 -I -S .runtime/offdesk_native_worker.py inspect --root . '
+            f'--path source.py --start {i + 1} --lines 122') for i in range(50)]
+        code = ('import sys,json,time;sys.stdin.read();events=' + repr(events)
+                + ';\nfor i,event in enumerate(events):\n print(json.dumps(event),flush=True)\n')
+        if responses:
+            code += " print(json.dumps({'type':'item.completed','item':{'type':'agent_message','id':str(i),'text':str(i)}}),flush=True)\n"
+        code += ' time.sleep(.03)\ntime.sleep(10)'
+        return guard, code
+
+    def test_refused_inspections_do_not_refresh_tool_progress_or_inactivity_clock(self):
+        guard, code = self.inspection_guard_fixture()
+        result = self.run_fake(code, idle=.2, guard=guard)
+        self.assertEqual(result['stop_reason'], 'response_inactive')
+        self.assertGreaterEqual(result['completed_tool_calls'], 1)
+        self.assertEqual(result['nonprogress_tool_calls'], result['completed_tool_calls'])
+        self.assertEqual(result['progress_tool_calls'], 0)
+        self.assertIsNone(result['last_tool_completed_at'])
+        self.assertGreaterEqual(result['seconds_without_tool_progress'], .2)
+
+    def test_real_inspect_receipts_allow_refusal_then_narrow_read_in_one_supervisor(self):
+        from offdesk_independent_qualification import ImplementationGuard
+        runtime = self.root / '.runtime'; runtime.mkdir()
+        (runtime / 'offdesk_native_worker.py').write_bytes(Path(worker.__file__).read_bytes())
+        (self.root / 'source.py').write_text('source\n' * 122)
+        source = {'source.py': 'before'}
+        guard = ImplementationGuard(32, lambda: dict(source), lambda: {}, lambda *a: None)
+        source['source.py'] = 'after'
+        argv = [sys.executable, '-I', '-S', '.runtime/offdesk_native_worker.py', 'inspect',
+                '--root', '.', '--path', 'source.py', '--lines']
+        # Produce real CLI receipts outside the supervisor's short fake-worker
+        # timers; the separate timer cases exercise inactivity and hard limits.
+        import shlex
+        events = []
+        for i, lines in enumerate((122, 40)):
+            args = argv + [str(lines)]
+            completed = subprocess.run(args, cwd=self.root, capture_output=True, text=True, timeout=10)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            item = {'id': str(i), 'type': 'command_execution', 'command': shlex.join(args)}
+            events += [{'type': 'item.started', 'item': item},
+                       {'type': 'item.completed', 'item': {**item, 'exit_code': completed.returncode,
+                                                          'aggregated_output': completed.stdout}}]
+        events.append({'type': 'turn.completed'})
+        code = ('import sys,json;sys.stdin.read();events=' + repr(events)
+                + ';\nfor event in events: print(json.dumps(event),flush=True)')
+        result = self.run_fake(code, guard=guard)
+        self.assertIsNone(result['stop_reason'])
+        self.assertTrue(result['turn_completed'])
+        self.assertEqual(result['completed_tool_calls'], 2)
+        self.assertEqual(result['nonprogress_tool_calls'], 1)
+        self.assertEqual(result['progress_tool_calls'], 1)
+        self.assertIsNotNone(result['last_tool_completed_at'])
+        self.assertEqual(guard.inspection_outputs['1']['source_lines'], 40)
+
+    def test_refusal_followed_by_active_response_keeps_the_hard_deadline(self):
+        guard, code = self.inspection_guard_fixture(responses=True)
+        result = self.run_fake(code, idle=5, deadline_seconds=.3, guard=guard)
+        self.assertEqual(result['stop_reason'], 'deadline_reached')
+        self.assertGreaterEqual(result['nonprogress_tool_calls'], 1)
+        self.assertEqual(result['progress_tool_calls'], 0)
+        self.assertIsNone(result['last_tool_completed_at'])
+        self.assertFalse(result['turn_completed'])
 
     def test_late_invalid_verification_argv_prevents_real_first_command_side_effect(self):
         initial = self.run_fake("import sys,json;sys.stdin.read();print(json.dumps({'type':'turn.completed'}))")

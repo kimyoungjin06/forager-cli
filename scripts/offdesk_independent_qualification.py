@@ -13,8 +13,8 @@ from offdesk_qualification_packet import load_packet
 LITERAL_SHELL_TOKEN = re.compile(r'''(?P<word>(?:'[^']*'|"(?:[^"\\$`]|\\[^\r\n])*"|\\[^\r\n]|[^\s'"\\;&|<>()$`*?\[\]{}~#])+)|(?P<and>&&)|(?P<space>[ \t]+)''')
 SELECTED_SHELLS = ('bash', 'sh', '/bin/bash', '/usr/bin/bash', '/bin/sh', '/usr/bin/sh')
 SELECTED_PYTHONS = ('python3', 'python3.11', '/usr/bin/python3', '/usr/bin/python3.11')
-MAX_INSPECTION_LINES = 60
-MAX_INSPECTION_BYTES = 8192
+MAX_INSPECTION_LINES = worker_module.MAX_INSPECTION_LINES
+MAX_INSPECTION_BYTES = worker_module.MAX_INSPECTION_BYTES
 
 
 def checked_command_argv(raw, root=None):
@@ -119,7 +119,8 @@ def inspection_commands(raw, root=None):
                     and not (name in ('head', 'tail') and re.fullmatch(r'-\d+', a))
                     for a in argv[1:])):
                 return False
-        elif argv[:5] != ['/usr/bin/python3', '-I', '-S', '.runtime/offdesk_native_worker.py', 'excerpt']:
+        elif (argv[:4] != ['/usr/bin/python3', '-I', '-S', '.runtime/offdesk_native_worker.py']
+              or argv[4:5] not in (['excerpt'], ['inspect'])):
             return False
     return segments
 
@@ -139,7 +140,8 @@ def inspection_targets(segments):
             selector = ','.join(str(int(n)) for n in argv[2][:-1].split(',')) + 'p'
             targets.extend((path, [name, selector]) for path in argv[3:])
             continue
-        if argv[:5] == ['/usr/bin/python3', '-I', '-S', '.runtime/offdesk_native_worker.py', 'excerpt']:
+        if (argv[:4] == ['/usr/bin/python3', '-I', '-S', '.runtime/offdesk_native_worker.py']
+                and argv[4:5] in (['excerpt'], ['inspect'])):
             options = {}
             tail = argv[5:]
             if len(tail) % 2:
@@ -156,7 +158,7 @@ def inspection_targets(segments):
                 return None
             if start < 1 or lines < 1:
                 return None
-            targets.append((options['--path'], ['excerpt', start, lines]))
+            targets.append((options['--path'], [argv[4], start, lines]))
             continue
         files, selector, pattern = [], [name], name not in ('grep', 'rg')
         options_done, position = False, 1
@@ -219,7 +221,8 @@ def inspection_output(item, root=None):
         observation['stop_reason'] = 'inspection_output_unverifiable'
         return observation
     segments = inspection_commands(item['command'], root) or []
-    if any(argv[:5] == ['/usr/bin/python3', '-I', '-S', '.runtime/offdesk_native_worker.py', 'excerpt']
+    if any(argv[:4] == ['/usr/bin/python3', '-I', '-S', '.runtime/offdesk_native_worker.py']
+           and argv[4:5] in (['excerpt'], ['inspect'])
            for argv in segments):
         # The helper's JSON string escapes newlines; count the decoded excerpt too.
         try:
@@ -228,6 +231,19 @@ def inspection_output(item, root=None):
             if type(receipt['lines_emitted']) is not int or receipt['lines_emitted'] != source_lines:
                 raise ValueError('Excerpt line count disagrees with text')
             observation['source_lines'] = source_lines
+            if any(argv[4:5] == ['inspect'] for argv in segments):
+                argv = checked_command_argv(item['command'], root)
+                if (len(segments) != 1 or argv[:5] != ['/usr/bin/python3', '-I', '-S',
+                        '.runtime/offdesk_native_worker.py', 'inspect']
+                        or receipt.get('schema') != worker_module.INSPECTION_SCHEMA):
+                    raise ValueError('Bounded inspection requires one exact helper command')
+                if receipt.get('status') == 'refused':
+                    reason = receipt.get('reason')
+                    if item.get('exit_code') != 0 or receipt != worker_module.inspection_refusal(reason):
+                        raise ValueError('Invalid bounded inspection refusal')
+                    observation['policy_refusal'] = reason
+                elif receipt.get('status') != 'ok':
+                    raise ValueError('Unknown bounded inspection status')
         except (ValueError, KeyError, TypeError, AttributeError):
             observation['stop_reason'] = 'inspection_output_unverifiable'
     if (observation['lines'] > MAX_INSPECTION_LINES
@@ -304,11 +320,14 @@ class ImplementationGuard(worker_module.ProgressGuard):
                 and inspection_command(item['command'], self.check_root)):
             observation = inspection_output(item, self.check_root)
             self.inspection_outputs[item['id']] = observation
+            if observation.get('policy_refusal') and not observation['stop_reason']:
+                self.nonprogress_items.add(item['id'])
             reason = reason or observation['stop_reason']
         self.record('IMPLEMENTATION_GUARD_STATE.json', {
             'inspection_starts_without_edit': len(self.inspection_items),
             'max_inspections': self.max_inspections, 'edit_observed': self.edit_observed,
             'charged_command_starts': self.calls, 'stop_reason': reason,
+            'policy_refusals': len(self.nonprogress_items),
             'max_observed_inspection_lines': MAX_INSPECTION_LINES,
             'max_observed_inspection_utf8_bytes': MAX_INSPECTION_BYTES,
             'inspection_outputs': list(self.inspection_outputs.values()),
@@ -319,13 +338,22 @@ class ImplementationGuard(worker_module.ProgressGuard):
         return reason
 
 
-def implementation_instructions(context, progress, context_sha):
+def implementation_instructions(context, progress, context_sha, read_paths=None):
+    path = read_paths[0] if read_paths else 'SELECTED_SOURCE_PATH'
+    inspect = shlex.join(['python3', '-I', '-S', '.runtime/offdesk_native_worker.py',
+                         'inspect', '--root', '.', '--path', path, '--start', '1', '--lines', '40'])
     return (
         'Edit first after recovery using the inline source and requirements. '
         'If one essential detail is missing, prefer one focused read, then edit. '
         'Do not restart discovery or dump files. At most four bounded read commands '
         'before the first edit; every read output, including after edits, must fit '
         f'{MAX_INSPECTION_LINES} lines and {MAX_INSPECTION_BYTES} UTF-8 bytes. '
+        f'For a necessary selected-source read use exactly: {inspect}. '
+        'This helper refuses oversized ranges before reading and bounds its serialized output. '
+        'A status=refused response contains no source text; follow next_action without a file dump. '
+        'Refused reads still consume command and inspection budgets, but are not tool progress. '
+        'Do not reread the inline checker; after editing, save progress and run the selected check '
+        'before further inspection. '
         'The guard checks visible completed output, not hidden or truncated bytes, '
         'and is not pre-execution admission. Inspections and progress saves consume '
         'the shared command budget. Save actual progress after edits and before '
@@ -603,7 +631,7 @@ def qualify(run,phase,deadline,batch,worker):
         'If recovery fails, stop. Otherwise implement independently. Use only '
         'command_execution and quoted literal heredocs; no native apply_patch, '
         'delegates, external requests, dependencies, Council/paid calls or server changes.\n'
-        +implementation_instructions(str(context.relative_to(run.root)),str(progress.relative_to(run.root)),context_sha)
+        +implementation_instructions(str(context.relative_to(run.root)),str(progress.relative_to(run.root)),context_sha,phase['read_paths'])
         +'Selected pre-edit read paths only: '+json.dumps(phase['read_paths'])+'. '
         'Do not reread the inline contract/checker. A repeated read before editing stops this attempt.\n'
         +'Selected checks: '+json.dumps(phase['checks'])+'\n'
@@ -613,6 +641,9 @@ def qualify(run,phase,deadline,batch,worker):
     out2=run.output/'context-2';guard2=ImplementationGuard(phase['max_tool_calls']-guard1.calls,lambda:batch.inventory(run.root),observer,run.record,read_paths=phase['read_paths'])
     second=supervise_counted(run,'context-2',worker,worker.native_argv(str(run.root/run.selection['native_codex']),run.root,run.selection['model'],out2/'final.txt',True,helper,**reasoning_options),second_prompt,run.root,out2,deadline,guard2,env,command_seconds=60,progress_observer=observer,request_telemetry=True,**generation_options);run.record('SECOND_CONTEXT_NATIVE_RESULT.json',dict(second));run.bindings()
     for key in ('tool_calls','started_tool_calls','completed_tool_calls','in_flight_tool_calls'):second[key]+=first[key]
+    for key in ('nonprogress_tool_calls', 'progress_tool_calls'):
+        if key in second and key in first:
+            second[key] += first[key]
     run.record('CONTEXT_2_RESULT.json',second)
     if second.get('stop_reason') or not second.get('turn_completed'):second['verification_state']='failed';return second
     final_saved,final_sha=worker.read_task_json(run.root,progress,worker.MAX_PROGRESS_BYTES);worker.validate_progress(final_saved,binding)

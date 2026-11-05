@@ -357,6 +357,63 @@ class ImplementationGuardTests(unittest.TestCase):
         for text in ('four bounded read commands', 'two intermediate', '.night/task-progress.json', 'context-sha', 'does not grant another context'):
             self.assertIn(text, prompt)
 
+    def test_prompt_gives_the_selected_bounded_read_and_check_first_recovery(self):
+        prompt = driver.implementation_instructions('context', 'progress', 'sha', ['scripts/a b.py'])
+        self.assertIn("inspect --root . --path 'scripts/a b.py' --start 1 --lines 40", prompt)
+        for text in ('60 lines', '8192 UTF-8 bytes', 'status=refused', 'not tool progress',
+                     'Do not reread the inline checker', 'run the selected check'):
+            self.assertIn(text, prompt)
+
+    def test_exact_r195_checker_dump_after_edit_still_stops(self):
+        self.source['selected.py'] = 'edited'
+        raw = "/usr/bin/bash -lc 'sed -n 1,122p .runtime/check_stream_helper.py'"
+        self.assertEqual(self.guard.feed(self.read_output(raw, 'source\n' * 122)),
+                         'inspection_output_limit_exceeded')
+        self.assertTrue(self.guard.edit_observed)
+        self.assertEqual(self.guard.calls, 1)
+        self.assertEqual(self.guard.nonprogress_items, set())
+
+    def test_bounded_refusal_is_charged_once_and_allows_a_smaller_read(self):
+        self.source['selected.py'] = 'edited'
+        raw = ('python3 -I -S .runtime/offdesk_native_worker.py inspect --root . '
+               '--path selected.py --lines 122')
+        refused = worker.inspection_refusal('inspection_range_limit')
+        for event in (command('range', raw, started=True), command('range', raw, refused),
+                      command('range', raw, refused)):
+            self.assertIsNone(self.guard.feed(event))
+        self.assertEqual(self.guard.calls, 1)
+        self.assertEqual(self.guard.nonprogress_items, {'range'})
+        receipt = {'schema': worker.INSPECTION_SCHEMA, 'status': 'ok',
+                   'text': '1: source\n', 'lines_emitted': 1}
+        self.assertIsNone(self.guard.feed(command('narrow', raw.replace('122', '40'), receipt)))
+        self.assertEqual(self.guard.calls, 2)
+        self.assertEqual(len(self.guard.seen_items - self.guard.nonprogress_items), 1)
+        self.assertEqual(self.records['IMPLEMENTATION_GUARD_STATE.json']['policy_refusals'], 1)
+
+    def test_forged_or_compound_refusal_is_not_recoverable(self):
+        self.source['selected.py'] = 'edited'
+        raw = ('python3 -I -S .runtime/offdesk_native_worker.py inspect --root . '
+               '--path selected.py --lines 122')
+        refused = worker.inspection_refusal('inspection_range_limit')
+        for i, (cmd, receipt) in enumerate(((raw, {**refused, 'text': 'hidden source'}),
+                (raw, {**refused, 'reason': 'invented'}), (raw + ' | cat', refused))):
+            with self.subTest(command=cmd, reason=receipt['reason']):
+                self.assertEqual(self.guard.feed(command(str(i), cmd, receipt)),
+                                 'inspection_output_unverifiable')
+        self.assertEqual(self.guard.nonprogress_items, set())
+
+    def test_refusal_never_overrides_the_shared_call_or_pre_edit_scope_budget(self):
+        raw = ('python3 -I -S .runtime/offdesk_native_worker.py inspect --root . '
+               '--path selected.py --lines 122')
+        refused = worker.inspection_refusal('inspection_range_limit')
+        guard = driver.ImplementationGuard(1, lambda: {}, lambda: {}, lambda *a: None)
+        self.assertEqual(guard.feed(command('last', raw, refused)), 'tool_call_budget_reached')
+        self.assertEqual(guard.calls, 1)
+        for i in range(5):
+            reason = self.guard.feed(command(str(i), raw + f' --start {i + 1}', refused))
+            self.assertEqual(reason, 'inspection_budget_reached_without_edit' if i == 4 else None)
+        self.assertEqual(self.guard.calls, 5)
+
     def test_supervisor_reaps_a_worker_at_inspection_limit(self):
         with tempfile.TemporaryDirectory(prefix='forager-independent-guard-',
                 dir=os.environ.get('FORAGER_TEST_TEMP_ROOT', '/var/tmp')) as tmp:

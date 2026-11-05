@@ -4,6 +4,25 @@ Updated: 2026-11-05
 
 ## Current focus
 
+Private helper qualifications now recommend an exact selected-source
+`inspect` command. Oversized ranges receive a compact refusal before a source
+read; successful responses fit the retained 60-line and 8192-byte limits,
+including JSON escaping and UTF-8 encoding. Oversized individual lines receive
+an empty refusal instead of partial source output. Existing source-path and
+frozen-checker restrictions remain in effect.
+
+Validated size refusals consume command/inspection budgets but do not refresh
+the tool-progress clock. Raw completion counts stay factual, with separate
+nonprogress/progress command counts. The observed-output guard still stops a
+direct 122-line checker dump after an edit. This is a preventive bound for the
+selected helper route, not universal admission control over native commands.
+The instructions prioritize the selected checker after an edit and forbid
+rereading its already-inline source. Model-free fixtures cover recovery from a
+refusal, encoded byte bounds, replay, scope, inactivity and hard deadlines.
+R195 remains a failed native trial with incomplete code; no model retry,
+97-vector change, installed activation or C5.1a/C6.3-local acceptance follows
+from this source increment.
+
 Private helper qualifications can now bind an explicit model and reasoning
 effort in the selected phase. The same effort reaches both native contexts,
 without adding an output-token cap. Unselected runs retain the backend default;

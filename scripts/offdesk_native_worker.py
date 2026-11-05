@@ -35,6 +35,9 @@ SOURCE_EXCLUDED_ROOTS = (*RUNTIME_DIRS, "target", ".git")
 PROGRESS_BINDING_KEYS = ("schema", "phase", "baseline_sha256", "root_identity", "run_binding")
 MAX_PROGRESS_BYTES = 8192
 MAX_CONTEXT_BYTES = 12000
+MAX_INSPECTION_LINES = 60
+MAX_INSPECTION_BYTES = 8192
+INSPECTION_SCHEMA = "offdesk_bounded_inspection.v1"
 
 
 class ProgressInputError(ValueError):
@@ -279,6 +282,38 @@ def source_excerpt(root: Path, relative: str, start: int = 1, lines: int = 60) -
     return {"path": relative, "sha256": sha(path), "start": start,
             "lines_emitted": len(chunks), "text": "".join(chunks),
             "truncated": len(chunks) < len(selected)}
+
+
+def inspection_refusal(reason: str) -> dict:
+    if reason not in ("inspection_range_limit", "inspection_line_too_large"):
+        raise ValueError("Unknown bounded inspection refusal")
+    return {"schema": INSPECTION_SCHEMA, "status": "refused", "reason": reason,
+            "text": "", "lines_emitted": 0, "truncated": False,
+            "max_lines": MAX_INSPECTION_LINES, "max_utf8_bytes": MAX_INSPECTION_BYTES,
+            "next_action": "Use inspect on a selected source with positive --start and --lines 1..60; "
+                           "for an oversized line use the inline inputs or selected check, not a file dump."}
+
+
+def inspect_source(root: Path, relative: str, start: int = 1, lines: int = 60) -> dict:
+    """Refuse oversized ranges before reading; bound the serialized response too."""
+    if (type(start) is not int or not 1 <= start <= 2147483647
+            or type(lines) is not int or not 1 <= lines <= MAX_INSPECTION_LINES):
+        return inspection_refusal("inspection_range_limit")
+    excerpt = source_excerpt(root, relative, start, lines)
+    chunks = excerpt["text"].splitlines(keepends=True)
+    while True:
+        packet = {**excerpt, "schema": INSPECTION_SCHEMA, "status": "ok",
+                  "text": "".join(chunks), "lines_emitted": len(chunks),
+                  "truncated": excerpt["truncated"] or len(chunks) < excerpt["lines_emitted"],
+                  "next_start": start + len(chunks),
+                  "max_lines": MAX_INSPECTION_LINES, "max_utf8_bytes": MAX_INSPECTION_BYTES}
+        if len((json.dumps(packet, ensure_ascii=False) + "\n").encode()) <= MAX_INSPECTION_BYTES:
+            if not chunks and packet["truncated"]:
+                return inspection_refusal("inspection_line_too_large")
+            return packet
+        if not chunks:
+            return inspection_refusal("inspection_line_too_large")
+        chunks.pop()
 
 
 def edit_source(root: Path, request: dict) -> dict:
@@ -642,6 +677,7 @@ class ProgressGuard:
         self.failed_checks = collections.Counter()
         self.source_generation = None
         self.check_root = None
+        self.nonprogress_items = set()
 
     def error(self, text: str) -> str | None:
         lower = text.lower()
@@ -964,7 +1000,7 @@ def _supervise_native(argv: list[str], prompt: str, root: Path, output: Path, de
                             active_commands.setdefault(item["id"], time.monotonic())
                     if item.get("type") == "command_execution" and event.get("type") == "item.completed":
                         active_commands.pop(item["id"], None)
-                        if new_completion:
+                        if new_completion and item["id"] not in guard.nonprogress_items:
                             last_progress = time.monotonic()
                             last_tool_completed_at = time.time()
                     if progress_observer is not None and event.get("type") == "item.completed" and (
@@ -991,6 +1027,8 @@ def _supervise_native(argv: list[str], prompt: str, root: Path, output: Path, de
             write_json(output / "status.json", {"pid": process.pid, "tool_calls": guard.calls,
                                                "started_tool_calls": len(guard.started_items),
                                                "completed_tool_calls": len(guard.seen_items),
+                                               "nonprogress_tool_calls": len(guard.nonprogress_items),
+                                               "progress_tool_calls": len(guard.seen_items - guard.nonprogress_items),
                                                "in_flight_tool_calls": len(guard.started_items - guard.seen_items),
                                                "last_tool_completed_at": last_tool_completed_at,
                                                "seconds_without_tool_progress": time.monotonic() - last_progress,
@@ -1029,6 +1067,8 @@ def _supervise_native(argv: list[str], prompt: str, root: Path, output: Path, de
               "tool_call_accounting": "unique_started_or_completion_only",
               "started_tool_calls": len(guard.started_items),
               "completed_tool_calls": len(guard.seen_items),
+              "nonprogress_tool_calls": len(guard.nonprogress_items),
+              "progress_tool_calls": len(guard.seen_items - guard.nonprogress_items),
               "in_flight_tool_calls": len(guard.started_items - guard.seen_items),
               "last_tool_completed_at": last_tool_completed_at,
               "seconds_without_tool_progress": time.monotonic() - last_progress,
@@ -1040,6 +1080,8 @@ def _supervise_native(argv: list[str], prompt: str, root: Path, output: Path, de
               "review_state": "pending_user_review", "ended_at": time.time()}
     write_json(output / "status.json", {"pid": process.pid, "tool_calls": guard.calls,
                "started_tool_calls": len(guard.started_items), "completed_tool_calls": len(guard.seen_items),
+               "nonprogress_tool_calls": len(guard.nonprogress_items),
+               "progress_tool_calls": len(guard.seen_items - guard.nonprogress_items),
                "in_flight_tool_calls": len(guard.started_items - guard.seen_items),
                "supervision": result["supervision"],
                "stop_reason": reason, "deadline": deadline, "terminal": True})
@@ -1462,6 +1504,11 @@ def main() -> int:
     excerpt.add_argument("--path", required=True)
     excerpt.add_argument("--start", type=int, default=1)
     excerpt.add_argument("--lines", type=int, default=60)
+    inspect = sub.add_parser("inspect", help="Bounded selected-source read with recoverable size refusals")
+    inspect.add_argument("--root", type=Path, required=True)
+    inspect.add_argument("--path", required=True)
+    inspect.add_argument("--start", type=int, default=1)
+    inspect.add_argument("--lines", type=int, default=60)
     edit = sub.add_parser("edit")
     edit.add_argument("--root", type=Path, required=True)
     edit.add_argument("--request", type=Path, required=True)
@@ -1517,6 +1564,8 @@ def main() -> int:
         value = preflight(args.root, args.out, json.loads(args.commands_json), args.timeout)
     elif args.action == "excerpt":
         value = source_excerpt(args.root, args.path, args.start, args.lines)
+    elif args.action == "inspect":
+        value = inspect_source(args.root, args.path, args.start, args.lines)
     elif args.action == "edit":
         value = edit_source(args.root, json.loads(args.request.read_text()))
     elif args.action == "progress":
