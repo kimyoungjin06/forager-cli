@@ -162,7 +162,32 @@ class RelayTests(unittest.TestCase):
         self.assertEqual(result['supervision']['last_response_kind'], 'reasoning')
 
     def test_streaming_response_remains_bounded_by_the_selected_deadline(self):
-        result = self.run_streaming_native(b'answer-stream', deadline_seconds=.4)
+        root = self.root/'deadline-native'
+        root.mkdir()
+        with RequestTelemetry(self.upstream, self.root/'deadline-probe', time.time()+10) as probe:
+            connection = self.client(probe)
+            try:
+                connection.request('POST', '/responses', body=b'answer-stream')
+                response = connection.getresponse()
+                try:
+                    # Arm the deadline after the real relay observes reasoning.
+                    # Cold Python/HTTP startup must not consume this fixture's budget.
+                    ready_by = time.monotonic()+3
+                    while probe.response_progress() is None and time.monotonic() < ready_by:
+                        time.sleep(.01)
+                    self.assertIsNotNone(probe.response_progress())
+                    self.assertEqual(probe.response_progress()['kind'], 'reasoning')
+                    code = 'import sys,time;sys.stdin.read();time.sleep(10)'
+                    result = worker._supervise_native(
+                        [sys.executable, '-I', '-S', '-u', '-c', code], 'prompt', root,
+                        root/'.night/run', time.time()+.4, worker.ProgressGuard(),
+                        dict(os.environ), idle_seconds=1,
+                        response_progress_observer=probe.response_progress,
+                        native_stop_observer=probe.observe_stop)
+                finally:
+                    response.close()
+            finally:
+                connection.close()
         self.assertEqual(result['stop_reason'], 'deadline_reached')
         self.assertFalse(result['turn_completed'])
         self.assertEqual(result['completed_tool_calls'], 0)
