@@ -298,6 +298,13 @@ the same explicit value. An omitted policy keeps the backend default; invalid
 policies are rejected before native launch. This qualification artifact is not a
 production settings field and does not select a new run or an output-token cap.
 
+The first explicit-low trial, R191, verifies the backend-bound request envelope
+but stops during runner startup and warmup before any answer or tool execution.
+Model readiness is separate from metadata availability and effort correctness.
+Keep that failed result, record native HTTP retries separately from trial
+relaunches, and qualify loading before measuring another bounded helper task.
+Effort performance, recovery, helper checks and production selection remain open.
+
 The current implementation should prioritize:
 
 - Offdesk closeout and review closure;

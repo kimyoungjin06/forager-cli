@@ -1,6 +1,6 @@
 # Project State
 
-Updated: 2026-11-04
+Updated: 2026-11-05
 
 ## Current focus
 
@@ -8,8 +8,16 @@ Private helper qualifications can now bind an explicit model and reasoning
 effort in the selected phase. The same effort reaches both native contexts,
 without adding an output-token cap. Unselected runs retain the backend default;
 unsupported or mismatched policies fail before model metadata or native launch.
-The selected real trial remains a separate bounded execution and does not accept
-C5.1a or activate a production setting.
+R191 verifies explicit `low` and absent output-token caps in the frozen-client
+fixture and both backend-bound requests of one fresh real trial. The trial
+stops before any model answer: Ollama's runner reaches model warmup but fails
+to become ready, returning HTTP 500 on the first request. The native client's
+HTTP retry remains in loading when the first context's 180-second deadline
+ends. No tool, edit, recovery or helper check occurs. Effort performance and
+C5.1a remain unqualified; the next diagnosis must separate model readiness from
+the task clock before selecting another real attempt. Local regression checks
+pass all 276 cases, formatting and strict Clippy. Owned resources are closed
+and existing GPU jobs survive. This does not activate a production setting.
 
 Native supervision now prioritizes completing a response. Nonempty reasoning,
 answer text and tool-argument generation can outlast the tool-idle interval
@@ -18,8 +26,9 @@ inactivity bound; selected phase/window deadlines, command timeouts and tool
 budgets remain in force. Heartbeats, metadata, empty deltas and native message
 replays do not extend the response clock. The inactivity reason changes from
 `no_tool_progress` to `response_inactive`, with separate response/tool timing in
-status and result evidence. This source change has local fixture verification;
-it does not repeat a model trial, qualify C5.1a or replace an installed runtime.
+status and result evidence. The response-clock change has local fixture
+verification. R191 observes waiting for a response, with no generated answer
+to qualify sustained-response behavior. The installed runtime is unchanged.
 
 The requested maintenance sequence now has implementation candidates for
 QA.1, Release.2, Release.3 and Ops.1, with local verification completed. Results
