@@ -325,7 +325,7 @@ class FourPhaseRun:
                                                fromfile="a/" + name, tofile="b/" + name))
         return "".join(pieces)
 
-    def closeout(self, failure, error=None):
+    def closeout(self, failure, error=None, failure_detail=None):
         patch_error = None
         try:
             (self.output / "candidate.patch").write_text(self.patch())
@@ -340,7 +340,7 @@ class FourPhaseRun:
                   "ticket_id": self.selection.get("ticket_id"),
                   "status": "failed" if failure else "completed",
                   "exit_code": 1 if failure else 0, "failure": failure,
-                  "error": error, "patch_error": patch_error,
+                  "error": error, "patch_error": patch_error, "failure_detail": failure_detail,
                   "completed_phase_gates": self.completed, "tool_calls": self.calls,
                   "native_tool_calls_observed": sum(self.native_calls.values()),
                   "review_state": "pending_user_review", "canonical_acceptance": False,
@@ -352,6 +352,8 @@ class FourPhaseRun:
                    + "Status: " + result["status"] + "\n"
                    + "Completed technical phase gates: " + ", ".join(self.completed) + "\n"
                    + "Failure: " + str(failure) + "\n\n"
+                   + ("Failure evidence: " + str(failure_detail.get("artifact_path")) + "\n\n"
+                      if failure_detail is not None else "")
                    + "See RUN_RESULT.json, candidate.patch, FINAL_SOURCE.json, phase reports, "
                      "native logs, check results and Council responses. Technical checks are "
                      "not canonical acceptance. No shared checkout integration or deployment.\n")
@@ -370,6 +372,7 @@ class FourPhaseRun:
         self.output.mkdir(parents=True, mode=0o700, exist_ok=True)
         failure = None
         error = None
+        failure_detail = None
         try:
             manifest = json.loads((self.root / ".runtime/source_manifest.json").read_text())
             if self.selection.get("require_launcher_receipt"):
@@ -431,6 +434,18 @@ class FourPhaseRun:
                         or result.get("verification_state") != "passed"
                         or result.get("turn_completed") is not True):
                     failure = "phase_gate_failed:" + phase["id"]
+                    detail = result.get("qualification_failure")
+                    if (result.get("exit_code") == 0 and result.get("stop_reason") is None
+                            and result.get("turn_completed") is True
+                            and result.get("verification_state") == "failed"
+                            and isinstance(detail, dict)
+                            and detail.get("schema") == "offdesk_native_command_failure.v1"
+                            and detail.get("phase") == phase["id"]
+                            and detail.get("category") in ("verification_failed", "execution_failed")
+                            and detail.get("canonical_acceptance") is False
+                            and detail.get("automatic_retry_authorized") is False):
+                        failure = detail["category"] + ":" + phase["id"]
+                        failure_detail = detail
                     break
                 if not (self.root / phase["summary_path"]).is_file():
                     failure = "phase_summary_missing:" + phase["id"]
@@ -450,7 +465,7 @@ class FourPhaseRun:
             failure = "orchestration_failed"
             error = {"type": type(exc).__name__, "message": str(exc)[:1000]}
         self.active_phase = None
-        return self.closeout(failure, error)
+        return self.closeout(failure, error, failure_detail)
 
 
 def main():

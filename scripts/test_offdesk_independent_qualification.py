@@ -43,6 +43,17 @@ class AuditTests(unittest.TestCase):
     def audit(self):
         return driver.implementation_audit(self.before, self.after, self.phase, self.rows, self.pin, 'final')
 
+    def test_progress_guidance_requires_a_new_standalone_call_and_audit_rejects_combining(self):
+        prompt = driver.plain_progress_instructions('.night/context.json', 'context-sha')
+        self.assertIn('separate single command', prompt)
+        self.assertIn('Never join it to an edit heredoc', prompt)
+        self.assertIn('new command-execution call', prompt)
+        combined = ("cat > scripts/offdesk_request_telemetry.py <<'PY'\n# fixture\nPY\n"
+                    "python3 -I -S .runtime/offdesk_native_worker.py progress")
+        self.rows.insert(1, command('combined-save', combined)['item'])
+        with self.assertRaisesRegex(ValueError, 'Helper invocations must use one simple'):
+            self.audit()
+
     def test_r53_checker_inspections_are_not_executions(self):
         reads = ["bash -lc 'cat .runtime/test_adapter.py'",
                  'cat -n .runtime/verify_stream_frames.py',
@@ -637,8 +648,8 @@ class HelperStageWiringTests(unittest.TestCase):
             events = [{'type': 'thread.started', 'thread_id': 'fixture-1' if first else 'fixture-2'}]
             context = self.out / (self.phase['id'] + '-context.json')
 
-            def completed(name, raw, receipt):
-                event = command(name, raw, receipt)
+            def completed(name, raw, receipt, code=0):
+                event = command(name, raw, receipt, code=code)
                 guard.feed(event)
                 events.append(event)
 
@@ -652,11 +663,19 @@ class HelperStageWiringTests(unittest.TestCase):
                 recovered = worker.recovery_context(root, context, pin['context_sha256'], pin['progress_sha256'])
                 completed('recovered', raw, recovered)
                 (root / packet_tools.HELPER_TARGET).write_text('# Scope-only fixture. No decoder implementation.\n')
-                completed('edited', "python3 -c 'pass'", {})
+                completed('edited', "python3 -c 'pass'", {}, code=1 if mode == 'edit-fails' else 0)
                 report = self.report()
                 if mode == 'bad-model-report': report['tests_run'] = 0
-                worker.write_json(root / '.night/helper-model-check.json', report)
-                completed('model-check', shlex.join(self.phase['checks'][0]), {})
+                check_fails = mode in ('check-fails', 'check-fails-missing-report', 'check-fails-stale-source')
+                if check_fails:
+                    report.update(status='failed', passed=37, failed=60)
+                    for i, row in enumerate(report['cases']): row['passed'] = i < 37
+                    if mode == 'check-fails-stale-source': report['target_sha256'] = 'stale'
+                if mode != 'check-fails-missing-report':
+                    worker.write_json(root / '.night/helper-model-check.json', report)
+                summary = {key: report[key] for key in ('status', 'tests_run', 'passed', 'failed', 'errors')}
+                completed('model-check', shlex.join(self.phase['checks'][0]), summary,
+                          code=1 if check_fails else 0)
                 receipt = worker.save_progress(root, context, 'Fixture change, not a model',
                     'Await review', ['fixture checker receipt'], [packet_tools.HELPER_TARGET], worker.sha(context))
                 completed('saved-final', 'python3 -I -S .runtime/offdesk_native_worker.py progress', receipt)
@@ -711,6 +730,100 @@ class HelperStageWiringTests(unittest.TestCase):
         self.assertTrue(all('generation_policy' not in options for options in self.native_options))
         self.assertNotIn('NATIVE_REASONING_POLICY.json', self.records)
         self.assertTrue(all(not call.kwargs for call in self.fake.native_argv.call_args_list))
+
+    def test_failed_selected_check_returns_verification_failure_without_host_run_or_retry(self):
+        result = self.execute('check-fails')
+        self.assertEqual(result['verification_state'], 'failed')
+        detail = result['qualification_failure']
+        self.assertEqual(detail['category'], 'verification_failed')
+        self.assertEqual(detail['selected_checks'][0]['evidence']['reported_counts'],
+                         {'status': 'failed', 'tests_run': 97, 'passed': 37, 'failed': 60, 'errors': 0})
+        self.assertFalse(detail['selected_checks'][0]['evidence']['independent_host_verified'])
+        self.assertEqual(result['verification_checks'], [])
+        self.assertEqual(self.host_calls, [])
+        self.assertEqual(len(self.prompts), 2)
+        self.assertEqual(len(detail['selected_checks']), 1)
+        self.assertFalse(detail['canonical_acceptance'])
+        self.assertFalse(detail['automatic_retry_authorized'])
+        self.assertIn(self.phase['id'] + '-native-command-failure.json', self.records)
+        self.assertNotIn('HOST_REPORT_RECEIPT.json', self.records)
+
+    def test_missing_failed_report_keeps_counts_unknown_and_still_blocks_acceptance(self):
+        result = self.execute('check-fails-missing-report')
+        evidence = result['qualification_failure']['selected_checks'][0]['evidence']
+        self.assertEqual(result['qualification_failure']['category'], 'verification_failed')
+        self.assertEqual(evidence['status'], 'unverified')
+        self.assertIsNone(evidence['reported_counts'])
+        self.assertEqual(evidence['error_class'], 'FileNotFoundError')
+        self.assertEqual(self.host_calls, [])
+
+    def test_stale_failed_report_is_not_reported_as_current_test_counts(self):
+        result = self.execute('check-fails-stale-source')
+        evidence = result['qualification_failure']['selected_checks'][0]['evidence']
+        self.assertEqual(evidence['status'], 'unverified')
+        self.assertIsNone(evidence['reported_counts'])
+        self.assertEqual(self.host_calls, [])
+
+    def test_failed_arbitrary_edit_is_execution_failure_without_selected_check_credit(self):
+        result = self.execute('edit-fails')
+        self.assertEqual(result['qualification_failure']['category'], 'execution_failed')
+        failed = result['qualification_failure']['failed_commands']
+        self.assertEqual([row['native_item_id'] for row in failed], ['edited'])
+        self.assertFalse(failed[0]['selected_check'])
+        self.assertNotIn('command', failed[0])
+        self.assertEqual(self.host_calls, [])
+
+    def failed_report_fixture(self):
+        (self.root / packet_tools.HELPER_TARGET).write_text('# fixture, no decoder\n')
+        report = self.report();report.update(status='failed', passed=37, failed=60)
+        for i, row in enumerate(report['cases']): row['passed'] = i < 37
+        summary = {key: report[key] for key in ('status', 'tests_run', 'passed', 'failed', 'errors')}
+        item = command('check', shlex.join(self.phase['checks'][0]), summary, code=1)['item']
+        return report, item
+
+    def test_failed_report_requires_full_case_identity_counts_and_native_summary(self):
+        report, item = self.failed_report_fixture()
+        path = self.root / '.night/helper-model-check.json'
+        variants = [('tests_run', True), ('passed', 38), ('failed', 59), ('errors', 1),
+                    ('source_root', str(self.root.parent)), ('target_sha256', 'stale'),
+                    ('cases', report['cases'][:-1]), ('qualification_complete', True)]
+        for field, value in variants:
+            invalid = copy.deepcopy(report);invalid[field] = value;worker.write_json(path, invalid)
+            evidence = driver.failed_helper_check_evidence(self.root, self.packet, item, worker)
+            with self.subTest(field=field):
+                self.assertEqual(evidence['status'], 'unverified')
+                self.assertIsNone(evidence['reported_counts'])
+        worker.write_json(path, report)
+        item['aggregated_output'] = json.dumps({'status': 'failed', 'tests_run': 97,
+                                               'passed': 0, 'failed': 97, 'errors': 0})
+        evidence = driver.failed_helper_check_evidence(self.root, self.packet, item, worker)
+        self.assertIsNone(evidence['reported_counts'])
+
+    def test_progress_text_mentioning_checker_is_not_a_selected_check(self):
+        raw = shlex.join(['python3', '-I', '-S', '.runtime/offdesk_native_worker.py', 'progress',
+                         '--checked-command', shlex.join(self.phase['checks'][0])])
+        detail = driver.native_command_failure(self.phase,
+            [command('save', raw, {}, code=1)['item']], self.root, self.packet, worker)
+        self.assertEqual(detail['category'], 'execution_failed')
+        self.assertEqual(detail['selected_checks'], [])
+
+    def test_duplicate_failed_checks_do_not_bind_the_last_report_as_one_attempt(self):
+        report, item = self.failed_report_fixture()
+        worker.write_json(self.root / '.night/helper-model-check.json', report)
+        other = {**item, 'id': 'second-check'}
+        detail = driver.native_command_failure(self.phase, [item, other], self.root, self.packet, worker)
+        self.assertEqual(len(detail['failed_commands']), 2)
+        for check in detail['selected_checks']:
+            self.assertEqual(check['evidence']['reason'], 'multiple_selected_invocations')
+            self.assertIsNone(check['evidence']['reported_counts'])
+
+    def test_unknown_native_exit_is_not_zero_filled_as_a_test_failure(self):
+        _, item = self.failed_report_fixture();item['exit_code'] = None
+        detail = driver.native_command_failure(self.phase, [item], self.root, self.packet, worker)
+        self.assertEqual(detail['category'], 'execution_failed')
+        self.assertIsNone(detail['failed_commands'][0]['exit_code'])
+        self.assertFalse(detail['failed_commands'][0]['exit_status_verified'])
+        self.assertIsNone(detail['selected_checks'][0]['evidence']['reported_counts'])
 
     def test_selected_reasoning_policy_binds_both_native_contexts_without_output_cap(self):
         policy = {'schema':'offdesk_native_reasoning_effort.v1',

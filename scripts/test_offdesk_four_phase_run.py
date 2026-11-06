@@ -190,6 +190,41 @@ class FourPhaseTests(unittest.TestCase):
         self.assertEqual(result["status"], "failed")
         self.assertEqual(len(self.called), 1)
 
+    def classified_backend(self, category, phase_id=None):
+        def backend(phase, deadline):
+            result = self.backend(phase, deadline)
+            result.update(verification_state='failed', qualification_failure={
+                'schema': 'offdesk_native_command_failure.v1',
+                'phase': phase_id or phase['id'], 'category': category,
+                'artifact_path': '.night/run/native-command-failure.json',
+                'canonical_acceptance': False, 'automatic_retry_authorized': False,
+                'selected_checks': [{'evidence': {'reported_counts':
+                    {'tests_run': 97, 'passed': 37, 'failed': 60}}}]})
+            return result
+        return backend
+
+    def test_selected_check_failure_survives_phase_closeout_without_orchestration_exception(self):
+        result = self.run_batch(self.classified_backend('verification_failed'))
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual(result['failure'], 'verification_failed:FG-N18-1')
+        self.assertIsNone(result['error'])
+        self.assertEqual(result['failure_detail']['selected_checks'][0]['evidence']['reported_counts']['failed'], 60)
+        self.assertFalse(result['canonical_acceptance'])
+        self.assertEqual(result['completed_phase_gates'], [])
+        self.assertEqual(self.called, ['FG-N18-1'])
+        self.assertIn('Failure evidence: .night/run/native-command-failure.json',
+                      (self.run.output / 'HANDOFF.md').read_text())
+
+    def test_execution_failure_keeps_its_distinct_phase_category(self):
+        result = self.run_batch(self.classified_backend('execution_failed'))
+        self.assertEqual(result['failure'], 'execution_failed:FG-N18-1')
+        self.assertEqual(self.called, ['FG-N18-1'])
+
+    def test_stale_phase_diagnostic_does_not_override_generic_failure(self):
+        result = self.run_batch(self.classified_backend('verification_failed', 'OTHER-PHASE'))
+        self.assertEqual(result['failure'], 'phase_gate_failed:FG-N18-1')
+        self.assertIsNone(result['failure_detail'])
+
     def test_incomplete_native_turn_is_not_phase_completion(self):
         def backend(phase, deadline):
             result = self.backend(phase, deadline)

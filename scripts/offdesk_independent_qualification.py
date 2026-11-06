@@ -376,7 +376,10 @@ def plain_progress_instructions(context, context_sha):
         "fit 1-1500 characters, arrays at most 16 strings of at most 500 "
         "characters, and the saved packet at most 8192 UTF-8 bytes. "
         "Only plain string options are selected; no stdin or legacy JSON "
-        "inputs, shell substitutions or invented successful checks. The writer "
+        "inputs, shell substitutions or invented successful checks. "
+        "Each progress save must be a separate single command. Never join it "
+        "to an edit heredoc or another action; finish the edit, then issue a new "
+        "command-execution call using the save form above. The writer "
         "preserves binding; model claims remain unverified.\n")
 
 
@@ -461,6 +464,85 @@ def helper_check_receipt(root, relative, packet, worker):
         raise ValueError('Complete bound helper check report required, not exit status alone')
     return {'path': relative, 'sha256': digest, 'target_sha256': target_sha, 'tests_run': 97,
             'qualification_complete': False, 'reported_retention_requires_code_review': True}
+
+
+def failed_helper_check_evidence(root, packet, item, worker):
+    relative = '.night/helper-model-check.json'
+    evidence = {'path': relative, 'sha256': None, 'reported_counts': None,
+                'status': 'unverified', 'independent_host_verified': False}
+    try:
+        report, digest = worker.read_task_json(root, root / relative, 262144)
+        evidence['sha256'] = digest
+        target_sha = packet_module.selected_file(root, packet_module.HELPER_TARGET)[1]
+        expected = [case[0] + '/' + style for case in packet['cases']
+                    for style in ('whole', 'bytewise', 'three-byte')] + ['independent-instances']
+        rows = report.get('cases')
+        if (report.get('schema') != 'forager_stream_helper_checks.v1'
+                or report.get('status') != 'failed'
+                or report.get('source_root') != str(root.resolve())
+                or report.get('target_sha256') != target_sha
+                or report.get('qualification_complete') is not False
+                or not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows)
+                or [row.get('id') for row in rows] != expected
+                or any(type(row.get('passed')) is not bool for row in rows)
+                or any(type(report.get(key)) is not int for key in ('tests_run', 'passed', 'failed', 'errors'))
+                or report['tests_run'] != 97 or report['errors'] != 0
+                or not 0 < report['failed'] <= 97
+                or report['passed'] != sum(row['passed'] for row in rows)
+                or report['failed'] != sum(not row['passed'] for row in rows)
+                or report['passed'] + report['failed'] != 97):
+            raise ValueError('Failed helper report is not bound to the selected source and full case inventory')
+        counts = {key: report[key] for key in ('status', 'tests_run', 'passed', 'failed', 'errors')}
+        summary = json.loads(item.get('aggregated_output', ''))
+        if (summary != counts or any(type(summary.get(key)) is not int
+                for key in ('tests_run', 'passed', 'failed', 'errors'))):
+            raise ValueError('Native checker summary and retained report disagree')
+        evidence.update(status='source_and_summary_bound', reported_counts=counts,
+                        target_sha256=target_sha)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        evidence['error_class'] = type(exc).__name__
+    return evidence
+
+
+def native_command_failure(phase, commands, root, packet, worker):
+    """Describe observed failed commands without accepting work or rerunning checks."""
+    selected = {tuple(argv) for argv in phase['checks']}
+    observed = []
+    for item in commands:
+        try:
+            argv = checked_command_argv(item['command'], root)
+        except ValueError:
+            argv = []
+        observed.append((item, argv, tuple(argv) in selected))
+    failed = [(item, argv, chosen) for item, argv, chosen in observed
+              if type(item.get('exit_code')) is not int or item['exit_code'] != 0]
+    if not failed:
+        return None
+    execution_failure = any(not chosen or type(item.get('exit_code')) is not int
+                            for item, _, chosen in failed)
+    checks = []
+    for item, argv, chosen in observed:
+        if not chosen:
+            continue
+        evidence = {'status': 'unverified', 'reported_counts': None,
+                    'independent_host_verified': False}
+        occurrences = sum(other_argv == argv for _, other_argv, selected_check in observed if selected_check)
+        if occurrences != 1:
+            evidence['reason'] = 'multiple_selected_invocations'
+        elif (type(item.get('exit_code')) is int and item['exit_code'] != 0
+                and implementation_stage(phase) == packet_module.HELPER_STAGE):
+            evidence = failed_helper_check_evidence(root, packet, item, worker)
+        checks.append({'argv': argv, 'native_item_id': item['id'],
+                       'exit_code': item.get('exit_code'), 'evidence': evidence})
+    return {'schema': 'offdesk_native_command_failure.v1', 'phase': phase['id'],
+            'category': 'execution_failed' if execution_failure else 'verification_failed',
+            'failed_commands': [{'native_item_id': item['id'], 'exit_code': item.get('exit_code'),
+                'selected_check': chosen, 'exit_status_verified': type(item.get('exit_code')) is int,
+                'command_sha256': hashlib.sha256(item['command'].encode()).hexdigest()}
+                for item, _, chosen in failed],
+            'selected_checks': checks, 'implementation_audit': 'not_completed',
+            'host_verification': 'not_run', 'canonical_acceptance': False,
+            'automatic_retry_authorized': False}
 
 
 def native_environment(root, selection, worker):
@@ -646,10 +728,20 @@ def qualify(run,phase,deadline,batch,worker):
             second[key] += first[key]
     run.record('CONTEXT_2_RESULT.json',second)
     if second.get('stop_reason') or not second.get('turn_completed'):second['verification_state']='failed';return second
+    commands = completed_commands(out2)
+    failure = native_command_failure(phase, commands, run.root, packet, worker)
+    if failure is not None:
+        name = phase['id'] + '-native-command-failure.json'
+        failure['artifact_path'] = str((run.output / name).relative_to(run.root))
+        failure['native_log'] = {'path': str((out2 / 'stdout.log').relative_to(run.root)),
+                                 'sha256': worker.sha(out2 / 'stdout.log')}
+        run.record(name, failure)
+        return {**second, 'verification_state': 'failed', 'qualification_failure': failure,
+                'native_verification_checks': failure['selected_checks'], 'verification_checks': []}
     final_saved,final_sha=worker.read_task_json(run.root,progress,worker.MAX_PROGRESS_BYTES);worker.validate_progress(final_saved,binding)
     events=[json.loads(line) for line in (out2/'stdout.log').read_text().splitlines()]
     if any(event.get('item',{}).get('type') not in (None,'command_execution','reasoning','agent_message','error') for event in events):raise ValueError('Only command-execution tools are selected for this bounded trial')
-    audit=implementation_audit(before,batch.inventory(run.root),phase,completed_commands(out2),recovery,final_sha,run.root)
+    audit=implementation_audit(before,batch.inventory(run.root),phase,commands,recovery,final_sha,run.root)
     if sorted(final_saved['changed_files'])!=audit['changed_paths']:raise ValueError('Saved changed-file paths must match actual source edits')
     run.record('HOST_IMPLEMENTATION_AUDIT.json',audit)
     first_id,second_id=thread_id(out1),thread_id(out2)

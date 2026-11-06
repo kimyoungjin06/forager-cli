@@ -1,8 +1,26 @@
 # Project State
 
-Updated: 2026-11-05
+Updated: 2026-11-06
 
 ## Current focus
+
+Private qualifications now preserve a failed selected checker as
+`verification_failed` and other failed or unknown-exit commands as
+`execution_failed`, with command identities and a durable failure artifact in
+the phase result and handoff. Failed helper counts are reported only when the
+complete 97-case inventory, current source hash and native checker summary
+agree. Missing or mismatched evidence keeps counts unknown. Native/model
+receipts remain distinct from independent host verification; a failed command
+does not run another check, complete an audit or advance the next phase.
+
+Progress instructions require a separate command-execution call after an edit;
+the existing audit still rejects progress helpers combined with heredoc edits.
+R198's read-only projection classifies retained R197 as a verification failure
+with 37 passed and 60 failed checks. Its historical `orchestration_failed`
+receipt and model-created helper remain unchanged. Model-free regressions pass
+282 Python cases and 8 Rust native-contract cases; 2 explicit model/VM opt-ins
+remain ignored. Formatting and strict all-target Clippy pass. No real model
+retry, installed activation or C5.1a/C6.3-local acceptance follows.
 
 Private helper qualifications now recommend an exact selected-source
 `inspect` command. Oversized ranges receive a compact refusal before a source
