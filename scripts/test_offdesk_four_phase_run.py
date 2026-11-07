@@ -46,11 +46,12 @@ class FourPhaseTests(unittest.TestCase):
         return {"exit_code": 0, "stop_reason": None, "turn_completed": True,
                 "verification_state": "passed", "tool_calls": 1}
 
-    def run_batch(self, backend=None, council=None, clock=lambda: 1000):
+    def run_batch(self, backend=None, council=None, clock=lambda: 1000, selection_input=None):
         self.run = batch.FourPhaseRun(self.root, self.selection,
                                      self.root / ".night/run", clock=clock,
                                      backend=backend or self.backend,
-                                     council=council or (lambda phase, record: True))
+                                     council=council or (lambda phase, record: True),
+                                     selection_input=selection_input)
         return self.run.run()
 
     def test_four_gates_run_in_order_without_acceptance(self):
@@ -61,6 +62,56 @@ class FourPhaseTests(unittest.TestCase):
         self.assertFalse(result["canonical_acceptance"])
         self.assertEqual(result["review_state"], "pending_user_review")
         self.assertTrue((self.run.output / "HANDOFF.md").is_file())
+
+    def unicode_selection_capture(self, ensure_ascii):
+        self.selection['user_note'] = '진행하자. 원본 보존'
+        path = self.root / '.runtime/selection.json'
+        raw = (json.dumps(self.selection, indent=2, ensure_ascii=ensure_ascii) + '\n').encode()
+        path.write_bytes(raw)
+        selected, source = batch.read_selection_input(path)
+        self.assertEqual(selected, self.selection)
+        result = self.run_batch(selection_input=source)
+        self.assertEqual(result['status'], 'completed')
+        receipt = result['executed_selection']
+        self.assertTrue(receipt['verbatim'])
+        copied = (self.root / receipt['path']).read_bytes()
+        self.assertEqual(copied, raw)
+        self.assertEqual(receipt['sha256'], hashlib.sha256(raw).hexdigest())
+        self.assertEqual(json.loads(copied), self.selection)
+        readable_variant = (json.dumps(self.selection, indent=2, ensure_ascii=not ensure_ascii) + '\n').encode()
+        self.assertNotEqual(copied, readable_variant)
+        self.assertFalse(result['canonical_acceptance'])
+
+    def test_ascii_escaped_authority_is_published_by_exact_byte_copy(self):
+        self.unicode_selection_capture(True)
+
+    def test_utf8_authority_is_published_by_exact_byte_copy(self):
+        self.unicode_selection_capture(False)
+
+    def test_changed_parsed_selection_stops_before_backend(self):
+        path = self.root / '.runtime/selection.json'
+        path.write_text(json.dumps(self.selection))
+        _, source = batch.read_selection_input(path)
+        self.selection['unexpected_change'] = 'not in executed bytes'
+        result = self.run_batch(selection_input=source)
+        self.assertEqual(result['failure'], 'orchestration_failed')
+        self.assertIn('match its exact input', result['error']['message'])
+        self.assertEqual(self.called, [])
+        self.assertIsNone(result['executed_selection'])
+
+    def test_selection_links_and_outside_root_files_are_not_admitted(self):
+        path = self.root / '.runtime/selection.json'
+        path.write_text(json.dumps(self.selection))
+        link = self.root / '.runtime/link.json'
+        link.symlink_to(path)
+        with self.assertRaises((OSError, ValueError)):
+            batch.read_selection_input(link)
+        with tempfile.TemporaryDirectory(dir=os.environ.get('FORAGER_TEST_TEMP_ROOT', '/var/tmp')) as other:
+            outside = Path(other) / 'selection.json'
+            outside.write_text(json.dumps(self.selection))
+            with self.assertRaises(ValueError):
+                batch.read_selection_input(outside)
+        self.assertEqual(self.called, [])
 
     def test_invalid_selected_verification_commands_stop_before_preflight_or_model(self):
         run = batch.FourPhaseRun(self.root, self.selection, self.root / '.night/run')
@@ -224,6 +275,59 @@ class FourPhaseTests(unittest.TestCase):
         result = self.run_batch(self.classified_backend('verification_failed', 'OTHER-PHASE'))
         self.assertEqual(result['failure'], 'phase_gate_failed:FG-N18-1')
         self.assertIsNone(result['failure_detail'])
+
+    def test_guarded_selected_failure_is_explicit_even_when_native_turn_is_interrupted(self):
+        def backend(phase, deadline):
+            result = self.classified_backend('verification_failed')(phase, deadline)
+            result.update(exit_code=-15, stop_reason='selected_check_failed', turn_completed=False)
+            result['qualification_failure'].update(guard_trigger='selected_check_failed',
+                failed_commands=[{'selected_check': True, 'exit_code': 1}],
+                primary_native_stop={'stop_reason': 'selected_check_failed', 'exit_code': -15, 'turn_completed': False})
+            return result
+        result = self.run_batch(backend)
+        self.assertEqual(result['failure'], 'verification_failed:FG-N18-1')
+        self.assertEqual(result['failure_detail']['primary_native_stop']['exit_code'], -15)
+        self.assertEqual(self.called, ['FG-N18-1'])
+        self.assertFalse(result['canonical_acceptance'])
+
+    def test_context_stop_retains_secondary_failures_without_becoming_a_check_stop(self):
+        def backend(phase, deadline):
+            result = self.classified_backend('execution_failed')(phase, deadline)
+            result.update(exit_code=-15, stop_reason='context_warning_budget_reached', turn_completed=False)
+            result['qualification_failure'].update(guard_trigger='selected_check_failed',
+                failed_commands=[{'selected_check': True, 'exit_code': 1}],
+                classification_role='secondary_to_native_stop',
+                primary_native_stop={'stop_reason': 'context_warning_budget_reached', 'exit_code': -15})
+            return result
+        result = self.run_batch(backend)
+        self.assertEqual(result['failure'], 'phase_gate_failed:FG-N18-1')
+        self.assertEqual(result['failure_detail']['category'], 'execution_failed')
+        self.assertEqual(result['failure_detail']['primary_native_stop']['stop_reason'], 'context_warning_budget_reached')
+        self.assertEqual(self.called, ['FG-N18-1'])
+
+    def test_stop_string_without_matching_host_guard_evidence_does_not_promote_category(self):
+        def backend(phase, deadline):
+            result = self.classified_backend('verification_failed')(phase, deadline)
+            result.update(exit_code=-15, stop_reason='selected_check_failed', turn_completed=False)
+            return result
+        result = self.run_batch(backend)
+        self.assertEqual(result['failure'], 'phase_gate_failed:FG-N18-1')
+        self.assertFalse(result['canonical_acceptance'])
+
+    def test_advisory_policy_stop_reaches_handoff_without_claiming_exhaustion(self):
+        def backend(phase, deadline):
+            result = self.backend(phase, deadline)
+            result.update(exit_code=-15, stop_reason='context_warning_budget_reached',
+                turn_completed=False, verification_state='failed', native_stop_observation={
+                    'schema': 'offdesk_native_stop_observation.v1', 'phase': phase['id'],
+                    'artifact_path': '.night/run/native-stop.json', 'canonical_acceptance': False,
+                    'hard_context_exhaustion_confirmed': False,
+                    'confirmed_context_transition': False})
+            return result
+        result = self.run_batch(backend)
+        self.assertEqual(result['failure'], 'phase_gate_failed:FG-N18-1')
+        self.assertFalse(result['failure_detail']['hard_context_exhaustion_confirmed'])
+        self.assertIn('native-stop.json', (self.run.output / 'HANDOFF.md').read_text())
 
     def test_incomplete_native_turn_is_not_phase_completion(self):
         def backend(phase, deadline):

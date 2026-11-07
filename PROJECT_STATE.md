@@ -1,8 +1,37 @@
 # Project State
 
-Updated: 2026-11-06
+Updated: 2026-11-08
 
 ## Current focus
+
+Private qualifications now stop the native worker at its first failed selected
+check. A separate host failure checkpoint retains the exact source bytes, full
+check report, command identity and unmodified model-progress observation.
+Captured files are hash-verified; later source changes leave latest-version
+counts unknown while retaining evidence for the checked version. Missing,
+colliding or changed capture files remain unverified and cannot trigger a
+host check, new context or retry. The supervised stop is post-execution
+observation, not universal pre-execution fencing.
+
+Raw native interruption and command failures remain distinct. A matching
+selected-check stop is reported as verification/execution failure even when
+the stopped native turn is incomplete. Other primary native stops retain
+secondary command evidence. The known compaction advisory is labelled as an
+advisory with its enforced policy stop; it proves neither hard exhaustion nor
+successful context recovery. The one-warning policy and all limits remain.
+Both CLI harnesses publish the exact executed selection bytes and hash,
+including Unicode escaping, rather than reserializing a readable substitute.
+
+R201 passes 301 Python cases, 8 Rust native contracts, formatting and strict
+all-target Clippy; 2 explicit model/VM opt-ins remain ignored. A local child
+process stops before a delayed write. The model-free R200 control replay stops
+at its first failed checker and preserves 80/17 for the checked source while
+later-source counts stay unknown. Three first-attempt snapshot-reader errors
+are retained and fixed by a separate bounded source reader without widening
+the invocation-file namespace. No decoder/checker or real model replay occurs.
+R200 remains failed with its partial helper and all raw receipts unchanged;
+C5.1a/C6.3-local remain unqualified and pending review. This source increment
+does not activate an installed runtime or select another real trial.
 
 Private qualifications now preserve a failed selected checker as
 `verification_failed` and other failed or unknown-exit commands as

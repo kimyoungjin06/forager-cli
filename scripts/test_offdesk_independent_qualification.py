@@ -352,6 +352,75 @@ class ImplementationGuardTests(unittest.TestCase):
         self.assertEqual(self.records['COMPACTION_PROGRESS_OBSERVATION.json'], observation)
         self.assertEqual(self.guard.warnings, 1)
 
+    def test_exact_advisory_is_a_policy_stop_without_exhaustion_or_recovery_claim(self):
+        event = {'type': 'item.completed', 'item': {'type': 'error', 'id': 'notice',
+                                                   'message': driver.COMPACTION_ADVISORY}}
+        original = copy.deepcopy(event)
+        self.assertEqual(self.guard.feed(event), 'context_warning_budget_reached')
+        notice = self.guard.notice_observations[0]
+        self.assertEqual(notice['kind'], 'compaction_advisory')
+        self.assertEqual(notice['context_warning_limit'], 1)
+        self.assertFalse(notice['hard_context_exhaustion_confirmed'])
+        self.assertFalse(notice['confirmed_context_transition'])
+        self.assertEqual(event, original)
+        self.assertEqual(self.guard.calls, 0)
+
+    def test_first_literal_selected_failure_stops_once_and_retains_late_observations(self):
+        capture = mock.Mock(return_value={'capture_status': 'fixture'})
+        checks = [['/usr/bin/python3', '-I', '-S', '.runtime/check.py']]
+        guard = driver.ImplementationGuard(32, lambda: {}, lambda: {}, lambda *args: None,
+                                           selected_checks=checks, failure_capture=capture)
+        event = command('selected', 'python3 -I -S .runtime/check.py', code=1)
+        self.assertEqual(guard.feed(event), driver.SELECTED_CHECK_FAILED)
+        self.assertEqual(guard.feed(event), driver.SELECTED_CHECK_FAILED)
+        self.assertEqual(capture.call_count, 1)
+        self.assertEqual(guard.calls, 1)
+        self.assertEqual(guard.feed(command('late', "python3 -c 'pass'")), driver.SELECTED_CHECK_FAILED)
+        self.assertEqual(guard.calls, 2)
+        self.assertEqual(len(guard.completed_commands), 2)
+
+    def test_selected_success_and_checker_text_inside_progress_do_not_trigger_stop(self):
+        capture = mock.Mock()
+        guard = driver.ImplementationGuard(32, lambda: {}, lambda: {}, lambda *args: None,
+            selected_checks=[['/usr/bin/python3', '-I', '-S', '.runtime/check.py']], failure_capture=capture)
+        self.assertIsNone(guard.feed(command('passed', 'python3 -I -S .runtime/check.py')))
+        raw = shlex.join(['python3', '-I', '-S', '.runtime/offdesk_native_worker.py', 'progress',
+                          '--checked-command', 'python3 -I -S .runtime/check.py'])
+        self.assertIsNone(guard.feed(command('save', raw, code=1)))
+        capture.assert_not_called()
+
+    def test_failed_capture_still_stops_without_retry(self):
+        capture = mock.Mock(side_effect=OSError('fixture failure'))
+        guard = driver.ImplementationGuard(32, lambda: {}, lambda: {}, lambda *args: None,
+            selected_checks=[['/usr/bin/python3', '.runtime/check.py']], failure_capture=capture)
+        self.assertEqual(guard.feed(command('selected', 'python3 .runtime/check.py', code=1)),
+                         driver.SELECTED_CHECK_FAILED)
+        self.assertEqual(guard.first_failed_check['capture_status'], 'failed')
+        self.assertIsNone(guard.first_failed_check['check_evidence']['reported_counts'])
+        self.assertEqual(capture.call_count, 1)
+
+    def test_selected_failure_reaps_worker_before_any_later_write(self):
+        with tempfile.TemporaryDirectory(prefix='forager-selected-failure-',
+                dir=os.environ.get('FORAGER_TEST_TEMP_ROOT', '/var/tmp')) as tmp:
+            root = Path(tmp)
+            capture = mock.Mock(return_value={'capture_status': 'control-only fixture'})
+            guard = driver.ImplementationGuard(32, lambda: {}, lambda: {}, lambda *args: None,
+                selected_checks=[['/usr/bin/python3', '-I', '-S', '.runtime/check.py']],
+                failure_capture=capture)
+            event = command('selected', 'python3 -I -S .runtime/check.py', code=1)
+            code = ('import sys,json,time;from pathlib import Path;sys.stdin.read();'
+                    'print(json.dumps(' + repr(event) + '),flush=True);'
+                    "time.sleep(10);Path('late-write').write_text('unexpected')")
+            result = worker.supervise([sys.executable, '-I', '-S', '-c', code],
+                'Offline control fixture, no checker or model', root, root / 'run',
+                time.time() + 5, guard, dict(os.environ), idle_seconds=1)
+            self.assertEqual(result['stop_reason'], driver.SELECTED_CHECK_FAILED)
+            self.assertFalse(result['turn_completed'])
+            self.assertNotEqual(result['exit_code'], 0)
+            self.assertFalse((root / 'late-write').exists())
+            self.assertEqual(result['completed_tool_calls'], 1)
+            self.assertEqual(capture.call_count, 1)
+
     def test_invalid_progress_is_preserved_without_claiming_recovery(self):
         self.progress = {'status': 'invalid_progress', 'claims_verified': False}
         reason = self.guard.feed({'type': 'item.completed', 'item': {'type': 'error', 'id': 'notice', 'message': 'compaction'}})
@@ -647,10 +716,12 @@ class HelperStageWiringTests(unittest.TestCase):
             output.mkdir()
             events = [{'type': 'thread.started', 'thread_id': 'fixture-1' if first else 'fixture-2'}]
             context = self.out / (self.phase['id'] + '-context.json')
+            stop_reason = None
 
             def completed(name, raw, receipt, code=0):
+                nonlocal stop_reason
                 event = command(name, raw, receipt, code=code)
-                guard.feed(event)
+                stop_reason = stop_reason or guard.feed(event)
                 events.append(event)
 
             if first:
@@ -663,25 +734,41 @@ class HelperStageWiringTests(unittest.TestCase):
                 recovered = worker.recovery_context(root, context, pin['context_sha256'], pin['progress_sha256'])
                 completed('recovered', raw, recovered)
                 (root / packet_tools.HELPER_TARGET).write_text('# Scope-only fixture. No decoder implementation.\n')
-                completed('edited', "python3 -c 'pass'", {}, code=1 if mode == 'edit-fails' else 0)
+                completed('edited', "python3 -c 'pass'", {},
+                          code=1 if mode in ('edit-fails', 'compaction-with-command-failure') else 0)
                 report = self.report()
                 if mode == 'bad-model-report': report['tests_run'] = 0
-                check_fails = mode in ('check-fails', 'check-fails-missing-report', 'check-fails-stale-source')
+                check_fails = mode.startswith('check-fails')
                 if check_fails:
                     report.update(status='failed', passed=37, failed=60)
                     for i, row in enumerate(report['cases']): row['passed'] = i < 37
                     if mode == 'check-fails-stale-source': report['target_sha256'] = 'stale'
                 if mode != 'check-fails-missing-report':
                     worker.write_json(root / '.night/helper-model-check.json', report)
+                if mode == 'check-fails-collision':
+                    (root / '.runtime/snapshot-canary').write_text('preserve\n')
+                    (self.out / (self.phase['id'] + '-failed-check-source')).symlink_to(root / '.runtime/snapshot-canary')
                 summary = {key: report[key] for key in ('status', 'tests_run', 'passed', 'failed', 'errors')}
                 completed('model-check', shlex.join(self.phase['checks'][0]), summary,
                           code=1 if check_fails else 0)
-                receipt = worker.save_progress(root, context, 'Fixture change, not a model',
-                    'Await review', ['fixture checker receipt'], [packet_tools.HELPER_TARGET], worker.sha(context))
-                completed('saved-final', 'python3 -I -S .runtime/offdesk_native_worker.py progress', receipt)
-            (output / 'stdout.log').write_text(''.join(json.dumps(event) + '\n' for event in events))
+                if mode == 'check-fails-later-edit':
+                    (root / packet_tools.HELPER_TARGET).write_text('# Later unverified source\n')
+                if mode == 'check-fails-capture-tampered':
+                    (root / guard.first_failed_check['source']['path']).write_text('# Tampered snapshot\n')
+                if mode in ('compaction', 'compaction-with-command-failure'):
+                    event = {'type': 'item.completed', 'item': {'type': 'error', 'id': 'notice',
+                                                               'message': driver.COMPACTION_ADVISORY}}
+                    stop_reason = guard.feed(event)
+                    events.append(event)
+                if stop_reason is None:
+                    receipt = worker.save_progress(root, context, 'Fixture change, not a model',
+                        'Await review', ['fixture checker receipt'], [packet_tools.HELPER_TARGET], worker.sha(context))
+                    completed('saved-final', 'python3 -I -S .runtime/offdesk_native_worker.py progress', receipt)
+            log = '{' if mode == 'check-fails-truncated-log' and not first else ''.join(json.dumps(event) + '\n' for event in events)
+            (output / 'stdout.log').write_text(log)
             (output / 'stderr.log').write_text('')
-            return {'run_id': 'offline-fixture', 'stop_reason': None, 'turn_completed': True, 'tool_calls': guard.calls,
+            return {'run_id': 'offline-fixture', 'exit_code': -15 if stop_reason else 0,
+                    'stop_reason': stop_reason, 'turn_completed': stop_reason is None, 'tool_calls': guard.calls,
                     'started_tool_calls': guard.calls, 'completed_tool_calls': guard.calls, 'in_flight_tool_calls': 0}
 
         def verify(result, output, root, commands, deadline):
@@ -747,6 +834,71 @@ class HelperStageWiringTests(unittest.TestCase):
         self.assertFalse(detail['automatic_retry_authorized'])
         self.assertIn(self.phase['id'] + '-native-command-failure.json', self.records)
         self.assertNotIn('HOST_REPORT_RECEIPT.json', self.records)
+        self.assertEqual(result['stop_reason'], driver.SELECTED_CHECK_FAILED)
+        self.assertFalse(result['turn_completed'])
+        captured = detail['first_failed_check_snapshot']
+        self.assertEqual(captured['capture_integrity'], 'verified')
+        self.assertEqual(captured['check_evidence']['reported_counts']['failed'], 60)
+        self.assertTrue(captured['current_source_matches_snapshot'])
+        self.assertFalse(captured['model_progress_rewritten'])
+        self.assertNotIn('saved-final', [item['id'] for item in driver.completed_commands(self.out / 'context-2')])
+
+    def test_later_source_change_keeps_snapshot_counts_and_current_counts_unknown(self):
+        result = self.execute('check-fails-later-edit')
+        detail = result['qualification_failure']
+        captured = detail['first_failed_check_snapshot']
+        self.assertEqual(captured['check_evidence']['reported_counts']['passed'], 37)
+        self.assertFalse(captured['current_source_matches_snapshot'])
+        self.assertIsNone(detail['selected_checks'][0]['evidence']['reported_counts'])
+        self.assertEqual((self.root / captured['source']['path']).read_text(),
+                         '# Scope-only fixture. No decoder implementation.\n')
+        self.assertEqual(json.loads((self.root / captured['report']['path']).read_text())['failed'], 60)
+        self.assertEqual(self.host_calls, [])
+
+    def test_changed_snapshot_is_not_credited_as_verified_stored_evidence(self):
+        result = self.execute('check-fails-capture-tampered')
+        captured = result['qualification_failure']['first_failed_check_snapshot']
+        self.assertEqual(captured['capture_integrity'], 'unverified')
+        self.assertIsNone(captured['check_evidence']['reported_counts'])
+        self.assertEqual(captured['captured_check_evidence']['reported_counts']['failed'], 60)
+        self.assertEqual(self.host_calls, [])
+
+    def test_snapshot_collision_does_not_overwrite_and_still_stops(self):
+        result = self.execute('check-fails-collision')
+        self.assertEqual(result['stop_reason'], driver.SELECTED_CHECK_FAILED)
+        captured = result['qualification_failure']['first_failed_check_snapshot']
+        self.assertIsNone(captured['source'])
+        self.assertIsNone(captured['check_evidence']['reported_counts'])
+        self.assertEqual((self.root / '.runtime/snapshot-canary').read_text(), 'preserve\n')
+        self.assertEqual(self.host_calls, [])
+
+    def test_truncated_native_log_retains_observed_failure_without_host_execution(self):
+        result = self.execute('check-fails-truncated-log')
+        detail = result['qualification_failure']
+        self.assertEqual(detail['command_log_read_error'], 'JSONDecodeError')
+        self.assertEqual(detail['selected_checks'][0]['evidence']['reported_counts']['failed'], 60)
+        self.assertEqual(result['verification_checks'], [])
+        self.assertEqual(self.host_calls, [])
+
+    def test_compaction_keeps_primary_policy_stop_and_secondary_command_failure(self):
+        result = self.execute('compaction-with-command-failure')
+        self.assertEqual(result['stop_reason'], 'context_warning_budget_reached')
+        detail = result['qualification_failure']
+        self.assertEqual(detail['category'], 'execution_failed')
+        self.assertEqual(detail['classification_role'], 'secondary_to_native_stop')
+        self.assertEqual(detail['primary_native_stop']['exit_code'], -15)
+        self.assertIsNone(detail['first_failed_check_snapshot'])
+        self.assertEqual(result['native_stop_observation']['notice_observations'][0]['kind'], 'compaction_advisory')
+        self.assertEqual(self.host_calls, [])
+
+    def test_advisory_without_failed_commands_stays_a_native_stop_observation(self):
+        result = self.execute('compaction')
+        self.assertIsNone(result['qualification_failure'])
+        stop = result['native_stop_observation']
+        self.assertFalse(stop['hard_context_exhaustion_confirmed'])
+        self.assertFalse(stop['confirmed_context_transition'])
+        self.assertEqual(stop['primary_native_stop']['stop_reason'], 'context_warning_budget_reached')
+        self.assertEqual(self.host_calls, [])
 
     def test_missing_failed_report_keeps_counts_unknown_and_still_blocks_acceptance(self):
         result = self.execute('check-fails-missing-report')

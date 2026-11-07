@@ -12,6 +12,7 @@ import resource
 import re
 import shutil
 import signal
+import stat
 import sys
 import time
 
@@ -104,6 +105,79 @@ def compact_result(result):
     return compact
 
 
+MAX_SELECTION_BYTES = 1048576
+
+
+def read_evidence_bytes(root, relative, limit=262144):
+    path = Path(relative)
+    if (path.is_absolute() or not path.parts or str(path) != relative
+            or any(part in ('.', '..') for part in path.parts)):
+        raise ValueError('Normalized root-relative evidence path required')
+    descriptors = []
+    try:
+        parent = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        descriptors.append(parent)
+        root_identity = os.fstat(parent)
+        for part in path.parts[:-1]:
+            parent = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            descriptors.append(parent)
+        descriptor = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        with os.fdopen(descriptor, 'rb') as stream:
+            before = os.fstat(stream.fileno())
+            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or before.st_size > limit:
+                raise ValueError('Bounded single-link evidence file required')
+            raw = stream.read(limit + 1)
+            after = os.fstat(stream.fileno())
+            active = os.stat(path.name, dir_fd=parent, follow_symlinks=False)
+            stamp = lambda row: (row.st_dev, row.st_ino, row.st_size, row.st_mtime_ns, row.st_ctime_ns, row.st_nlink)
+            if len(raw) > limit or stamp(before) != stamp(after) or stamp(after) != stamp(active):
+                raise ValueError('Evidence changed during capture')
+        current_root = root.stat()
+        if (current_root.st_dev, current_root.st_ino) != (root_identity.st_dev, root_identity.st_ino):
+            raise ValueError('Execution root changed during capture')
+        return raw, hashlib.sha256(raw).hexdigest()
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
+
+
+def read_selection_input(path):
+    path = Path(path).absolute()
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > MAX_SELECTION_BYTES:
+            raise ValueError('Selected run input must be one bounded regular file')
+        raw = stream.read(MAX_SELECTION_BYTES + 1)
+    if len(raw) > MAX_SELECTION_BYTES:
+        raise ValueError('Selected run input exceeds its byte bound')
+    selection = json.loads(raw)
+    if not isinstance(selection, dict):
+        raise ValueError('Selected run input must contain one object')
+    root = Path(selection['root'])
+    relative = str(path.relative_to(root))
+    checked, digest = worker.invocation_file(root, relative, MAX_SELECTION_BYTES)
+    if checked != raw:
+        raise ValueError('Selected run input changed during startup')
+    return selection, {'raw': raw, 'source_path': relative, 'sha256': digest}
+
+
+def write_evidence_bytes(root, path, raw):
+    if not isinstance(raw, bytes) or len(raw) > MAX_SELECTION_BYTES:
+        raise ValueError('Bounded evidence bytes required')
+    with worker.night_parent(root, path) as (parent, name):
+        descriptor = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                             0o600, dir_fd=parent)
+        with os.fdopen(descriptor, 'wb') as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+    copied, digest = worker.invocation_file(root, str(path.relative_to(root)), MAX_SELECTION_BYTES)
+    if copied != raw:
+        raise ValueError('Published evidence changed during capture')
+    return {'path': str(path.relative_to(root)), 'sha256': digest}
+
+
 def prepare_task_context(root, output, phase, run_binding=None):
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", phase["id"]):
         raise ValueError("Task phase requires one safe identifier")
@@ -175,7 +249,7 @@ def observe_task_progress(root, path, binding):
 
 class FourPhaseRun:
     def __init__(self, root, selection, output, clock=time.time, backend=None,
-                 council=None, sleeper=time.sleep):
+                 council=None, sleeper=time.sleep, selection_input=None):
         self.root = root
         self.selection = selection
         self.output = output
@@ -189,6 +263,8 @@ class FourPhaseRun:
         self.active_phase = None
         self.native_calls = {}
         self.started = clock()
+        self.selection_input = selection_input
+        self.executed_selection = None
         baseline = Path(selection.get("baseline_relative", ".runtime/four-phase-baseline-r33"))
         if baseline.is_absolute() or len(baseline.parts) != 2 or baseline.parts[0] != ".runtime" or baseline.parts[1] == "..":
             raise ValueError("Baseline must be one selected directory under .runtime")
@@ -341,6 +417,7 @@ class FourPhaseRun:
                   "status": "failed" if failure else "completed",
                   "exit_code": 1 if failure else 0, "failure": failure,
                   "error": error, "patch_error": patch_error, "failure_detail": failure_detail,
+                  "executed_selection": self.executed_selection,
                   "completed_phase_gates": self.completed, "tool_calls": self.calls,
                   "native_tool_calls_observed": sum(self.native_calls.values()),
                   "review_state": "pending_user_review", "canonical_acceptance": False,
@@ -374,6 +451,16 @@ class FourPhaseRun:
         error = None
         failure_detail = None
         try:
+            if self.selection_input is not None:
+                raw = self.selection_input['raw']
+                if (json.loads(raw) != self.selection
+                        or hashlib.sha256(raw).hexdigest() != self.selection_input['sha256']):
+                    raise ValueError('Executed selection must match its exact input')
+                self.executed_selection = {
+                    'schema': 'forager.executed_selection_binding.v1',
+                    **write_evidence_bytes(self.root, self.output / 'EXECUTED_SELECTION.json', raw),
+                    'source_path': self.selection_input['source_path'], 'verbatim': True}
+                self.record('EXECUTED_SELECTION_RECEIPT.json', self.executed_selection)
             manifest = json.loads((self.root / ".runtime/source_manifest.json").read_text())
             if self.selection.get("require_launcher_receipt"):
                 until = self.clock() + 5
@@ -435,17 +522,28 @@ class FourPhaseRun:
                         or result.get("turn_completed") is not True):
                     failure = "phase_gate_failed:" + phase["id"]
                     detail = result.get("qualification_failure")
-                    if (result.get("exit_code") == 0 and result.get("stop_reason") is None
-                            and result.get("turn_completed") is True
-                            and result.get("verification_state") == "failed"
+                    if (result.get("verification_state") == "failed"
                             and isinstance(detail, dict)
                             and detail.get("schema") == "offdesk_native_command_failure.v1"
                             and detail.get("phase") == phase["id"]
                             and detail.get("category") in ("verification_failed", "execution_failed")
                             and detail.get("canonical_acceptance") is False
                             and detail.get("automatic_retry_authorized") is False):
-                        failure = detail["category"] + ":" + phase["id"]
                         failure_detail = detail
+                        completed = (result.get('exit_code') == 0 and result.get('stop_reason') is None
+                                     and result.get('turn_completed') is True)
+                        selected_stop = (result.get('stop_reason') == 'selected_check_failed'
+                            and detail.get('guard_trigger') == 'selected_check_failed'
+                            and any(row.get('selected_check') is True
+                                and type(row.get('exit_code')) is int and row['exit_code'] != 0
+                                for row in detail.get('failed_commands', [])))
+                        if completed or selected_stop:
+                            failure = detail['category'] + ':' + phase['id']
+                    elif (isinstance(result.get('native_stop_observation'), dict)
+                            and result['native_stop_observation'].get('schema') == 'offdesk_native_stop_observation.v1'
+                            and result['native_stop_observation'].get('phase') == phase['id']
+                            and result['native_stop_observation'].get('canonical_acceptance') is False):
+                        failure_detail = result['native_stop_observation']
                     break
                 if not (self.root / phase["summary_path"]).is_file():
                     failure = "phase_summary_missing:" + phase["id"]
@@ -472,7 +570,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--selection", type=Path, required=True)
     args = parser.parse_args()
-    selection = json.loads(args.selection.read_text())
+    selection, selection_input = read_selection_input(args.selection)
     root = Path(selection["root"])
     # The retired container cleanup surface must not contact a live daemon
     # while testing source-only candidates in this owned execution root.
@@ -482,7 +580,7 @@ def main():
     resource.setrlimit(resource.RLIMIT_CPU, (21600, 21600))
     worker.verify_outer_boundary(root, Path(selection["outside_canary"]))
     signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(128 + signum))
-    run = FourPhaseRun(root, selection, root / selection["output_relative"])
+    run = FourPhaseRun(root, selection, root / selection["output_relative"], selection_input=selection_input)
     result = run.run()
     print(json.dumps(result))
     return result["exit_code"]

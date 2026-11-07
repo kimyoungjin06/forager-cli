@@ -15,6 +15,9 @@ SELECTED_SHELLS = ('bash', 'sh', '/bin/bash', '/usr/bin/bash', '/bin/sh', '/usr/
 SELECTED_PYTHONS = ('python3', 'python3.11', '/usr/bin/python3', '/usr/bin/python3.11')
 MAX_INSPECTION_LINES = worker_module.MAX_INSPECTION_LINES
 MAX_INSPECTION_BYTES = worker_module.MAX_INSPECTION_BYTES
+SELECTED_CHECK_FAILED = 'selected_check_failed'
+COMPACTION_ADVISORY = ('Heads up: Long threads and multiple compactions can cause the model to be less accurate. '
+                      'Start a new thread when possible to keep threads small and targeted.')
 
 
 def checked_command_argv(raw, root=None):
@@ -256,7 +259,7 @@ def inspection_output(item, root=None):
 class ImplementationGuard(worker_module.ProgressGuard):
     """Bound observed inspection and preserve progress on a compaction notice."""
     def __init__(self, max_calls, source_observer, progress_observer, record,
-                 max_inspections=4, read_paths=None):
+                 max_inspections=4, read_paths=None, selected_checks=None, failure_capture=None):
         super().__init__(max_calls=max_calls, context_warnings=1)
         if type(max_inspections) is not int or not 1 <= max_inspections <= 4:
             raise ValueError('Implementation inspection budget must be 1 through 4')
@@ -271,6 +274,15 @@ class ImplementationGuard(worker_module.ProgressGuard):
         self.inspection_policy = []
         self.edit_observed = False
         self.max_inspections = max_inspections
+        self.selected_checks = {tuple(argv) for argv in (selected_checks or [])}
+        if self.selected_checks and not callable(failure_capture):
+            raise ValueError('Selected failure capture callback required')
+        self.failure_capture = failure_capture
+        self.first_failed_check = None
+        self.first_failed_item = None
+        self.completed_commands = []
+        self.completed_ids = set()
+        self.notice_observations = []
 
     def feed(self, event, source_generation=None):
         valid = worker_module.valid_native_event(event)
@@ -284,9 +296,37 @@ class ImplementationGuard(worker_module.ProgressGuard):
         warnings_before = self.warnings
         reason = super().feed(event, source_generation)
         if compaction and self.warnings > warnings_before:
+            notice = {'native_item_id': item.get('id'), 'message': item.get('message', ''),
+                'kind': 'compaction_advisory' if item.get('message') == COMPACTION_ADVISORY
+                        else 'unclassified_compaction_notice',
+                'received_as': 'native_error_item', 'policy_stop_reason': reason,
+                'context_warning_limit': self.context_warnings,
+                'confirmed_context_transition': False, 'hard_context_exhaustion_confirmed': False}
+            self.notice_observations.append(notice)
             self.record('COMPACTION_PROGRESS_OBSERVATION.json', {
                 'observation': self.progress_observer(), 'observed_at': time.time(),
-                'claims_verified': False, 'automatic_resume_authorized': False})
+                'notice': notice, 'claims_verified': False, 'automatic_resume_authorized': False})
+        if (valid and event.get('type') == 'item.completed'
+                and item.get('type') == 'command_execution' and item['id'] not in self.completed_ids):
+            self.completed_ids.add(item['id'])
+            self.completed_commands.append(dict(item))
+            try:
+                argv = checked_command_argv(item['command'], self.check_root)
+            except ValueError:
+                argv = []
+            if (self.first_failed_item is None and tuple(argv) in self.selected_checks
+                    and type(item.get('exit_code')) is int and item['exit_code'] != 0):
+                self.first_failed_item = dict(item)
+                try:
+                    self.first_failed_check = self.failure_capture(dict(item))
+                except Exception as exc:
+                    self.first_failed_check = {'capture_status': 'failed',
+                        'error_class': type(exc).__name__, 'native_item_id': item['id'],
+                        'check_evidence': {'status': 'unverified', 'reported_counts': None,
+                                           'independent_host_verified': False}}
+                reason = reason or SELECTED_CHECK_FAILED
+        if self.first_failed_item is not None:
+            reason = reason or SELECTED_CHECK_FAILED
         if fresh:
             self.edit_observed |= self.source_observer() != self.initial_source
             if not self.edit_observed and inspection_command(item['command'], getattr(self, 'check_root', None)):
@@ -333,6 +373,8 @@ class ImplementationGuard(worker_module.ProgressGuard):
             'inspection_outputs': list(self.inspection_outputs.values()),
             'selected_pre_edit_read_paths': None if self.read_paths is None else sorted(self.read_paths),
             'pre_edit_read_policy': list(self.inspection_policy),
+            'first_failed_selected_item': None if self.first_failed_item is None else self.first_failed_item['id'],
+            'notice_observations': list(self.notice_observations),
             'output_scope': 'recognized reads; visible completion output only, including after edits',
             'post_execution_observation': True, 'admission_fencing': False})
         return reason
@@ -358,7 +400,8 @@ def implementation_instructions(context, progress, context_sha, read_paths=None)
         'and is not pre-execution admission. Inspections and progress saves consume '
         'the shared command budget. Save actual progress after edits and before '
         'checks, then once finally; at most two intermediate saves and one final '
-        'save. Run each selected check once; stop on failure without rerun. '
+        'save. Run each selected check once; a failed selected check is captured '
+        'and stops this worker immediately. Do not edit again or run replacement self-checks. '
         'A compaction notice stops and preserves progress; it does not grant another context or replay.\n'
         f'Latest progress path: {progress}. Task context: {context}. '
         f'Expected context sha256: {context_sha}.\n')
@@ -466,6 +509,32 @@ def helper_check_receipt(root, relative, packet, worker):
             'qualification_complete': False, 'reported_retention_requires_code_review': True}
 
 
+def failed_helper_report_counts(report, root, packet, item, target_sha):
+    expected = [case[0] + '/' + style for case in packet['cases']
+                for style in ('whole', 'bytewise', 'three-byte')] + ['independent-instances']
+    rows = report.get('cases')
+    if (report.get('schema') != 'forager_stream_helper_checks.v1'
+            or report.get('status') != 'failed'
+            or report.get('source_root') != str(root.resolve())
+            or report.get('target_sha256') != target_sha
+            or report.get('qualification_complete') is not False
+            or not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows)
+            or [row.get('id') for row in rows] != expected
+            or any(type(row.get('passed')) is not bool for row in rows)
+            or any(type(report.get(key)) is not int for key in ('tests_run', 'passed', 'failed', 'errors'))
+            or report['tests_run'] != 97 or report['errors'] != 0
+            or not 0 < report['failed'] <= 97
+            or report['passed'] != sum(row['passed'] for row in rows)
+            or report['failed'] != sum(not row['passed'] for row in rows)
+            or report['passed'] + report['failed'] != 97):
+        raise ValueError('Failed helper report is not bound to the selected source and full case inventory')
+    counts = {key: report[key] for key in ('status', 'tests_run', 'passed', 'failed', 'errors')}
+    summary = json.loads(item.get('aggregated_output', ''))
+    if (summary != counts or any(type(summary.get(key)) is not int
+            for key in ('tests_run', 'passed', 'failed', 'errors'))):
+        raise ValueError('Native checker summary and retained report disagree')
+    return counts
+
 def failed_helper_check_evidence(root, packet, item, worker):
     relative = '.night/helper-model-check.json'
     evidence = {'path': relative, 'sha256': None, 'reported_counts': None,
@@ -474,34 +543,87 @@ def failed_helper_check_evidence(root, packet, item, worker):
         report, digest = worker.read_task_json(root, root / relative, 262144)
         evidence['sha256'] = digest
         target_sha = packet_module.selected_file(root, packet_module.HELPER_TARGET)[1]
-        expected = [case[0] + '/' + style for case in packet['cases']
-                    for style in ('whole', 'bytewise', 'three-byte')] + ['independent-instances']
-        rows = report.get('cases')
-        if (report.get('schema') != 'forager_stream_helper_checks.v1'
-                or report.get('status') != 'failed'
-                or report.get('source_root') != str(root.resolve())
-                or report.get('target_sha256') != target_sha
-                or report.get('qualification_complete') is not False
-                or not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows)
-                or [row.get('id') for row in rows] != expected
-                or any(type(row.get('passed')) is not bool for row in rows)
-                or any(type(report.get(key)) is not int for key in ('tests_run', 'passed', 'failed', 'errors'))
-                or report['tests_run'] != 97 or report['errors'] != 0
-                or not 0 < report['failed'] <= 97
-                or report['passed'] != sum(row['passed'] for row in rows)
-                or report['failed'] != sum(not row['passed'] for row in rows)
-                or report['passed'] + report['failed'] != 97):
-            raise ValueError('Failed helper report is not bound to the selected source and full case inventory')
-        counts = {key: report[key] for key in ('status', 'tests_run', 'passed', 'failed', 'errors')}
-        summary = json.loads(item.get('aggregated_output', ''))
-        if (summary != counts or any(type(summary.get(key)) is not int
-                for key in ('tests_run', 'passed', 'failed', 'errors'))):
-            raise ValueError('Native checker summary and retained report disagree')
-        evidence.update(status='source_and_summary_bound', reported_counts=counts,
-                        target_sha256=target_sha)
+        counts = failed_helper_report_counts(report, root, packet, item, target_sha)
+        evidence.update(status='source_and_summary_bound', reported_counts=counts, target_sha256=target_sha)
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
         evidence['error_class'] = type(exc).__name__
     return evidence
+
+
+def capture_failed_check(run, phase, packet, item, worker, batch, progress_observer):
+    prefix = phase['id'] + '-failed-check'
+    snapshot = {'schema': 'offdesk_failed_check_snapshot.v1', 'phase': phase['id'],
+        'native_item_id': item['id'], 'exit_code': item['exit_code'],
+        'command_sha256': hashlib.sha256(item['command'].encode()).hexdigest(),
+        'captured_at': time.time(), 'host_observed_failure': True,
+        'model_progress_rewritten': False, 'canonical_acceptance': False,
+        'automatic_resume_authorized': False, 'source': None, 'report': None,
+        'check_evidence': {'status': 'unverified', 'reported_counts': None,
+                           'independent_host_verified': False}}
+    try:
+        snapshot['model_progress_observation'] = progress_observer()
+    except Exception as exc:
+        snapshot['model_progress_observation'] = {'status': 'unavailable', 'error_class': type(exc).__name__}
+    helper = implementation_stage(phase) == packet_module.HELPER_STAGE
+    paths = [('source', packet_module.HELPER_TARGET if helper else packet.get('source_path'))]
+    if helper:
+        paths.append(('report', '.night/helper-model-check.json'))
+    raw_files = {}
+    for kind, relative in paths:
+        if relative is None:
+            continue
+        try:
+            raw, digest = batch.read_evidence_bytes(run.root, relative, 262144)
+            copied = batch.write_evidence_bytes(run.root, run.output / (prefix + '-' + kind), raw)
+            snapshot[kind] = {'original_path': relative, 'original_sha256': digest, **copied}
+            raw_files[kind] = raw
+        except (OSError, ValueError) as exc:
+            snapshot[kind + '_error_class'] = type(exc).__name__
+    if helper and all(kind in raw_files for kind in ('source', 'report')):
+        try:
+            counts = failed_helper_report_counts(json.loads(raw_files['report']), run.root, packet,
+                                                item, snapshot['source']['original_sha256'])
+            snapshot['check_evidence'].update(status='source_and_summary_bound', reported_counts=counts,
+                target_sha256=snapshot['source']['original_sha256'])
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
+            snapshot['check_evidence']['error_class'] = type(exc).__name__
+    path = run.output / (prefix + '-snapshot.json')
+    snapshot['artifact_path'] = str(path.relative_to(run.root))
+    stored = batch.write_evidence_bytes(run.root, path,
+        (json.dumps(snapshot, indent=2, ensure_ascii=False, allow_nan=False) + '\n').encode())
+    return {**snapshot, 'artifact_sha256': stored['sha256']}
+
+
+def checked_failure_snapshot(root, snapshot, worker, batch):
+    checked = json.loads(json.dumps(snapshot))
+    errors = [] if snapshot.get('artifact_path') and snapshot.get('artifact_sha256') else ['snapshot_not_published']
+    for entry in [snapshot] + [snapshot.get(key) for key in ('source', 'report')]:
+        if entry is None:
+            continue
+        relative = entry.get('artifact_path', entry.get('path'))
+        expected = entry.get('artifact_sha256', entry.get('sha256'))
+        if relative is None or expected is None:
+            continue
+        try:
+            _, actual = worker.invocation_file(root, relative, 1048576)
+            if actual != expected:
+                errors.append(relative)
+        except (OSError, ValueError):
+            errors.append(relative)
+    checked['capture_integrity'] = 'unverified' if errors else 'verified'
+    checked['capture_integrity_errors'] = errors
+    if errors:
+        checked['captured_check_evidence'] = checked['check_evidence']
+        checked['check_evidence'] = {'status': 'unverified', 'reported_counts': None,
+                                   'independent_host_verified': False}
+    source = snapshot.get('source')
+    if source is not None:
+        try:
+            _, current = batch.read_evidence_bytes(root, source['original_path'], 262144)
+            checked['current_source_matches_snapshot'] = current == source['original_sha256']
+        except (OSError, ValueError):
+            checked['current_source_matches_snapshot'] = None
+    return checked
 
 
 def native_command_failure(phase, commands, root, packet, worker):
@@ -720,22 +842,56 @@ def qualify(run,phase,deadline,batch,worker):
         +plain_progress_instructions(str(context.relative_to(run.root)),context_sha)
         +'Keep other source, tests and frozen runtime unchanged; the host owns the report.\n'
         +second_delivery)
-    out2=run.output/'context-2';guard2=ImplementationGuard(phase['max_tool_calls']-guard1.calls,lambda:batch.inventory(run.root),observer,run.record,read_paths=phase['read_paths'])
+    out2=run.output/'context-2'
+    guard2=ImplementationGuard(phase['max_tool_calls']-guard1.calls,lambda:batch.inventory(run.root),observer,
+        run.record,read_paths=phase['read_paths'],selected_checks=phase['checks'],
+        failure_capture=lambda item:capture_failed_check(run,phase,packet,item,worker,batch,observer))
+    guard2.check_root=run.root
     second=supervise_counted(run,'context-2',worker,worker.native_argv(str(run.root/run.selection['native_codex']),run.root,run.selection['model'],out2/'final.txt',True,helper,**reasoning_options),second_prompt,run.root,out2,deadline,guard2,env,command_seconds=60,progress_observer=observer,request_telemetry=True,**generation_options);run.record('SECOND_CONTEXT_NATIVE_RESULT.json',dict(second));run.bindings()
     for key in ('tool_calls','started_tool_calls','completed_tool_calls','in_flight_tool_calls'):second[key]+=first[key]
     for key in ('nonprogress_tool_calls', 'progress_tool_calls'):
         if key in second and key in first:
             second[key] += first[key]
     run.record('CONTEXT_2_RESULT.json',second)
-    if second.get('stop_reason') or not second.get('turn_completed'):second['verification_state']='failed';return second
-    commands = completed_commands(out2)
+    command_read_error = None
+    try:
+        commands = completed_commands(out2)
+    except (OSError, ValueError) as exc:
+        if not second.get('stop_reason') and second.get('turn_completed'):
+            raise
+        commands = list(guard2.completed_commands)
+        command_read_error = type(exc).__name__
     failure = native_command_failure(phase, commands, run.root, packet, worker)
     if failure is not None:
         name = phase['id'] + '-native-command-failure.json'
         failure['artifact_path'] = str((run.output / name).relative_to(run.root))
+        failure['primary_native_stop'] = {key: second.get(key) for key in ('stop_reason', 'exit_code', 'turn_completed')}
+        failure['classification_role'] = ('secondary_to_native_stop'
+            if second.get('stop_reason') not in (None, SELECTED_CHECK_FAILED) else 'command_failure')
+        failure['guard_trigger'] = SELECTED_CHECK_FAILED if guard2.first_failed_item is not None else None
+        failure['first_failed_check_snapshot'] = (checked_failure_snapshot(run.root, guard2.first_failed_check, worker, batch)
+            if guard2.first_failed_check is not None else None)
+        failure['notice_observations'] = list(guard2.notice_observations)
+        failure['command_log_read_error'] = command_read_error
         failure['native_log'] = {'path': str((out2 / 'stdout.log').relative_to(run.root)),
-                                 'sha256': worker.sha(out2 / 'stdout.log')}
+            'sha256': worker.sha(out2 / 'stdout.log') if (out2 / 'stdout.log').is_file() else None}
         run.record(name, failure)
+    if second.get('stop_reason') or not second.get('turn_completed'):
+        name = phase['id'] + '-native-stop.json'
+        stop = {'schema': 'offdesk_native_stop_observation.v1', 'phase': phase['id'],
+            'artifact_path': str((run.output / name).relative_to(run.root)),
+            'primary_native_stop': {key: second.get(key) for key in ('stop_reason', 'exit_code', 'turn_completed')},
+            'notice_observations': list(guard2.notice_observations),
+            'confirmed_context_transition': False, 'hard_context_exhaustion_confirmed': False,
+            'secondary_command_failure_artifact': None if failure is None else failure['artifact_path'],
+            'command_log_read_error': command_read_error, 'canonical_acceptance': False,
+            'automatic_resume_authorized': False}
+        run.record(name, stop)
+        return {**second, 'verification_state': 'failed', 'qualification_failure': failure,
+            'native_stop_observation': stop,
+            'native_verification_checks': [] if failure is None else failure['selected_checks'],
+            'verification_checks': []}
+    if failure is not None:
         return {**second, 'verification_state': 'failed', 'qualification_failure': failure,
                 'native_verification_checks': failure['selected_checks'], 'verification_checks': []}
     final_saved,final_sha=worker.read_task_json(run.root,progress,worker.MAX_PROGRESS_BYTES);worker.validate_progress(final_saved,binding)
@@ -782,5 +938,8 @@ def main():
     if selection.get('operator_runtime_approved') is not True:raise ValueError('This new independent task selection is not approved')
     verify_driver_files(Path(selection['root']), selection)
     sys.path.insert(0,str(script.parent));import offdesk_four_phase_run as batch;import offdesk_native_worker as worker
-    root=Path(selection['root']);run=batch.FourPhaseRun(root,selection,root/selection['output_relative']);run.backend=lambda phase,deadline:qualify(run,phase,deadline,batch,worker);result=run.run();print(json.dumps(result,indent=2));return 0 if result['status']=='completed' else 1
+    checked,selection_input=batch.read_selection_input(selection_path)
+    if checked!=selection:raise ValueError('Approved selection changed during startup')
+    selection=checked
+    root=Path(selection['root']);run=batch.FourPhaseRun(root,selection,root/selection['output_relative'],selection_input=selection_input);run.backend=lambda phase,deadline:qualify(run,phase,deadline,batch,worker);result=run.run();print(json.dumps(result,indent=2));return 0 if result['status']=='completed' else 1
 if __name__=='__main__':sys.exit(main())
