@@ -259,7 +259,8 @@ def inspection_output(item, root=None):
 class ImplementationGuard(worker_module.ProgressGuard):
     """Bound observed inspection and preserve progress on a compaction notice."""
     def __init__(self, max_calls, source_observer, progress_observer, record,
-                 max_inspections=4, read_paths=None, selected_checks=None, failure_capture=None):
+                 max_inspections=4, read_paths=None, selected_checks=None, failure_capture=None,
+                 start_capture=None):
         super().__init__(max_calls=max_calls, context_warnings=1)
         if type(max_inspections) is not int or not 1 <= max_inspections <= 4:
             raise ValueError('Implementation inspection budget must be 1 through 4')
@@ -283,6 +284,70 @@ class ImplementationGuard(worker_module.ProgressGuard):
         self.completed_commands = []
         self.completed_ids = set()
         self.notice_observations = []
+        self.start_capture = start_capture
+        self.check_observations = []
+        self.pending_check = None
+        self.check_stop_reason = None
+
+    def observe_selected_check(self, event, item, fresh):
+        kind = event.get('type')
+        command_event = (kind in ('item.started', 'item.completed')
+                         and item.get('type') == 'command_execution')
+        try:
+            argv = checked_command_argv(item['command'], self.check_root) if command_event else []
+        except ValueError:
+            argv = []
+        selected = tuple(argv) in self.selected_checks
+        pending = self.pending_check
+        if pending is not None:
+            try:
+                unchanged = self.source_observer() == pending['source_identity']
+            except Exception:
+                unchanged = None
+            pending['source_unchanged_at_last_observation'] = unchanged
+            if command_event and fresh and item['id'] != pending['native_item_id']:
+                pending['overlapping_commands'].append({'native_item_id': item['id'],
+                    'command_sha256': hashlib.sha256(item['command'].encode()).hexdigest(),
+                    'observed_as': kind})
+                self.check_stop_reason = self.check_stop_reason or 'selected_check_overlap'
+            if unchanged is not True:
+                self.check_stop_reason = self.check_stop_reason or 'selected_check_source_changed'
+            if (command_event and item['id'] == pending['native_item_id']
+                    and hashlib.sha256(item['command'].encode()).hexdigest() != pending['command_sha256']):
+                self.check_stop_reason = self.check_stop_reason or 'selected_check_identity_changed'
+            if kind == 'turn.completed':
+                self.check_stop_reason = self.check_stop_reason or 'selected_check_incomplete'
+            if command_event and kind == 'item.completed' and item['id'] == pending['native_item_id']:
+                pending.update(completion_observed=True, exit_code=item.get('exit_code'),
+                               completed_at=time.time())
+                self.pending_check = None
+        if selected and fresh and pending is None:
+            row = {'native_item_id': item['id'], 'argv': argv,
+                'command_sha256': hashlib.sha256(item['command'].encode()).hexdigest(),
+                'start_observed': kind == 'item.started', 'observed_at': time.time(),
+                'completion_observed': kind == 'item.completed',
+                'exit_code': item.get('exit_code') if kind == 'item.completed' else None,
+                'source_identity': None, 'source_unchanged_at_last_observation': None,
+                'start_snapshot': None, 'overlapping_commands': []}
+            self.check_observations.append(row)
+            if kind == 'item.started':
+                try:
+                    row['source_identity'] = json.loads(json.dumps(self.source_observer(), allow_nan=False))
+                    row['start_snapshot'] = self.start_capture(dict(item), row['source_identity'])
+                    if row['start_snapshot'].get('capture_status') != 'captured':
+                        raise ValueError('Selected-check start source capture incomplete')
+                    if self.source_observer() != row['source_identity']:
+                        raise ValueError('Source changed while capturing selected-check start')
+                    row['source_unchanged_at_last_observation'] = True
+                except Exception as exc:
+                    if not isinstance(row['start_snapshot'], dict):
+                        row['start_snapshot'] = None
+                    row['capture_error_class'] = type(exc).__name__
+                    self.check_stop_reason = self.check_stop_reason or 'selected_check_capture_failed'
+                self.pending_check = row
+            elif type(item.get('exit_code')) is not int or item['exit_code'] == 0:
+                self.check_stop_reason = self.check_stop_reason or 'selected_check_start_unobserved'
+        return self.check_stop_reason
 
     def feed(self, event, source_generation=None):
         valid = worker_module.valid_native_event(event)
@@ -295,6 +360,9 @@ class ImplementationGuard(worker_module.ProgressGuard):
                       and 'compaction' in item.get('message', '').lower())
         warnings_before = self.warnings
         reason = super().feed(event, source_generation)
+        if valid:
+            check_reason = self.observe_selected_check(event, item, fresh)
+            reason = reason or check_reason
         if compaction and self.warnings > warnings_before:
             notice = {'native_item_id': item.get('id'), 'message': item.get('message', ''),
                 'kind': 'compaction_advisory' if item.get('message') == COMPACTION_ADVISORY
@@ -374,6 +442,9 @@ class ImplementationGuard(worker_module.ProgressGuard):
             'selected_pre_edit_read_paths': None if self.read_paths is None else sorted(self.read_paths),
             'pre_edit_read_policy': list(self.inspection_policy),
             'first_failed_selected_item': None if self.first_failed_item is None else self.first_failed_item['id'],
+            'pending_selected_item': None if self.pending_check is None else self.pending_check['native_item_id'],
+            'selected_check_stop_reason': self.check_stop_reason,
+            'selected_check_observations': self.check_observations,
             'notice_observations': list(self.notice_observations),
             'output_scope': 'recognized reads; visible completion output only, including after edits',
             'post_execution_observation': True, 'admission_fencing': False})
@@ -400,7 +471,10 @@ def implementation_instructions(context, progress, context_sha, read_paths=None)
         'and is not pre-execution admission. Inspections and progress saves consume '
         'the shared command budget. Save actual progress after edits and before '
         'checks, then once finally; at most two intermediate saves and one final '
-        'save. Run each selected check once; a failed selected check is captured '
+        'save. Run each selected check once and wait for its completion before '
+        'any other command or edit. Starting another command while it is pending '
+        'stops this worker; a timeout keeps check counts unknown. '
+        'A failed selected check is captured '
         'and stops this worker immediately. Do not edit again or run replacement self-checks. '
         'A compaction notice stops and preserves progress; it does not grant another context or replay.\n'
         f'Latest progress path: {progress}. Task context: {context}. '
@@ -548,6 +622,86 @@ def failed_helper_check_evidence(root, packet, item, worker):
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
         evidence['error_class'] = type(exc).__name__
     return evidence
+
+
+def capture_selected_check_start(run, phase, item, source_identity, batch):
+    """Retain observed start bytes, without claiming which bytes the child loaded."""
+    prefix = phase['id'] + '-check-start-' + hashlib.sha256(item['id'].encode()).hexdigest()
+    snapshot = {'schema': 'offdesk_selected_check_start.v1', 'phase': phase['id'],
+        'native_item_id': item['id'], 'command_sha256': hashlib.sha256(item['command'].encode()).hexdigest(),
+        'observed_at': time.time(), 'capture_status': 'captured',
+        'source_identity': source_identity, 'sources': [], 'errors': [],
+        'observation': 'native_start_event_after_command_admission',
+        'checker_loaded_source_identity_confirmed': False, 'reported_counts': None,
+        'canonical_acceptance': False, 'automatic_resume_authorized': False}
+    for index, relative in enumerate(phase['write_paths']):
+        try:
+            raw, digest = batch.read_evidence_bytes(run.root, relative, 262144)
+            if source_identity.get(relative) != {'kind': 'file', 'sha256': digest}:
+                raise ValueError('Captured source differs from the observed inventory')
+            copied = batch.write_evidence_bytes(run.root, run.output / (prefix + '-source-' + str(index)), raw)
+            snapshot['sources'].append({'original_path': relative, 'original_sha256': digest, **copied})
+        except (OSError, ValueError, TypeError, AttributeError) as exc:
+            snapshot['errors'].append({'path': relative, 'error_class': type(exc).__name__})
+    if snapshot['errors'] or batch.inventory(run.root) != source_identity:
+        snapshot['capture_status'] = 'unverified'
+    path = run.output / (prefix + '.json')
+    snapshot['artifact_path'] = str(path.relative_to(run.root))
+    stored = batch.write_evidence_bytes(run.root, path,
+        (json.dumps(snapshot, indent=2, ensure_ascii=False, allow_nan=False) + '\n').encode())
+    return {**snapshot, 'artifact_sha256': stored['sha256']}
+
+
+def selected_check_observation(run, phase, guard, result, worker, batch):
+    """Keep pending/timeout observations separate from completed failed checks."""
+    observations = []
+    for raw in guard.check_observations:
+        row = json.loads(json.dumps(raw))
+        snapshot = row['start_snapshot']
+        errors = []
+        if snapshot is None or snapshot.get('capture_status') != 'captured':
+            errors.append('start_capture_unverified')
+        else:
+            for entry in [snapshot] + snapshot.get('sources', []):
+                relative = entry.get('artifact_path', entry.get('path'))
+                expected = entry.get('artifact_sha256', entry.get('sha256'))
+                try:
+                    _, actual = worker.invocation_file(run.root, relative, 1048576)
+                    if actual != expected:
+                        raise ValueError('Selected-check start capture changed')
+                except (OSError, ValueError, TypeError) as exc:
+                    errors.append(type(exc).__name__)
+        row['start_capture_integrity'] = 'unverified' if errors else 'verified'
+        row['start_capture_integrity_errors'] = errors
+        try:
+            row['current_source_matches_observed_start'] = guard.source_observer() == row['source_identity']
+        except Exception:
+            row['current_source_matches_observed_start'] = None
+        row['pending_at_native_stop'] = not row['completion_observed']
+        row['reported_counts'] = None
+        row['checker_loaded_source_identity_confirmed'] = False
+        observations.append(row)
+    name = phase['id'] + '-selected-check-observation.json'
+    observation = {'schema': 'offdesk_selected_check_observation.v1', 'phase': phase['id'],
+        'primary_native_stop': {key: result.get(key) for key in ('stop_reason', 'exit_code', 'turn_completed')},
+        'guard_trigger': guard.check_stop_reason,
+        'pending_at_native_stop': [row['native_item_id'] for row in observations if row['pending_at_native_stop']],
+        'checks': observations, 'reported_counts': None,
+        'post_execution_observation': True, 'admission_fencing': False,
+        'model_progress_rewritten': False, 'canonical_acceptance': False,
+        'automatic_resume_authorized': False, 'automatic_retry_authorized': False}
+    stored = run.output / name
+    published = json.dumps(observation, indent=2, ensure_ascii=False, allow_nan=False) + '\n'
+    receipt = batch.write_evidence_bytes(run.root, stored, published.encode())
+    return {'schema': observation['schema'], 'phase': phase['id'],
+        'artifact_path': str(stored.relative_to(run.root)), 'artifact_sha256': receipt['sha256'],
+        'guard_trigger': guard.check_stop_reason,
+        'pending_at_native_stop': observation['pending_at_native_stop'], 'reported_counts': None,
+        'checks': [{'native_item_id': row['native_item_id'],
+            'start_observed': row['start_observed'], 'completion_observed': row['completion_observed'],
+            'exit_code': row['exit_code'], 'start_capture_integrity': row['start_capture_integrity'],
+            'current_source_matches_observed_start': row['current_source_matches_observed_start']}
+            for row in observations], 'canonical_acceptance': False}
 
 
 def capture_failed_check(run, phase, packet, item, worker, batch, progress_observer):
@@ -845,7 +999,8 @@ def qualify(run,phase,deadline,batch,worker):
     out2=run.output/'context-2'
     guard2=ImplementationGuard(phase['max_tool_calls']-guard1.calls,lambda:batch.inventory(run.root),observer,
         run.record,read_paths=phase['read_paths'],selected_checks=phase['checks'],
-        failure_capture=lambda item:capture_failed_check(run,phase,packet,item,worker,batch,observer))
+        failure_capture=lambda item:capture_failed_check(run,phase,packet,item,worker,batch,observer),
+        start_capture=lambda item,source:capture_selected_check_start(run,phase,item,source,batch))
     guard2.check_root=run.root
     second=supervise_counted(run,'context-2',worker,worker.native_argv(str(run.root/run.selection['native_codex']),run.root,run.selection['model'],out2/'final.txt',True,helper,**reasoning_options),second_prompt,run.root,out2,deadline,guard2,env,command_seconds=60,progress_observer=observer,request_telemetry=True,**generation_options);run.record('SECOND_CONTEXT_NATIVE_RESULT.json',dict(second));run.bindings()
     for key in ('tool_calls','started_tool_calls','completed_tool_calls','in_flight_tool_calls'):second[key]+=first[key]
@@ -862,6 +1017,11 @@ def qualify(run,phase,deadline,batch,worker):
         commands = list(guard2.completed_commands)
         command_read_error = type(exc).__name__
     failure = native_command_failure(phase, commands, run.root, packet, worker)
+    check_observation = selected_check_observation(run, phase, guard2, second, worker, batch)
+    check_hold = any(not row['start_observed'] or not row['completion_observed']
+        or row['start_capture_integrity'] != 'verified'
+        or row['current_source_matches_observed_start'] is not True
+        for row in check_observation['checks'])
     if failure is not None:
         name = phase['id'] + '-native-command-failure.json'
         failure['artifact_path'] = str((run.output / name).relative_to(run.root))
@@ -872,11 +1032,12 @@ def qualify(run,phase,deadline,batch,worker):
         failure['first_failed_check_snapshot'] = (checked_failure_snapshot(run.root, guard2.first_failed_check, worker, batch)
             if guard2.first_failed_check is not None else None)
         failure['notice_observations'] = list(guard2.notice_observations)
+        failure['selected_check_observation'] = check_observation
         failure['command_log_read_error'] = command_read_error
         failure['native_log'] = {'path': str((out2 / 'stdout.log').relative_to(run.root)),
             'sha256': worker.sha(out2 / 'stdout.log') if (out2 / 'stdout.log').is_file() else None}
         run.record(name, failure)
-    if second.get('stop_reason') or not second.get('turn_completed'):
+    if second.get('stop_reason') or not second.get('turn_completed') or check_hold:
         name = phase['id'] + '-native-stop.json'
         stop = {'schema': 'offdesk_native_stop_observation.v1', 'phase': phase['id'],
             'artifact_path': str((run.output / name).relative_to(run.root)),
@@ -884,6 +1045,8 @@ def qualify(run,phase,deadline,batch,worker):
             'notice_observations': list(guard2.notice_observations),
             'confirmed_context_transition': False, 'hard_context_exhaustion_confirmed': False,
             'secondary_command_failure_artifact': None if failure is None else failure['artifact_path'],
+            'selected_check_observation': check_observation,
+            'host_hold_reason': 'selected_check_observation_incomplete' if check_hold else None,
             'command_log_read_error': command_read_error, 'canonical_acceptance': False,
             'automatic_resume_authorized': False}
         run.record(name, stop)

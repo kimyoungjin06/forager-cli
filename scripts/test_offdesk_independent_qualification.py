@@ -382,7 +382,9 @@ class ImplementationGuardTests(unittest.TestCase):
     def test_selected_success_and_checker_text_inside_progress_do_not_trigger_stop(self):
         capture = mock.Mock()
         guard = driver.ImplementationGuard(32, lambda: {}, lambda: {}, lambda *args: None,
-            selected_checks=[['/usr/bin/python3', '-I', '-S', '.runtime/check.py']], failure_capture=capture)
+            selected_checks=[['/usr/bin/python3', '-I', '-S', '.runtime/check.py']], failure_capture=capture,
+            start_capture=lambda *args: {'capture_status': 'captured'})
+        self.assertIsNone(guard.feed(command('passed', 'python3 -I -S .runtime/check.py', started=True)))
         self.assertIsNone(guard.feed(command('passed', 'python3 -I -S .runtime/check.py')))
         raw = shlex.join(['python3', '-I', '-S', '.runtime/offdesk_native_worker.py', 'progress',
                           '--checked-command', 'python3 -I -S .runtime/check.py'])
@@ -720,6 +722,10 @@ class HelperStageWiringTests(unittest.TestCase):
 
             def completed(name, raw, receipt, code=0):
                 nonlocal stop_reason
+                if name == 'model-check':
+                    started = command(name, raw, started=True)
+                    stop_reason = stop_reason or guard.feed(started)
+                    events.append(started)
                 event = command(name, raw, receipt, code=code)
                 stop_reason = stop_reason or guard.feed(event)
                 events.append(event)
@@ -743,14 +749,29 @@ class HelperStageWiringTests(unittest.TestCase):
                     report.update(status='failed', passed=37, failed=60)
                     for i, row in enumerate(report['cases']): row['passed'] = i < 37
                     if mode == 'check-fails-stale-source': report['target_sha256'] = 'stale'
-                if mode != 'check-fails-missing-report':
+                if mode != 'check-fails-missing-report' and not mode.startswith('pending-'):
                     worker.write_json(root / '.night/helper-model-check.json', report)
                 if mode == 'check-fails-collision':
                     (root / '.runtime/snapshot-canary').write_text('preserve\n')
                     (self.out / (self.phase['id'] + '-failed-check-source')).symlink_to(root / '.runtime/snapshot-canary')
                 summary = {key: report[key] for key in ('status', 'tests_run', 'passed', 'failed', 'errors')}
-                completed('model-check', shlex.join(self.phase['checks'][0]), summary,
-                          code=1 if check_fails else 0)
+                if mode.startswith('pending-'):
+                    started = command('model-check', shlex.join(self.phase['checks'][0]), started=True)
+                    stop_reason = guard.feed(started)
+                    events.append(started)
+                    if mode == 'pending-overlap':
+                        (root / packet_tools.HELPER_TARGET).write_text('# Edit before overlap notice\n')
+                        overlap = command('overlap', "python3 -c 'pass'", started=True)
+                        stop_reason = guard.feed(overlap)
+                        events.append(overlap)
+                    else:
+                        stop_reason = 'active_command_timeout'
+                else:
+                    completed('model-check', shlex.join(self.phase['checks'][0]), summary,
+                              code=1 if check_fails else 0)
+                if mode == 'check-start-tampered':
+                    start = guard.check_observations[0]['start_snapshot']['sources'][0]
+                    (root / start['path']).write_text('# Changed start capture\n')
                 if mode == 'check-fails-later-edit':
                     (root / packet_tools.HELPER_TARGET).write_text('# Later unverified source\n')
                 if mode == 'check-fails-capture-tampered':
@@ -769,7 +790,8 @@ class HelperStageWiringTests(unittest.TestCase):
             (output / 'stderr.log').write_text('')
             return {'run_id': 'offline-fixture', 'exit_code': -15 if stop_reason else 0,
                     'stop_reason': stop_reason, 'turn_completed': stop_reason is None, 'tool_calls': guard.calls,
-                    'started_tool_calls': guard.calls, 'completed_tool_calls': guard.calls, 'in_flight_tool_calls': 0}
+                    'started_tool_calls': guard.calls, 'completed_tool_calls': len(guard.seen_items),
+                    'in_flight_tool_calls': len(guard.started_items - guard.seen_items)}
 
         def verify(result, output, root, commands, deadline):
             self.host_calls.append(commands)
@@ -789,6 +811,44 @@ class HelperStageWiringTests(unittest.TestCase):
         with mock.patch.object(driver, 'verify_selected_model') as metadata:
             self.metadata_check = metadata
             return driver.qualify(self.run, self.phase, time.time() + 60, batch, self.fake)
+
+    def test_pending_timeout_preserves_primary_stop_unknown_counts_and_no_host_check(self):
+        result = self.execute('pending-timeout')
+        self.assertEqual(result['stop_reason'], 'active_command_timeout')
+        self.assertFalse(result['turn_completed'])
+        self.assertIsNone(result['qualification_failure'])
+        stop = result['native_stop_observation']
+        observed = stop['selected_check_observation']
+        self.assertEqual(observed['pending_at_native_stop'], ['model-check'])
+        self.assertIsNone(observed['reported_counts'])
+        self.assertEqual(observed['checks'][0]['start_capture_integrity'], 'verified')
+        self.assertFalse(observed['checks'][0]['completion_observed'])
+        self.assertFalse((self.root / '.night/helper-model-check.json').exists())
+        self.assertFalse(self.host_calls)
+        self.assertNotIn('HOST_IMPLEMENTATION_AUDIT', self.records)
+
+    def test_pending_overlap_stops_and_retains_start_source_even_after_an_edit(self):
+        result = self.execute('pending-overlap')
+        self.assertEqual(result['stop_reason'], 'selected_check_overlap')
+        observed = result['native_stop_observation']['selected_check_observation']
+        self.assertFalse(observed['checks'][0]['current_source_matches_observed_start'])
+        body = json.loads((self.root / observed['artifact_path']).read_text())
+        source = body['checks'][0]['start_snapshot']['sources'][0]
+        self.assertEqual((self.root / source['path']).read_text(), '# Scope-only fixture. No decoder implementation.\n')
+        self.assertIsNone(body['reported_counts'])
+        self.assertFalse(self.host_calls)
+
+    def test_changed_start_capture_holds_without_fabricating_a_native_stop(self):
+        result = self.execute('check-start-tampered')
+        self.assertIsNone(result['stop_reason'])
+        self.assertTrue(result['turn_completed'])
+        self.assertEqual(result['exit_code'], 0)
+        self.assertEqual(result['verification_state'], 'failed')
+        stop = result['native_stop_observation']
+        self.assertEqual(stop['host_hold_reason'], 'selected_check_observation_incomplete')
+        self.assertIsNone(stop['primary_native_stop']['stop_reason'])
+        self.assertEqual(stop['selected_check_observation']['checks'][0]['start_capture_integrity'], 'unverified')
+        self.assertFalse(self.host_calls)
 
     def test_two_context_receipts_separate_checks_and_pending_stage_report(self):
         self.fake.native_argv = mock.Mock(return_value=[])

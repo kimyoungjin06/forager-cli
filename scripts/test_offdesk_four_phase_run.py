@@ -329,6 +329,30 @@ class FourPhaseTests(unittest.TestCase):
         self.assertFalse(result['failure_detail']['hard_context_exhaustion_confirmed'])
         self.assertIn('native-stop.json', (self.run.output / 'HANDOFF.md').read_text())
 
+    def test_pending_checker_timeout_reaches_handoff_without_becoming_a_failed_check(self):
+        def backend(phase, deadline):
+            result = self.backend(phase, deadline)
+            result.update(exit_code=-15, stop_reason='active_command_timeout',
+                turn_completed=False, verification_state='failed', native_stop_observation={
+                    'schema': 'offdesk_native_stop_observation.v1', 'phase': phase['id'],
+                    'artifact_path': '.night/run/native-stop.json', 'canonical_acceptance': False,
+                    'primary_native_stop': {'stop_reason': 'active_command_timeout',
+                                            'exit_code': -15, 'turn_completed': False},
+                    'selected_check_observation': {
+                        'artifact_path': '.night/run/selected-check-observation.json',
+                        'pending_at_native_stop': ['check-1'], 'reported_counts': None},
+                    'secondary_command_failure_artifact': None})
+            return result
+        result = self.run_batch(backend)
+        self.assertEqual(result['failure'], 'phase_gate_failed:FG-N18-1')
+        self.assertEqual(result['failure_detail']['primary_native_stop']['stop_reason'], 'active_command_timeout')
+        self.assertEqual(result['failure_detail']['selected_check_observation']['pending_at_native_stop'], ['check-1'])
+        self.assertIsNone(result['failure_detail']['selected_check_observation']['reported_counts'])
+        self.assertEqual(self.called, ['FG-N18-1'])
+        self.assertEqual(result['completed_phase_gates'], [])
+        self.assertIn('selected-check-observation.json', (self.run.output / 'HANDOFF.md').read_text())
+        self.assertFalse(result['canonical_acceptance'])
+
     def test_incomplete_native_turn_is_not_phase_completion(self):
         def backend(phase, deadline):
             result = self.backend(phase, deadline)

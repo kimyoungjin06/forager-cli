@@ -1,8 +1,49 @@
 # Project State
 
-Updated: 2026-11-08
+Updated: 2026-11-11
 
 ## Current focus
+
+R203 now records the source at the observed start of a selected check, before
+waiting for its completion. A pending-check guard stops on an overlapping
+command, changed source inventory, changed command identity or a turn ending
+without the check's completion. Missing start/capture evidence cannot certify
+a successful check. Separate start copies and inventory identities are retained
+with exact hashes; these are observed start bytes, not proof of what the child
+loaded. The guard observes native events after command admission and does not
+provide a hard write fence. An edit may already have happened when its event
+arrives; the retained start source and changed current source remain separate.
+
+Timeout/cancellation preserves the original native stop, pending item IDs,
+completion state, source-capture integrity and unknown counts in a dedicated
+evidence artifact and the return handoff. A zero native exit cannot advance
+host verification if the start capture was changed or source stability is
+unverified. No failed-check completion or test count is invented. Existing
+first-failed-check capture and stop behavior remains intact, as do all time,
+command, context, warning and output policies and the native worker.
+
+Model-free R202 event-prefix replay stops at item_7's start while item_6 remains
+pending, preserving the pre-check source bytes without executing any command,
+model helper or checker. The historical R202 timeout and its unknown 97 case
+outcomes remain unchanged. The long-line quadratic scan estimate is recomputed
+from frozen vectors as static evidence, not a measured timeout-case diagnosis.
+Controlled local children verify timeout reaping and overlap stop while also
+preserving an edit made before its start event, exposing the observation limit.
+
+Related Python regressions pass 320 distinct cases, including 19 new pending
+check, wiring and return-handoff cases. Formatting and strict all-target Clippy
+pass; Rust native-contract validation is recorded in the R203 checkpoint.
+The initial extended test environment was wrongly nested below a Cargo
+workspace and 40 executions were correctly refused. Those receipts are retained;
+a separate external test root fixes the environment. A later one-case failure
+identified the missing pending-check handoff link, now fixed. No guard or test
+was weakened to obtain a pass.
+
+C5.1a/C6.3-local remain unqualified and pending review. No live model, GPU,
+provider/Council call, generated-helper repair/replay, installed activation,
+push or canonical acceptance is selected. The next real validation, if selected,
+requires fresh preparation and admission on this source. Evidence is retained
+under `.git/forager-checkpoints/20261111-pending-check-observation-r203/`.
 
 Private qualifications now stop the native worker at its first failed selected
 check. A separate host failure checkpoint retains the exact source bytes, full

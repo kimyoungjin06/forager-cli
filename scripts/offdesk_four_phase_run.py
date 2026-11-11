@@ -425,12 +425,22 @@ class FourPhaseRun:
                   "records": [{**record, "result": compact_result(record["result"])}
                               for record in self.records],
                   "ended_at": self.clock(), "deadline_epoch": self.selection["stop_epoch"]}
+        selected_check = (failure_detail.get('selected_check_observation')
+                          if isinstance(failure_detail, dict) else None)
+        check_handoff = ''
+        if isinstance(selected_check, dict):
+            check_handoff = 'Selected-check evidence: ' + str(selected_check.get('artifact_path')) + '\n'
+            if selected_check.get('pending_at_native_stop'):
+                check_handoff += ('No completion observed for: '
+                    + ', '.join(selected_check['pending_at_native_stop']) + '. Check counts unknown.\n')
+            check_handoff += '\n'
         handoff = ("Forager Offdesk return. Review pending.\n\n"
                    + "Status: " + result["status"] + "\n"
                    + "Completed technical phase gates: " + ", ".join(self.completed) + "\n"
                    + "Failure: " + str(failure) + "\n\n"
                    + ("Failure evidence: " + str(failure_detail.get("artifact_path")) + "\n\n"
                       if failure_detail is not None else "")
+                   + check_handoff
                    + "See RUN_RESULT.json, candidate.patch, FINAL_SOURCE.json, phase reports, "
                      "native logs, check results and Council responses. Technical checks are "
                      "not canonical acceptance. No shared checkout integration or deployment.\n")
