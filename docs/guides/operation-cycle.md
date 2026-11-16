@@ -61,7 +61,7 @@ wiki promotion.
 
 When several reviewed tasks and fixed routines are grouped into one unattended
 window, use the immutable manifest and receipt model described in
-the [bounded-shift contract](../../src/offdesk/shift.rs). Review the exact selected
+the [bounded-shift contract](https://github.com/kimyoungjin06/forager-cli/blob/main/src/offdesk/shift.rs). Review the exact selected
 manifest before arming a window; timer execution consumes its bound routine claims.
 
 ## Stage Contract
@@ -223,7 +223,7 @@ Plans are limited to 1 MiB and 1024 tasks; an empty task list is valid.
 Existing Markdown plans are not automatically converted. Do not create a
 parallel plan merely to use this command. Automatic ownership discovery remains
 work in the existing operator-owned continuity plan. See
-[plan ownership](../../PROJECT_STATE.md#plan-ownership-and-execution-boundaries).
+[document roles and ownership](documentation-artifact-governance.md#document-roles).
 
 ### Explicit adoption of an existing TODO
 
@@ -863,7 +863,7 @@ it prevents launch. It clears the child environment and uses workdir-local
 `HOME` and `TMPDIR`. Stage necessary inputs explicitly. This does not protect
 local tmux or return sessions and does not restrict network, IPC, metadata,
 preopened descriptors, hardlink aliases or nested mounts. The complete task
-directory is visible. See the [read-policy implementation](../../src/offdesk/read_policy.rs)
+directory is visible. See the [read-policy implementation](https://github.com/kimyoungjin06/forager-cli/blob/main/src/offdesk/read_policy.rs)
 for the exact runtime exceptions and compatibility boundary. Installed services
 have not been changed by source qualification.
 

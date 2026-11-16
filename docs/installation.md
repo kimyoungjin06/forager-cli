@@ -1,44 +1,11 @@
 # Installation
 
-## Coordinated frontend replacement
-
-Cooperative admission applies to builds containing this feature. The first
-transition from older builds uses the reviewed legacy-reader refresh and final
-inventory; subsequent transitions can also drain the instrumented frontends.
-
-For a reviewed local cutover, `scripts/forager_frontend_maintenance.py` supplies
-`begin`, `status`, `guard`, `verify`, `finish`, and `cancel`. Begin records an
-operation ID and requests cooperative frontend exit. New TUI, go, and attach
-entrypoints hold before initialization. An attached client detaches only when
-its session and server retain sessions after detachment; agent input is untouched.
-
-Run the exact release-specific operator command under `guard`, after the
-approved stopped-writer, backup, queue/marker compatibility, and delivery-hold
-preflight. Declare every retained reader executable with `--reader-executable`.
-Bind the immutable selected payload through `--candidate-executable` and its
-reviewed `--expected-candidate-sha256`. Its original identity and bytes are
-checked before and after the command and again when the gate is finished.
-The guard retains original image identities across selector changes, checks
-before and after that command, and rechecks at finish. A late old reader keeps
-admission held; `verify` inspects again without rerunning the cutover command.
-State and offsets have no automatic rollback or replay path in this helper.
-
-Unknown or failed command outcomes retain the gate and audit history. Releasing
-such a gate requires an exact current record hash, an operator reason, and
-`--confirm-state-reviewed`. An unattempted operation can be cancelled directly.
-This is local operator coordination; Offdesk execution authority stays with the
-existing task and approval records.
-
-The legacy reader inventory currently supports Linux. It covers declared image
-identities and their expected native process names. Unreadable candidate readers
-hold the transition; other unreadable process-name observations remain counted.
-Arbitrary process renaming, direct old binaries, unrelated editors, and OS-wide
-write fencing remain outside this cooperative contract. Retain old payloads for
-identity checks and apply the release-specific compatibility decision to rollback.
-
 ## Prerequisites
 
-- [tmux](https://github.com/tmux/tmux/wiki) (required)
+- Linux or macOS
+- [tmux](https://github.com/tmux/tmux/wiki)
+- An installed coding agent CLI
+- Rust 1.88 or later when building from source
 
 ## Install Forager
 
@@ -52,12 +19,16 @@ curl -fsSL \
   | bash
 ```
 
+The installer downloads a tagged release. This documentation tree may describe
+newer source changes; consult the [release notes](releases/v0.14.0.md) and
+[operation status](offdesk-operation-status.md) for the relevant scope.
+
 ### Build from Source
 
 ```bash
 git clone https://github.com/kimyoungjin06/forager-cli
 cd forager-cli
-cargo build --release
+cargo build --locked --release
 ```
 
 The primary binary will be at `target/release/forager`; `target/release/aoe`
@@ -110,3 +81,39 @@ forager uninstall
 ```
 
 This will guide you through removing the binary, configuration, and tmux settings.
+
+## Upgrading a running installation
+
+Cooperative admission applies to builds containing this feature. The first
+transition from older builds uses the reviewed legacy-reader refresh and final
+inventory; subsequent transitions can also drain the instrumented frontends.
+
+For a reviewed local cutover, `scripts/forager_frontend_maintenance.py` supplies
+`begin`, `status`, `guard`, `verify`, `finish`, and `cancel`. Begin records an
+operation ID and requests cooperative frontend exit. New TUI, go, and attach
+entrypoints hold before initialization. An attached client detaches only when
+its session and server retain sessions after detachment; agent input is untouched.
+
+Run the exact release-specific operator command under `guard`, after the
+approved stopped-writer, backup, queue/marker compatibility, and delivery-hold
+preflight. Declare every retained reader executable with `--reader-executable`.
+Bind the immutable selected payload through `--candidate-executable` and its
+reviewed `--expected-candidate-sha256`. Its original identity and bytes are
+checked before and after the command and again when the gate is finished.
+The guard retains original image identities across selector changes, checks
+before and after that command, and rechecks at finish. A late old reader keeps
+admission held; `verify` inspects again without rerunning the cutover command.
+State and offsets have no automatic rollback or replay path in this helper.
+
+Unknown or failed command outcomes retain the gate and audit history. Releasing
+such a gate requires an exact current record hash, an operator reason, and
+`--confirm-state-reviewed`. An unattempted operation can be cancelled directly.
+This is local operator coordination; Offdesk execution authority stays with the
+existing task and approval records.
+
+The legacy reader inventory currently supports Linux. It covers declared image
+identities and their expected native process names. Unreadable candidate readers
+hold the transition; other unreadable process-name observations remain counted.
+Arbitrary process renaming, direct old binaries, unrelated editors, and OS-wide
+write fencing remain outside this cooperative contract. Retain old payloads for
+identity checks and apply the release-specific compatibility decision to rollback.

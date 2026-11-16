@@ -6,42 +6,31 @@ built on tmux and written in Rust.
 > Forager lets people entrust meaningful work to agents and return to evidence,
 > choices, and continuity instead of mystery.
 
-Forager lets you run multiple harness-backed agents in parallel, each in its own
-tmux session and optionally on its own git branch. It is useful as a session
-manager on day one, but its product direction is larger: make long-running agent
-work governable, inspectable, recoverable, and transferable.
-
-Forager does not replace Claude Code, Codex, OpenCode, OpenHands, Gemini CLI,
-Mistral Vibe, or local LLM scripts. It supervises harness-backed agents with
-local approvals, durable evidence, recovery state, reviewable handoffs, and
-deliberate knowledge promotion.
+Start with a coding agent in a tmux session and an optional Git worktree. Keep
+its terminal and diff close at hand, then prepare bounded Offdesk work when you
+are ready. Forager preserves the task's evidence and review so you can return
+to an agreed next step.
 
 ![Forager TUI preview](assets/tui.png)
 
-## What To Read First
+## Choose a starting point
 
-- [Project Direction](project-direction.md) defines the north star, product
-  boundary, and practical completion criteria.
-- [Functional Definition Set](functional-definitions.md) defines the required
-  capabilities independently from the current UI or implementation shape.
-- [Gajae-Code Benchmarking](gajae-benchmarking.md) records how external harness
-  patterns are translated through Forager's invariants before implementation.
-- [Implementation Packet And Recursive Alignment Review](implementation-packet.md)
-  defines the design-first packet that preserves original intent, brand
-  boundary, scope, completion criteria, and work-slice receipt boundary before
-  substantial delegation.
-- [Decision Pipeline](decision-pipeline.md) defines the canonical state model
-  for Agent to Council to User decisions before execution handoff.
-- [Operation Cycle](guides/operation-cycle.md) explains the Ondesk to Offdesk to
-  Ondesk loop.
-- [Hosted Harness Agents](hosted-harness-agents.md) defines how external
-  harness-backed agents fit into Forager.
-- [Remote Operator](remote-operator.md) defines the transport-agnostic remote
-  supervision model for mobile and chat surfaces such as Telegram.
-- [Evidence Search And Memory Boundary](evidence-search-and-memory-boundary.md)
-  translates external memory, context-budget, and operator workflow patterns
-  into Forager's evidence, candidate, and promotion boundaries.
-- [Quick Start](quick-start.md) gets the TUI running for ordinary agent sessions.
+| Your goal | Start here |
+| --- | --- |
+| Install and open your first session | [Installation](installation.md), then [Quick start](quick-start.md) |
+| Work on separate branches | [Session workflow](guides/workflow.md) and [Git worktrees](guides/worktrees.md) |
+| Prepare work and review it on return | [Operation cycle](guides/operation-cycle.md) |
+| Inspect and control work from Telegram | [Remote operator](remote-operator.md) |
+| Understand the supported scope | [Operation status](offdesk-operation-status.md) |
+| Look up a command or setting | [CLI reference](cli/reference.md) and [Configuration](guides/configuration.md) |
+
+The public website's workspace pages are static previews. Local exports and
+an explicitly configured local action bridge supply your own workstation data
+and controls. See the [remote operator guide](remote-operator.md) for setup.
+
+Release downloads contain tagged versions. This documentation tree may describe
+newer source changes; use the [release notes](releases/v0.14.0.md) for the
+published version and [operation status](offdesk-operation-status.md) for scope.
 
 ## Why Forager?
 
@@ -57,10 +46,11 @@ and makes the operating boundary explicit:
 
 ## Supported Harness-Backed Agents
 
-Claude Code, OpenCode, Mistral Vibe, Codex CLI, and Gemini CLI are currently
-auto-detected for interactive sessions. Offdesk can also supervise local command
-workloads, deterministic review harnesses, local LLM scripts, and future hosted
-harness agents through the same approval and evidence model.
+Claude Code, OpenCode, Mistral Vibe, Codex CLI, and Gemini CLI are auto-detected
+for interactive sessions. Other command workloads need explicit configuration
+and checks for their selected task. Local-model coding and context recovery
+remain task-specific qualification work; running a command alone does not
+establish those outcomes.
 
 ## Core Surfaces
 
@@ -72,6 +62,16 @@ harness agents through the same approval and evidence model.
 - **Adaptive wiki**: capture agent-created lessons as candidates and promote
   only reviewed knowledge.
 - **CLI/JSON**: keep automation and audit grounded in durable local state.
+
+## Product and implementation references
+
+[Project direction](project-direction.md) describes the product's goals.
+[Harness contracts](hosted-harness-agents.md),
+[functional definitions](functional-definitions.md),
+[decision pipeline](decision-pipeline.md) and
+[evidence and memory boundaries](evidence-search-and-memory-boundary.md)
+explain the design. Benchmarking and implementation proposals are grouped under
+Design and development in the navigation.
 
 <div class="cta-box">
 <p><strong>Ready to get started?</strong></p>

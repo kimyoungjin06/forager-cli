@@ -1,42 +1,27 @@
 # Offdesk Operation Status
 
-This page records the current Forager Offdesk operating baseline and the work
-that remains before treating the system as a dependable overnight operator.
+This page distinguishes the behavior implemented in this source tree from a
+published release and from the outcome of a particular workload. Release
+archives contain their tagged source; use the [release notes](releases/v0.14.0.md)
+to identify that scope.
 
-Snapshot date: 2026-06-17.
+## Source capabilities and validation boundaries
 
-## Current Baseline
+| Area | Source behavior | Boundary |
+| --- | --- | --- |
+| Interactive sessions | Detect installed Claude Code, Codex, OpenCode, Gemini CLI and Mistral Vibe; attach through tmux and manage worktrees. | A host reboot ends running agent processes. Stored records and supported checkpoints are separate. |
+| Bounded Offdesk work | Prepare tasks, bind approvals, supervise execution and return evidence. | Useful results, stop conditions and executor suitability must be checked for the selected task. |
+| Result review | Separate completed execution, pending review, failed execution and accepted results. | A completed task or a healthy listener does not accept a result. |
+| Telegram | Read-only inspection plus explicitly confirmed, bound actions. | Credentials, transport health and delivery uncertainty belong to the operator's installation. |
+| Attention cards | Distinguish result/closeout review, execution recovery and decisions; retain exact task lookup. | Unchanged routine reviews remain visible without timed re-alerts. Execution failures and decisions retain their reminder policy. |
+| Local command/model adapters | Run explicitly configured command workloads. | Coding quality and recovery across context transitions remain task-specific qualification work. |
+| Web workspace | Static sample views; optional local exports and a local action bridge. | The public website is a preview. Actions require a separately configured local bridge. |
+| Coordinated upgrades | A reviewed candidate, stopped backup, reader inventory and guarded selector changes. | Legacy reader inventory currently supports Linux; see [upgrading a running installation](installation.md#upgrading-a-running-installation). |
 
-Forager now has a generic Offdesk operating loop, a read-only Remote Operator
-projection surface, a Telegram transport adapter, project initialization
-packets, plan registration/review records, runtime approval gates, background
-runner probes, closeout packets, Ondesk return packages, and adaptive wiki
-review surfaces.
-
-At this point:
-
-- the default Forager profile is loaded from primary Forager storage;
-- the default profile has no pending approvals, queued tasks, active tasks,
-  failed tasks, resume-pending tasks, stale background runs, or
-  closeout-required tasks;
-- the Telegram listener is installed as a user service and reports healthy
-  polling state through `scripts/offdesk_remote_operator_telegram.py --health`;
-- the Telegram listener can survive known Telegram transport failures and
-  record them as loop state instead of exiting;
-- `scripts/offdesk_remote_operator_watchdog.py` runs outside the listener,
-  reads the loop-status file and systemd service state, and sends rate-limited
-  emergency Telegram alerts when remote operation is not currently reliable;
-- the local model endpoint configured for the Remote Operator is available;
-- Telegram can start and monitor only a reviewed, bound task through
-  task-scoped `offdesk tick`, and can create a closeout packet only for that
-  completed task; closeout review, accepted truth, arbitrary launch, and shell
-  actions remain blocked from Telegram by design;
-- `cargo test`, `cargo fmt -- --check`, `cargo clippy -- -D warnings`,
-  `mdbook build`, and the website build pass locally.
-
-This baseline proves that the approval-gated runtime path and the remote
-operator status path can be inspected consistently. It still does not prove
-that every long autonomous run will produce useful project output.
+Use `forager status --json` and the remote operator's local health command to
+inspect your own installation. This page is documentation, not a live health
+report. The detailed implementation inventory below preserves its original
+scope and historical observations.
 
 ## Verified Generic Flow
 
@@ -268,3 +253,36 @@ Acceptance checks:
 - Offdesk CLI plan/closeout/remote-operator code is split into smaller modules;
 - Telegram adapter session, rendering, provider, and loop code are separated;
 - existing integration tests continue to cover the public contracts.
+
+## Historical local baseline: 2026-06-17
+
+Forager now has a generic Offdesk operating loop, a read-only Remote Operator
+projection surface, a Telegram transport adapter, project initialization
+packets, plan registration/review records, runtime approval gates, background
+runner probes, closeout packets, Ondesk return packages, and adaptive wiki
+review surfaces.
+
+At the time of that local snapshot:
+
+- the default Forager profile is loaded from primary Forager storage;
+- the default profile has no pending approvals, queued tasks, active tasks,
+  failed tasks, resume-pending tasks, stale background runs, or
+  closeout-required tasks;
+- the Telegram listener is installed as a user service and reports healthy
+  polling state through `scripts/offdesk_remote_operator_telegram.py --health`;
+- the Telegram listener can survive known Telegram transport failures and
+  record them as loop state instead of exiting;
+- `scripts/offdesk_remote_operator_watchdog.py` runs outside the listener,
+  reads the loop-status file and systemd service state, and sends rate-limited
+  emergency Telegram alerts when remote operation is not currently reliable;
+- the local model endpoint configured for the Remote Operator is available;
+- Telegram can start and monitor only a reviewed, bound task through
+  task-scoped `offdesk tick`, and can create a closeout packet only for that
+  completed task; closeout review, accepted truth, arbitrary launch, and shell
+  actions remain blocked from Telegram by design;
+- `cargo test`, `cargo fmt -- --check`, `cargo clippy -- -D warnings`,
+  `mdbook build`, and the website build pass locally.
+
+This baseline proves that the approval-gated runtime path and the remote
+operator status path can be inspected consistently. It still does not prove
+that every long autonomous run will produce useful project output.

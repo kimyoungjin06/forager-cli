@@ -22,6 +22,8 @@ This document contains the help content for the `forager` command-line program.
 * [`forager session show`↴](#forager-session-show)
 * [`forager session rename`↴](#forager-session-rename)
 * [`forager session current`↴](#forager-session-current)
+* [`forager session context-status`↴](#forager-session-context-status)
+* [`forager session context-sync`↴](#forager-session-context-sync)
 * [`forager group`↴](#forager-group)
 * [`forager group list`↴](#forager-group-list)
 * [`forager group create`↴](#forager-group-create)
@@ -34,15 +36,24 @@ This document contains the help content for the `forager` command-line program.
 * [`forager profile default`↴](#forager-profile-default)
 * [`forager project`↴](#forager-project)
 * [`forager project init`↴](#forager-project-init)
+* [`forager project plan-routing`↴](#forager-project-plan-routing)
 * [`forager project apply-governance-hints`↴](#forager-project-apply-governance-hints)
+* [`forager project wiki-context`↴](#forager-project-wiki-context)
 * [`forager project audit-docs`↴](#forager-project-audit-docs)
 * [`forager project artifact-index`↴](#forager-project-artifact-index)
+* [`forager project document-catalog`↴](#forager-project-document-catalog)
+* [`forager project document-search`↴](#forager-project-document-search)
+* [`forager project document-lifecycle-review`↴](#forager-project-document-lifecycle-review)
+* [`forager project document-lifecycle-request`↴](#forager-project-document-lifecycle-request)
+* [`forager project document-lifecycle-apply`↴](#forager-project-document-lifecycle-apply)
+* [`forager project document-lifecycle-history`↴](#forager-project-document-lifecycle-history)
 * [`forager project retention-review`↴](#forager-project-retention-review)
 * [`forager project retention-request`↴](#forager-project-retention-request)
 * [`forager project retention-apply`↴](#forager-project-retention-apply)
 * [`forager project retention-promote`↴](#forager-project-retention-promote)
 * [`forager project implementation-packet`↴](#forager-project-implementation-packet)
 * [`forager project sync`↴](#forager-project-sync)
+* [`forager project inventory`↴](#forager-project-inventory)
 * [`forager worktree`↴](#forager-worktree)
 * [`forager worktree list`↴](#forager-worktree-list)
 * [`forager worktree info`↴](#forager-worktree-info)
@@ -60,12 +71,39 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk remote-operator pending`↴](#forager-offdesk-remote-operator-pending)
 * [`forager offdesk remote-operator plans`↴](#forager-offdesk-remote-operator-plans)
 * [`forager offdesk remote-operator show`↴](#forager-offdesk-remote-operator-show)
+* [`forager offdesk remote-session`↴](#forager-offdesk-remote-session)
+* [`forager offdesk remote-session policy-inspect`↴](#forager-offdesk-remote-session-policy-inspect)
+* [`forager offdesk remote-session policy-resolve`↴](#forager-offdesk-remote-session-policy-resolve)
 * [`forager offdesk pending`↴](#forager-offdesk-pending)
 * [`forager offdesk gate`↴](#forager-offdesk-gate)
 * [`forager offdesk launch`↴](#forager-offdesk-launch)
 * [`forager offdesk enqueue`↴](#forager-offdesk-enqueue)
 * [`forager offdesk tick`↴](#forager-offdesk-tick)
+* [`forager offdesk shift`↴](#forager-offdesk-shift)
+* [`forager offdesk shift start-review`↴](#forager-offdesk-shift-start-review)
+* [`forager offdesk shift request-arm-review`↴](#forager-offdesk-shift-request-arm-review)
+* [`forager offdesk shift confirm-arm-review`↴](#forager-offdesk-shift-confirm-arm-review)
+* [`forager offdesk shift candidates`↴](#forager-offdesk-shift-candidates)
+* [`forager offdesk shift propose`↴](#forager-offdesk-shift-propose)
+* [`forager offdesk shift preview`↴](#forager-offdesk-shift-preview)
+* [`forager offdesk shift enterprise-policies`↴](#forager-offdesk-shift-enterprise-policies)
+* [`forager offdesk shift host-policy-probe`↴](#forager-offdesk-shift-host-policy-probe)
+* [`forager offdesk shift read-policy-probe`↴](#forager-offdesk-shift-read-policy-probe)
+* [`forager offdesk shift prepare`↴](#forager-offdesk-shift-prepare)
+* [`forager offdesk shift instantiate-template`↴](#forager-offdesk-shift-instantiate-template)
+* [`forager offdesk shift show`↴](#forager-offdesk-shift-show)
+* [`forager offdesk shift arm`↴](#forager-offdesk-shift-arm)
+* [`forager offdesk shift status`↴](#forager-offdesk-shift-status)
+* [`forager offdesk shift review`↴](#forager-offdesk-shift-review)
+* [`forager offdesk shift retention-report`↴](#forager-offdesk-shift-retention-report)
+* [`forager offdesk shift council-packet`↴](#forager-offdesk-shift-council-packet)
+* [`forager offdesk shift disarm`↴](#forager-offdesk-shift-disarm)
+* [`forager offdesk shift routine-claim`↴](#forager-offdesk-shift-routine-claim)
+* [`forager offdesk shift routine-start`↴](#forager-offdesk-shift-routine-start)
+* [`forager offdesk shift routine-complete`↴](#forager-offdesk-shift-routine-complete)
+* [`forager offdesk shift routine-recover`↴](#forager-offdesk-shift-routine-recover)
 * [`forager offdesk tasks`↴](#forager-offdesk-tasks)
+* [`forager offdesk task-recovery`↴](#forager-offdesk-task-recovery)
 * [`forager offdesk decisions`↴](#forager-offdesk-decisions)
 * [`forager offdesk decision`↴](#forager-offdesk-decision)
 * [`forager offdesk decision show`↴](#forager-offdesk-decision-show)
@@ -76,6 +114,7 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk provider-capacity`↴](#forager-offdesk-provider-capacity)
 * [`forager offdesk provider-fallback`↴](#forager-offdesk-provider-fallback)
 * [`forager offdesk cancel-task`↴](#forager-offdesk-cancel-task)
+* [`forager offdesk terminate-task`↴](#forager-offdesk-terminate-task)
 * [`forager offdesk pause`↴](#forager-offdesk-pause)
 * [`forager offdesk unpause`↴](#forager-offdesk-unpause)
 * [`forager offdesk pause-status`↴](#forager-offdesk-pause-status)
@@ -101,6 +140,7 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk closeout-review`↴](#forager-offdesk-closeout-review)
 * [`forager offdesk closeout-decision`↴](#forager-offdesk-closeout-decision)
 * [`forager offdesk closeout-retire`↴](#forager-offdesk-closeout-retire)
+* [`forager offdesk review-link`↴](#forager-offdesk-review-link)
 * [`forager offdesk wiki`↴](#forager-offdesk-wiki)
 * [`forager offdesk wiki corrections`↴](#forager-offdesk-wiki-corrections)
 * [`forager offdesk wiki proposal-events`↴](#forager-offdesk-wiki-proposal-events)
@@ -138,9 +178,21 @@ This document contains the help content for the `forager` command-line program.
 * [`forager offdesk wiki add-counterexample`↴](#forager-offdesk-wiki-add-counterexample)
 * [`forager offdesk wiki update-runbook`↴](#forager-offdesk-wiki-update-runbook)
 * [`forager ondesk`↴](#forager-ondesk)
+* [`forager ondesk plan-inspect`↴](#forager-ondesk-plan-inspect)
+* [`forager ondesk prepare-offdesk`↴](#forager-ondesk-prepare-offdesk)
+* [`forager ondesk plan-adopt-proposal`↴](#forager-ondesk-plan-adopt-proposal)
+* [`forager ondesk plan-apply`↴](#forager-ondesk-plan-apply)
+* [`forager ondesk plan-review-proposal`↴](#forager-ondesk-plan-review-proposal)
+* [`forager ondesk return-binding`↴](#forager-ondesk-return-binding)
 * [`forager ondesk note`↴](#forager-ondesk-note)
 * [`forager ondesk capture`↴](#forager-ondesk-capture)
 * [`forager ondesk prompt-package`↴](#forager-ondesk-prompt-package)
+* [`forager ondesk return`↴](#forager-ondesk-return)
+* [`forager ondesk return launch-restricted`↴](#forager-ondesk-return-launch-restricted)
+* [`forager ondesk return preview`↴](#forager-ondesk-return-preview)
+* [`forager ondesk return send`↴](#forager-ondesk-return-send)
+* [`forager ondesk return observe`↴](#forager-ondesk-return-observe)
+* [`forager ondesk return status`↴](#forager-ondesk-return-status)
 * [`forager ondesk review-surface`↴](#forager-ondesk-review-surface)
 * [`forager ondesk workstation-surface`↴](#forager-ondesk-workstation-surface)
 * [`forager ondesk action-envelope`↴](#forager-ondesk-action-envelope)
@@ -302,17 +354,13 @@ Show session status summary
 * `-v`, `--verbose` - Show detailed session list
 * `-q`, `--quiet` - Only output waiting count (for scripts)
 * `--json` - Output as JSON
+* `--notification-capture` - Include identity-checked terminal text for waiting notifications (sensitive)
 
 
 
 ## `forager doctor`
 
 Diagnose Forager paths, profile env, and legacy AoE compatibility state
-
-The build section reports the selected executable's SHA256 independently of its
-version string. Linux reads the running image through `/proc/self/exe`. Other
-platforms label the current executable path as an unverified running-image
-observation. An unreadable, changed, or oversized image keeps an unknown digest.
 
 **Usage:** `forager doctor [OPTIONS]`
 
@@ -368,6 +416,8 @@ Manage session lifecycle (start, stop, attach, etc.)
 * `show` - Show session details
 * `rename` - Rename a session
 * `current` - Auto-detect current session
+* `context-status` - Inspect a session's wiki brief and presentation freshness without writes
+* `context-sync` - Explicitly refresh and present wiki context to one prompt-ready session
 
 
 
@@ -462,6 +512,45 @@ Auto-detect current session
 
 * `-q`, `--quiet` - Just session name (for scripting)
 * `--json` - Output as JSON
+
+
+
+## `forager session context-status`
+
+Inspect a session's wiki brief and presentation freshness without writes
+
+**Usage:** `forager session context-status [OPTIONS] <IDENTIFIER>`
+
+###### **Arguments:**
+
+* `<IDENTIFIER>` - Exact session ID, unique prefix, title, or project path
+
+###### **Options:**
+
+* `--json` - Output the read-only status envelope as JSON
+
+
+
+## `forager session context-sync`
+
+Explicitly refresh and present wiki context to one prompt-ready session
+
+**Usage:** `forager session context-sync [OPTIONS] <IDENTIFIER>`
+
+###### **Arguments:**
+
+* `<IDENTIFIER>` - Exact session ID, unique prefix, title, or project path
+
+###### **Options:**
+
+* `--agent-mode <AGENT_MODE>` - Work mode used to select reviewed wiki entries
+
+  Default value: `shared`
+
+  Possible values: `shared`, `planning`, `development`, `analysis`, `writing`, `critique`, `review`, `maintenance`
+
+* `--require-fresh` - Refuse to use the last exact brief if refresh fails
+* `--json` - Output the sync receipt and resulting status as JSON
 
 
 
@@ -605,15 +694,24 @@ Initialize and inspect project operation packets
 ###### **Subcommands:**
 
 * `init` - Create a read-only project operation initialization packet
+* `plan-routing` - Preview or apply exact-hash-reviewed owning TODO and AGENTS routing
 * `apply-governance-hints` - Apply reviewed governance surface templates to a project
+* `wiki-context` - Lint or apply reviewed local-agent wiki context discovery markers
 * `audit-docs` - Audit documentation and human-facing artifact governance surfaces
 * `artifact-index` - Build a read-only project/profile artifact index
+* `document-catalog` - Build a bounded read-only document catalog without storing state
+* `document-search` - Search a fresh visibility-neutral document catalog
+* `document-lifecycle-review` - Review one exact document lifecycle proposal without writing state
+* `document-lifecycle-request` - Open one proposal-hash-bound lifecycle approval request
+* `document-lifecycle-apply` - Apply one approved lifecycle proposal to the append-only profile ledger
+* `document-lifecycle-history` - Inspect append-only lifecycle history without opening document bodies
 * `retention-review` - Build a read-only artifact retention review packet
 * `retention-request` - Create an approval-only artifact retention follow-up request
 * `retention-apply` - Consume an approved artifact retention decision into a profile receipt
 * `retention-promote` - Promote a retained artifact into DELIVERABLES.md with snapshot evidence
 * `implementation-packet` - Draft a design-first implementation packet before delegated execution
 * `sync` - Scan workspace roots and bulk-register unmatched projects into the registry
+* `inventory` - Account for workspace paths and registry entries without writing state
 
 
 
@@ -630,12 +728,37 @@ Create a read-only project operation initialization packet
 ###### **Options:**
 
 * `--project-key <PROJECT_KEY>` - Stable project key used by Ondesk, Offdesk, and adaptive wiki records
+* `--owning-plan <OWNING_PLAN>` - Existing authoritative TODO, relative to this project root (explicit selection)
 * `--operation-target <MODULE_PATH_OR_ID>` - Module path/id to mark as a prioritized operation target
+* `--subproject-spec <PATH>` - Explicit logical subproject scope spec. Repeat for several subprojects
 * `--module-profile-spec <PATH>` - Project-specific module operation profile spec. Repeat to register multiple specs
 * `--out <OUT>` - Write the initialization packet to this directory
 * `--include-git` - Include read-only git branch/status/diff-stat evidence
 * `--force` - Overwrite known initialization files when --out already contains files
 * `--json` - Output machine-readable JSON
+
+
+
+## `forager project plan-routing`
+
+Preview or apply exact-hash-reviewed owning TODO and AGENTS routing
+
+**Usage:** `forager project plan-routing [OPTIONS] --project-key <PROJECT_KEY> <PATH>`
+
+###### **Arguments:**
+
+* `<PATH>` - Explicit project root; only bounded documentation discovery is performed
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEY>`
+* `--owning-plan <OWNING_PLAN>` - Explicit existing owning TODO, relative to the project root
+* `--subproject-spec <SUBPROJECT_SPEC>` - Select one previously declared logical scope instead of the whole project
+* `--document-route <ROLE=PATH>` - Existing document location: working_notes, evidence, reports, or canonical=PATH
+* `--create-plan` - Preview establishment of an explicitly named missing plan (one file only)
+* `--reviewed` - Apply the exact reviewed preview; planning never authorizes Offdesk work
+* `--expected-preview-sha256 <EXPECTED_PREVIEW_SHA256>`
+* `--json`
 
 
 
@@ -657,6 +780,26 @@ Apply reviewed governance surface templates to a project
   Possible values: `current-state`, `next-actions`, `decisions`, `deliverables`
 
 * `--reviewed` - Confirm that the operator reviewed the hints and approves creating missing files
+* `--json` - Output machine-readable JSON
+
+
+
+## `forager project wiki-context`
+
+Lint or apply reviewed local-agent wiki context discovery markers
+
+**Usage:** `forager project wiki-context [OPTIONS] --project-key <PROJECT_KEY> <PATH>`
+
+###### **Arguments:**
+
+* `<PATH>` - Project repository/root directory to inspect
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEY>` - Stable project key expected in the generated wiki brief
+* `--include-claude` - Also preview or update an existing regular CLAUDE.md; create it if missing
+* `--manage-gitignore` - Preview or add the managed .wiki-brief.md rule to .gitignore
+* `--reviewed` - Confirm review of the exact diff and apply selected marker changes
 * `--json` - Output machine-readable JSON
 
 
@@ -709,6 +852,177 @@ Build a read-only project/profile artifact index
 
 
 
+## `forager project document-catalog`
+
+Build a bounded read-only document catalog without storing state
+
+**Usage:** `forager project document-catalog [OPTIONS] <PATH>`
+
+###### **Arguments:**
+
+* `<PATH>` - One explicit bounded project root to scan
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEY>` - Project key for this ephemeral projection
+* `--max-files <MAX_FILES>` - Maximum supported document files to observe
+
+  Default value: `10000`
+* `--max-directory-entries <MAX_DIRECTORY_ENTRIES>` - Maximum filesystem entries to enumerate across all directories
+
+  Default value: `100000`
+* `--max-total-bytes <MAX_TOTAL_BYTES>` - Maximum total document bytes to hash and extract
+
+  Default value: `67108864`
+* `--max-file-bytes <MAX_FILE_BYTES>` - Maximum bytes to read from any one document
+
+  Default value: `8388608`
+* `--max-elapsed-ms <MAX_ELAPSED_MS>` - Maximum elapsed scan time in milliseconds
+
+  Default value: `5000`
+* `--lifecycle` - Join the active profile lifecycle ledger and emit document_catalog.v2
+* `--json` - Output machine-readable JSON
+
+
+
+## `forager project document-search`
+
+Search a fresh visibility-neutral document catalog
+
+**Usage:** `forager project document-search [OPTIONS] <PATH>`
+
+###### **Arguments:**
+
+* `<PATH>` - One explicit bounded project root to scan live
+
+###### **Options:**
+
+* `--query <QUERY>` - Path and supported-text query
+* `--observation-id <OBSERVATION_ID>` - Inspect one observation from the current live catalog
+* `--document-id <DOCUMENT_ID>` - Inspect one durable lifecycle document from the current live catalog
+* `--relative-path <RELATIVE_PATH>` - Inspect one exact bounded project-relative path
+* `--lifecycle` - Join the active profile lifecycle ledger and emit document_search.v2
+* `--include-cold` - Return reviewed cold query matches instead of omitting them
+* `--project-key <PROJECT_KEY>` - Project key for this ephemeral projection
+* `--max-files <MAX_FILES>` - Maximum supported document files to observe
+
+  Default value: `10000`
+* `--max-directory-entries <MAX_DIRECTORY_ENTRIES>` - Maximum filesystem entries to enumerate across all directories
+
+  Default value: `100000`
+* `--max-total-bytes <MAX_TOTAL_BYTES>` - Maximum total document bytes to hash and extract
+
+  Default value: `67108864`
+* `--max-file-bytes <MAX_FILE_BYTES>` - Maximum bytes to read from any one document
+
+  Default value: `8388608`
+* `--max-elapsed-ms <MAX_ELAPSED_MS>` - Maximum elapsed scan time in milliseconds
+
+  Default value: `5000`
+* `--json` - Output machine-readable JSON
+
+
+
+## `forager project document-lifecycle-review`
+
+Review one exact document lifecycle proposal without writing state
+
+**Usage:** `forager project document-lifecycle-review [OPTIONS] --project-key <PROJECT_KEY> --reason <REASON> <PATH> <TRANSITION>`
+
+###### **Arguments:**
+
+* `<PATH>` - One explicit bounded project root
+* `<TRANSITION>` - Lifecycle event class to review
+
+  Possible values: `mint-document`, `activity-transition`, `revalidate-observation`, `rebind-observation`
+
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEY>` - Stable project key bound into the proposal and ledger
+* `--observation-id <OBSERVATION_ID>` - Exact current observation selector, required for mint
+* `--document-id <DOCUMENT_ID>` - Durable document selector, required for an existing document
+* `--activity-state <ACTIVITY_STATE>` - Reviewed activity for mint and activity transitions
+
+  Possible values: `draft`, `candidate`, `active`, `review-due`, `superseded`, `retired`
+
+* `--successor-document-id <SUCCESSOR_DOCUMENT_ID>` - Exact active successor for a superseded document
+* `--active-owner-document-id <ACTIVE_OWNER_DOCUMENT_ID>` - Exact active owner for this document
+* `--review-after <REVIEW_AFTER>` - Canonical UTC review deadline with a Z suffix
+* `--reason <REASON>` - Operator-safe reason bound into the proposal hash
+* `--json` - Output strict machine-readable JSON
+
+
+
+## `forager project document-lifecycle-request`
+
+Open one proposal-hash-bound lifecycle approval request
+
+**Usage:** `forager project document-lifecycle-request [OPTIONS] --project-key <PROJECT_KEY> --reason <REASON> --expected-proposal-sha256 <EXPECTED_PROPOSAL_SHA256> <PATH> <TRANSITION>`
+
+###### **Arguments:**
+
+* `<PATH>` - One explicit bounded project root
+* `<TRANSITION>` - Lifecycle event class to review
+
+  Possible values: `mint-document`, `activity-transition`, `revalidate-observation`, `rebind-observation`
+
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEY>` - Stable project key bound into the proposal and ledger
+* `--observation-id <OBSERVATION_ID>` - Exact current observation selector, required for mint
+* `--document-id <DOCUMENT_ID>` - Durable document selector, required for an existing document
+* `--activity-state <ACTIVITY_STATE>` - Reviewed activity for mint and activity transitions
+
+  Possible values: `draft`, `candidate`, `active`, `review-due`, `superseded`, `retired`
+
+* `--successor-document-id <SUCCESSOR_DOCUMENT_ID>` - Exact active successor for a superseded document
+* `--active-owner-document-id <ACTIVE_OWNER_DOCUMENT_ID>` - Exact active owner for this document
+* `--review-after <REVIEW_AFTER>` - Canonical UTC review deadline with a Z suffix
+* `--reason <REASON>` - Operator-safe reason bound into the proposal hash
+* `--expected-proposal-sha256 <EXPECTED_PROPOSAL_SHA256>` - Exact proposal hash returned by a fresh review
+* `--request-id <REQUEST_ID>` - Optional bounded request identity
+* `--task-id <TASK_ID>` - Optional bounded task identity
+* `--json` - Output strict machine-readable JSON
+
+
+
+## `forager project document-lifecycle-apply`
+
+Apply one approved lifecycle proposal to the append-only profile ledger
+
+**Usage:** `forager project document-lifecycle-apply [OPTIONS] --approval-id <APPROVAL_ID> <PATH>`
+
+###### **Arguments:**
+
+* `<PATH>` - One explicit bounded project root
+
+###### **Options:**
+
+* `--approval-id <APPROVAL_ID>` - Approval ID from the active profile's canonical approval ledger
+* `--json` - Output strict machine-readable JSON
+
+
+
+## `forager project document-lifecycle-history`
+
+Inspect append-only lifecycle history without opening document bodies
+
+**Usage:** `forager project document-lifecycle-history [OPTIONS] --project-key <PROJECT_KEY> --document-id <DOCUMENT_ID> <PATH>`
+
+###### **Arguments:**
+
+* `<PATH>` - One explicit bounded project root
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEY>` - Stable project key bound into the lifecycle ledger
+* `--document-id <DOCUMENT_ID>` - Exact durable document ID
+* `--json` - Output strict machine-readable JSON
+
+
+
 ## `forager project retention-review`
 
 Build a read-only artifact retention review packet
@@ -722,6 +1036,7 @@ Build a read-only artifact retention review packet
 ###### **Options:**
 
 * `--project-key <PROJECT_KEY>` - Stable project key used to filter profile-local Forager artifacts
+* `--document-id <DOCUMENT_ID>` - Resolve one exact durable document through the retention crosswalk
 * `--json` - Output machine-readable JSON
 
 
@@ -741,9 +1056,11 @@ Create an approval-only artifact retention follow-up request
 * `--project-key <PROJECT_KEY>` - Stable project key used for approval and audit correlation
 * `--artifact-id <ARTIFACT_ID>` - Existing artifact_index/artifact_retention_review artifact id to request approval for
 * `--path <PATH_FILTER>` - Artifact path or relative path to request approval for
+* `--document-id <DOCUMENT_ID>` - Durable lifecycle document to request retention for
+* `--summary-document-id <SUMMARY_DOCUMENT_ID>` - Exact active summary document required by summary-keep
 * `--action <ACTION>` - Retention action to request approval for
 
-  Possible values: `keep`, `promote`, `archive`, `dispose`
+  Possible values: `keep`, `preserve`, `summary-keep`, `promote`, `archive`, `quarantine`, `dispose`
 
 * `--request-id <REQUEST_ID>` - Request ID for approval correlation
 
@@ -866,6 +1183,33 @@ Scan workspace roots and bulk-register unmatched projects into the registry
 
 
 
+## `forager project inventory`
+
+Account for workspace paths and registry entries without writing state
+
+**Usage:** `forager project inventory [OPTIONS] <ROOTS>...`
+
+###### **Arguments:**
+
+* `<ROOTS>` - Explicit workspace roots whose children should be accounted for
+
+###### **Options:**
+
+* `--registry <PATH>` - Registry to inspect; defaults to the existing project registry
+* `--max-depth <MAX_DEPTH>` - Directory levels inspected through marker-free containers only
+
+  Default value: `2`
+* `--max-entries <MAX_ENTRIES>` - Maximum number of filesystem entries across all roots
+
+  Default value: `4096`
+* `--project-key <PROJECT_KEYS>` - Project keys to highlight; absence means inventory only, no selection
+* `--no-selection` - Explicitly select no projects while still reporting inventory
+* `--exclude <PATH>` - Explicitly excluded path; descendants are not inspected
+* `--subproject-spec <PATH>` - Existing initialization subproject spec; parent must resolve uniquely
+* `--json` - Output as JSON
+
+
+
 ## `forager worktree`
 
 Manage git worktrees for parallel development
@@ -928,17 +1272,21 @@ Manage offdesk approvals and recovery artifacts
 * `plan-review` - Record an operator review for a registered Offdesk planning artifact
 * `plan-launch-prep` - Build a read-only launch-preparation packet from an approved plan review
 * `remote-operator` - Render read-only Remote Operator projections for mobile/chat transports
+* `remote-session` - Inspect remote interactive-session policy without opening launch authority
 * `pending` - List pending action approvals
 * `gate` - Evaluate whether an offdesk capability may execute now
 * `launch` - Gate and record a background runner launch
 * `enqueue` - Enqueue a durable offdesk task
 * `tick` - Run one offdesk control-loop pass
+* `shift` - Inspect bounded Offdesk shift authority and lifecycle
 * `tasks` - Show durable offdesk tasks
+* `task-recovery` - Inspect runtime release evidence without changing tasks or processes
 * `decisions` - List canonical Offdesk decision records
 * `decision` - Inspect one canonical Offdesk decision record
 * `provider-capacity` - Show provider capacity cooldown state
 * `provider-fallback` - Recommend provider/model fallbacks without retargeting tasks
 * `cancel-task` - Mark a durable task cancelled without stopping its background runner
+* `terminate-task` - Stop the verified local runtime and mark its durable task cancelled
 * `pause` - Halt all new offdesk dispatch until resumed (existing runs keep polling)
 * `unpause` - Clear the global operator pause so new dispatch can proceed again
 * `pause-status` - Show the current global operator pause state
@@ -964,6 +1312,7 @@ Manage offdesk approvals and recovery artifacts
 * `closeout-review` - Record a reviewed closeout verdict without applying file operations
 * `closeout-decision` - Resolve a closeout receipt open decision without applying file operations
 * `closeout-retire` - Retire an evidence-incomplete historical closeout without accepting truth
+* `review-link` - Inspect or explicitly record an exact existing-decision link to a completed runtime
 * `wiki` - Inspect adaptive wiki candidates, entries, projections, and lint
 
 
@@ -1190,6 +1539,48 @@ Render one read-only Offdesk plan detail projection
 
 
 
+## `forager offdesk remote-session`
+
+Inspect remote interactive-session policy without opening launch authority
+
+**Usage:** `forager offdesk remote-session <COMMAND>`
+
+###### **Subcommands:**
+
+* `policy-inspect` - Validate and summarize one owner-only policy without reading profile state
+* `policy-resolve` - Resolve one exact root and executable without creating a request
+
+
+
+## `forager offdesk remote-session policy-inspect`
+
+Validate and summarize one owner-only policy without reading profile state
+
+**Usage:** `forager offdesk remote-session policy-inspect [OPTIONS] --policy <POLICY>`
+
+###### **Options:**
+
+* `--policy <POLICY>` - Owner-only remote session policy JSON file
+* `--json` - Output as JSON
+
+
+
+## `forager offdesk remote-session policy-resolve`
+
+Resolve one exact root and executable without creating a request
+
+**Usage:** `forager offdesk remote-session policy-resolve [OPTIONS] --policy <POLICY> --installation-boundary <INSTALLATION_BOUNDARY> --root-id <ROOT_ID> --launch-profile-id <LAUNCH_PROFILE_ID>`
+
+###### **Options:**
+
+* `--policy <POLICY>` - Owner-only remote session policy JSON file
+* `--installation-boundary <INSTALLATION_BOUNDARY>` - Explicit absolute parent boundary containing every allowed project root
+* `--root-id <ROOT_ID>` - Exact root ID from the policy
+* `--launch-profile-id <LAUNCH_PROFILE_ID>` - Exact fixed launch profile ID authorized for the root
+* `--json` - Output as JSON
+
+
+
 ## `forager offdesk pending`
 
 List pending action approvals
@@ -1344,12 +1735,714 @@ Run one offdesk control-loop pass
 * `--limit <LIMIT>` - Maximum queued tasks to dispatch in this tick
 
   Default value: `10`
+* `--shift-id <SHIFT_ID>` - Consume one exact bounded shift. Defaults to the active shift when present
 * `--project-key <PROJECT_KEY>` - Restrict this tick to one project key
 * `--task-id <TASK_ID>` - Restrict this tick to one task ID
 * `--lock-stale-minutes <LOCK_STALE_MINUTES>` - Treat previous free lock metadata as stale after this many minutes
 
   Default value: `30`
 * `--notify-cooldown-minutes <NOTIFY_COOLDOWN_MINUTES>` - Record notification cooldown state in minutes while polling background runs
+* `--json` - Output as JSON
+
+
+
+## `forager offdesk shift`
+
+Inspect bounded Offdesk shift authority and lifecycle
+
+**Usage:** `forager offdesk shift <COMMAND>`
+
+###### **Subcommands:**
+
+* `start-review` - Review an already prepared shift and inert night preferences without writes
+* `request-arm-review` - Request only a pending arm approval for an exact local review; never arm or dispatch
+* `confirm-arm-review` - Confirm an exact reviewed arm approval and activate its shift; never tick or dispatch
+* `candidates` - Inspect existing queued candidates in explicitly registered projects without writes
+* `propose` - Propose an explicit serial selection with pinned owning TODOs, without writes
+* `preview` - Read-only start preview for an exact reviewed plan and queued selection
+* `enterprise-policies` - List canonical enterprise policy profiles without selecting one
+* `host-policy-probe` - Probe one supported host isolation policy without granting authority
+* `read-policy-probe` - Verify filesystem read restrictions without creating profile state or authority
+* `prepare` - Bind one reviewed plan, exact tasks, roots, routines, window, and budget
+* `instantiate-template` - Materialize one daily or weekly slot as a fresh inert shift manifest
+* `show` - Show one shift, or the latest shift when no ID is supplied
+* `arm` - Create or consume a manifest-bound operator approval and arm the shift
+* `status` - Summarize all bounded shifts without creating profile state
+* `review` - Project one bounded shift into the shared read-only morning review
+* `retention-report` - Classify preserved shift records and derived evidence without mutating either
+* `council-packet` - Build a review-only Council comparison of goal, evidence, drift, and budget
+* `disarm` - Terminate active shift authority without stopping already-running processes
+* `routine-claim` - Select and reserve the one manifest-bound handler for a fixed timer task
+* `routine-start` - Reserve one due typed routine occurrence before executing it
+* `routine-complete` - Record the terminal outcome of one exact routine reservation
+* `routine-recover` - Fail-safe close an unresolved routine after explicit operator acknowledgement
+
+
+
+## `forager offdesk shift start-review`
+
+Review an already prepared shift and inert night preferences without writes
+
+**Usage:** `forager offdesk shift start-review [OPTIONS] <SHIFT_ID>`
+
+###### **Arguments:**
+
+* `<SHIFT_ID>` - Exact already prepared shift ID
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEYS>` - One-run project scope; omitted uses saved global/profile night preferences
+* `--approval-ttl-minutes <APPROVAL_TTL_MINUTES>` - One-run validity for a newly requested shift-arm approval
+* `--json` - Output as JSON
+
+
+
+## `forager offdesk shift request-arm-review`
+
+Request only a pending arm approval for an exact local review; never arm or dispatch
+
+**Usage:** `forager offdesk shift request-arm-review [OPTIONS] --expected-review-sha256 <EXPECTED_REVIEW_SHA256> <SHIFT_ID>`
+
+###### **Arguments:**
+
+* `<SHIFT_ID>` - Exact already prepared shift ID
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEYS>` - One-run project scope; omitted uses saved global/profile night preferences
+* `--approval-ttl-minutes <APPROVAL_TTL_MINUTES>` - One-run validity for a newly requested shift-arm approval
+* `--json` - Output as JSON
+* `--expected-review-sha256 <EXPECTED_REVIEW_SHA256>`
+
+
+
+## `forager offdesk shift confirm-arm-review`
+
+Confirm an exact reviewed arm approval and activate its shift; never tick or dispatch
+
+**Usage:** `forager offdesk shift confirm-arm-review [OPTIONS] --expected-review-sha256 <EXPECTED_REVIEW_SHA256> --approval-id <APPROVAL_ID> --by <BY> <SHIFT_ID>`
+
+###### **Arguments:**
+
+* `<SHIFT_ID>` - Exact already prepared shift ID
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEYS>` - One-run project scope; omitted uses saved global/profile night preferences
+* `--approval-ttl-minutes <APPROVAL_TTL_MINUTES>` - One-run validity for a newly requested shift-arm approval
+* `--json` - Output as JSON
+* `--expected-review-sha256 <EXPECTED_REVIEW_SHA256>`
+* `--approval-id <APPROVAL_ID>`
+* `--by <BY>`
+* `--acknowledge-unknown-task-usage` - Explicitly accept that child-task usage is unknown and no new spend cap is enforced
+
+
+
+## `forager offdesk shift candidates`
+
+Inspect existing queued candidates in explicitly registered projects without writes
+
+**Usage:** `forager offdesk shift candidates [OPTIONS] --starts-at <STARTS_AT> --stops-at <STOPS_AT> --project-key <PROJECT_KEYS> <PLAN_REF>`
+
+###### **Arguments:**
+
+* `<PLAN_REF>` - Registered Offdesk plan ID or registration/source path
+
+###### **Options:**
+
+* `--review-id <REVIEW_ID>` - Use this approved plan review instead of the latest review
+* `--shift-id <SHIFT_ID>` - Stable shift ID. Generated when omitted; instantiate-template rejects this override
+* `--starts-at <STARTS_AT>` - Inclusive shift start as RFC3339
+* `--stops-at <STOPS_AT>` - Inclusive shift stop as RFC3339, no more than 24 hours after start
+* `--timezone <TIMEZONE>` - Display timezone recorded in the immutable manifest
+
+  Default value: `Asia/Seoul`
+* `--enterprise-policy <ENTERPRISE_POLICY>` - Canonical enterprise policy bound into the immutable manifest
+
+  Default value: `single-owner-local`
+
+  Possible values: `single-owner-local`, `multi-operator-local`, `airgapped-local`
+
+* `--host-policy <HOST_POLICY>` - Require and bind one live-verified child-task host isolation policy
+
+  Possible values: `linux-bubblewrap-external-ip-deny`, `linux-bubblewrap-external-ip-and-outside-workdir-write-deny`
+
+* `--read-policy <READ_POLICY>` - Require filesystem read restrictions for every local-background or local-tmux task
+
+  Possible values: `linux-landlock-workdir-and-runtime-only`, `linux-landlock-metadata-boot-identity`
+
+* `--task-id <TASK_IDS>` - Exact queued task to bind. May be repeated
+* `--serial-proposal-sha256 <SERIAL_PROPOSAL_SHA256>` - Require the exact freshly revalidated serial-selection proposal
+* `--require-preparation-control <REQUIRED_PREPARATION_CONTROLS>` - Require an existing preparation control by ID; unsupported or unconfigured controls hold arm/launch. Repeat as needed
+* `--weekly-usage-state <WEEKLY_USAGE_STATE>` - Existing guard state directly inside this profile; binds weekly baselines to this run
+* `--weekly-gpt-sample <WEEKLY_GPT_SAMPLE>` - Fresh normalized GPT weekly sample inside this profile, without automatic polling
+* `--weekly-claude-sample <WEEKLY_CLAUDE_SAMPLE>` - Fresh normalized Claude weekly sample inside this profile
+* `--weekly-max-age-seconds <WEEKLY_MAX_AGE_SECONDS>` - Maximum age of manually supplied weekly samples, at most 300 seconds
+
+  Default value: `300`
+* `--serial-project-key <SERIAL_PROJECT_KEYS>` - Registered project scope used to produce the serial proposal; repeat in the same order
+* `--dispatch-interval-minutes <DISPATCH_INTERVAL_MINUTES>` - Add a dispatch-tick routine over the full shift window
+* `--wiki-project-key <WIKI_PROJECT_KEY>` - Project key for one candidate-only Wiki distillation routine
+* `--wiki-profile <WIKI_PROFILE>` - Wiki profile for the distillation routine
+* `--wiki-root <WIKI_ROOT>` - Exact project root for the Wiki distillation routine
+* `--wiki-at <WIKI_AT>` - One-time Wiki distillation time as RFC3339
+* `--morning-review-at <MORNING_REVIEW_AT>` - Add a one-time morning review brief routine at this RFC3339 time
+* `--max-concurrent-tasks <MAX_CONCURRENT_TASKS>` - Maximum simultaneously running bound tasks. Defaults to one when tasks exist
+* `--max-attempts-per-task <MAX_ATTEMPTS_PER_TASK>` - Maximum attempts per bound task
+
+  Default value: `1`
+* `--max-routine-process-starts <MAX_ROUTINE_PROCESS_STARTS>` - Maximum child processes started by fixed routine handlers
+* `--max-routine-external-calls <MAX_ROUTINE_EXTERNAL_CALLS>` - Maximum network calls attempted by fixed routine handlers
+* `--max-routine-disk-bytes <MAX_ROUTINE_DISK_BYTES>` - Maximum durable evidence bytes written by fixed routine handlers
+
+  Default value: `33554432`
+* `--max-routine-llm-tokens <MAX_ROUTINE_LLM_TOKENS>` - Maximum total local-LLM prompt plus output tokens
+* `--max-routine-cost-micro-usd <MAX_ROUTINE_COST_MICRO_USD>` - Maximum estimated routine cost in micro-US dollars
+
+  Default value: `0`
+* `--routine-llm-cost-rate-micro-usd-per-million-tokens <ROUTINE_LLM_COST_RATE_MICRO_USD_PER_MILLION_TOKENS>` - Manifest-bound LLM rate in micro-US dollars per million tokens
+
+  Default value: `0`
+* `--json` - Output as JSON
+* `--project-key <PROJECT_KEYS>` - Exact registered project keys to inspect. May be repeated
+
+
+
+## `forager offdesk shift propose`
+
+Propose an explicit serial selection with pinned owning TODOs, without writes
+
+**Usage:** `forager offdesk shift propose [OPTIONS] --starts-at <STARTS_AT> --stops-at <STOPS_AT> --project-key <PROJECT_KEYS> <PLAN_REF>`
+
+###### **Arguments:**
+
+* `<PLAN_REF>` - Registered Offdesk plan ID or registration/source path
+
+###### **Options:**
+
+* `--review-id <REVIEW_ID>` - Use this approved plan review instead of the latest review
+* `--shift-id <SHIFT_ID>` - Stable shift ID. Generated when omitted; instantiate-template rejects this override
+* `--starts-at <STARTS_AT>` - Inclusive shift start as RFC3339
+* `--stops-at <STOPS_AT>` - Inclusive shift stop as RFC3339, no more than 24 hours after start
+* `--timezone <TIMEZONE>` - Display timezone recorded in the immutable manifest
+
+  Default value: `Asia/Seoul`
+* `--enterprise-policy <ENTERPRISE_POLICY>` - Canonical enterprise policy bound into the immutable manifest
+
+  Default value: `single-owner-local`
+
+  Possible values: `single-owner-local`, `multi-operator-local`, `airgapped-local`
+
+* `--host-policy <HOST_POLICY>` - Require and bind one live-verified child-task host isolation policy
+
+  Possible values: `linux-bubblewrap-external-ip-deny`, `linux-bubblewrap-external-ip-and-outside-workdir-write-deny`
+
+* `--read-policy <READ_POLICY>` - Require filesystem read restrictions for every local-background or local-tmux task
+
+  Possible values: `linux-landlock-workdir-and-runtime-only`, `linux-landlock-metadata-boot-identity`
+
+* `--task-id <TASK_IDS>` - Exact queued task to bind. May be repeated
+* `--serial-proposal-sha256 <SERIAL_PROPOSAL_SHA256>` - Require the exact freshly revalidated serial-selection proposal
+* `--require-preparation-control <REQUIRED_PREPARATION_CONTROLS>` - Require an existing preparation control by ID; unsupported or unconfigured controls hold arm/launch. Repeat as needed
+* `--weekly-usage-state <WEEKLY_USAGE_STATE>` - Existing guard state directly inside this profile; binds weekly baselines to this run
+* `--weekly-gpt-sample <WEEKLY_GPT_SAMPLE>` - Fresh normalized GPT weekly sample inside this profile, without automatic polling
+* `--weekly-claude-sample <WEEKLY_CLAUDE_SAMPLE>` - Fresh normalized Claude weekly sample inside this profile
+* `--weekly-max-age-seconds <WEEKLY_MAX_AGE_SECONDS>` - Maximum age of manually supplied weekly samples, at most 300 seconds
+
+  Default value: `300`
+* `--serial-project-key <SERIAL_PROJECT_KEYS>` - Registered project scope used to produce the serial proposal; repeat in the same order
+* `--dispatch-interval-minutes <DISPATCH_INTERVAL_MINUTES>` - Add a dispatch-tick routine over the full shift window
+* `--wiki-project-key <WIKI_PROJECT_KEY>` - Project key for one candidate-only Wiki distillation routine
+* `--wiki-profile <WIKI_PROFILE>` - Wiki profile for the distillation routine
+* `--wiki-root <WIKI_ROOT>` - Exact project root for the Wiki distillation routine
+* `--wiki-at <WIKI_AT>` - One-time Wiki distillation time as RFC3339
+* `--morning-review-at <MORNING_REVIEW_AT>` - Add a one-time morning review brief routine at this RFC3339 time
+* `--max-concurrent-tasks <MAX_CONCURRENT_TASKS>` - Maximum simultaneously running bound tasks. Defaults to one when tasks exist
+* `--max-attempts-per-task <MAX_ATTEMPTS_PER_TASK>` - Maximum attempts per bound task
+
+  Default value: `1`
+* `--max-routine-process-starts <MAX_ROUTINE_PROCESS_STARTS>` - Maximum child processes started by fixed routine handlers
+* `--max-routine-external-calls <MAX_ROUTINE_EXTERNAL_CALLS>` - Maximum network calls attempted by fixed routine handlers
+* `--max-routine-disk-bytes <MAX_ROUTINE_DISK_BYTES>` - Maximum durable evidence bytes written by fixed routine handlers
+
+  Default value: `33554432`
+* `--max-routine-llm-tokens <MAX_ROUTINE_LLM_TOKENS>` - Maximum total local-LLM prompt plus output tokens
+* `--max-routine-cost-micro-usd <MAX_ROUTINE_COST_MICRO_USD>` - Maximum estimated routine cost in micro-US dollars
+
+  Default value: `0`
+* `--routine-llm-cost-rate-micro-usd-per-million-tokens <ROUTINE_LLM_COST_RATE_MICRO_USD_PER_MILLION_TOKENS>` - Manifest-bound LLM rate in micro-US dollars per million tokens
+
+  Default value: `0`
+* `--json` - Output as JSON
+* `--project-key <PROJECT_KEYS>` - Exact registered projects in scope; repeated task IDs define the proposed serial order
+* `--expected-proposal-sha256 <EXPECTED_PROPOSAL_SHA256>` - Refuse if the freshly inspected proposal differs from this previous version
+
+
+
+## `forager offdesk shift preview`
+
+Read-only start preview for an exact reviewed plan and queued selection
+
+**Usage:** `forager offdesk shift preview [OPTIONS] --starts-at <STARTS_AT> --stops-at <STOPS_AT> <PLAN_REF>`
+
+###### **Arguments:**
+
+* `<PLAN_REF>` - Registered Offdesk plan ID or registration/source path
+
+###### **Options:**
+
+* `--review-id <REVIEW_ID>` - Use this approved plan review instead of the latest review
+* `--shift-id <SHIFT_ID>` - Stable shift ID. Generated when omitted; instantiate-template rejects this override
+* `--starts-at <STARTS_AT>` - Inclusive shift start as RFC3339
+* `--stops-at <STOPS_AT>` - Inclusive shift stop as RFC3339, no more than 24 hours after start
+* `--timezone <TIMEZONE>` - Display timezone recorded in the immutable manifest
+
+  Default value: `Asia/Seoul`
+* `--enterprise-policy <ENTERPRISE_POLICY>` - Canonical enterprise policy bound into the immutable manifest
+
+  Default value: `single-owner-local`
+
+  Possible values: `single-owner-local`, `multi-operator-local`, `airgapped-local`
+
+* `--host-policy <HOST_POLICY>` - Require and bind one live-verified child-task host isolation policy
+
+  Possible values: `linux-bubblewrap-external-ip-deny`, `linux-bubblewrap-external-ip-and-outside-workdir-write-deny`
+
+* `--read-policy <READ_POLICY>` - Require filesystem read restrictions for every local-background or local-tmux task
+
+  Possible values: `linux-landlock-workdir-and-runtime-only`, `linux-landlock-metadata-boot-identity`
+
+* `--task-id <TASK_IDS>` - Exact queued task to bind. May be repeated
+* `--serial-proposal-sha256 <SERIAL_PROPOSAL_SHA256>` - Require the exact freshly revalidated serial-selection proposal
+* `--require-preparation-control <REQUIRED_PREPARATION_CONTROLS>` - Require an existing preparation control by ID; unsupported or unconfigured controls hold arm/launch. Repeat as needed
+* `--weekly-usage-state <WEEKLY_USAGE_STATE>` - Existing guard state directly inside this profile; binds weekly baselines to this run
+* `--weekly-gpt-sample <WEEKLY_GPT_SAMPLE>` - Fresh normalized GPT weekly sample inside this profile, without automatic polling
+* `--weekly-claude-sample <WEEKLY_CLAUDE_SAMPLE>` - Fresh normalized Claude weekly sample inside this profile
+* `--weekly-max-age-seconds <WEEKLY_MAX_AGE_SECONDS>` - Maximum age of manually supplied weekly samples, at most 300 seconds
+
+  Default value: `300`
+* `--serial-project-key <SERIAL_PROJECT_KEYS>` - Registered project scope used to produce the serial proposal; repeat in the same order
+* `--dispatch-interval-minutes <DISPATCH_INTERVAL_MINUTES>` - Add a dispatch-tick routine over the full shift window
+* `--wiki-project-key <WIKI_PROJECT_KEY>` - Project key for one candidate-only Wiki distillation routine
+* `--wiki-profile <WIKI_PROFILE>` - Wiki profile for the distillation routine
+* `--wiki-root <WIKI_ROOT>` - Exact project root for the Wiki distillation routine
+* `--wiki-at <WIKI_AT>` - One-time Wiki distillation time as RFC3339
+* `--morning-review-at <MORNING_REVIEW_AT>` - Add a one-time morning review brief routine at this RFC3339 time
+* `--max-concurrent-tasks <MAX_CONCURRENT_TASKS>` - Maximum simultaneously running bound tasks. Defaults to one when tasks exist
+* `--max-attempts-per-task <MAX_ATTEMPTS_PER_TASK>` - Maximum attempts per bound task
+
+  Default value: `1`
+* `--max-routine-process-starts <MAX_ROUTINE_PROCESS_STARTS>` - Maximum child processes started by fixed routine handlers
+* `--max-routine-external-calls <MAX_ROUTINE_EXTERNAL_CALLS>` - Maximum network calls attempted by fixed routine handlers
+* `--max-routine-disk-bytes <MAX_ROUTINE_DISK_BYTES>` - Maximum durable evidence bytes written by fixed routine handlers
+
+  Default value: `33554432`
+* `--max-routine-llm-tokens <MAX_ROUTINE_LLM_TOKENS>` - Maximum total local-LLM prompt plus output tokens
+* `--max-routine-cost-micro-usd <MAX_ROUTINE_COST_MICRO_USD>` - Maximum estimated routine cost in micro-US dollars
+
+  Default value: `0`
+* `--routine-llm-cost-rate-micro-usd-per-million-tokens <ROUTINE_LLM_COST_RATE_MICRO_USD_PER_MILLION_TOKENS>` - Manifest-bound LLM rate in micro-US dollars per million tokens
+
+  Default value: `0`
+* `--json` - Output as JSON
+
+
+
+## `forager offdesk shift enterprise-policies`
+
+List canonical enterprise policy profiles without selecting one
+
+**Usage:** `forager offdesk shift enterprise-policies [OPTIONS]`
+
+###### **Options:**
+
+* `--json` - Output as JSON
+
+
+
+## `forager offdesk shift host-policy-probe`
+
+Probe one supported host isolation policy without granting authority
+
+**Usage:** `forager offdesk shift host-policy-probe [OPTIONS] [PROVIDER]`
+
+###### **Arguments:**
+
+* `<PROVIDER>` - Supported host policy provider to probe
+
+  Default value: `linux-bubblewrap-external-ip-deny`
+
+  Possible values: `linux-bubblewrap-external-ip-deny`, `linux-bubblewrap-external-ip-and-outside-workdir-write-deny`
+
+
+###### **Options:**
+
+* `--json` - Output as JSON
+
+
+
+## `forager offdesk shift read-policy-probe`
+
+Verify filesystem read restrictions without creating profile state or authority
+
+**Usage:** `forager offdesk shift read-policy-probe [OPTIONS]`
+
+###### **Options:**
+
+* `--json` - Output as JSON
+
+
+
+## `forager offdesk shift prepare`
+
+Bind one reviewed plan, exact tasks, roots, routines, window, and budget
+
+**Usage:** `forager offdesk shift prepare [OPTIONS] --starts-at <STARTS_AT> --stops-at <STOPS_AT> <PLAN_REF>`
+
+###### **Arguments:**
+
+* `<PLAN_REF>` - Registered Offdesk plan ID or registration/source path
+
+###### **Options:**
+
+* `--review-id <REVIEW_ID>` - Use this approved plan review instead of the latest review
+* `--shift-id <SHIFT_ID>` - Stable shift ID. Generated when omitted; instantiate-template rejects this override
+* `--starts-at <STARTS_AT>` - Inclusive shift start as RFC3339
+* `--stops-at <STOPS_AT>` - Inclusive shift stop as RFC3339, no more than 24 hours after start
+* `--timezone <TIMEZONE>` - Display timezone recorded in the immutable manifest
+
+  Default value: `Asia/Seoul`
+* `--enterprise-policy <ENTERPRISE_POLICY>` - Canonical enterprise policy bound into the immutable manifest
+
+  Default value: `single-owner-local`
+
+  Possible values: `single-owner-local`, `multi-operator-local`, `airgapped-local`
+
+* `--host-policy <HOST_POLICY>` - Require and bind one live-verified child-task host isolation policy
+
+  Possible values: `linux-bubblewrap-external-ip-deny`, `linux-bubblewrap-external-ip-and-outside-workdir-write-deny`
+
+* `--read-policy <READ_POLICY>` - Require filesystem read restrictions for every local-background or local-tmux task
+
+  Possible values: `linux-landlock-workdir-and-runtime-only`, `linux-landlock-metadata-boot-identity`
+
+* `--task-id <TASK_IDS>` - Exact queued task to bind. May be repeated
+* `--serial-proposal-sha256 <SERIAL_PROPOSAL_SHA256>` - Require the exact freshly revalidated serial-selection proposal
+* `--require-preparation-control <REQUIRED_PREPARATION_CONTROLS>` - Require an existing preparation control by ID; unsupported or unconfigured controls hold arm/launch. Repeat as needed
+* `--weekly-usage-state <WEEKLY_USAGE_STATE>` - Existing guard state directly inside this profile; binds weekly baselines to this run
+* `--weekly-gpt-sample <WEEKLY_GPT_SAMPLE>` - Fresh normalized GPT weekly sample inside this profile, without automatic polling
+* `--weekly-claude-sample <WEEKLY_CLAUDE_SAMPLE>` - Fresh normalized Claude weekly sample inside this profile
+* `--weekly-max-age-seconds <WEEKLY_MAX_AGE_SECONDS>` - Maximum age of manually supplied weekly samples, at most 300 seconds
+
+  Default value: `300`
+* `--serial-project-key <SERIAL_PROJECT_KEYS>` - Registered project scope used to produce the serial proposal; repeat in the same order
+* `--dispatch-interval-minutes <DISPATCH_INTERVAL_MINUTES>` - Add a dispatch-tick routine over the full shift window
+* `--wiki-project-key <WIKI_PROJECT_KEY>` - Project key for one candidate-only Wiki distillation routine
+* `--wiki-profile <WIKI_PROFILE>` - Wiki profile for the distillation routine
+* `--wiki-root <WIKI_ROOT>` - Exact project root for the Wiki distillation routine
+* `--wiki-at <WIKI_AT>` - One-time Wiki distillation time as RFC3339
+* `--morning-review-at <MORNING_REVIEW_AT>` - Add a one-time morning review brief routine at this RFC3339 time
+* `--max-concurrent-tasks <MAX_CONCURRENT_TASKS>` - Maximum simultaneously running bound tasks. Defaults to one when tasks exist
+* `--max-attempts-per-task <MAX_ATTEMPTS_PER_TASK>` - Maximum attempts per bound task
+
+  Default value: `1`
+* `--max-routine-process-starts <MAX_ROUTINE_PROCESS_STARTS>` - Maximum child processes started by fixed routine handlers
+* `--max-routine-external-calls <MAX_ROUTINE_EXTERNAL_CALLS>` - Maximum network calls attempted by fixed routine handlers
+* `--max-routine-disk-bytes <MAX_ROUTINE_DISK_BYTES>` - Maximum durable evidence bytes written by fixed routine handlers
+
+  Default value: `33554432`
+* `--max-routine-llm-tokens <MAX_ROUTINE_LLM_TOKENS>` - Maximum total local-LLM prompt plus output tokens
+* `--max-routine-cost-micro-usd <MAX_ROUTINE_COST_MICRO_USD>` - Maximum estimated routine cost in micro-US dollars
+
+  Default value: `0`
+* `--routine-llm-cost-rate-micro-usd-per-million-tokens <ROUTINE_LLM_COST_RATE_MICRO_USD_PER_MILLION_TOKENS>` - Manifest-bound LLM rate in micro-US dollars per million tokens
+
+  Default value: `0`
+* `--json` - Output as JSON
+
+
+
+## `forager offdesk shift instantiate-template`
+
+Materialize one daily or weekly slot as a fresh inert shift manifest
+
+**Usage:** `forager offdesk shift instantiate-template [OPTIONS] --template-key <TEMPLATE_KEY> --starts-at <STARTS_AT> --stops-at <STOPS_AT> <CADENCE> <PLAN_REF>`
+
+###### **Arguments:**
+
+* `<CADENCE>` - Cadence label used only to derive this occurrence's UTC slot
+
+  Possible values: `daily`, `weekly`
+
+* `<PLAN_REF>` - Registered Offdesk plan ID or registration/source path
+
+###### **Options:**
+
+* `--template-key <TEMPLATE_KEY>` - Stable non-authorizing identity for this recurring template
+* `--review-id <REVIEW_ID>` - Use this approved plan review instead of the latest review
+* `--shift-id <SHIFT_ID>` - Stable shift ID. Generated when omitted; instantiate-template rejects this override
+* `--starts-at <STARTS_AT>` - Inclusive shift start as RFC3339
+* `--stops-at <STOPS_AT>` - Inclusive shift stop as RFC3339, no more than 24 hours after start
+* `--timezone <TIMEZONE>` - Display timezone recorded in the immutable manifest
+
+  Default value: `Asia/Seoul`
+* `--enterprise-policy <ENTERPRISE_POLICY>` - Canonical enterprise policy bound into the immutable manifest
+
+  Default value: `single-owner-local`
+
+  Possible values: `single-owner-local`, `multi-operator-local`, `airgapped-local`
+
+* `--host-policy <HOST_POLICY>` - Require and bind one live-verified child-task host isolation policy
+
+  Possible values: `linux-bubblewrap-external-ip-deny`, `linux-bubblewrap-external-ip-and-outside-workdir-write-deny`
+
+* `--read-policy <READ_POLICY>` - Require filesystem read restrictions for every local-background or local-tmux task
+
+  Possible values: `linux-landlock-workdir-and-runtime-only`, `linux-landlock-metadata-boot-identity`
+
+* `--task-id <TASK_IDS>` - Exact queued task to bind. May be repeated
+* `--serial-proposal-sha256 <SERIAL_PROPOSAL_SHA256>` - Require the exact freshly revalidated serial-selection proposal
+* `--require-preparation-control <REQUIRED_PREPARATION_CONTROLS>` - Require an existing preparation control by ID; unsupported or unconfigured controls hold arm/launch. Repeat as needed
+* `--weekly-usage-state <WEEKLY_USAGE_STATE>` - Existing guard state directly inside this profile; binds weekly baselines to this run
+* `--weekly-gpt-sample <WEEKLY_GPT_SAMPLE>` - Fresh normalized GPT weekly sample inside this profile, without automatic polling
+* `--weekly-claude-sample <WEEKLY_CLAUDE_SAMPLE>` - Fresh normalized Claude weekly sample inside this profile
+* `--weekly-max-age-seconds <WEEKLY_MAX_AGE_SECONDS>` - Maximum age of manually supplied weekly samples, at most 300 seconds
+
+  Default value: `300`
+* `--serial-project-key <SERIAL_PROJECT_KEYS>` - Registered project scope used to produce the serial proposal; repeat in the same order
+* `--dispatch-interval-minutes <DISPATCH_INTERVAL_MINUTES>` - Add a dispatch-tick routine over the full shift window
+* `--wiki-project-key <WIKI_PROJECT_KEY>` - Project key for one candidate-only Wiki distillation routine
+* `--wiki-profile <WIKI_PROFILE>` - Wiki profile for the distillation routine
+* `--wiki-root <WIKI_ROOT>` - Exact project root for the Wiki distillation routine
+* `--wiki-at <WIKI_AT>` - One-time Wiki distillation time as RFC3339
+* `--morning-review-at <MORNING_REVIEW_AT>` - Add a one-time morning review brief routine at this RFC3339 time
+* `--max-concurrent-tasks <MAX_CONCURRENT_TASKS>` - Maximum simultaneously running bound tasks. Defaults to one when tasks exist
+* `--max-attempts-per-task <MAX_ATTEMPTS_PER_TASK>` - Maximum attempts per bound task
+
+  Default value: `1`
+* `--max-routine-process-starts <MAX_ROUTINE_PROCESS_STARTS>` - Maximum child processes started by fixed routine handlers
+* `--max-routine-external-calls <MAX_ROUTINE_EXTERNAL_CALLS>` - Maximum network calls attempted by fixed routine handlers
+* `--max-routine-disk-bytes <MAX_ROUTINE_DISK_BYTES>` - Maximum durable evidence bytes written by fixed routine handlers
+
+  Default value: `33554432`
+* `--max-routine-llm-tokens <MAX_ROUTINE_LLM_TOKENS>` - Maximum total local-LLM prompt plus output tokens
+* `--max-routine-cost-micro-usd <MAX_ROUTINE_COST_MICRO_USD>` - Maximum estimated routine cost in micro-US dollars
+
+  Default value: `0`
+* `--routine-llm-cost-rate-micro-usd-per-million-tokens <ROUTINE_LLM_COST_RATE_MICRO_USD_PER_MILLION_TOKENS>` - Manifest-bound LLM rate in micro-US dollars per million tokens
+
+  Default value: `0`
+* `--json` - Output as JSON
+
+
+
+## `forager offdesk shift show`
+
+Show one shift, or the latest shift when no ID is supplied
+
+**Usage:** `forager offdesk shift show [OPTIONS] [SHIFT_ID]`
+
+###### **Arguments:**
+
+* `<SHIFT_ID>` - Exact shift ID. Defaults to the latest prepared or armed shift
+
+###### **Options:**
+
+* `--json` - Output as JSON
+
+
+
+## `forager offdesk shift arm`
+
+Create or consume a manifest-bound operator approval and arm the shift
+
+**Usage:** `forager offdesk shift arm [OPTIONS] [SHIFT_ID]`
+
+###### **Arguments:**
+
+* `<SHIFT_ID>` - Prepared shift ID. Defaults to the latest prepared shift
+
+###### **Options:**
+
+* `--approval-id <APPROVAL_ID>` - Exact approved approval ID. Without it, an exact pending approval is reused or created
+* `--approval-ttl-minutes <APPROVAL_TTL_MINUTES>` - Time allowed to answer a newly created arm approval
+
+  Default value: `30`
+* `--json` - Output as JSON
+
+
+
+## `forager offdesk shift status`
+
+Summarize all bounded shifts without creating profile state
+
+**Usage:** `forager offdesk shift status [OPTIONS]`
+
+###### **Options:**
+
+* `--json` - Output as JSON
+
+
+
+## `forager offdesk shift review`
+
+Project one bounded shift into the shared read-only morning review
+
+**Usage:** `forager offdesk shift review [OPTIONS] [SHIFT_ID]`
+
+###### **Arguments:**
+
+* `<SHIFT_ID>` - Exact shift ID. Defaults to the active shift, then the latest shift
+
+###### **Options:**
+
+* `--current-run-id <CURRENT_RUN_ID>` - Routine run currently generating this projection; it is not treated as abandoned
+* `--json` - Output as JSON
+
+
+
+## `forager offdesk shift retention-report`
+
+Classify preserved shift records and derived evidence without mutating either
+
+**Usage:** `forager offdesk shift retention-report [OPTIONS]`
+
+###### **Options:**
+
+* `--shift-id <SHIFT_ID>` - Limit the report to one exact shift ID
+* `--compact-after-days <COMPACT_AFTER_DAYS>` - Age after which terminal morning-review views become compaction candidates
+
+  Default value: `30`
+* `--json` - Output as JSON
+
+
+
+## `forager offdesk shift council-packet`
+
+Build a review-only Council comparison of goal, evidence, drift, and budget
+
+**Usage:** `forager offdesk shift council-packet [OPTIONS] [SHIFT_ID]`
+
+###### **Arguments:**
+
+* `<SHIFT_ID>` - Exact shift ID. Defaults to the active shift, then the latest shift
+
+###### **Options:**
+
+* `--current-run-id <CURRENT_RUN_ID>` - Morning routine currently producing evidence; it is not treated as abandoned
+* `--json` - Output as JSON
+
+
+
+## `forager offdesk shift disarm`
+
+Terminate active shift authority without stopping already-running processes
+
+**Usage:** `forager offdesk shift disarm [OPTIONS] [SHIFT_ID]`
+
+###### **Arguments:**
+
+* `<SHIFT_ID>` - Active shift ID. Defaults to the one active shift
+
+###### **Options:**
+
+* `--reason <REASON>` - Operator-safe reason recorded in the terminal transition
+
+  Default value: `operator requested disarm`
+* `--json` - Output as JSON
+
+
+
+## `forager offdesk shift routine-claim`
+
+Select and reserve the one manifest-bound handler for a fixed timer task
+
+**Usage:** `forager offdesk shift routine-claim [OPTIONS] --task <TASK> <SHIFT_ID>`
+
+###### **Arguments:**
+
+* `<SHIFT_ID>` - Exact armed shift ID
+
+###### **Options:**
+
+* `--task <TASK>` - Fixed timer task mapped to one manifest-bound routine handler by Rust policy
+
+  Possible values: `tick`, `distill`, `brief`
+
+* `--json` - Output as JSON
+
+
+
+## `forager offdesk shift routine-start`
+
+Reserve one due typed routine occurrence before executing it
+
+**Usage:** `forager offdesk shift routine-start [OPTIONS] <SHIFT_ID> <ROUTINE_ID>`
+
+###### **Arguments:**
+
+* `<SHIFT_ID>` - Exact armed shift ID
+* `<ROUTINE_ID>` - Exact routine ID from the reviewed manifest
+
+###### **Options:**
+
+* `--json` - Output as JSON
+
+
+
+## `forager offdesk shift routine-complete`
+
+Record the terminal outcome of one exact routine reservation
+
+**Usage:** `forager offdesk shift routine-complete [OPTIONS] --outcome <OUTCOME> --summary <SUMMARY> <SHIFT_ID> <RUN_ID>`
+
+###### **Arguments:**
+
+* `<SHIFT_ID>` - Exact armed shift ID
+* `<RUN_ID>` - Deterministic run ID returned by routine-start
+
+###### **Options:**
+
+* `--outcome <OUTCOME>` - Terminal typed outcome
+
+  Possible values: `succeeded`, `failed`, `skipped`, `budget-exhausted`, `identity-drift`
+
+* `--summary <SUMMARY>` - Short operator-safe outcome summary
+* `--evidence <EVIDENCE_PATHS>` - Local regular evidence file to hash-bind. May be repeated
+* `--usage-complete` - Assert that all routine-controlled resource usage was measured
+* `--process-starts <PROCESS_STARTS>` - Child processes started by the fixed handler
+
+  Default value: `0`
+* `--external-calls <EXTERNAL_CALLS>` - Network calls attempted by the fixed handler
+
+  Default value: `0`
+* `--llm-tokens <LLM_TOKENS>` - Prompt plus output tokens reported by the local LLM provider
+
+  Default value: `0`
+* `--cost-micro-usd <COST_MICRO_USD>` - Estimated cost in micro-US dollars
+
+  Default value: `0`
+* `--cost-rate-micro-usd-per-million-tokens <COST_RATE_MICRO_USD_PER_MILLION_TOKENS>` - Cost rate used for the estimate, in micro-US dollars per million tokens
+* `--json` - Output as JSON
+
+
+
+## `forager offdesk shift routine-recover`
+
+Fail-safe close an unresolved routine after explicit operator acknowledgement
+
+**Usage:** `forager offdesk shift routine-recover [OPTIONS] --reason <REASON> <SHIFT_ID> <RUN_ID>`
+
+###### **Arguments:**
+
+* `<SHIFT_ID>` - Exact shift ID that owns the unresolved reservation
+* `<RUN_ID>` - Deterministic unresolved run ID returned by routine-start
+
+###### **Options:**
+
+* `--reason <REASON>` - Why the operator is closing the uncertain execution as failed
+* `--acknowledge-execution-unknown` - Confirm that the handler may or may not have run and no success is being asserted
+* `--evidence <EVIDENCE_PATHS>` - Local regular evidence file to hash-bind. May be repeated
 * `--json` - Output as JSON
 
 
@@ -1366,6 +2459,22 @@ Show durable offdesk tasks
 * `--task-id <TASK_ID>` - Filter tasks by exact task ID
 * `--status <STATUS>` - Filter tasks by status. Repeat for multiple statuses
 * `--latest` - Return only the newest matching task by updated_at
+* `--json` - Output as JSON
+
+
+
+## `forager offdesk task-recovery`
+
+Inspect runtime release evidence without changing tasks or processes
+
+**Usage:** `forager offdesk task-recovery [OPTIONS] <TASK_ID>`
+
+###### **Arguments:**
+
+* `<TASK_ID>` - Exact Offdesk task ID
+
+###### **Options:**
+
 * `--json` - Output as JSON
 
 
@@ -1550,6 +2659,26 @@ Mark a durable task cancelled without stopping its background runner
 
 
 
+## `forager offdesk terminate-task`
+
+Stop the verified local runtime and mark its durable task cancelled
+
+**Usage:** `forager offdesk terminate-task [OPTIONS] <TASK_ID>`
+
+###### **Arguments:**
+
+* `<TASK_ID>` - Offdesk task ID whose verified local runtime should be stopped
+
+###### **Options:**
+
+* `--reason <REASON>` - Operator reason stored with the termination and task cancellation
+* `--by <BY>` - Actor requesting the termination
+
+  Default value: `cli`
+* `--json` - Output as JSON
+
+
+
 ## `forager offdesk pause`
 
 Halt all new offdesk dispatch until resumed (existing runs keep polling)
@@ -1630,7 +2759,7 @@ Accept recovery for a resume-pending task and requeue it
 
 ###### **Arguments:**
 
-* `<TASK_ID>` - Offdesk task ID to update
+* `<TASK_ID>` - Exact Offdesk task ID
 
 ###### **Options:**
 
@@ -1646,7 +2775,7 @@ Discard a failed or resume-pending task
 
 ###### **Arguments:**
 
-* `<TASK_ID>` - Offdesk task ID to update
+* `<TASK_ID>` - Exact Offdesk task ID
 
 ###### **Options:**
 
@@ -1908,6 +3037,8 @@ Generate a mandatory closeout plan and commercial review packet
 
 ###### **Options:**
 
+* `--owning-plan <OWNING_PLAN>` - Existing owning TODO relative to the declared project root
+* `--subproject-spec <SUBPROJECT_SPEC>` - Existing logical subproject declaration, validated by project owner routing
 * `--project-key <PROJECT_KEY>` - Project key to close out. Defaults to all projects in the profile
 * `--request-id <REQUEST_ID>` - Request ID to close out
 * `--task-id <TASK_ID>` - Task ID to close out
@@ -1962,8 +3093,10 @@ Resolve a closeout receipt open decision without applying file operations
 * `--kind <KIND>` - Open decision kind to resolve, for example archive_review
 * `--decision <DECISION>` - Resolution to record. This command never moves, archives, or deletes files
 
-  Possible values: `preserve-in-place`
+  Possible values: `preserve-in-place`, `preserve-in-place-administrative`, `not-applicable-administrative`
 
+* `--expected-review-sha256 <EXPECTED_REVIEW_SHA256>` - Exact latest review-file hash, required for administrative-only decisions
+* `--acknowledge-read <ACKNOWLEDGE_READ>` - Acknowledge an exact artifact read as ABSOLUTE_PATH=SHA256; never accepts its claims
 * `--reviewer <REVIEWER>` - Reviewer or operator label
 
   Default value: `operator`
@@ -1987,6 +3120,24 @@ Retire an evidence-incomplete historical closeout without accepting truth
   Default value: `operator`
 * `--reason <REASON>` - Required rationale for retiring the closeout as evidence-incomplete
 * `--json` - Output as JSON
+
+
+
+## `forager offdesk review-link`
+
+Inspect or explicitly record an exact existing-decision link to a completed runtime
+
+**Usage:** `forager offdesk review-link [OPTIONS] <REQUEST>`
+
+###### **Arguments:**
+
+* `<REQUEST>` - Exact request binding the runtime, result and existing committed decision
+
+###### **Options:**
+
+* `--confirm` - Confirm only this review link, without accepting output or starting work
+* `--expected-preview-sha256 <EXPECTED_PREVIEW_SHA256>`
+* `--by <BY>`
 
 
 
@@ -2765,9 +3916,16 @@ Capture ondesk notes and prompt context from external harness work
 
 ###### **Subcommands:**
 
+* `plan-inspect` - Inspect an explicitly selected Markdown task plan without importing or changing it
+* `prepare-offdesk` - Draft shared night readiness from exact owning tasks without writes or model calls
+* `plan-adopt-proposal` - Propose explicit task mapping in a plain owning TODO without changing it
+* `plan-apply` - Apply one explicitly confirmed, hash-bound change to an existing plan
+* `plan-review-proposal` - Preview attributed review decisions without writing a plan or starting work
+* `return-binding` - Prepare a read-only binding from preserved execution copies to an original owning plan
 * `note` - Append a safe operator note for an ondesk session or project
 * `capture` - Capture live harness scrollback into an inspectable prompt package
 * `prompt-package` - Build a markdown prompt package from recent notes and optional capture
+* `return` - Preview and explicitly deliver a morning package to one ready local session
 * `review-surface` - Emit the shared review surface for Ondesk and future rich UIs
 * `workstation-surface` - Emit the workstation dashboard surface for the Web UI control plane
 * `action-envelope` - Validate a Web UI action envelope and record a receipt
@@ -2777,6 +3935,113 @@ Capture ondesk notes and prompt context from external harness work
 * `action-closeout` - Close an applied decision action execution with a canonical decision receipt
 * `runtime-preflight` - Preflight a receipted decision action closeout before runtime dispatch
 * `runtime-dispatch` - Queue runtime work from a ready runtime dispatch preflight
+
+
+
+## `forager ondesk plan-inspect`
+
+Inspect an explicitly selected Markdown task plan without importing or changing it
+
+**Usage:** `forager ondesk plan-inspect [OPTIONS] --project-key <PROJECT_KEY> <PATH>`
+
+###### **Arguments:**
+
+* `<PATH>` - Existing owning Markdown document with one forager-plan JSON fence
+
+###### **Options:**
+
+* `--project-key <PROJECT_KEY>`
+* `--candidate <CANDIDATE>` - Candidate document to compare, without applying any changes
+* `--expected-sha256 <EXPECTED_SHA256>`
+
+
+
+## `forager ondesk prepare-offdesk`
+
+Draft shared night readiness from exact owning tasks without writes or model calls
+
+**Usage:** `forager ondesk prepare-offdesk [OPTIONS] --source <SOURCES> --task <TASKS>`
+
+###### **Options:**
+
+* `--source <SOURCES>` - Explicit owning plans in PROJECT_KEY=PATH form; one source per project
+* `--task <TASKS>` - Explicit selections in PROJECT_KEY/TASK_ID form
+* `--expected-source-sha256 <EXPECTED>` - Optional exact source versions in PROJECT_KEY=SHA256 form
+
+
+
+## `forager ondesk plan-adopt-proposal`
+
+Propose explicit task mapping in a plain owning TODO without changing it
+
+**Usage:** `forager ondesk plan-adopt-proposal --tasks <TASKS> --project-key <PROJECT_KEY> --expected-sha256 <EXPECTED_SHA256> --request-id <REQUEST_ID> --decision-ref <DECISION_REF> <SOURCE>`
+
+###### **Arguments:**
+
+* `<SOURCE>` - Absolute existing plain Markdown owning TODO
+
+###### **Options:**
+
+* `--tasks <TASKS>` - Explicit ondesk_task_plan.v1 JSON selection; checklist text is not imported
+* `--project-key <PROJECT_KEY>`
+* `--expected-sha256 <EXPECTED_SHA256>`
+* `--request-id <REQUEST_ID>`
+* `--decision-ref <DECISION_REF>`
+
+
+
+## `forager ondesk plan-apply`
+
+Apply one explicitly confirmed, hash-bound change to an existing plan
+
+**Usage:** `forager ondesk plan-apply [OPTIONS] --candidate <CANDIDATE> <REQUEST>`
+
+###### **Arguments:**
+
+* `<REQUEST>` - JSON change request binding the exact source path and both content hashes
+
+###### **Options:**
+
+* `--candidate <CANDIDATE>`
+* `--confirm-plan-write` - Confirm only the exact plan write, not execution or knowledge promotion
+
+
+
+## `forager ondesk plan-review-proposal`
+
+Preview attributed review decisions without writing a plan or starting work
+
+**Usage:** `forager ondesk plan-review-proposal [OPTIONS] --decisions <DECISIONS> <SOURCE>`
+
+###### **Arguments:**
+
+* `<SOURCE>`
+
+###### **Options:**
+
+* `--decisions <DECISIONS>`
+* `--reconcile-baseline <RECONCILE_BASELINE>` - Exact preserved execution-era plan, for narrative/format-only drift
+* `--reconciliation-reason <RECONCILIATION_REASON>` - Operator's reason for connecting this execution baseline to the current plan
+
+
+
+## `forager ondesk return-binding`
+
+Prepare a read-only binding from preserved execution copies to an original owning plan
+
+**Usage:** `forager ondesk return-binding --owning-plan <OWNING_PLAN> --project-key <PROJECT_KEY> --morning-review <MORNING_REVIEW> --by <BY> --decision-ref <DECISION_REF> <WORKDIR>`
+
+###### **Arguments:**
+
+* `<WORKDIR>` - Absolute original project root
+
+###### **Options:**
+
+* `--owning-plan <OWNING_PLAN>`
+* `--project-key <PROJECT_KEY>`
+* `--morning-review <MORNING_REVIEW>`
+* `--by <BY>` - Operator attribution; preparation grants no task disposition
+* `--decision-ref <DECISION_REF>`
 
 
 
@@ -2833,12 +4098,103 @@ Build a markdown prompt package from recent notes and optional capture
 
 ###### **Options:**
 
+* `--morning-review <MORNING_REVIEW>` - Exact saved shift-review reference JSON for morning recovery
+* `--owning-plan <OWNING_PLAN>` - Absolute current owning plan for morning recovery
+* `--return-binding <RETURN_BINDING>` - Exact operator-attributed binding for an execution-copy return
+* `--return-binding-sha256 <RETURN_BINDING_SHA256>` - SHA256 of the selected return-binding artifact
+* `--review-only-unstructured` - Build a review-only return for an existing plan without a forager-plan block
+* `--resume-session <RESUME_SESSION>` - Existing session ID to bind without sending input
+* `--expected-branch <EXPECTED_BRANCH>` - Require the currently selected Git branch
 * `--capture-id <CAPTURE_ID>` - Existing capture ID to render
 * `--mode <MODE>` - Work mode label used to filter notes
 * `--project-key <PROJECT_KEY>` - Stable project key used to filter notes
 * `--include-doc-audit` - Include a fresh documentation governance audit from the latest closeout workdir or resolved project path
 * `--output <OUTPUT>` - Write markdown package to a file instead of stdout
 * `--json` - Output metadata as JSON
+
+
+
+## `forager ondesk return`
+
+Preview and explicitly deliver a morning package to one ready local session
+
+**Usage:** `forager ondesk return <COMMAND>`
+
+###### **Subcommands:**
+
+* `launch-restricted` - Launch a stopped registered session under the canonical Landlock read policy
+* `preview` - Build a short-lived preview without sending input or writing runtime state
+* `send` - Attempt input once after confirming the exact preview hash
+* `observe` - Observe a bound agent read-claim marker without sending more input
+* `status` - Read the durable delivery record without contacting the session
+
+
+
+## `forager ondesk return launch-restricted`
+
+Launch a stopped registered session under the canonical Landlock read policy
+
+**Usage:** `forager ondesk return launch-restricted --session <SESSION>`
+
+###### **Options:**
+
+* `--session <SESSION>` - Exact explicitly selected stopped session ID; runs its registered command
+
+
+
+## `forager ondesk return preview`
+
+Build a short-lived preview without sending input or writing runtime state
+
+**Usage:** `forager ondesk return preview [OPTIONS] --package <PACKAGE> --session <SESSION>`
+
+###### **Options:**
+
+* `--read-policy-receipt <READ_POLICY_RECEIPT>` - Require the matching live restricted-launch receipt; absence keeps legacy behavior
+* `--package <PACKAGE>` - Absolute saved morning prompt-package path
+* `--session <SESSION>` - Exact explicitly selected session ID
+* `--output <OUTPUT>` - Save a new ticket file; keep it outside the worktree or in ignored storage
+
+
+
+## `forager ondesk return send`
+
+Attempt input once after confirming the exact preview hash
+
+**Usage:** `forager ondesk return send [OPTIONS] --expected-preview-sha256 <EXPECTED_PREVIEW_SHA256> <TICKET>`
+
+###### **Arguments:**
+
+* `<TICKET>` - Absolute prepared ticket JSON path
+
+###### **Options:**
+
+* `--expected-preview-sha256 <EXPECTED_PREVIEW_SHA256>` - Exact preview hash printed by return preview
+* `--confirm-input` - Explicit consent to context-reading input, not task execution
+
+
+
+## `forager ondesk return observe`
+
+Observe a bound agent read-claim marker without sending more input
+
+**Usage:** `forager ondesk return observe <REQUEST_ID>`
+
+###### **Arguments:**
+
+* `<REQUEST_ID>`
+
+
+
+## `forager ondesk return status`
+
+Read the durable delivery record without contacting the session
+
+**Usage:** `forager ondesk return status <REQUEST_ID>`
+
+###### **Arguments:**
+
+* `<REQUEST_ID>`
 
 
 
@@ -2851,6 +4207,8 @@ Emit the shared review surface for Ondesk and future rich UIs
 ###### **Options:**
 
 * `--project-key <PROJECT_KEY>` - Stable project key to focus the review packet. Defaults to all projects
+* `--shift-id <SHIFT_ID>` - Exact bounded shift to project. Defaults to the active shift, then latest
+* `--current-run-id <CURRENT_RUN_ID>` - Routine run currently generating this projection
 * `--json` - Emit compact JSON. Without this flag, a human summary is printed
 
 
@@ -2863,6 +4221,8 @@ Emit the workstation dashboard surface for the Web UI control plane
 
 ###### **Options:**
 
+* `--shift-id <SHIFT_ID>` - Exact bounded shift to project. Defaults to the active shift, then latest
+* `--current-run-id <CURRENT_RUN_ID>` - Routine run currently generating this projection
 * `--json` - Emit compact JSON. Without this flag, a human summary is printed
 
 

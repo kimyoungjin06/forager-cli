@@ -32,6 +32,29 @@ cargo check      # Fast type-check
 
 Some integration tests require `tmux` to be available and will skip if it's not installed.
 
+## Building the public website
+
+The website combines Astro pages and mdBook documentation under `/forager-cli/`.
+Use Node.js 22.12 or later, npm, mdBook, and the Rust toolchain:
+
+```bash
+cargo run --locked -p xtask -- gen-docs
+bash scripts/build-site.sh
+python3 tests/support/test_site_links.py
+python3 scripts/check_site_links.py dist
+npm --prefix website audit --audit-level=high
+npm --prefix website run test:visual
+```
+
+The build script installs locked website dependencies and writes the assembled
+site to `dist/`. The link checker validates local routes, assets and anchors in
+that output; it does not request or certify external websites. GitHub Pages
+checks dependencies and the assembled links before uploading its artifact.
+
+The public workspace routes use sample data. Local exports and the action
+bridge are separate from the published site. Keep review data in its existing
+local source location when preparing public changes.
+
 ## Generating the Demo GIF
 
 The demo GIF in the docs is created using [VHS](https://github.com/charmbracelet/vhs).

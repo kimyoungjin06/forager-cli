@@ -1,83 +1,94 @@
 ---
 import { sitePath } from '../lib/paths';
+
+const workspaceLinks = [
+  ['Dashboard', '/dashboard/', 'Project status and next actions'],
+  ['Portfolio', '/portfolio/', 'Compare projects and priorities'],
+  ['Work', '/work/', 'Tasks, results and handoffs'],
+  ['Review', '/review/', 'Inspect results before accepting them'],
+  ['Decisions', '/decisions/', 'Approvals and recovery choices'],
+  ['Knowledge', '/knowledge/', 'Candidate and reviewed lessons'],
+  ['Graph', '/graph/', 'Explore evidence and relationships'],
+  ['Settings', '/settings/', 'Local connection and configuration'],
+];
+const primaryLinks = [
+  ['Docs', '/docs/'],
+  ['Workflow', '/docs/guides/operation-cycle.html'],
+];
+const current = (path: string) => Astro.url.pathname === sitePath(path) ? 'page' : undefined;
+const linkClass = 'rounded-sm text-sm font-medium text-slate-300 transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand-400';
 ---
 
-<nav class="fixed top-0 left-0 right-0 z-50 bg-surface-950/80 backdrop-blur-xl border-b border-surface-800/50">
-  <div class="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-    <a href={sitePath('/')} class="group flex shrink-0 items-center gap-3">
-      <img src={sitePath('/assets/logo.svg')} alt="Forager" class="w-8 h-8 transition-transform group-hover:scale-110">
-      <span class="font-semibold text-lg">Forager</span>
+<nav class="fixed inset-x-0 top-0 z-50 border-b border-surface-800/60 bg-surface-950/95 backdrop-blur-xl" aria-label="Main navigation">
+  <div class="mx-auto flex h-18 max-w-7xl items-center justify-between gap-6 px-6">
+    <a href={sitePath('/')} class="flex shrink-0 items-center gap-3 rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand-400" aria-label="Forager home">
+      <img src={sitePath('/assets/logo.svg')} alt="" width="32" height="32">
+      <span class="text-lg font-semibold">Forager</span>
     </a>
 
-    <!-- Desktop nav -->
-    <div class="hidden items-center gap-4 lg:flex xl:gap-6">
-      <a href={sitePath('/docs/')} class="text-sm font-medium text-gray-400 transition-colors hover:text-white">Docs</a>
-      <a href={sitePath('/dashboard/')} class="text-sm font-medium text-gray-400 transition-colors hover:text-white">Dashboard</a>
-      <a href={sitePath('/portfolio/')} class="text-sm font-medium text-gray-400 transition-colors hover:text-white">Portfolio</a>
-      <a href={sitePath('/work/')} class="text-sm font-medium text-gray-400 transition-colors hover:text-white">Work</a>
-      <a href={sitePath('/graph/')} class="text-sm font-medium text-gray-400 transition-colors hover:text-white">Graph</a>
-      <a href={sitePath('/knowledge/')} class="text-sm font-medium text-gray-400 transition-colors hover:text-white">Knowledge</a>
-      <a href={sitePath('/decisions/')} class="text-sm font-medium text-gray-400 transition-colors hover:text-white">Decisions</a>
-      <a href={sitePath('/review/')} class="text-sm font-medium text-gray-400 transition-colors hover:text-white">Review</a>
-      <a href={sitePath('/settings/')} class="text-sm font-medium text-gray-400 transition-colors hover:text-white">Settings</a>
-      <a href={sitePath('/docs/guides/operation-cycle.html')} class="text-sm font-medium text-gray-400 transition-colors hover:text-white">Operation Loop</a>
-      <a href="https://github.com/kimyoungjin06/forager-cli/releases" class="text-sm font-medium text-gray-400 transition-colors hover:text-white">Releases</a>
-      <a href="https://www.kisti.re.kr/" class="institution-badge shrink-0 rounded-lg px-3 py-2" aria-label="KISTI">
+    <div class="hidden items-center gap-6 lg:flex">
+      {primaryLinks.map(([label, path]) => <a href={sitePath(path)} class={linkClass} aria-current={current(path)}>{label}</a>)}
+      <details class="relative" data-nav-disclosure>
+        <summary class={`${linkClass} cursor-pointer py-4`}>Workspace preview <span aria-hidden="true">⌄</span></summary>
+        <div class="absolute right-0 top-full mt-1 w-[min(38rem,calc(100vw-3rem))] border border-surface-700 bg-surface-950 p-5 shadow-xl">
+          <p class="mb-4 max-w-prose text-sm leading-relaxed text-slate-400">Explore sample data. Connect local exports to inspect your own work.</p>
+          <div class="grid grid-cols-2 gap-1">
+            {workspaceLinks.map(([label, path, description]) => (
+              <a href={sitePath(path)} aria-current={current(path)} class="rounded-sm p-3 hover:bg-surface-800 focus-visible:outline-2 focus-visible:outline-brand-400">
+                <span class="block text-sm font-semibold text-slate-100">{label}</span>
+                <span class="mt-1 block text-sm text-slate-400">{description}</span>
+              </a>
+            ))}
+          </div>
+        </div>
+      </details>
+      <a href="https://github.com/kimyoungjin06/forager-cli" class={linkClass}>GitHub</a>
+      <a href="https://www.kisti.re.kr/" class="institution-badge rounded-lg px-3 py-2 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-brand-400" aria-label="KISTI">
         <img src={sitePath('/assets/kisti-logo-en.png')} alt="KISTI">
-      </a>
-      <a href="https://github.com/kimyoungjin06/forager-cli" class="flex shrink-0 items-center gap-2 text-sm font-medium text-gray-400 transition-colors hover:text-white">
-        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-        GitHub
       </a>
     </div>
 
-    <!-- Mobile hamburger button -->
-    <button id="mobile-menu-btn" class="p-1 text-gray-400 transition-colors hover:text-white lg:hidden" aria-label="Toggle menu" aria-expanded="false">
-      <svg id="menu-icon-open" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
-      </svg>
-      <svg id="menu-icon-close" class="w-6 h-6 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-      </svg>
-    </button>
-  </div>
-
-  <!-- Mobile dropdown menu -->
-  <div id="mobile-menu" class="hidden border-t border-surface-800/50 bg-surface-950/95 backdrop-blur-xl lg:hidden">
-    <div class="mx-auto flex max-w-7xl flex-col gap-4 px-6 py-4">
-      <a href={sitePath('/docs/')} class="text-gray-400 hover:text-white transition-colors text-base font-medium">Docs</a>
-      <a href={sitePath('/dashboard/')} class="text-gray-400 hover:text-white transition-colors text-base font-medium">Dashboard</a>
-      <a href={sitePath('/portfolio/')} class="text-gray-400 hover:text-white transition-colors text-base font-medium">Portfolio</a>
-      <a href={sitePath('/work/')} class="text-gray-400 hover:text-white transition-colors text-base font-medium">Work</a>
-      <a href={sitePath('/graph/')} class="text-gray-400 hover:text-white transition-colors text-base font-medium">Graph</a>
-      <a href={sitePath('/knowledge/')} class="text-gray-400 hover:text-white transition-colors text-base font-medium">Knowledge</a>
-      <a href={sitePath('/decisions/')} class="text-gray-400 hover:text-white transition-colors text-base font-medium">Decisions</a>
-      <a href={sitePath('/review/')} class="text-gray-400 hover:text-white transition-colors text-base font-medium">Review</a>
-      <a href={sitePath('/settings/')} class="text-gray-400 hover:text-white transition-colors text-base font-medium">Settings</a>
-      <a href={sitePath('/docs/guides/operation-cycle.html')} class="text-gray-400 hover:text-white transition-colors text-base font-medium">Operation Loop</a>
-      <a href="https://github.com/kimyoungjin06/forager-cli/releases" class="text-gray-400 hover:text-white transition-colors text-base font-medium">Releases</a>
-      <a href="https://www.kisti.re.kr/" class="institution-badge rounded-lg px-3 py-2 self-start" aria-label="KISTI">
-        <img src={sitePath('/assets/kisti-logo-en.png')} alt="KISTI">
-      </a>
-      <a href="https://github.com/kimyoungjin06/forager-cli" class="text-gray-400 hover:text-white transition-colors flex items-center gap-2 text-base font-medium">
-        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-        GitHub
-      </a>
-    </div>
+    <details class="lg:hidden" data-nav-disclosure>
+      <summary class={`${linkClass} cursor-pointer px-2 py-3`}>Menu <span aria-hidden="true">⌄</span></summary>
+      <div class="absolute inset-x-0 top-full max-h-[calc(100dvh-5rem)] overflow-y-auto border-b border-surface-700 bg-surface-950 px-6 py-5">
+        <div class="flex flex-wrap gap-6 border-b border-surface-800 pb-5">
+          {primaryLinks.map(([label, path]) => <a href={sitePath(path)} class={linkClass} aria-current={current(path)}>{label}</a>)}
+          <a href="https://github.com/kimyoungjin06/forager-cli/releases" class={linkClass}>Releases</a>
+          <a href="https://github.com/kimyoungjin06/forager-cli" class={linkClass}>GitHub</a>
+        </div>
+        <p class="mt-5 font-semibold text-slate-100">Workspace preview</p>
+        <p class="mb-3 mt-2 max-w-prose text-sm leading-relaxed text-slate-400">Sample data. Connect local exports to inspect your own work.</p>
+        <div class="grid grid-cols-2 gap-1">
+          {workspaceLinks.map(([label, path]) => <a href={sitePath(path)} class={`${linkClass} px-2 py-3`} aria-current={current(path)}>{label}</a>)}
+        </div>
+        <a href="https://www.kisti.re.kr/" class="institution-badge mt-5 inline-flex rounded-lg px-3 py-2" aria-label="KISTI">
+          <img src={sitePath('/assets/kisti-logo-en.png')} alt="KISTI">
+        </a>
+      </div>
+    </details>
   </div>
 </nav>
 
-<script>
-  const btn = document.getElementById('mobile-menu-btn');
-  const menu = document.getElementById('mobile-menu');
-  const iconOpen = document.getElementById('menu-icon-open');
-  const iconClose = document.getElementById('menu-icon-close');
+<style>
+  summary { list-style: none; }
+  summary::-webkit-details-marker { display: none; }
+  a[aria-current='page'] { color: var(--color-brand-300); }
+</style>
 
-  btn?.addEventListener('click', () => {
-    const isOpen = !menu?.classList.contains('hidden');
-    menu?.classList.toggle('hidden');
-    iconOpen?.classList.toggle('hidden');
-    iconClose?.classList.toggle('hidden');
-    btn.setAttribute('aria-expanded', String(!isOpen));
+<script>
+  const menus = [...document.querySelectorAll<HTMLDetailsElement>('[data-nav-disclosure]')];
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    for (const menu of menus) {
+      if (!menu.open) continue;
+      const returnFocus = menu.contains(document.activeElement);
+      menu.open = false;
+      if (returnFocus) menu.querySelector('summary')?.focus();
+    }
+  });
+  document.addEventListener('click', (event) => {
+    for (const menu of menus) {
+      if (event.target instanceof Node && !menu.contains(event.target)) menu.open = false;
+    }
   });
 </script>

@@ -2,32 +2,17 @@
 
 [Introduction](index.md)
 
-[Project Direction](project-direction.md)
-
-[Functional Definition Set](functional-definitions.md)
-
-[Gajae-Code Benchmarking](gajae-benchmarking.md)
-
-[Implementation Packet And Recursive Alignment Review](implementation-packet.md)
-
-[Decision Pipeline](decision-pipeline.md)
-
-[Hosted Harness Agents](hosted-harness-agents.md)
-
-[Remote Operator](remote-operator.md)
-[Remote Session Creation And Isolation Plan](remote-session-creation-isolation-plan.md)
-
-[Evidence Search And Memory Boundary](evidence-search-and-memory-boundary.md)
-
 # Getting Started
 
 - [Installation](installation.md)
 - [Quick Start](quick-start.md)
+- [Operation Status](offdesk-operation-status.md)
 
 # Guides
 
 - [Workflow](guides/workflow.md)
 - [Operation Cycle](guides/operation-cycle.md)
+- [Remote Operator](remote-operator.md)
 - [Offdesk Runtime Smoke](guides/offdesk-runtime-smoke.md)
 - [Offdesk Long-Run Validation](guides/offdesk-long-run-validation.md)
 - [Project Initialization](guides/project-initialization.md)
@@ -49,15 +34,23 @@
 - [v0.14.0 Release Notes](releases/v0.14.0.md)
 - [Brand System](brand-system.md)
 - [Offdesk Safety Rail Baseline](offdesk-safety-rail-baseline.md)
-- [Offdesk Operation Status](offdesk-operation-status.md)
+- [Offdesk Evidence Bundles](offdesk-evidence-bundles.md)
 - [Offdesk Agent Modes](offdesk-agent-modes.md)
 - [Forager And Orchestrator Boundary](forager-orchestrator-boundary.md)
 - [Adaptive Wiki](adaptive-wiki.md)
 - [Adaptive Wiki Tag Graph](adaptive-wiki-tag-graph.md)
 - [Adaptive Wiki Distillation](adaptive-wiki-distillation.md)
 
-# Contributing
+# Design and development
 
-- [Development](development.md)
+- [Project Direction](project-direction.md)
+- [Functional Definitions](functional-definitions.md)
+- [Hosted Harness Agents](hosted-harness-agents.md)
+- [Decision Pipeline](decision-pipeline.md)
+- [Evidence Search And Memory Boundary](evidence-search-and-memory-boundary.md)
+- [Implementation And Alignment Review](implementation-packet.md)
+- [Remote Session Creation And Isolation Plan](remote-session-creation-isolation-plan.md)
+- [Gajae-Code Benchmarking](gajae-benchmarking.md)
 - [Hermes Pattern Review](hermes-pattern-review.md)
+- [Development](development.md)
 - [Credits](credits.md)
