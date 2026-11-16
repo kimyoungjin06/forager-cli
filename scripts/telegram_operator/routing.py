@@ -70,9 +70,9 @@ COMMAND_SURFACE = (
     ("/plans", "계획 목록", "조회"),
     ("/show <id>", "항목 상세 보기", "조회"),
     ("/decisions", "결정 대기함", "조회"),
-    ("/recovery", "복구 대기 항목", "조회"),
+    ("/recovery [id]", "복구 검토 목록과 상세", "조회"),
     ("/runtime", "런타임 디스패치 상태", "조회"),
-    ("/tasks", "실행 중 작업 목록", "조회"),
+    ("/tasks [project task request]", "실행 작업과 결과 검토 상세", "조회"),
     ("/wiki [project]", "프로젝트별 위키 검토 대기", "조회"),
     ("/projects [project]", "접근 가능한 프로젝트와 현재 포커스", "조회"),
     ("/receipts [session-id]", "명령부터 closeout까지 영수증 체인", "조회"),
@@ -293,14 +293,15 @@ def parse_remote_command(command_text: str) -> dict[str, Any]:
     if command == "decision":
         return parse_decision_command(original_text, args)
     if command == "recovery":
-        if args:
-            return unsupported_command(original_text, "recovery_accepts_no_arguments")
+        if len(args) > 1:
+            return unsupported_command(original_text, "recovery_accepts_zero_or_one_id")
         return {
             "supported": True,
             "command": "recovery",
             "argv": [],
             "reason": "explicit_recovery_command",
             "command_text": original_text,
+            "closeout_selector": args[0] if args else "",
         }
     if command == "recover":
         return parse_recover_command(original_text, args)
@@ -317,14 +318,17 @@ def parse_remote_command(command_text: str) -> dict[str, Any]:
     if command == "run":
         return parse_run_command(original_text, args)
     if command == "tasks":
-        if args:
-            return unsupported_command(original_text, "tasks_accepts_no_arguments")
+        if len(args) > 3:
+            return unsupported_command(original_text, "tasks_accepts_task_or_project_task_request")
         return {
             "supported": True,
             "command": "tasks",
             "argv": [],
             "reason": "explicit_tasks_command",
             "command_text": original_text,
+            "project_selector": args[0] if len(args) >= 2 else "",
+            "task_selector": args[1] if len(args) >= 2 else args[0] if args else "",
+            "request_selector": args[2] if len(args) == 3 else "",
         }
     if command == "attention":
         if args:

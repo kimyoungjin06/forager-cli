@@ -3350,13 +3350,85 @@ fn remote_operator_telegram_attention_summarizes_waiting_work() -> Result<()> {
     );
     // One decision and one review-flagged task are aggregated.
     assert!(preview.contains("결정 1"));
-    assert!(preview.contains("작업 1"));
+    assert!(preview.contains("실행 복구 1"));
     // The most urgent action remains visible as a typed command. Passive
     // summary cards must not install a persistent reply keyboard.
     assert!(preview.contains("/decision decision-user"));
     assert_eq!(result["reply_markup_preview"], Value::Null);
     assert_eq!(result["choice_surface_contract"]["surface_kind"], "none");
     assert_mobile_contract(&result);
+    Ok(())
+}
+
+#[test]
+#[serial]
+fn remote_operator_telegram_completed_review_lookup_is_scoped_and_read_only() -> Result<()> {
+    let temp = tempdir()?;
+    let env_path = temp.path().join("telegram.env");
+    write_env_file(&env_path)?;
+    let profile = profile_dir(temp.path());
+    fs::create_dir_all(&profile)?;
+    fs::write(
+        profile
+            .parent()
+            .expect("profiles directory")
+            .parent()
+            .expect("app directory")
+            .join(".schema_version"),
+        "11",
+    )?;
+    let path = profile.join("offdesk_tasks.json");
+    fs::write(
+        &path,
+        serde_json::to_vec(&json!([{
+            "task_id": "review-completed", "request_id": "run-review",
+            "project_key": "project-a", "status": "completed",
+            "capability_id": "web.visual_review", "runner_kind": "local_background",
+            "command": "echo never-dispatch-this-fixture", "workdir": temp.path(),
+            "attempt_count": 1, "created_at": "2026-11-01T00:00:00Z",
+            "updated_at": "2026-11-01T00:00:00Z"
+        }]))?,
+    )?;
+    let before = fs::read(&path)?;
+    for (index, project, expected) in [
+        (0, "project-a", "실행 완료"),
+        (1, "project-b", "선택한 작업을 찾지 못했습니다"),
+    ] {
+        let update = temp.path().join(format!("lookup-{index}.json"));
+        let out = temp.path().join(format!("result-{index}.json"));
+        write_text_update(
+            &update,
+            920 + index,
+            1 + index,
+            &format!("/tasks {project} review-completed run-review"),
+        )?;
+        let result = remote_operator_command(temp.path())
+            .args(["--dry-run", "--once", "--replay-update-file"])
+            .arg(&update)
+            .arg("--forager-bin")
+            .arg(env!("CARGO_BIN_EXE_forager"))
+            .arg("--env-file")
+            .arg(&env_path)
+            .arg("--state-file")
+            .arg(temp.path().join(format!("state-{index}.json")))
+            .arg("--out")
+            .arg(&out)
+            .output()?;
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let result: Value = serde_json::from_slice(&fs::read(out)?)?;
+        let message = result["message_preview"].as_str().expect("lookup preview");
+        assert!(message.contains(expected), "{message}");
+        assert!(!message.contains("/cancel-task"));
+        assert_eq!(result["mutation_authorized"], false);
+        assert_eq!(result["approval_authorized"], false);
+        assert!(result["dispatch_result"].is_null());
+        assert_mobile_contract(&result);
+        assert_eq!(fs::read(&path)?, before);
+    }
     Ok(())
 }
 
@@ -6021,7 +6093,7 @@ fn remote_operator_telegram_attention_notify_pushes_then_dedupes() -> Result<()>
     assert_eq!(notification["status"], "notified");
     assert_eq!(notification["notified_count"], 1);
     let preview = notification["message_preview"].as_str().expect("preview");
-    assert!(preview.contains("조치 필요"));
+    assert!(preview.contains("결정 대기"));
     assert!(preview.contains("/decision decision-user"));
     // The attention card is a separate send to the owner chat, mobile-scannable.
     let contract = &notification["mobile_card_contract"];

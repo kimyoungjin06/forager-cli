@@ -841,18 +841,27 @@ operator-safe `workstation_surface.v1` for open decisions and accepted-truth
 recovery follow-ups and sends the owner chat a short card naming the top item
 and the exact command to run (for example `/decision <id> revise`).
 
-It is deduplicated: an item is pushed once, and a still-waiting item is
-re-notified after `--attention-reminder-sec` (default 21600 seconds). Set the
-value to 0 to notify only once. A resolved item is pruned so it notifies
-afresh if it reopens. The scan is read-only, never mutates state, and never
+Cards distinguish decisions, execution recovery and result/closeout review.
+Unchanged completed-result and closeout reviews notify on appearance or evidence
+change; they remain visible in `/attention` and `/tasks` without periodic cards.
+Waiting decisions and execution failures retain `--attention-reminder-sec`
+(default 21600 seconds); 0 disables their timed reminders. A resolved item is
+pruned so it notifies afresh if it reopens. Project/task/request identities keep
+different runs separate. Unambiguous legacy notification history is retained,
+and legacy uncertain-delivery holds still prevent duplicate sends.
+The scan never changes task or acceptance state, and never
 crashes the poll loop: a surface-export or send failure is recorded and the
 loop continues.
 
 ## Emergency stop
 
-`/tasks` lists tasks that can still be cancelled (drawn from the operator-safe
-workstation surface: anything not already completed or cancelled), with each
-task id and status. `/cancel-task <task-id> [reason]` returns a single-use
+`/tasks` lists cancellable tasks and completed/cancelled tasks that still require
+review. `/tasks <task-id>` inspects one unambiguous task; use
+`/tasks <project> <task-id> <request-id>` to select an exact run. Completed review
+targets expose their inspection command without suggesting cancellation.
+`/recovery <closeout-id>` reads the follow-up reason and available review actions;
+a proactive recovery card opens this inspection before selecting an action.
+`/cancel-task <task-id> [reason]` returns a single-use
 confirmation card; `/confirm <token>` runs `forager offdesk cancel-task`, which
 marks the durable task cancelled so the harness stops continuing or resuming
 it.

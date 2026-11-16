@@ -94,6 +94,7 @@ from telegram_operator.dispatch import (
     available_recovery_action_kinds,
     build_confirmation,
     cancellable_tasks_from_surface,
+    inspectable_tasks_from_surface,
     clear_confirmation,
     classify_session_interaction,
     confirmation_is_fresh,
@@ -143,7 +144,9 @@ from telegram_operator.notifier import (
     build_attention_notification,
     commit_attention_notification,
     render_attention_message,
+    attention_event_key,
 )
+from telegram_operator.attention_classification import attention_category
 from telegram_operator.notification_policy import (
     NotificationCandidate,
     NotificationCycle,
@@ -516,7 +519,8 @@ def parse_args() -> argparse.Namespace:
         # once meant a real item sat unread for two months while a misdetected
         # session was re-carded every 30 minutes.
         default=int(os.environ.get("OFFDESK_REMOTE_OPERATOR_ATTENTION_REMINDER_SEC", "21600")),
-        help="Re-notify a still-waiting attention item after this many seconds. 0 notifies once.",
+        help="Repeat waiting decisions and execution follow-ups after this many seconds. "
+             "0 notifies once. Unchanged completed-result and closeout reviews notify on change only.",
     )
     parser.add_argument(
         "--agent-intent-mode",
@@ -1317,8 +1321,12 @@ def render_dispatch_command(
         try:
             surface = export_workstation_surface(args.forager_bin, args.profile)
             recoveries = open_recovery_actions(surface)
+            selector = str(parsed.get("closeout_selector") or "")
+            if selector:
+                recoveries = [row for row in recoveries if row["closeout_id"] == selector]
             message_preview = render_recovery_message(
-                profile=args.profile, generated_at=generated_at, recoveries=recoveries
+                profile=args.profile, generated_at=generated_at, recoveries=recoveries,
+                selected=bool(selector),
             )
         except RemoteOperatorTelegramError as error:
             message_preview = render_dispatch_error_message(
@@ -1510,9 +1518,15 @@ def render_dispatch_command(
     if command == "tasks":
         try:
             surface = export_workstation_surface(args.forager_bin, args.profile)
-            tasks = cancellable_tasks_from_surface(surface)
+            tasks = inspectable_tasks_from_surface(surface)
+            for field, selector in [("project_key", parsed.get("project_selector")),
+                                    ("task_id", parsed.get("task_selector")),
+                                    ("request_id", parsed.get("request_selector"))]:
+                if selector:
+                    tasks = [row for row in tasks if str(row.get(field) or "") == selector]
             message_preview = render_tasks_message(
-                profile=args.profile, generated_at=generated_at, tasks=tasks
+                profile=args.profile, generated_at=generated_at, tasks=tasks,
+                selected=bool(parsed.get("task_selector")),
             )
         except RemoteOperatorTelegramError as error:
             message_preview = render_dispatch_error_message(
@@ -3514,6 +3528,8 @@ def _close_notification_scan(
 
 def _attention_priority(item: dict[str, Any]) -> NotificationPriority:
     kind = str(item.get("kind") or "")
+    if kind == "task" and attention_category(item)[0] == "review":
+        return NotificationPriority.TASK_READY
     if kind in {"recovery", "task"}:
         return NotificationPriority.RECOVERY
     if kind == "decision":
@@ -4652,7 +4668,8 @@ def scan_and_notify_attention(
     for item in fresh:
         item_key = str(item.get("key") or "")
         message = render_attention_message(
-            profile=args.profile, generated_at=utc_now(), items=[item]
+            profile=args.profile, generated_at=utc_now(), items=[item],
+            notified=notification.get("staged_notified_by_key"),
         )
         report = result
 
@@ -4681,7 +4698,7 @@ def scan_and_notify_attention(
 
         cycle.add(
             NotificationCandidate(
-                event_key=f"attention:{item_key}",
+                event_key=attention_event_key(item, state),
                 source="attention",
                 priority=_attention_priority(item),
                 message=message,

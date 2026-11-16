@@ -1242,6 +1242,30 @@ def cancellable_tasks_from_surface(surface: dict[str, Any]) -> list[dict[str, An
     return tasks
 
 
+def inspectable_tasks_from_surface(surface: dict[str, Any]) -> list[dict[str, Any]]:
+    """Retain completed review targets without granting them cancellation."""
+    tasks = []
+    projects = surface.get("projects")
+    if not isinstance(projects, list):
+        raise RemoteOperatorTelegramError("workstation project list is unreadable")
+    for project in projects:
+        if not isinstance(project, dict):
+            continue
+        items = project.get("task_items")
+        if not isinstance(items, list):
+            raise RemoteOperatorTelegramError("workstation task list is unreadable")
+        for item in items:
+            if not isinstance(item, dict) or not item.get("task_id"):
+                continue
+            cancellable = str(item.get("status") or "").lower() not in CANCELLABLE_TASK_STATUSES_EXCLUDED
+            if cancellable or item.get("requires_operator_review"):
+                tasks.append({**item, "project_key": str(project.get("project_key") or ""),
+                              "cancellable": cancellable})
+    for task in tasks:
+        task["cancellation_hint_safe"] = sum(row["task_id"] == task["task_id"] for row in tasks) == 1
+    return tasks
+
+
 def apply_cancel_task(
     forager_bin: str,
     profile: str,

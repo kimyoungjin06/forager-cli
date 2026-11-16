@@ -27,18 +27,18 @@ class AttentionVersions(unittest.TestCase):
         summary = attention_summary(surface)
         message = build_attention_notification(surface, {}, reminder_sec=21600)
         self.assertEqual(summary["items"], message["fresh_items"])
-        self.assertEqual(summary["top"]["command_hint"], "/tasks")
+        self.assertEqual(summary["top"]["command_hint"], "/tasks nano task run")
         self.assertNotIn("cancel", str(summary))
         self.assertEqual(attention_summary(self.surface(review=False))["total"], 0)
 
-    def test_same_version_reminds_changes_and_reopening_notify_without_early_commit(self):
+    def test_review_changes_and_reopening_notify_without_periodic_or_early_commit(self):
         state = {}
         with patch("telegram_operator.notifier.utc_now", return_value="2026-10-19T00:00:00Z"):
             first = build_attention_notification(self.surface(), state, reminder_sec=21600)
         self.assertEqual(state, {})
-        commit_attention_notification(state, first, delivered_keys=("task:task",))
+        commit_attention_notification(state, first, delivered_keys=(first["fresh_items"][0]["key"],))
         before = copy.deepcopy(state)
-        for at, expected in (("2026-10-19T05:59:59Z",0), ("2026-10-19T06:00:00Z",1)):
+        for at, expected in (("2026-10-19T05:59:59Z",0), ("2026-10-20T06:00:00Z",0)):
             with patch("telegram_operator.notifier.utc_now", return_value=at):
                 result = build_attention_notification(self.surface(), state, reminder_sec=21600)
                 self.assertEqual(len(result["fresh_items"]), expected)

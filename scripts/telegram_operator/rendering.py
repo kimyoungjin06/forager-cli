@@ -9,6 +9,7 @@ import re
 from typing import Any
 
 from .routing import BUTTON_COMMAND_ALIASES, COMMAND_SURFACE
+from .attention_classification import task_inspection_hint
 
 
 MOBILE_CARD_CONTRACT_SCHEMA = "telegram_mobile_card_contract.v1"
@@ -834,12 +835,18 @@ def render_attention_summary_message(*, profile: Any, generated_at: Any, summary
         lines.append("지금 조치가 필요한 항목이 없습니다.")
         lines.append("다음 조치: /status · /pending")
         return "\n".join(lines)
-    lines.append(
-        f"결정 {int(summary.get('decision_count') or 0)} · "
-        f"복구 {int(summary.get('recovery_count') or 0)} · "
-        f"작업 {int(summary.get('task_count') or 0)} · "
-        f"위키 {int(summary.get('wiki_candidate_count') or 0)}"
-    )
+    if "review_waiting_count" in summary:
+        lines.append(f"검토 대기 {summary['review_waiting_count']} · "
+                     f"실행 복구 {summary.get('execution_followup_count', 0)} · "
+                     f"결정 {int(summary.get('decision_count') or 0)} · "
+                     f"위키 {int(summary.get('wiki_candidate_count') or 0)}")
+    else:
+        lines.append(
+            f"결정 {int(summary.get('decision_count') or 0)} · "
+            f"복구 {int(summary.get('recovery_count') or 0)} · "
+            f"작업 {int(summary.get('task_count') or 0)} · "
+            f"위키 {int(summary.get('wiki_candidate_count') or 0)}"
+        )
     top = summary.get("top")
     if isinstance(top, dict):
         if top.get("project_key"):
@@ -892,21 +899,49 @@ def render_resume_result_message(*, profile: Any, generated_at: Any, result: dic
     return "\n".join(lines)
 
 
-def render_tasks_message(*, profile: Any, generated_at: Any, tasks: list[dict[str, Any]]) -> str:
-    lines = [title_with_profile("실행 작업", profile)]
+def render_tasks_message(*, profile: Any, generated_at: Any, tasks: list[dict[str, Any]], selected: bool = False) -> str:
+    lines = [title_with_profile("작업·검토 목록", profile)]
     if not tasks:
-        lines.append("취소 가능한 작업이 없습니다.")
-        lines.append("다음 조치: /status · /pending")
+        lines.append("선택한 작업을 찾지 못했습니다." if selected else "실행 또는 검토 대기 작업이 없습니다.")
+        lines.append("다음 조치: /tasks · /attention" if selected else "다음 조치: /status · /pending")
         return "\n".join(lines)
-    for task in tasks[:3]:
+    if selected and len(tasks) == 1:
+        task = tasks[0]
+        project = str(task.get("project_key") or "")
         task_id = str(task.get("task_id") or "")
-        if len(task_id) > 40:
-            task_id = task_id[:37] + "..."
-        status = str(task.get("status") or "")
-        lines.append(f"{html.escape(task_id)} · {html.escape(status)}")
-    lines.append(
-        "다음 조치: 상태만 /cancel-task &lt;id&gt; · 러너까지 /terminate-task &lt;id&gt;"
-    )
+        reasons = {"review_binding_changed": "검토 근거 변경", "review_required": "결과 검토 대기",
+                   "closeout_check": "종료 기록 확인", "recovery_required": "실행 실패 검토",
+                   "resume_review_required": "중단 상태 검토"}
+        status = {"completed": "실행 완료", "cancelled": "실행 취소", "failed": "실행 실패",
+                  "resume_pending": "실행 중단", "running": "실행 중"}.get(str(task.get("status")), "작업 확인")
+        lines.append(html.escape(sanitize_text(f"{project} · {task_id}", max_chars=85)))
+        reason = reasons.get(str(task.get("next_safe_action_kind") or ""), "작업 기록 확인")
+        lines.append(status + " · " + reason)
+        command = str(task.get("command") or "")
+        lines.append("로컬에서: <code>" + html.escape(command) + "</code>" if command else "로컬에서: 프로젝트 TODO와 결과 근거 확인")
+        if task.get("cancellable") and task.get("cancellation_hint_safe", True):
+            lines.append("다음 조치: /cancel-task " + html.escape(task_id))
+        else:
+            lines.append("다음 조치: /projects " + html.escape(project) if project else "다음 조치: /attention")
+        if len("\n".join(lines)) > MOBILE_CARD_MAX_CHARS:
+            lines[3] = "로컬에서: 프로젝트 TODO와 결과 근거 확인"
+        return "\n".join(lines)
+    review_count = sum(bool(task.get("requires_operator_review")) for task in tasks)
+    lines.append("작업 ID가 여러 범위에 있습니다." if selected else f"작업 {len(tasks)}건 · 검토 대기 {review_count}건")
+    for task in tasks[:2]:
+        label = "검토" if task.get("requires_operator_review") else "실행"
+        identity = f"{task.get('project_key') or ''} · {task.get('task_id') or ''}"
+        if selected:
+            identity += " · " + str(task.get("request_id") or "")
+        lines.append(html.escape(sanitize_text(label + " · " + identity, max_chars=70)))
+    if selected:
+        hint = "/tasks &lt;project&gt; &lt;task&gt; &lt;request&gt;"
+    elif review_count:
+        task = next(task for task in tasks if task.get("requires_operator_review"))
+        hint = html.escape(task_inspection_hint(task.get("project_key"), task.get("task_id"), task.get("request_id")))
+    else:
+        hint = "/cancel-task &lt;id&gt; · /terminate-task &lt;id&gt;"
+    lines.append("다음 조치: " + hint)
     return "\n".join(lines)
 
 
@@ -993,12 +1028,22 @@ def render_terminate_task_result_message(
     return "\n".join(lines)
 
 
-def render_recovery_message(*, profile: Any, generated_at: Any, recoveries: list[dict[str, Any]]) -> str:
-    lines = [title_with_profile("복구 목록", profile)]
+def render_recovery_message(*, profile: Any, generated_at: Any, recoveries: list[dict[str, Any]], selected: bool = False) -> str:
+    lines = [title_with_profile("복구 검토 목록", profile)]
     open_recoveries = [recovery for recovery in recoveries if recovery.get("actions")]
     if not open_recoveries:
         lines.append("처리 대기 중인 복구 항목이 없습니다.")
         lines.append("다음 조치: /status · /decisions")
+        return "\n".join(lines)
+    if selected and len(open_recoveries) == 1:
+        row = open_recoveries[0]
+        lines.append(html.escape(sanitize_text(str(row.get("closeout_id") or ""), max_chars=60)))
+        reason = {"Review remaining follow-ups before treating the result as accepted.": "남은 후속 검토가 필요합니다.",
+                  "Supply the missing evidence and rerun closeout-review.": "근거를 보완한 뒤 종료 검토가 필요합니다."}.get(str(row.get("next_safe_action") or ""), str(row.get("next_safe_action") or "복구 근거 확인이 필요합니다."))
+        lines.append(html.escape(sanitize_text(reason, max_chars=100)))
+        actions = " · ".join(str(action["action_kind"]) for action in row["actions"][:2])
+        lines.append("선택 가능한 검토: " + html.escape(actions))
+        lines.append("다음 조치: /recover " + html.escape(str(row["closeout_id"])) + " &lt;action&gt;")
         return "\n".join(lines)
     for recovery in open_recoveries[:3]:
         actions = " · ".join(action["action_kind"] for action in recovery["actions"][:2])
@@ -1006,7 +1051,7 @@ def render_recovery_message(*, profile: Any, generated_at: Any, recoveries: list
         if len(closeout) > 40:
             closeout = closeout[:37] + "..."
         lines.append(f"{html.escape(closeout)}: {html.escape(actions)}")
-    lines.append("다음 조치: /recover &lt;closeout-id&gt; &lt;action&gt; [note]")
+    lines.append("다음 조치: /recovery &lt;closeout-id&gt;")
     return "\n".join(lines)
 
 
