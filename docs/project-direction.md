@@ -1,19 +1,20 @@
 # Project Direction
 
-Forager is a local autonomy meta-harness for harness-backed AI agent work.
+Forager currently manages tmux agent sessions, Git worktrees and optional
+Offdesk task records. See [operation status](offdesk-operation-status.md) for
+source capabilities and validation boundaries.
 
-Its purpose is to turn fragile live chat, terminal sessions, and external agent
-harnesses into governed operations: explicit intent, bounded approvals, durable
-runtime evidence, reviewable handoffs, and promoted project knowledge.
+This document describes the direction of development, including goals that
+have not been demonstrated across all harnesses and workloads. "Meta-harness"
+describes the intended architecture around other agents' execution loops.
 
 ## North Star
 
 Forager lets people entrust meaningful work to agents and return to evidence,
 choices, and continuity instead of mystery.
 
-This is the human-facing product promise. It should stay short enough to guide
-taste, positioning, and product judgment. The internal criteria below define how
-the project knows whether that promise is actually being met.
+This is a development goal. The criteria below describe how to assess progress;
+they are not a statement that the goal has been achieved.
 
 ## Direction Statement
 
@@ -41,21 +42,24 @@ The product direction is:
     direction, brand boundary, scope, and completion criteria in a reviewable
     implementation packet.
 
-## What Forager Is
+## Current Role and Intended Extensions
 
 Forager is:
 
 - a tmux-backed manager for agent and terminal sessions;
 - an approval-gated Offdesk runtime for queued or long-running work;
-- a meta-harness that can supervise harness-backed agents from Claude Code,
-  Codex, OpenCode, OpenHands, local LLM scripts, or future agent loops as
-  workloads;
+- a host for installed coding CLIs and explicitly configured commands;
 - a local source of truth for task queues, approvals, runtime probes, recovery,
   result artifacts, closeout packages, and adaptive wiki state;
 - a handoff system that moves work from Ondesk to Offdesk and back through
   bounded artifacts;
 - an operator surface for deciding what is safe to run, trust, preserve,
   promote, or discard.
+
+OpenHands and other future integrations are candidates, not current hosted
+harness support. The [profile inventory](hosted-harness-agents.md) distinguishes
+the available profiles from planned ones. Task records and approval checks do
+not impose a general security sandbox on an agent's tool use.
 
 ## What Forager Is Not
 
@@ -207,7 +211,7 @@ the same underlying state and safety contract should apply everywhere.
 
 ## Practical Completion Criteria
 
-The north star is being met when these internal criteria are true:
+These are target criteria for the north star, not a completed validation list:
 
 - each supported hosted harness agent has a shared local contract: launch
   command, working directory, mutation scope, runtime evidence sources, result

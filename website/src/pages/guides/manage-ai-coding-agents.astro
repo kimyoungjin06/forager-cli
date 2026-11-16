@@ -16,7 +16,7 @@ import { sitePath } from '../../lib/paths';
       <header class="mb-12">
         <h1 class="text-4xl md:text-5xl font-bold text-white mb-6 leading-tight">How to Manage Multiple AI Coding Agents</h1>
         <p class="text-lg text-gray-400 leading-relaxed">
-          Running one AI coding agent is straightforward. Running five at once across different repos and branches turns into a mess of terminal tabs and forgotten sessions. Here is how to bring order to the chaos.
+          When coding agents run across several repos and branches, a session list can help you find their terminals and working directories. This guide covers Forager's dashboard, groups and Git worktrees.
         </p>
       </header>
 
@@ -33,10 +33,10 @@ import { sitePath } from '../../lib/paths';
       <section>
         <h2>A Session Manager Built for AI Agents</h2>
         <p>
-          <a href={sitePath('/')}>Forager</a> is a local meta-harness designed specifically for this workflow. It starts with a TUI dashboard where every agent session is visible at a glance with real-time status detection. You can see which agents are actively generating code, which are waiting for your input, and which have finished.
+          <a href={sitePath('/')}>Forager</a> lists its managed sessions in a TUI dashboard. It estimates agent activity from process and terminal observations so you can choose which session to inspect.
         </p>
         <p>
-          Sessions are organized into groups, so you can keep your work project agents separate from your side project experiments. Everything runs in tmux underneath, which means sessions persist even if you close the TUI. Your agents keep running.
+          Sessions can be organized into groups. Closing the TUI leaves their tmux processes running while the host and tmux server stay up.
         </p>
       </section>
 
@@ -45,7 +45,7 @@ import { sitePath } from '../../lib/paths';
 
         <h3>Status Detection</h3>
         <p>
-          Forager automatically detects the status of Claude Code, Gemini CLI, OpenCode, Mistral Vibe, and Codex sessions. The dashboard shows whether each agent is actively working, waiting for input, or idle. No more switching through tabs to check progress.
+          Forager uses agent-specific process and terminal patterns to estimate whether Claude Code, Gemini CLI, OpenCode, Mistral Vibe and Codex sessions are working, waiting or idle. Labels can be stale or misclassified, especially when a CLI changes its output. Inspect the terminal and task artifacts to confirm progress or completion.
         </p>
 
         <h3>Git Worktrees for Parallel Work</h3>
@@ -69,7 +69,7 @@ import { sitePath } from '../../lib/paths';
           <li><strong>With Forager</strong>: <code>forager add</code> a session, see all statuses in a dashboard, navigate with arrow keys, and get automatic worktree lifecycle management.</li>
         </ul>
         <p>
-          The difference is most noticeable when you are running 3+ agents. At that point, the overhead of manual management starts eating into the productivity gains from using AI in the first place.
+          Try the dashboard and worktree commands with your own session count and workflow to assess whether they reduce manual session management.
         </p>
       </section>
 

@@ -23,9 +23,12 @@ inspect your own installation. This page is documentation, not a live health
 report. The detailed implementation inventory below preserves its original
 scope and historical observations.
 
-## Verified Generic Flow
+## Configured Workflow
 
-The intended flow is:
+The commands support this operator workflow. Available interfaces and local
+fixtures do not establish uninterrupted completion for every project, harness
+version or recovery case. Validate the selected task and inspect its actual
+artifacts before recording a result decision.
 
 ```text
 project init
@@ -70,10 +73,12 @@ runtime, and receipt-bound closeout side of this flow:
 It intentionally does not provide broad runtime launch or general process
 control. Telegram can start only the reviewed task that was already bound and
 queued, then monitor and close out that same task. A closeout verdict is valid
-only through the prepared handoff, and accepted truth exists only when the CLI
-closeout receipt reports `accepted`.
+only through the prepared handoff. A CLI closeout receipt reporting `accepted`
+records an acceptance decision; it does not establish that the underlying
+result is correct.
 
-Remote Operator phase status:
+Remote Operator source interfaces (`Implemented` describes availability in this
+tree, not the success of a particular unattended workload):
 
 | Phase | Status | Boundary |
 | --- | --- | --- |
@@ -91,14 +96,17 @@ Remote Operator phase status:
 | Enqueue run | Implemented | Runs only bound `offdesk enqueue`; does not launch or tick. |
 | Runtime start | Implemented | Runs only task-scoped `offdesk tick`; does not monitor or close out. |
 | Runtime monitor/readout | Implemented | Polls only the same task with `offdesk tick --limit 0`; does not dispatch or close out. |
-| Closeout packet | Implemented | Generates closeout artifacts only for the completed monitored task; does not review or accept truth. |
-| Closeout review handoff | Implemented | Writes local `closeout-review` verdict templates; does not execute verdicts or accept truth. |
-| Closeout verdict/accepted-truth bridge | Implemented | Runs only handoff-bound `closeout-review` verdicts; accepted truth follows the CLI receipt. |
+| Closeout packet | Implemented | Generates closeout artifacts only for the completed monitored task; does not record a review decision. |
+| Closeout review handoff | Implemented | Writes local `closeout-review` verdict templates; does not execute verdicts. |
+| Closeout verdict recording | Implemented | Runs only handoff-bound `closeout-review` verdicts; the receipt records the decision. |
 | Listener health and external watchdog | Implemented | Reports or alerts; does not mutate Offdesk state. |
 
-## Completed Work
+## Source Implementation Inventory
 
-### Runtime Safety
+### Runtime Approval Checks
+
+These checks apply to Forager's dispatch and review commands. They do not
+restrict every tool call made inside a hosted coding agent.
 
 - Provider fallback is approval-gated and does not consume
   `dispatch.runtime` approvals.
@@ -121,7 +129,7 @@ Remote Operator phase status:
 
 ### Remote Operator
 
-- Remote projections are read-only and operator-safe.
+- Remote projections read local records without resolving approvals.
 - Telegram messages are compact enough for mobile scanning and keep detailed
   diagnostics in local health output.
 - Telegram freeform messages can become reviewable decision-inbox items or
@@ -184,14 +192,14 @@ Remote Operator phase status:
 
 ## Current Completion Boundaries
 
-### 1. Closeout Review And Accepted-Truth Bridge - Implemented
+### 1. Closeout Review and Acceptance Recording
 
-Verified contract: generated closeout packets connect to closeout review without
+The source connects generated closeout packets to closeout review without
 collapsing plan approval, gate request creation, approval resolution, brief
 generation, enqueue, runtime start, runtime monitoring, closeout packet
-generation, and accepted-truth review.
+generation, and result acceptance recording.
 
-Acceptance checks:
+Interface checks:
 
 - `forager offdesk enqueue`, `launch`, and `tick` remain separate runtime
   surfaces;
@@ -216,21 +224,20 @@ Acceptance checks:
   templates only; it must not execute `closeout-review`, mutate files, or
   accept runtime work;
 - Telegram closeout verdict recording can run only handoff-bound
-  `closeout-review --verdict approved|revise|blocked`; accepted truth is
-  recorded only when the resulting closeout receipt status is `accepted`;
+  `closeout-review --verdict approved|revise|blocked`; an acceptance decision is
+  recorded when the resulting closeout receipt status is `accepted`;
 - stale plan, stale review, changed launch packet, or mismatched approval
   blocks progression.
 
-### 2. Accepted-Truth Review Bridge - Implemented
+### 2. Review Status in Operator Views
 
-Verified contract: closeout readiness and accepted-truth decisions are exposed
-through compact operator surfaces.
+Operator views expose closeout readiness and recorded acceptance decisions.
 
-Acceptance checks:
+Interface checks:
 
 - mobile surfaces show heartbeat, blocker, and next-safe-action summaries;
 - closeout artifacts are linked through CLI-inspectable receipts;
-- completed execution remains separate from accepted truth;
+- completed execution remains separate from recorded acceptance;
 - review-required states do not disappear from status.
 
 ### 3. Documentation And Dependency Hygiene - Ongoing

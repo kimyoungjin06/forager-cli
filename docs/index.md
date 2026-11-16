@@ -1,15 +1,11 @@
 # Forager
 
-A local meta-harness for harness-backed AI coding agents on Linux and macOS,
-built on tmux and written in Rust.
-
-> Forager lets people entrust meaningful work to agents and return to evidence,
-> choices, and continuity instead of mystery.
+Forager manages coding agent sessions and Git worktrees from a terminal UI.
+It uses tmux and is written in Rust for Linux and macOS.
 
 Start with a coding agent in a tmux session and an optional Git worktree. Keep
-its terminal and diff close at hand, then prepare bounded Offdesk work when you
-are ready. Forager preserves the task's evidence and review so you can return
-to an agreed next step.
+its terminal and diff close at hand. Optional Offdesk workflows add task queues,
+execution approvals, logs and result review for explicitly configured commands.
 
 ![Forager TUI preview](assets/tui.png)
 
@@ -34,17 +30,13 @@ published version and [operation status](offdesk-operation-status.md) for scope.
 
 ## Why Forager?
 
-AI coding agents are strong enough to do meaningful work, but long-running work
-often becomes hard to inspect after the fact. Forager keeps the useful autonomy
-and makes the operating boundary explicit:
+When several coding sessions are open, Forager provides one place to list them,
+attach to their terminals, inspect diffs and manage their working directories.
+For configured Offdesk tasks, you can also inspect execution records and result
+artifacts before recording a review decision. The available artifacts depend on
+the runner and task configuration.
 
-- **Entrust** a bounded task to a chosen harness-backed agent.
-- **Observe** what actually ran through local state, tmux, heartbeat, progress,
-  logs, and result artifacts.
-- **Return** to evidence, risks, next choices, and handoff packages.
-- **Promote** only reviewed lessons into durable project knowledge.
-
-## Supported Harness-Backed Agents
+## Interactive Coding CLIs
 
 Claude Code, OpenCode, Mistral Vibe, Codex CLI, and Gemini CLI are auto-detected
 for interactive sessions. Other command workloads need explicit configuration
@@ -54,13 +46,14 @@ establish those outcomes.
 
 ## Core Surfaces
 
-- **TUI dashboard**: create, monitor, attach, recover, and review sessions.
+- **TUI dashboard**: create, list and attach to sessions; inspect status estimates
+  and diffs.
 - **Paired terminals**: run git, builds, tests, and inspection commands without
   interrupting the agent.
 - **Offdesk runtime**: queue bounded work, require approval, preserve runtime
   evidence, and close out before returning Ondesk.
-- **Adaptive wiki**: capture agent-created lessons as candidates and promote
-  only reviewed knowledge.
+- **Adaptive wiki**: store proposed lessons, evidence references and review
+  decisions. A promotion record does not prove a lesson is correct.
 - **CLI/JSON**: keep automation and audit grounded in durable local state.
 
 ## Product and implementation references

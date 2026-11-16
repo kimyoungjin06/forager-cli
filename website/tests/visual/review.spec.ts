@@ -199,7 +199,7 @@ test('landing page links to the review surface', async ({ page }) => {
 
   await expect(
     page.getByRole('heading', {
-      name: /Entrust agent work\.\s*Return to evidence\./,
+      name: /Manage agent sessions\.\s*Review their work\./,
     }),
   ).toBeVisible();
   await expect(page.getByRole('link', { name: 'Preview review surface', exact: true })).toHaveAttribute(

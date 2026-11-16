@@ -14,6 +14,8 @@ The current source update prepares the repository and website for publication:
   run, review, agree and resume path.
 - Published release scope, source capabilities, sample workspace views and
   task-specific local-model qualification are distinguished.
+- Public descriptions lead with session/worktree management. Product goals,
+  status estimates, recorded reviews and task-specific validation are distinct.
 - The website groups its workspace routes, supports keyboard/mobile navigation
   and provides a shared installation command with copy-failure feedback.
 - CLI reference text is generated from the current command definitions.

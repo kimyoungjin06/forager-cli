@@ -16,7 +16,7 @@ import { sitePath } from '../../lib/paths';
       <header class="mb-12">
         <h1 class="text-4xl md:text-5xl font-bold text-white mb-6 leading-tight">Git Worktrees for Parallel AI Development</h1>
         <p class="text-lg text-gray-400 leading-relaxed">
-          Git worktrees let you check out multiple branches of the same repository at the same time, each in its own directory. This is the foundation for running multiple AI agents on the same codebase without conflicts.
+          Git worktrees let you check out multiple branches of the same repository at the same time, each in its own directory. Separate working files reduce accidental overlap, but changes can still conflict when merged.
         </p>
       </header>
 
@@ -34,22 +34,22 @@ import { sitePath } from '../../lib/paths';
       <section>
         <h2>Why Worktrees Matter for AI Agents</h2>
         <p>
-          When you run multiple AI agents on the same project, each agent needs its own working directory. Without worktrees, you either:
+          For concurrent changes, you can choose separate worktrees, separate clones or a shared checkout:
         </p>
         <ul>
-          <li>Clone the repo multiple times, wasting disk space and creating disconnected git histories</li>
-          <li>Have agents share a single checkout, leading to merge conflicts and corrupted state</li>
-          <li>Stash and switch branches constantly, losing context</li>
+          <li>Separate clones have their own repository metadata and object stores.</li>
+          <li>Worktrees share repository metadata while separating checked-out files.</li>
+          <li>A shared checkout requires coordination of edits and branch changes.</li>
         </ul>
         <p>
-          Worktrees solve this cleanly. Each agent gets its own branch and its own directory. They share git history, so changes from one agent are immediately visible (as commits) to the others.
+          Worktrees provide separate branches and directories without duplicating the object store. A commit made in one worktree is available to the others, but it does not automatically update their checked-out files.
         </p>
       </section>
 
       <section>
         <h2>The Bare Repo Pattern</h2>
         <p>
-          For the best experience with multiple worktrees, Forager supports the bare repo pattern. Instead of having a "main" clone with worktrees branching off it, you start with a bare repository (no working directory) and create all checkouts as worktrees:
+          Forager also supports a bare repository layout. Instead of a main checkout with additional worktrees, you can use a bare repository and create checkouts beside it:
         </p>
         <pre><code>git clone --bare git@github.com:user/repo.git repo.git
 cd repo.git
@@ -63,16 +63,16 @@ git worktree add ../repo-feature feature</code></pre>
       <section>
         <h2>How Forager Automates Worktrees</h2>
         <p>
-          When you add a session in <a href={sitePath('/')}>Forager</a> with worktree mode enabled, Forager handles the full lifecycle:
+          With worktree mode enabled, <a href={sitePath('/')}>Forager</a> provides commands to:
         </p>
         <ol>
           <li>Creates the worktree from your configured base repository</li>
           <li>Checks out the branch you specify (or creates a new one)</li>
           <li>Points the agent's session at the worktree directory</li>
-          <li>Cleans up the worktree when the session is removed</li>
+          <li>Remove the worktree during session deletion when cleanup is selected</li>
         </ol>
         <p>
-          Each agent gets its own branch and working directory. This is the core isolation model Forager currently supports for parallel AI development and hosted harness agent review.
+          Worktree mode gives each session a separate branch checkout and working directory. This separates working files, not process or network access; worktrees share repository metadata and are not a security sandbox.
         </p>
       </section>
 
@@ -87,7 +87,7 @@ git worktree add ../repo-feature feature</code></pre>
           <li>Start your AI agent in the session and give it the task</li>
           <li>Meanwhile, another agent is working on a different branch in a different worktree</li>
           <li>Review and merge completed work from any worktree</li>
-          <li>Remove finished sessions, and Forager cleans up the worktrees</li>
+          <li>Remove finished sessions and review the worktree cleanup option</li>
         </ol>
       </section>
 

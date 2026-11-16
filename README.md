@@ -9,20 +9,18 @@
   </p>
 </div>
 
-Run coding agents locally. Return to their sessions, results, and next steps.
-Forager is a local meta-harness built on tmux and written in Rust.
-
-> Forager lets people entrust meaningful work to agents and return to evidence,
-> choices, and continuity instead of mystery.
+Forager manages coding agent sessions and Git worktrees from a terminal UI.
+It uses tmux and is written in Rust for Linux and macOS.
 
 Start with Claude Code, Codex, OpenCode, Gemini CLI, or Mistral Vibe in separate
 tmux sessions and optional Git worktrees. Keep a paired terminal for each agent,
 inspect its status and diff, and reconnect from the TUI.
 
-For longer work, prepare a bounded Offdesk task and return to its evidence and
-review. Record the agreed next step before continuing. Telegram provides remote
-inspection and confirmation-based controls; the adaptive wiki keeps lessons as
-candidates until they are reviewed. `forager` is the primary command and `aoe`
+Optional Offdesk workflows add task queues, execution approvals, logs and result
+review for explicitly configured commands. Telegram adds remote inspection and
+confirmation-based controls. The adaptive wiki stores proposed lessons and
+review decisions. These records help you inspect work; they do not establish
+that an agent's result is correct. `forager` is the primary command and `aoe`
 is its compatibility alias.
 
 [Install](docs/installation.md) · [Quick start](docs/quick-start.md) ·
@@ -74,6 +72,8 @@ TUI leaves agent tmux sessions running on the same host.
 
 ## From a session to bounded work
 
+Use this operator workflow for configured Offdesk tasks:
+
 | Step | What you do |
 | --- | --- |
 | Prepare | Select a project TODO, scope, executor, evidence and stop conditions. |
@@ -110,10 +110,11 @@ The agent processes continue in tmux while the host stays running. Reopen
 `forager` to attach again. A host reboot stops those processes; persistent task
 records and supported harness checkpoints are separate from a live session.
 
-### Which harness-backed agents are supported?
+### Which coding CLIs are detected for interactive sessions?
 
-Claude Code, OpenCode, Mistral Vibe, Codex CLI, and Gemini CLI. Forager
-auto-detects which are installed on your system.
+Claude Code, OpenCode, Mistral Vibe, Codex CLI, and Gemini CLI. Detection and
+session attachment are separate from validating an unattended task or recovery
+with a particular harness version.
 
 ## Troubleshooting
 
@@ -130,7 +131,9 @@ Use `Ctrl+b L` to toggle back to Forager after attaching to an agent session.
 
 ### Claude Code is flickering
 
-This is a known Claude Code issue, not a Forager problem: https://github.com/anthropics/claude-code/issues/1913
+Compare the same CLI directly in tmux and through Forager. Include the CLI
+version, tmux version, terminal and reproduction steps in a bug report so the
+cause can be identified.
 
 ## Development
 
