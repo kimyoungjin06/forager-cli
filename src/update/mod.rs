@@ -6,6 +6,7 @@ use std::fs;
 use std::path::PathBuf;
 use tracing::warn;
 
+use crate::offdesk::operator_safe_text;
 use crate::session::{get_app_dir, resolve_config, UpdatesConfig};
 
 const GITHUB_API_LATEST: &str =
@@ -223,7 +224,8 @@ pub async fn print_update_notice(profile: &str) {
         if info.available {
             eprintln!(
                 "\nUpdate available: v{} -> v{} (download: https://github.com/kimyoungjin06/forager-cli/releases/latest)",
-                info.current_version, info.latest_version
+                operator_safe_text(&info.current_version),
+                operator_safe_text(&info.latest_version)
             );
         }
     }

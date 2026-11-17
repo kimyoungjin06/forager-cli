@@ -141,8 +141,9 @@ artifact entry.
   `git diff --stat`; it does not run tests, clean files, or mutate worktrees.
 - Ondesk commands do not promote adaptive wiki entries. They prepare candidate
   material for a later review stage.
-- Secrets and runner-only context are redacted before durable note or capture
-  artifacts are written.
+- Pattern-based redaction is applied before durable note or capture artifacts
+  are written. It can miss unfamiliar secrets or sensitive prose; inspect the
+  selected context before sharing it with another harness or endpoint.
 
 ## When To Use It
 
@@ -181,8 +182,9 @@ Before returning from Offdesk to Ondesk:
 
 ## Morning Telegram Handoff
 
-For long overnight work, send a compact Telegram handoff around 08:30 KST and
-use WebUI as the review surface. Telegram should answer only: should the
+One optional overnight recipe sends a compact Telegram handoff around
+08:30 KST and uses a configured local WebUI as the review surface. This guide
+does not install or enable that schedule. Telegram should answer only: should the
 operator start Ondesk review now, keep it pending, or defer with a natural
 language condition. It should not approve cleanup, wiki promotion, provider
 retargeting, file movement, or deletion.

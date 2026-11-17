@@ -5,6 +5,10 @@ inherited AoE sandbox path is treated as an audit surface until there is a
 product decision to benchmark it, rebuild it as a Forager-native feature, or
 remove it completely.
 
+This page concerns the retired Docker session feature and legacy cleanup.
+The separately selected Linux background read policy has a different scope;
+see [runtime qualification notes](guides/operation-cycle.md#runtime-qualification-notes).
+
 ## Current Policy
 
 - New sandbox sessions are blocked by `forager add --sandbox` and

@@ -8,22 +8,42 @@ pub mod adaptive_wiki;
 pub mod approval;
 pub mod background;
 pub mod capability;
+pub mod containment_seal;
 pub mod control_loop;
 pub mod decision;
+pub mod failure_history;
 pub mod implementation_packet;
 pub mod learning_signals;
+pub mod local_exit;
 pub mod mode_contract;
 pub mod mutation;
 pub mod operator_pause;
 pub mod orchestration;
 pub mod provider;
+pub mod read_policy;
+pub mod read_policy_tmux;
 pub mod redaction;
 pub mod remote_session;
+pub mod result_observation;
 pub mod resume;
 pub mod runner;
+pub(crate) mod runtime_occupancy;
 pub mod scheduler;
+pub mod shift;
+pub mod shift_enterprise;
+pub mod shift_host_policy;
+pub mod shift_retention;
+pub mod shift_review;
+pub(crate) mod shift_runtime;
+pub mod shift_store;
 pub mod task_queue;
+pub(crate) mod task_report;
+pub mod task_termination;
 pub mod tick_lock;
+pub mod wiki_context;
+pub(crate) mod wiki_context_file;
+pub(crate) mod wiki_context_receipts;
+pub(crate) mod workdir_conflicts;
 pub mod workflow;
 
 pub use adaptive_wiki::{
@@ -66,8 +86,9 @@ pub use adaptive_wiki::{
 pub use approval::{
     ActionApprovalMetadata, ActionApprovalRequest, ApprovalBrief, ApprovalBriefOption,
     ApprovalDecision, ApprovalLedger, ApprovalLedgerSession, ApprovalMode, ApprovalScope,
-    ApprovalStatus, ArtifactRetentionApprovalMetadata, ExecutionBrief, PendingActionApproval,
-    ProviderFallbackApplyScope, ProviderFallbackApprovalMetadata, RiskLevel,
+    ApprovalStatus, ArtifactRetentionApprovalMetadata, ExecutionBrief,
+    OffdeskShiftArmApprovalMetadataV1, PendingActionApproval, ProviderFallbackApplyScope,
+    ProviderFallbackApprovalMetadata, RiskLevel, OFFDESK_SHIFT_ARM_APPROVAL_METADATA_SCHEMA,
 };
 pub use background::{
     BackgroundProbe, BackgroundRecoveryAcknowledgement, BackgroundRecoveryDecision,
@@ -128,7 +149,8 @@ pub use provider::{
     ProviderRecoveryAction,
 };
 pub use redaction::{
-    force_redact, force_redact_with_report, operator_safe_report, operator_safe_text,
+    force_redact, force_redact_with_report, operator_safe_identity,
+    operator_safe_identity_selector, operator_safe_report, operator_safe_text,
     strip_runner_context, strip_runner_context_with_report, RedactionOutcome,
 };
 pub use remote_session::*;
@@ -137,12 +159,83 @@ pub use resume::{
 };
 pub use runner::{
     launch_background_command, launch_background_command_with_gate_outcome, launch_background_run,
-    poll_background_runs, BackgroundLaunchOutcome, BackgroundLaunchRequest, BackgroundPollOutcome,
-    LocalCommandLaunchSpec,
+    poll_background_runs, terminate_background_run, BackgroundLaunchOutcome,
+    BackgroundLaunchRequest, BackgroundPollOutcome, BackgroundTerminationReport,
+    LocalCommandLaunchSpec, BACKGROUND_TERMINATION_REPORT_SCHEMA,
 };
 pub use scheduler::{
     is_provider_capacity_block, ProviderCapacityGateSummary, SchedulerGate, SchedulerGateOutcome,
     SchedulerGateRequest, SchedulerGateStatus,
+};
+pub use shift::{
+    execution_brief_sha256, normalize_offdesk_shift_template_key, offdesk_shift_arm_receipt_sha256,
+    offdesk_shift_background_probe_sha256, offdesk_shift_manifest_sha256,
+    offdesk_shift_routine_run_id, offdesk_shift_task_ticket_receipt_sha256,
+    offdesk_shift_template_shift_id, offdesk_shift_template_slot, offdesk_task_launch_spec_sha256,
+    validate_offdesk_shift_dispatch_authority, validate_offdesk_shift_state_transition,
+    OffdeskShiftArmReceiptV1, OffdeskShiftAuthorityV1, OffdeskShiftBudgetV1,
+    OffdeskShiftManifestV1, OffdeskShiftRoutineBindingV1, OffdeskShiftRoutineEvidenceV1,
+    OffdeskShiftRoutineKindV1, OffdeskShiftRoutineOutcomeReceiptV1, OffdeskShiftRoutineOutcomeV1,
+    OffdeskShiftRoutineRecoveryAcknowledgementV1, OffdeskShiftRoutineResourceBudgetV1,
+    OffdeskShiftRoutineRunReservationV1, OffdeskShiftRoutineScheduleV1, OffdeskShiftRoutineUsageV1,
+    OffdeskShiftStateV1, OffdeskShiftStatusV1, OffdeskShiftTaskBindingV1,
+    OffdeskShiftTaskLaunchReservationV1, OffdeskShiftTaskLaunchTicketReceiptV1,
+    OffdeskShiftTaskObservation, OffdeskShiftTaskOutcomeReceiptV1, OffdeskShiftTaskOutcomeV1,
+    OffdeskShiftTemplateCadenceV1, OffdeskShiftTemplateInstantiationV1,
+    OffdeskShiftTransitionReceiptV1, OffdeskShiftWindowV1, OFFDESK_SHIFT_ARM_RECEIPT_SCHEMA,
+    OFFDESK_SHIFT_MANIFEST_SCHEMA, OFFDESK_SHIFT_REQUIRED_DENIALS,
+    OFFDESK_SHIFT_ROUTINE_OUTCOME_RECEIPT_SCHEMA,
+    OFFDESK_SHIFT_ROUTINE_RECOVERY_ACKNOWLEDGEMENT_SCHEMA,
+    OFFDESK_SHIFT_ROUTINE_RECOVERY_REQUIRED_DENIALS, OFFDESK_SHIFT_ROUTINE_RUN_RESERVATION_SCHEMA,
+    OFFDESK_SHIFT_ROUTINE_USAGE_SCHEMA, OFFDESK_SHIFT_STATE_SCHEMA,
+    OFFDESK_SHIFT_TASK_LAUNCH_RESERVATION_SCHEMA, OFFDESK_SHIFT_TASK_LAUNCH_TICKET_RECEIPT_SCHEMA,
+    OFFDESK_SHIFT_TASK_OUTCOME_RECEIPT_SCHEMA, OFFDESK_SHIFT_TEMPLATE_INSTANTIATION_SCHEMA,
+    OFFDESK_SHIFT_TRANSITION_RECEIPT_SCHEMA,
+};
+pub use shift_enterprise::{
+    build_offdesk_shift_enterprise_policy_report, OffdeskShiftChildTaskNetworkBoundaryV1,
+    OffdeskShiftEnterpriseBudgetCeilingV1, OffdeskShiftEnterprisePolicyReportAuthorityV1,
+    OffdeskShiftEnterprisePolicyReportV1, OffdeskShiftEnterprisePolicyV1,
+    OffdeskShiftEnterpriseProfileKeyV1, OffdeskShiftForagerNetworkEffectV1,
+    OffdeskShiftMandatoryReviewsV1, OffdeskShiftNotificationRouteV1, OffdeskShiftOperatorModeV1,
+    OFFDESK_SHIFT_ENTERPRISE_POLICY_REPORT_SCHEMA, OFFDESK_SHIFT_ENTERPRISE_POLICY_SCHEMA,
+};
+pub use shift_host_policy::{
+    probe_offdesk_shift_host_policy, require_offdesk_shift_host_policy_attestation,
+    reverify_offdesk_shift_host_policy_attestation, OffdeskShiftHostFilesystemPolicyV1,
+    OffdeskShiftHostPolicyAttestationV1, OffdeskShiftHostPolicyFilesystemBoundaryV1,
+    OffdeskShiftHostPolicyLaunchEvidenceV1, OffdeskShiftHostPolicyNetworkBoundaryV1,
+    OffdeskShiftHostPolicyProbeStatusV1, OffdeskShiftHostPolicyProviderV1,
+    OffdeskShiftHostPolicyReportAuthorityV1, OffdeskShiftHostPolicyReportV1,
+    OFFDESK_SHIFT_HOST_POLICY_ATTESTATION_SCHEMA, OFFDESK_SHIFT_HOST_POLICY_LAUNCH_EVIDENCE_SCHEMA,
+    OFFDESK_SHIFT_HOST_POLICY_REPORT_SCHEMA,
+};
+pub use shift_retention::{
+    build_offdesk_shift_retention_report, OffdeskShiftEvidenceRetentionDispositionV1,
+    OffdeskShiftEvidenceRetentionReasonV1, OffdeskShiftRetentionAuthorityV1,
+    OffdeskShiftRetentionItemV1, OffdeskShiftRetentionPolicyV1, OffdeskShiftRetentionReportV1,
+    OffdeskShiftRetentionSummaryV1, OFFDESK_SHIFT_RETENTION_POLICY_SCHEMA,
+    OFFDESK_SHIFT_RETENTION_REPORT_SCHEMA,
+};
+pub use shift_review::{
+    build_offdesk_shift_council_escalation_packet, build_offdesk_shift_review_projection,
+    OffdeskShiftCloseoutReviewV1, OffdeskShiftCouncilCurrentEvidenceV1,
+    OffdeskShiftCouncilDecisionRequestV1, OffdeskShiftCouncilDecisionV1,
+    OffdeskShiftCouncilDriftV1, OffdeskShiftCouncilEscalationPacketV1, OffdeskShiftCouncilOptionV1,
+    OffdeskShiftCouncilOriginalGoalV1, OffdeskShiftCouncilPacketAuthorityV1,
+    OffdeskShiftCouncilPacketSourcesV1, OffdeskShiftCouncilRemainingBudgetV1,
+    OffdeskShiftCouncilResourceAmountsV1, OffdeskShiftCouncilResourceBudgetV1,
+    OffdeskShiftCouncilReviewV1, OffdeskShiftCouncilRoutineBudgetV1,
+    OffdeskShiftCouncilTaskAttemptBudgetV1, OffdeskShiftCouncilTaskBudgetV1,
+    OffdeskShiftEvidenceCoverageV1, OffdeskShiftEvidenceDrilldownV1, OffdeskShiftEvidenceItemV1,
+    OffdeskShiftReviewAuthorityV1, OffdeskShiftReviewProjectionV1, OffdeskShiftReviewSourcesV1,
+    OffdeskShiftReviewSummaryV1, OffdeskShiftRoutineReviewV1, OffdeskShiftTaskAttemptReviewV1,
+    OffdeskShiftTaskReviewV1, OffdeskShiftWikiReviewV1, OffdeskShiftWikiTargetReviewV1,
+    OFFDESK_SHIFT_COUNCIL_ESCALATION_PACKET_SCHEMA, OFFDESK_SHIFT_REVIEW_PROJECTION_SCHEMA,
+};
+pub use shift_store::{
+    OffdeskShiftRecordV1, OffdeskShiftStore, OffdeskShiftStoreSnapshotV1,
+    OFFDESK_SHIFT_LEDGER_FILE, OFFDESK_SHIFT_LEDGER_SCHEMA, OFFDESK_SHIFT_STORE_SNAPSHOT_SCHEMA,
 };
 pub use task_queue::{
     count_tasks, ensure_resume_review_next_safe_action, next_safe_action_for_background_poll,
@@ -154,7 +247,18 @@ pub use task_queue::{
     OffdeskTaskNextSafeAction, OffdeskTaskStatus, OffdeskTaskStore, OffdeskTaskView,
     OffdeskTickReportInput,
 };
+pub use task_termination::{
+    terminate_offdesk_task, OffdeskTaskTerminationReport, OFFDESK_TASK_TERMINATION_REPORT_SCHEMA,
+};
 pub use tick_lock::{OffdeskTickLockGuard, OffdeskTickLockMetadata};
+pub use wiki_context::{
+    wiki_context_projection_sha256, WikiContextAgentAcknowledgementV1, WikiContextAgentMode,
+    WikiContextAgentTool, WikiContextBoundFailureV1, WikiContextManifestOutcomeV1,
+    WikiContextManifestV1, WikiContextOperatorVerificationV1, WikiContextPresentationReceiptV1,
+    WikiContextPresentationStatus, WikiContextProjectionEntryV1, WikiContextProjectionV1,
+    WikiContextUnregisteredProjectV1, WIKI_CONTEXT_MANIFEST_SCHEMA,
+    WIKI_CONTEXT_PRESENTATION_RECEIPT_SCHEMA,
+};
 pub use workflow::{
     assess_implementation_packet_detail, assess_implementation_packet_goal,
     assess_work_slice_receipt, build_adaptive_wiki_proposal_receipt,
@@ -189,3 +293,5 @@ pub use workflow::{
     WorkSliceReceiptCoverage, WorkSliceReceiptTrustTier, OFFDESK_PLAN_LAUNCH_PREP_SCHEMA,
     OFFDESK_PLAN_REGISTRATION_SCHEMA, OFFDESK_PLAN_REQUIRED_DENIALS, OFFDESK_PLAN_REVIEW_SCHEMA,
 };
+
+pub mod weekly_usage;

@@ -1,0 +1,59 @@
+{
+  "schema": "document_hygiene_report.v1",
+  "generated_at": "2026-08-19T04:05:00Z",
+  "project_key": "fixture-mixed-git-states",
+  "baseline": {
+    "identity": "catalog_baseline_001",
+    "generated_at": "2026-08-19T03:40:00Z",
+    "complete": true
+  },
+  "post_work": {
+    "identity": "catalog_post_work_001",
+    "generated_at": "2026-08-19T04:00:00Z",
+    "complete": false
+  },
+  "assessment_complete": false,
+  "changes": [
+    {
+      "change": "created",
+      "before": null,
+      "after": {"kind": "observation", "value": "doc_observation_untracked_draft"},
+      "intent": {
+        "kind": "create_new_document",
+        "subject_key": "operator-proposal",
+        "target_ref": null,
+        "why_update_is_insufficient": "The proposal has a distinct operator audience and review boundary.",
+        "active_entrypoint_ref": {"kind": "relative_path", "value": "PROJECT_STATE.md"}
+      }
+    }
+  ],
+  "findings": [
+    {
+      "finding_id": "finding_incomplete_post_work",
+      "kind": "coverage_incomplete",
+      "severity": "warn",
+      "authority": "observed",
+      "document_ref": null,
+      "summary": "The post-work catalog reached its elapsed-time budget.",
+      "evidence": ["post_work.complete=false", "reached_limit=elapsed_time"],
+      "review_required": true
+    },
+    {
+      "finding_id": "finding_unlinked_proposal",
+      "kind": "unlinked_meaningful_document",
+      "severity": "warn",
+      "authority": "observed",
+      "document_ref": {"kind": "observation", "value": "doc_observation_untracked_draft"},
+      "summary": "The declared active entrypoint does not yet link the new proposal.",
+      "evidence": ["inbound_ref_count=0", "declared_entrypoint=PROJECT_STATE.md"],
+      "review_required": true
+    }
+  ],
+  "summary": {"errors": 0, "warnings": 2, "infos": 0},
+  "authority_boundary": {
+    "advisory_only": true,
+    "strict_closeout_authorized": false,
+    "search_visibility_mutation_authorized": false,
+    "file_mutation_authorized": false
+  }
+}

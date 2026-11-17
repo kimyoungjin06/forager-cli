@@ -7,29 +7,30 @@ tracked copy for Forager documentation.
 
 ## Message Architecture
 
-Forager's public brand should lead with the north star from
-[`project-direction.md`](project-direction.md):
+Public introductions should describe the current tool:
 
-> Forager lets people entrust meaningful work to agents and return to evidence,
-> choices, and continuity instead of mystery.
+> Forager manages coding agent sessions and Git worktrees from a terminal UI,
+> with optional task queues and result review.
 
-Use that sentence for high-level positioning. Use the practical language below
-for docs, UI labels, and implementation plans.
+The north star in [`project-direction.md`](project-direction.md) describes the
+direction of development. Label it as a goal when using it; do not present it as
+an achieved outcome for every task or harness.
 
 | Layer | Preferred language |
 | --- | --- |
-| Product category | Local meta-harness |
-| Worker model | Harness-backed agents |
-| Main promise | Evidence, choices, and continuity |
+| Product category | Coding agent session manager |
+| Worker model | Installed coding CLIs and explicitly configured commands |
+| Main functions | Sessions, worktrees, task records and result review |
 | Operating loop | Ondesk to Offdesk to Ondesk |
-| Trust model | Completed execution is not accepted truth |
-| Durable state | Local approval, evidence, recovery, review, and knowledge promotion |
-| Knowledge model | Candidates first, reviewed promotion later |
+| Review model | Execution status and recorded review decisions are separate |
+| Stored state | Local session, task, approval, artifact and review records |
+| Knowledge model | Proposed lessons and recorded review decisions |
 
-Avoid leading with generic phrases such as "AI agent manager" or "terminal
-session manager" when the context is product positioning. Those phrases are
-still accurate for narrow feature descriptions, but the top-level identity is
-Forager as the supervising local control plane around other harnesses.
+Use "meta-harness" in architecture discussions with its intended scope
+explained. Prefer concrete feature names in product copy. Distinguish source
+interfaces, task-specific validation and future plans. Worktrees are separate
+checkouts, status labels are estimates, and a recorded acceptance is a review
+decision rather than proof of correctness.
 
 ## Source
 
@@ -74,7 +75,8 @@ Forager as the supervising local control plane around other harnesses.
   brand surfaces unless a project has a separate documented reason.
 - Keep official KISTI logo usage on a white or near-white badge with adequate
   padding.
-- Put the north star ahead of feature inventory on first-contact surfaces.
+- Lead first-contact surfaces with current functions. Keep goals and planned
+  integrations visibly separate from available features.
 - Distinguish hosted harness responsibility from Forager responsibility in
   product, docs, and UI copy.
 - Preserve the logo metaphor as a bounded evidence trail: frame for local

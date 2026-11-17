@@ -66,25 +66,16 @@ Disallowed integration paths:
 
 ## Local Folder Policy
 
-The recommended checkout names are:
+Checkout paths are operator choices. Portable examples are:
 
 ```text
-/home/kimyoungjin06/Desktop/Workspace/98.Harness/forager-cli
-/home/kimyoungjin06/Desktop/Workspace/forager-control      # possible future rename
+~/src/forager-cli
+~/src/forager-control   # optional external coordinator, not a bundled service
 ```
 
-No checkout-level compatibility symlink is kept after the harness move:
-
-```text
-/home/kimyoungjin06/Desktop/Workspace/agent-of-empires     # removed local path
-/home/kimyoungjin06/Desktop/Workspace/forager-cli          # removed local path
-/home/kimyoungjin06/Desktop/Workspace/aoe_orch_control     # unchanged until separately renamed
-```
-
-Do not perform the local folder rename in the same patch as large Offdesk
-runtime changes. Rename the checkout only after the stabilization tree is
-checkpointed, because historical reports, scripts, shell history, and memory
-records may still contain absolute paths under `agent-of-empires`.
+The earlier workstation rename is preserved in the
+[historical migration record](rename-forager.md). Existing reports can retain
+old paths as evidence; do not move a live checkout just to match these examples.
 
 ## Product Direction
 
@@ -98,16 +89,8 @@ such as `forager-control` or `forager-orch-lab`.
 
 ## Migration Checklist
 
-Before renaming the local checkout:
-
-- checkpoint or commit the current Offdesk stabilization patch set;
-- verify no running tmux/offdesk task is using the old checkout as its workdir;
-- check that no `98.Harness/forager-cli` directory already exists;
-- remove the previous `agent-of-empires` symlink instead of preserving checkout
-  path compatibility;
-- run `cargo test --test offdesk_cli` and one `forager offdesk status` or
-  equivalent smoke after the rename;
-- update local notes/scripts only when they are active operational surfaces, not
-  archival evidence paths.
-
-The rename is a workspace hygiene step, not a product compatibility break.
+If a checkout move is separately selected, first checkpoint its work and
+inspect active sessions and Offdesk working directories. Update active local
+scripts and references after the move while preserving historical evidence.
+Use `forager status --json` to inspect the selected profile and sessions.
+The historical rename sequence is not a general setup prerequisite.

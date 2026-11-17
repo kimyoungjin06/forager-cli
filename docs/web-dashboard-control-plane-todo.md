@@ -1,5 +1,12 @@
 # Web Dashboard Control Plane TODO
 
+> **Record scope:** Retained WebUI design and implementation notes. Published workspace views
+> use static samples; local exports and the action bridge require separate
+> configuration. Historical fixture counts and source milestones below do not
+> certify an installation or select the current implementation backlog.
+> See [current operation scope](offdesk-operation-status.md) and
+> [the daily workflow](guides/operation-cycle.md) for active guidance.
+
 Updated: 2026-06-19
 
 This is the long-term implementation backlog for turning the current WebUI

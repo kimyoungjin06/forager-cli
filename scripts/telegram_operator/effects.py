@@ -43,6 +43,18 @@ PLAN_EFFECTS: dict[str, tuple[str, str, str, str | None]] = {
         "plan_draft",
         "plan_draft",
     ),
+    "plan_drafts_compared": (
+        "artifact_write",
+        "plan_artifact",
+        "plan_draft_comparison",
+        "compare_plan_drafts",
+    ),
+    "plan_draft_selected": (
+        "artifact_write",
+        "plan_artifact",
+        "plan_draft",
+        "select_plan_draft",
+    ),
     "plan_registered": (
         "plan_registry_mutation",
         "plan_registry",
@@ -54,6 +66,18 @@ PLAN_EFFECTS: dict[str, tuple[str, str, str, str | None]] = {
         "plan_review",
         "plan_review",
         "approved",
+    ),
+    "plan_review_revision_required": (
+        "plan_review_resolution",
+        "plan_review",
+        "plan_review",
+        "revision_required",
+    ),
+    "plan_review_rejected": (
+        "plan_review_resolution",
+        "plan_review",
+        "plan_review",
+        "rejected",
     ),
     "plan_launch_prep_prepared": (
         "artifact_write",
@@ -182,12 +206,15 @@ def _plan_effect(rendered: dict[str, Any]) -> dict[str, Any] | None:
 
 def _dispatch_authority_domain(effect_kind: str) -> str:
     return {
+        "remote_command_envelope": "telegram_command_ingress",
         "session_input": "agent_session_input",
         "session_message": "agent_session_input",
         "decision": "ondesk_decision",
         "recovery": "accepted_truth_recovery",
+        "runtime": "offdesk_runtime",
         "runtime_dispatch": "offdesk_runtime",
         "cancel_task": "offdesk_task_queue",
+        "terminate_task": "offdesk_runtime_control",
         "pause": "operator_control",
         "resume": "operator_control",
     }.get(effect_kind, "guarded_control")
@@ -267,5 +294,27 @@ def annotate_result_effect(rendered: dict[str, Any]) -> None:
             if effect["kind"] == "approval_resolution":
                 rendered["approval_resolution_authorized"] = True
                 rendered["approval_authorized"] = effect.get("action") == "approved"
+    operator_identity = rendered.get("operator_identity")
+    if isinstance(operator_identity, dict):
+        effect["operator_identity"] = operator_identity
+    command_envelope = rendered.get("remote_command_envelope")
+    if isinstance(command_envelope, dict):
+        effect["command_envelope_id"] = command_envelope.get("envelope_id")
+        effect["command_nonce"] = command_envelope.get("nonce")
+        effect["command_envelope_status"] = command_envelope.get("validation_status")
+    remote_plan_session = rendered.get("remote_plan_session")
+    remote_plan_session_id = (
+        str(remote_plan_session.get("session_id") or "").strip()
+        if isinstance(remote_plan_session, dict)
+        else str(rendered.get("remote_plan_session_id") or "").strip()
+    )
+    if remote_plan_session_id:
+        effect["remote_plan_session_id"] = remote_plan_session_id
+        rendered["remote_plan_session_id"] = remote_plan_session_id
+    if isinstance(dispatch, dict):
+        for key in ("receipt_id", "task_id", "decision_id", "recovery_id"):
+            value = str(dispatch.get(key) or "").strip()
+            if value:
+                effect[key] = value
     rendered["authority_domain"] = effect["authority_domain"]
     rendered["effect"] = effect

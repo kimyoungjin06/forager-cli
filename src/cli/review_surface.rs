@@ -12,11 +12,12 @@ use std::path::{Path, PathBuf};
 use super::artifact_index;
 use super::status::current_status_json_value;
 use crate::offdesk::{
-    latest_implementation_packet_for_project, load_offdesk_status_summary, operator_safe_text,
-    AdaptiveWikiStore, BackgroundProbe, BackgroundRunStore, DecisionLedger, DecisionRecord,
-    DecisionStatus, ImplementationPacketSummary, LatestImplementationPacket, OffdeskStatusSummary,
-    OffdeskTaskStatus, OffdeskTaskStore, IMPLEMENTATION_PACKET_FILE, IMPLEMENTATION_PACKET_MD_FILE,
-    RECURSIVE_ALIGNMENT_REVIEW_FILE,
+    build_offdesk_shift_review_projection, latest_implementation_packet_for_project,
+    load_offdesk_status_summary, operator_safe_text, AdaptiveWikiStore, BackgroundProbe,
+    BackgroundRunStore, DecisionLedger, DecisionRecord, DecisionStatus,
+    ImplementationPacketSummary, LatestImplementationPacket, OffdeskShiftReviewProjectionV1,
+    OffdeskStatusSummary, OffdeskTask, OffdeskTaskStatus, OffdeskTaskStore,
+    IMPLEMENTATION_PACKET_FILE, IMPLEMENTATION_PACKET_MD_FILE, RECURSIVE_ALIGNMENT_REVIEW_FILE,
 };
 use crate::session::get_profile_dir;
 
@@ -32,6 +33,14 @@ pub struct ReviewSurfaceArgs {
     /// Stable project key to focus the review packet. Defaults to all projects.
     #[arg(long)]
     pub project_key: Option<String>,
+
+    /// Exact bounded shift to project. Defaults to the active shift, then latest.
+    #[arg(long)]
+    pub shift_id: Option<String>,
+
+    /// Routine run currently generating this projection.
+    #[arg(long)]
+    pub current_run_id: Option<String>,
 
     /// Emit compact JSON. Without this flag, a human summary is printed.
     #[arg(long)]
@@ -51,6 +60,8 @@ struct ReviewSurface {
     runtime: ReviewSurfaceRuntime,
     decisions: ReviewSurfaceDecisions,
     adaptive_wiki: ReviewSurfaceAdaptiveWiki,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    offdesk_shift: Option<OffdeskShiftReviewProjectionV1>,
     #[serde(skip_serializing_if = "Option::is_none")]
     implementation_packet: Option<ImplementationPacketSummary>,
     artifacts: ReviewSurfaceArtifacts,
@@ -103,6 +114,10 @@ struct ReviewSurfaceCloseout {
     reviewed_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     receipt_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    recorded_receipt_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    acceptance_basis: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     verification_status: Option<String>,
 }
@@ -203,6 +218,7 @@ struct ReviewSurfaceSources {
     implementation_packet: &'static str,
     artifact_index: &'static str,
     artifact_retention_review: &'static str,
+    offdesk_shift_review: &'static str,
 }
 
 struct LatestCloseout {
@@ -250,6 +266,8 @@ pub(crate) fn build_review_surface_value(
 ) -> Result<Value> {
     let args = ReviewSurfaceArgs {
         project_key: project_key.map(ToOwned::to_owned),
+        shift_id: None,
+        current_run_id: None,
         json: true,
     };
     serde_json::to_value(build_review_surface(profile, &args)?).context("serialize review surface")
@@ -329,6 +347,19 @@ pub(crate) fn human_summary_from_value(surface: &Value) -> String {
         number_at(surface, "/adaptive_wiki/candidate_count").unwrap_or_default(),
         number_at(surface, "/adaptive_wiki/review_due_count").unwrap_or_default()
     ));
+    if let Some(shift_id) = text_at(surface, "/offdesk_shift/shift_id") {
+        output.push_str(&format!(
+            "  bounded shift: {shift_id}, review={}\n",
+            text_at(surface, "/offdesk_shift/review_status").unwrap_or("unknown")
+        ));
+        output.push_str(&format!(
+            "  shift attempts: {} reserved, {} terminal; routines: {} reserved, {} terminal\n",
+            number_at(surface, "/offdesk_shift/summary/task_attempts_reserved").unwrap_or_default(),
+            number_at(surface, "/offdesk_shift/summary/task_attempts_terminal").unwrap_or_default(),
+            number_at(surface, "/offdesk_shift/summary/routine_runs_reserved").unwrap_or_default(),
+            number_at(surface, "/offdesk_shift/summary/routine_runs_terminal").unwrap_or_default()
+        ));
+    }
     if surface.pointer("/artifacts/index/schema").is_some() {
         output.push_str(&format!(
             "  artifact index: {} total, {} review-required, {} disposal/archive candidate(s)\n",
@@ -438,6 +469,12 @@ fn build_review_surface(profile: &str, args: &ReviewSurfaceArgs) -> Result<Revie
         artifact_index,
         retention_review,
     );
+    let offdesk_shift = build_offdesk_shift_review_projection(
+        profile,
+        args.shift_id.as_deref(),
+        args.current_run_id.as_deref(),
+        generated_at,
+    )?;
 
     Ok(ReviewSurface {
         schema: REVIEW_SURFACE_SCHEMA,
@@ -455,6 +492,7 @@ fn build_review_surface(profile: &str, args: &ReviewSurfaceArgs) -> Result<Revie
         runtime: build_runtime(&profile_dir, &status_json, args.project_key.as_deref()),
         decisions: build_decisions(&profile_dir, args.project_key.as_deref()),
         adaptive_wiki: build_adaptive_wiki(&profile_dir, args.project_key.as_deref(), generated_at),
+        offdesk_shift,
         implementation_packet: latest_implementation_packet.map(|packet| packet.summary),
         artifacts,
         redaction: ReviewSurfaceRedaction {
@@ -468,6 +506,7 @@ fn build_review_surface(profile: &str, args: &ReviewSurfaceArgs) -> Result<Revie
             implementation_packet: "implementation_packet.v1",
             artifact_index: "artifact_index.v1",
             artifact_retention_review: "artifact_retention_review.v1",
+            offdesk_shift_review: "offdesk_shift_review_projection.v1",
         },
     })
 }
@@ -703,6 +742,14 @@ fn build_closeout(
             .and_then(|closeout| closeout.review.as_ref())
             .map(|review| review.reviewed_at.to_rfc3339()),
         receipt_status,
+        recorded_receipt_status: receipt
+            .and_then(|receipt| receipt.get("recorded_acceptance_status"))
+            .and_then(Value::as_str)
+            .map(operator_safe_text),
+        acceptance_basis: receipt
+            .and_then(|receipt| receipt.get("acceptance_basis"))
+            .and_then(Value::as_str)
+            .map(operator_safe_text),
         verification_status,
     }
 }
@@ -757,6 +804,7 @@ fn build_runtime(
             "cancelled": value_usize(status_json, "cancelled_offdesk_tasks"),
             "stale_background": value_usize(status_json, "stale_background_runs"),
             "failed_background": value_usize(status_json, "failed_background_runs"),
+            "historical_failed_background": value_usize(status_json, "historical_failed_background_runs"),
             "closeout_required": closeout_required,
             "background_records": filtered_backgrounds.len()
         }),
@@ -1046,7 +1094,7 @@ fn latest_closeout(
         let source_observation = plan
             .get("source_observation")
             .map(closeout_source_observation_projection);
-        let review = latest_closeout_review(&artifact_dir)?;
+        let review = latest_closeout_review(profile_dir, &artifact_dir)?;
         let sort_key = review
             .as_ref()
             .map(|review| review.reviewed_at)
@@ -1074,13 +1122,17 @@ fn latest_accepted_truth_receipt(
     profile_dir: &Path,
     project_key: Option<&str>,
 ) -> Result<Option<AcceptedTruthReceipt>> {
-    let current_completed_tasks = OffdeskTaskStore::new(profile_dir)
-        .load()
-        .unwrap_or_default()
-        .into_iter()
+    let tasks = OffdeskTaskStore::new(profile_dir).load()?;
+    let current_completed_tasks = tasks
+        .iter()
         .filter(|task| task.status == OffdeskTaskStatus::Completed)
         .filter(|task| option_matches(project_key, Some(task.project_key.as_str())))
-        .map(|task| ((task.project_key, task.task_id), task.updated_at))
+        .map(|task| {
+            (
+                (task.project_key.clone(), task.task_id.clone()),
+                task.updated_at,
+            )
+        })
         .collect::<HashMap<_, _>>();
     if current_completed_tasks.is_empty() {
         return Ok(None);
@@ -1116,6 +1168,8 @@ fn latest_accepted_truth_receipt(
             .map(operator_safe_text)
             .unwrap_or_else(|| "unknown".to_string());
         candidates.extend(accepted_truth_receipts_in_dir(
+            profile_dir,
+            &tasks,
             &artifact_dir,
             &closeout_id,
             &current_completed_tasks,
@@ -1127,6 +1181,8 @@ fn latest_accepted_truth_receipt(
 }
 
 fn accepted_truth_receipts_in_dir(
+    profile_dir: &Path,
+    tasks: &[OffdeskTask],
     artifact_dir: &Path,
     closeout_id: &str,
     current_completed_tasks: &HashMap<(String, String), DateTime<Utc>>,
@@ -1155,9 +1211,11 @@ fn accepted_truth_receipts_in_dir(
         else {
             continue;
         };
-        let Some(receipt) = value.get("closeout_receipt") else {
-            continue;
-        };
+        let receipt = crate::offdesk::workflow::review_link::effective_closeout_receipt(
+            profile_dir,
+            tasks,
+            &value,
+        );
         if receipt.get("acceptance_status").and_then(Value::as_str) != Some("accepted") {
             continue;
         }
@@ -1173,7 +1231,7 @@ fn accepted_truth_receipts_in_dir(
             .pointer("/artifacts/closeout_receipt_json")
             .and_then(Value::as_str)
             .map(PathBuf::from);
-        let mut accepted_scope = string_array(receipt, "accepted_scope");
+        let mut accepted_scope = string_array(&receipt, "accepted_scope");
         if accepted_scope.is_empty() {
             accepted_scope = review_task_refs(&value);
         }
@@ -1241,7 +1299,11 @@ fn review_task_refs(review: &Value) -> Vec<String> {
         .collect()
 }
 
-fn latest_closeout_review(artifact_dir: &Path) -> Result<Option<LatestCloseoutReview>> {
+fn latest_closeout_review(
+    profile_dir: &Path,
+    artifact_dir: &Path,
+) -> Result<Option<LatestCloseoutReview>> {
+    let tasks = OffdeskTaskStore::new(profile_dir).load()?;
     let mut reviews = Vec::new();
     for entry in fs::read_dir(artifact_dir)? {
         let entry = entry?;
@@ -1275,7 +1337,12 @@ fn latest_closeout_review(artifact_dir: &Path) -> Result<Option<LatestCloseoutRe
             .pointer("/artifacts/closeout_receipt_json")
             .and_then(Value::as_str)
             .map(PathBuf::from);
-        let receipt = value.get("closeout_receipt").cloned();
+        let effective = crate::offdesk::workflow::review_link::effective_closeout_receipt(
+            profile_dir,
+            &tasks,
+            &value,
+        );
+        let receipt = (!effective.is_null()).then_some(effective);
         reviews.push(LatestCloseoutReview {
             reviewed_at,
             verdict,

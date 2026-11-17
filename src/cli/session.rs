@@ -4,7 +4,11 @@ use anyhow::{bail, Result};
 use clap::{Args, Subcommand};
 use serde::Serialize;
 
+use crate::offdesk::operator_safe_text;
 use crate::session::{GroupTree, Storage};
+
+pub(crate) mod wiki_context;
+use wiki_context::{ContextStatusArgs, ContextSyncArgs};
 
 #[derive(Subcommand)]
 pub enum SessionCommands {
@@ -28,6 +32,18 @@ pub enum SessionCommands {
 
     /// Auto-detect current session
     Current(CurrentArgs),
+
+    /// Inspect a session's wiki brief and presentation freshness without writes
+    ContextStatus(ContextStatusArgs),
+
+    /// Explicitly refresh and present wiki context to one prompt-ready session
+    ContextSync(ContextSyncArgs),
+}
+
+impl SessionCommands {
+    pub(crate) fn is_read_only_context_status(&self) -> bool {
+        matches!(self, Self::ContextStatus(_))
+    }
 }
 
 #[derive(Args)]
@@ -99,6 +115,10 @@ pub async fn run(profile: &str, command: SessionCommands) -> Result<()> {
         SessionCommands::Show(args) => show_session(profile, args).await,
         SessionCommands::Rename(args) => rename_session(profile, args).await,
         SessionCommands::Current(args) => current_session(args).await,
+        SessionCommands::ContextStatus(args) => {
+            wiki_context::run_context_status(profile, args).await
+        }
+        SessionCommands::ContextSync(args) => wiki_context::run_context_sync(profile, args).await,
     }
 }
 
@@ -112,6 +132,7 @@ async fn start_session(profile: &str, args: SessionIdArgs) -> Result<()> {
         std::path::Path::new(&instances[idx].project_path),
     )?;
 
+    crate::session::auto_orchestrator::prepare_launch(&mut instances[idx]);
     instances[idx].start_with_size(crate::terminal::get_size(), &config)?;
     let title = instances[idx].title.clone();
 
@@ -149,6 +170,7 @@ async fn restart_session(profile: &str, args: SessionIdArgs) -> Result<()> {
         std::path::Path::new(&instances[idx].project_path),
     )?;
 
+    crate::session::auto_orchestrator::prepare_launch(&mut instances[idx]);
     instances[idx].restart_with_size(crate::terminal::get_size(), &config)?;
     let title = instances[idx].title.clone();
 
@@ -272,7 +294,10 @@ async fn rename_session(profile: &str, args: RenameArgs) -> Result<()> {
         if tmux_session.exists() {
             let new_tmux_name = crate::tmux::Session::generate_name(&id, &effective_title);
             if let Err(e) = tmux_session.rename(&new_tmux_name) {
-                eprintln!("Warning: failed to rename tmux session: {}", e);
+                eprintln!(
+                    "Warning: failed to rename tmux session: {}",
+                    operator_safe_text(&e.to_string())
+                );
             } else {
                 crate::tmux::refresh_session_cache();
             }

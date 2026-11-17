@@ -10,7 +10,7 @@ use super::{
     write_new_file, WikiProposalReceiptArgs,
 };
 use crate::offdesk::{
-    build_adaptive_wiki_proposal_receipt, AdaptiveWikiProposalReceipt,
+    build_adaptive_wiki_proposal_receipt, operator_safe_text, AdaptiveWikiProposalReceipt,
     AdaptiveWikiProposalReceiptInput, AdaptiveWikiReviewQueueFilter,
 };
 
@@ -98,12 +98,13 @@ pub(super) async fn wiki_proposal_receipt(
 fn print_wiki_proposal_receipt(receipt: &AdaptiveWikiProposalReceipt) {
     println!(
         "Adaptive wiki proposal receipt {}: {}",
-        receipt.proposal.proposal_id, receipt.status
+        operator_safe_text(&receipt.proposal.proposal_id),
+        operator_safe_text(receipt.status)
     );
     println!(
         "  proposal: {} {} current={}",
-        empty_dash(&receipt.proposal.subject_kind),
-        empty_dash(&receipt.proposal.subject_id),
+        operator_safe_or_dash(&receipt.proposal.subject_kind),
+        operator_safe_or_dash(&receipt.proposal.subject_id),
         receipt.proposal.current
     );
     if let Some(action) = receipt.proposal.action {
@@ -113,30 +114,45 @@ fn print_wiki_proposal_receipt(receipt: &AdaptiveWikiProposalReceipt) {
         println!("  lifecycle: {:?}", decision);
     }
     if let Some(event_id) = receipt.proposal.lifecycle_event_id.as_deref() {
-        println!("  event: {event_id}");
+        println!("  event: {}", operator_safe_text(event_id));
     }
     if let Some(audit) = receipt.audit.as_ref() {
-        println!("  audit: {}", audit.id);
+        println!("  audit: {}", operator_safe_text(&audit.id));
     }
-    println!("  command_sha256: {}", receipt.preview_command_sha256);
-    println!("  command: {}", receipt.preview_command);
+    println!(
+        "  command_sha256: {}",
+        operator_safe_text(&receipt.preview_command_sha256)
+    );
+    println!(
+        "  command: {}",
+        operator_safe_text(&receipt.preview_command)
+    );
     println!("  checks:");
     for check in &receipt.checks {
         println!(
             "    {}: {} ({})",
-            check.name,
+            operator_safe_text(check.name),
             if check.passed { "pass" } else { "fail" },
-            check.detail
+            operator_safe_text(&check.detail)
         );
     }
     if !receipt.blockers.is_empty() {
         println!("  blockers:");
         for blocker in &receipt.blockers {
-            println!("    - {blocker}");
+            println!("    - {}", operator_safe_text(blocker));
         }
     }
     if !receipt.proposal.evidence_refs.is_empty() {
-        println!("  evidence: {}", receipt.proposal.evidence_refs.join(", "));
+        println!(
+            "  evidence: {}",
+            receipt
+                .proposal
+                .evidence_refs
+                .iter()
+                .map(|value| operator_safe_text(value))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
     }
 }
 
@@ -145,7 +161,8 @@ fn write_wiki_proposal_receipt_export(
     receipt: &AdaptiveWikiProposalReceipt,
     output: Option<&PathBuf>,
 ) -> Result<WikiProposalReceiptExport> {
-    let bytes = serde_json::to_vec_pretty(receipt)?;
+    let safe_receipt = operator_safe_json_value(serde_json::to_value(receipt)?);
+    let bytes = serde_json::to_vec_pretty(&safe_receipt)?;
 
     if let Some(path) = output {
         if let Some(parent) = path
@@ -179,7 +196,8 @@ fn write_wiki_proposal_receipt_export(
         )
     })?;
     let timestamp = receipt.generated_at.format("%Y%m%dT%H%M%SZ");
-    let proposal_id = receipt.proposal.proposal_id.replace(['/', '\\', ':'], "_");
+    let proposal_id =
+        operator_safe_text(&receipt.proposal.proposal_id).replace(['/', '\\', ':'], "_");
     for attempt in 0..1000 {
         let filename = if attempt == 0 {
             format!("adaptive_wiki_proposal_receipt_{timestamp}_{proposal_id}.json")
@@ -212,9 +230,10 @@ fn write_wiki_proposal_receipt_export(
     )
 }
 
-fn empty_dash(value: &str) -> &str {
+fn operator_safe_or_dash(value: &str) -> String {
+    let value = operator_safe_text(value);
     if value.trim().is_empty() {
-        "-"
+        "-".to_string()
     } else {
         value
     }

@@ -1,7 +1,7 @@
 //! Tests for HomeView
 
 use chrono::{Duration, Utc};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{backend::TestBackend, buffer::Buffer, Terminal};
 use serde_json::json;
 use serial_test::serial;
@@ -25,6 +25,8 @@ fn preview_cache_refreshes_only_for_changed_or_stale_content() {
         last_refresh: std::time::Instant::now(),
         dimensions: (80, 24),
         terminal_running: false,
+        wiki_context_summary: String::new(),
+        wiki_context_last_refresh: None,
     };
 
     assert!(!cache.needs_refresh("session-a", (80, 24)));
@@ -283,6 +285,95 @@ fn load_offdesk_summary_counts_recovery_tasks() {
 
 #[test]
 #[serial]
+fn load_offdesk_summary_projects_the_latest_bounded_shift() {
+    let temp = TempDir::new().unwrap();
+    setup_test_home(&temp);
+    let profile_dir = crate::session::get_profile_dir("test").unwrap();
+    let ledger_path = profile_dir.join("offdesk_shifts.v1.json");
+    fs::write(
+        &ledger_path,
+        serde_json::to_vec_pretty(&json!({
+            "schema": "offdesk_shift_ledger.v1",
+            "manifests": [{
+                "schema": "offdesk_shift_manifest.v1",
+                "shift_id": "shift_tui_review_1",
+                "profile": "test",
+                "created_at": "2026-08-29T00:00:00Z",
+                "window": {
+                    "starts_at": "2026-08-29T00:00:00Z",
+                    "stops_at": "2026-08-29T09:00:00Z",
+                    "timezone": "Asia/Seoul"
+                },
+                "plan_id": "plan_tui_review_1",
+                "plan_review_id": "review_tui_review_1",
+                "plan_source_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "plan_review_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "task_bindings": [],
+                "routine_bindings": [{
+                    "routine_id": "morning_review",
+                    "routine_kind": "morning_review_brief",
+                    "schedule": {
+                        "schedule_kind": "once",
+                        "at": "2026-08-29T08:30:00Z"
+                    }
+                }],
+                "budget": {
+                    "max_concurrent_tasks": 0,
+                    "max_task_launches": 0,
+                    "max_attempts_per_task": 0,
+                    "max_routine_runs": 1
+                },
+                "authority": {
+                    "task_dispatch_requires_fresh_approval": true,
+                    "task_launch_spec_is_immutable": true,
+                    "wiki_writes_are_candidate_only": true,
+                    "plan_revision_requires_review": true,
+                    "acceptance_requires_ondesk_review": true,
+                    "does_not_authorize": [
+                        "task_dispatch_without_fresh_approval",
+                        "command_or_workdir_change",
+                        "provider_retargeting",
+                        "canonical_mutation",
+                        "destructive_action",
+                        "unlisted_external_side_effect",
+                        "wiki_promotion",
+                        "accepted_truth",
+                        "plan_revision_without_review"
+                    ]
+                }
+            }],
+            "arm_receipts": [],
+            "states": [],
+            "transitions": []
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&ledger_path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
+    let direct_review =
+        crate::offdesk::build_offdesk_shift_review_projection("test", None, None, Utc::now());
+    assert!(
+        direct_review.is_ok(),
+        "shared shift review failed: {direct_review:?}"
+    );
+    let summary = super::load_offdesk_summary("test");
+    let review = summary.shift_review.as_ref().expect("shared shift review");
+
+    assert_eq!(review.shift_id, "shift_tui_review_1");
+    assert_eq!(review.review_status, "prepared");
+    assert!(review.authority.review_only);
+    assert!(!review.authority.accepted_truth_authorized);
+    assert!(summary.has_morning_review());
+    assert!(summary.shift_review_label().contains("prepared"));
+}
+
+#[test]
+#[serial]
 fn load_offdesk_summary_counts_completed_tasks_needing_closeout() {
     let temp = TempDir::new().unwrap();
     setup_test_home(&temp);
@@ -412,6 +503,19 @@ fn offdesk_attention_includes_failed_and_resume_pending_tasks() {
         ..OffdeskResumeSummary::default()
     }
     .needs_operator_attention());
+    let unavailable = OffdeskResumeSummary {
+        shift_review_error: Some("invalid required source".to_string()),
+        ..OffdeskResumeSummary::default()
+    };
+    assert!(unavailable.needs_operator_attention());
+    assert_eq!(
+        unavailable.focus_label(),
+        "bounded shift review unavailable"
+    );
+    assert_eq!(
+        unavailable.next_action_label(),
+        "Inspect: forager offdesk shift review"
+    );
 }
 
 #[test]
@@ -1361,6 +1465,194 @@ fn test_enter_on_session_returns_attach_action() {
     assert!(matches!(action, Some(Action::AttachSession(_))));
 }
 
+fn click_list_row(view: &mut HomeView, text: &str, label: &str) {
+    let row = text
+        .lines()
+        .position(|line| line.chars().take(35).collect::<String>().contains(label))
+        .unwrap();
+    view.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 5,
+        row: row as u16,
+        modifiers: KeyModifiers::NONE,
+    });
+}
+
+#[test]
+#[serial]
+fn session_selection_mouse_row_and_enter_use_the_same_id_with_review_card() {
+    let mut env = create_test_env_with_sessions(2);
+    env.view.offdesk_resume.closeout_required = 3;
+    let expected = env.view.instances[1].id.clone();
+    let text = render_home_text(&mut env.view, 120, 30);
+    assert!(text.contains("Offdesk Morning Review"));
+    click_list_row(&mut env.view, &text, "session1");
+    assert_eq!(
+        env.view.selected_session.as_deref(),
+        Some(expected.as_str())
+    );
+    assert!(
+        matches!(env.view.handle_key(key(KeyCode::Enter)), Some(Action::AttachSession(id)) if id == expected)
+    );
+}
+
+#[test]
+#[serial]
+fn session_selection_mouse_uses_scrolled_visible_row() {
+    let mut env = create_test_env_with_sessions(35);
+    env.view.cursor = 30;
+    env.view.update_selected();
+    let expected = match &env.view.flat_items[29] {
+        Item::Session { id, .. } => id.clone(),
+        _ => panic!("session"),
+    };
+    let label = env.view.instance_map[&expected].title.clone();
+    let text = render_home_text(&mut env.view, 120, 10);
+    click_list_row(&mut env.view, &text, &label);
+    assert_eq!(
+        env.view.selected_session.as_deref(),
+        Some(expected.as_str())
+    );
+}
+
+#[test]
+#[serial]
+fn session_selection_mouse_uses_filtered_visible_row() {
+    let mut env = create_test_env_with_sessions(5);
+    let expected = env.view.instances[4].id.clone();
+    env.view.filtered_items = Some(vec![1, 4]);
+    env.view.cursor = 0;
+    env.view.update_selected();
+    let text = render_home_text(&mut env.view, 120, 20);
+    click_list_row(&mut env.view, &text, "session4");
+    assert_eq!(
+        env.view.selected_session.as_deref(),
+        Some(expected.as_str())
+    );
+}
+
+#[test]
+#[serial]
+fn session_selection_restore_id_uses_filtered_index() {
+    let mut env = create_test_env_with_sessions(5);
+    let expected = env.view.instances[4].id.clone();
+    env.view.filtered_items = Some(vec![1, 4]);
+    env.view.cursor = 0;
+    env.view.update_selected();
+    env.view.select_session_by_id(&expected);
+    assert_eq!(env.view.cursor, 1);
+    assert_eq!(
+        env.view.selected_session.as_deref(),
+        Some(expected.as_str())
+    );
+}
+
+#[test]
+#[serial]
+fn session_selection_escape_search_preserves_id_and_highlight() {
+    let mut env = create_test_env_with_sessions(5);
+    let expected = env.view.instances[4].id.clone();
+    env.view.filtered_items = Some(vec![4]);
+    env.view.cursor = 0;
+    env.view.search_active = true;
+    env.view.update_selected();
+    env.view.handle_key(key(KeyCode::Esc));
+    assert_eq!(env.view.cursor, 4);
+    assert_eq!(
+        env.view.selected_session.as_deref(),
+        Some(expected.as_str())
+    );
+}
+
+#[test]
+#[serial]
+fn session_selection_empty_filter_cannot_attach_previous_session() {
+    let mut env = create_test_env_with_sessions(2);
+    env.view.filtered_items = Some(vec![]);
+    env.view.update_selected();
+    assert!(env.view.selected_session.is_none());
+    assert!(env.view.handle_key(key(KeyCode::Enter)).is_none());
+}
+
+#[test]
+#[serial]
+fn session_selection_reload_preserves_id_when_an_earlier_row_disappears() {
+    let mut env = create_test_env_with_sessions(5);
+    let expected = env.view.instances[3].id.clone();
+    env.view.select_session_by_id(&expected);
+    let remaining = env.view.instances[1..].to_vec();
+    env.view.storage.save(&remaining).unwrap();
+    env.view.reload().unwrap();
+    assert_eq!(
+        env.view.selected_session.as_deref(),
+        Some(expected.as_str())
+    );
+    assert!(
+        matches!(env.view.handle_key(key(KeyCode::Enter)), Some(Action::AttachSession(id)) if id == expected)
+    );
+}
+
+#[test]
+#[serial]
+fn session_selection_reload_rebuilds_search_indices() {
+    let mut env = create_test_env_with_sessions(5);
+    let expected = env.view.instances[4].id.clone();
+    env.view.search_query = Input::new("session4".to_string());
+    env.view.update_filter();
+    env.view.storage.save(&env.view.instances[1..]).unwrap();
+    env.view.reload().unwrap();
+    assert_eq!(env.view.filtered_items.as_deref(), Some([3].as_slice()));
+    assert_eq!(
+        env.view.selected_session.as_deref(),
+        Some(expected.as_str())
+    );
+}
+
+#[test]
+#[serial]
+fn session_selection_mouse_does_not_select_under_a_modal_or_in_review_panel() {
+    let mut env = create_test_env_with_sessions(2);
+    let selected = env.view.selected_session.clone();
+    let text = render_home_text(&mut env.view, 120, 20);
+    env.view.show_help = true;
+    click_list_row(&mut env.view, &text, "session1");
+    assert_eq!(env.view.selected_session, selected);
+    env.view.show_help = false;
+    env.view.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 95,
+        row: 3,
+        modifiers: KeyModifiers::NONE,
+    });
+    assert_eq!(env.view.selected_session, selected);
+}
+
+#[test]
+#[serial]
+fn session_selection_mouse_tab_attaches_the_visible_id() {
+    let mut env = create_test_env_with_sessions(2);
+    let expected = env.view.instances[1].id.clone();
+    render_home_text(&mut env.view, 120, 30);
+    let area = env
+        .view
+        .session_tab_areas
+        .iter()
+        .find(|(_, id)| id == &expected)
+        .unwrap()
+        .0;
+    let action = env.view.handle_mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: area.x,
+        row: area.y,
+        modifiers: KeyModifiers::NONE,
+    });
+    assert!(matches!(action, Some(Action::AttachSession(id)) if id == expected));
+    assert_eq!(
+        env.view.selected_session.as_deref(),
+        Some(expected.as_str())
+    );
+}
+
 #[test]
 #[serial]
 fn test_slash_enters_search_mode() {
@@ -1776,6 +2068,78 @@ fn test_a_opens_and_closes_attention_view() {
 
 #[test]
 #[serial]
+fn night_review_takes_input_without_attaching_or_creating_authority() {
+    let mut env = create_test_env_with_sessions(1);
+    assert!(env.view.handle_key(key(KeyCode::Char('N'))).is_none());
+    assert!(env.view.night_view.is_some());
+    assert!(env.view.has_dialog());
+    assert!(env.view.handle_key(key(KeyCode::Enter)).is_none());
+    assert!(env
+        .view
+        .handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 4,
+            row: 3,
+            modifiers: KeyModifiers::NONE
+        })
+        .is_none());
+    let text = render_home_text(&mut env.view, 80, 24);
+    assert!(text.contains("Night review: prepared shifts"));
+    assert!(text.contains("No prepared shifts."));
+    for code in [
+        KeyCode::Char('s'),
+        KeyCode::Char('a'),
+        KeyCode::Char('A'),
+        KeyCode::Char('y'),
+        KeyCode::Char('r'),
+    ] {
+        assert!(env.view.handle_key(key(code)).is_none());
+    }
+    assert!(!crate::session::get_profile_dir("test")
+        .unwrap()
+        .join("pending_action_approvals.json")
+        .exists());
+    env.view.handle_key(key(KeyCode::Esc));
+    assert!(env.view.night_view.is_none());
+}
+
+#[test]
+#[serial]
+fn morning_detail_takes_keys_and_mouse_without_attaching_or_creating_authority() {
+    let mut env = create_test_env_with_sessions(1);
+    let profile = crate::session::profile_dir_path("test").unwrap();
+    let before = fs::read_dir(&profile).unwrap().count();
+    assert!(env.view.handle_key(key(KeyCode::Char('M'))).is_none());
+    assert!(env.view.has_dialog());
+    for code in [
+        KeyCode::Enter,
+        KeyCode::Char('a'),
+        KeyCode::Char('A'),
+        KeyCode::Char('y'),
+        KeyCode::Right,
+        KeyCode::Char('r'),
+    ] {
+        assert!(env.view.handle_key(key(code)).is_none());
+    }
+    assert!(env
+        .view
+        .handle_mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 4,
+            row: 3,
+            modifiers: KeyModifiers::NONE
+        })
+        .is_none());
+    let text = render_home_text(&mut env.view, 80, 24);
+    assert!(text.contains("Offdesk report detail"));
+    assert!(text.contains("No bounded shifts"));
+    assert_eq!(fs::read_dir(&profile).unwrap().count(), before);
+    env.view.handle_key(key(KeyCode::Esc));
+    assert!(env.view.morning_view.is_none());
+}
+
+#[test]
+#[serial]
 fn attention_view_renders_shared_actions_at_80_columns() {
     let mut env = create_test_env_empty();
     env.view.offdesk_resume = OffdeskResumeSummary {
@@ -1936,14 +2300,19 @@ fn create_test_env_with_group_sessions() -> TestEnv {
 
 fn drain_deletion_results(view: &mut HomeView, expected: usize) {
     let mut observed = 0;
-    for _ in 0..100 {
+    // These checks verify asynchronous results, not a two-second deletion SLA.
+    // Tmux and container probes may share a loaded test host.
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_secs(10 * expected.max(1) as u64);
+    while std::time::Instant::now() < deadline {
         if view.apply_deletion_results() {
             observed += 1;
             if observed >= expected {
                 return;
             }
+        } else {
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        std::thread::sleep(std::time::Duration::from_millis(20));
     }
     panic!("timed out waiting for {expected} deletion results; observed {observed}");
 }
@@ -2438,19 +2807,15 @@ fn test_uppercase_l_grows_list() {
 
 #[test]
 #[serial]
-fn orchestration_summary_reads_armed_state_and_registry() {
+fn orchestration_summary_reads_bounded_shift_state_and_registry() {
     let temp = TempDir::new().unwrap();
     setup_test_home(&temp);
-    // The registry lives under XDG config on every platform, but the profile
-    // dir (armed file) is platform-specific (~/.forager on macOS), so both
-    // paths must come from the real resolvers.
     let registry_file = crate::session::project_registry::registry_path();
     std::fs::create_dir_all(registry_file.parent().unwrap()).unwrap();
     let profile_dir = crate::session::get_profile_dir("test").unwrap();
     std::fs::create_dir_all(&profile_dir).unwrap();
-    let armed_file = profile_dir.join("offdesk_autonomy_armed.json");
 
-    // No registry, no armed file: everything quiet.
+    // No registry and no reviewed shift: everything is quiet.
     let summary = super::load_orchestration_summary("test");
     assert!(!summary.autonomy_armed);
     assert_eq!(summary.registered_projects, 0);
@@ -2460,26 +2825,117 @@ fn orchestration_summary_reads_armed_state_and_registry() {
         "schema = \"forager_project_registry.v1\"\n\n[projects.demo]\nworkspace_patterns = [\"Demo\"]\n",
     )
     .unwrap();
-    let future = chrono::Utc::now() + chrono::Duration::hours(8);
-    std::fs::write(
-        &armed_file,
-        format!(
-            "{{\"armed\": true, \"until\": \"{}\"}}",
-            future.to_rfc3339()
-        ),
-    )
-    .unwrap();
+    let now = chrono::Utc::now();
+    let starts_at = now - chrono::Duration::minutes(1);
+    let stops_at = now + chrono::Duration::hours(8);
+    let manifest = crate::offdesk::OffdeskShiftManifestV1 {
+        serial_selection: None,
+        preparation_review: None,
+        preparation_requirements: None,
+        weekly_usage: None,
+        schema: crate::offdesk::OFFDESK_SHIFT_MANIFEST_SCHEMA.to_string(),
+        shift_id: "shift_orchestration_test".to_string(),
+        profile: "test".to_string(),
+        created_at: starts_at,
+        window: crate::offdesk::OffdeskShiftWindowV1 {
+            starts_at,
+            stops_at,
+            timezone: "UTC".to_string(),
+        },
+        plan_id: "plan_test".to_string(),
+        plan_review_id: "review_test".to_string(),
+        plan_source_sha256: "a".repeat(64),
+        plan_review_sha256: "b".repeat(64),
+        task_bindings: Vec::new(),
+        routine_bindings: vec![crate::offdesk::OffdeskShiftRoutineBindingV1 {
+            routine_id: "dispatch_tick".to_string(),
+            routine_kind: crate::offdesk::OffdeskShiftRoutineKindV1::DispatchTick,
+            schedule: crate::offdesk::OffdeskShiftRoutineScheduleV1::Interval {
+                starts_at,
+                stops_at,
+                every_minutes: 10,
+            },
+            project_key: None,
+            wiki_profile: None,
+            project_root_identity_sha256: None,
+            project_root_path: None,
+        }],
+        budget: crate::offdesk::OffdeskShiftBudgetV1 {
+            max_concurrent_tasks: 0,
+            max_task_launches: 0,
+            max_attempts_per_task: 0,
+            max_routine_runs: 49,
+        },
+        enterprise_policy: Some(crate::offdesk::OffdeskShiftEnterprisePolicyV1::built_in(
+            crate::offdesk::OffdeskShiftEnterpriseProfileKeyV1::SingleOwnerLocal,
+        )),
+        host_policy_attestation: None,
+        read_policy: None,
+        template_instantiation: None,
+        routine_resource_budget: Some(crate::offdesk::OffdeskShiftRoutineResourceBudgetV1 {
+            max_process_starts: 49,
+            max_external_calls: 0,
+            max_disk_bytes_written: 0,
+            max_llm_tokens: 0,
+            max_cost_micro_usd: 0,
+            llm_cost_rate_micro_usd_per_million_tokens: 0,
+        }),
+        authority: crate::offdesk::OffdeskShiftAuthorityV1 {
+            task_dispatch_requires_fresh_approval: true,
+            task_launch_spec_is_immutable: true,
+            wiki_writes_are_candidate_only: true,
+            plan_revision_requires_review: true,
+            acceptance_requires_ondesk_review: true,
+            does_not_authorize: crate::offdesk::OFFDESK_SHIFT_REQUIRED_DENIALS
+                .iter()
+                .map(|value| (*value).to_string())
+                .collect(),
+        },
+    };
+    let manifest_sha256 = crate::offdesk::offdesk_shift_manifest_sha256(&manifest).unwrap();
+    let receipt = crate::offdesk::OffdeskShiftArmReceiptV1 {
+        schema: crate::offdesk::OFFDESK_SHIFT_ARM_RECEIPT_SCHEMA.to_string(),
+        receipt_id: "receipt_test".to_string(),
+        shift_id: manifest.shift_id.clone(),
+        manifest_sha256: manifest_sha256.clone(),
+        approval_id: "approval_test".to_string(),
+        approved_at: now,
+        expires_at: stops_at,
+        approved_by: "operator".to_string(),
+        task_dispatch_still_requires_fresh_approval: true,
+    };
+    let state = crate::offdesk::OffdeskShiftStateV1 {
+        schema: crate::offdesk::OFFDESK_SHIFT_STATE_SCHEMA.to_string(),
+        shift_id: manifest.shift_id.clone(),
+        manifest_sha256,
+        arm_receipt_sha256: crate::offdesk::offdesk_shift_arm_receipt_sha256(&receipt, &manifest)
+            .unwrap(),
+        sequence: 1,
+        status: crate::offdesk::OffdeskShiftStatusV1::Armed,
+        updated_at: now,
+        reason: "test reviewed shift".to_string(),
+        acceptance_receipt_id: None,
+        acceptance_receipt_sha256: None,
+    };
+    let store = crate::offdesk::OffdeskShiftStore::writable("test").unwrap();
+    store.save_manifest(manifest).unwrap();
+    store
+        .arm_shift(receipt, state.clone(), "transition_test_arm")
+        .unwrap();
 
     let summary = super::load_orchestration_summary("test");
     assert!(summary.autonomy_armed);
     assert_eq!(summary.registered_projects, 1);
 
-    // An expired window must not read as armed.
-    let past = chrono::Utc::now() - chrono::Duration::hours(1);
-    std::fs::write(
-        &armed_file,
-        format!("{{\"armed\": true, \"until\": \"{}\"}}", past.to_rfc3339()),
-    )
-    .unwrap();
+    let disarmed = crate::offdesk::OffdeskShiftStateV1 {
+        sequence: 2,
+        status: crate::offdesk::OffdeskShiftStatusV1::Disarmed,
+        updated_at: now + chrono::Duration::seconds(1),
+        reason: "test disarm".to_string(),
+        ..state
+    };
+    store
+        .transition(disarmed, "transition_test_disarm")
+        .unwrap();
     assert!(!super::load_orchestration_summary("test").autonomy_armed);
 }

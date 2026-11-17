@@ -49,6 +49,19 @@ pub enum BackgroundRunnerPhase {
     StaleLostCallback,
     Reconstructable,
     RecoveryAcknowledged,
+    Terminated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackgroundTerminationRecord {
+    pub terminated_at: DateTime<Utc>,
+    pub terminated_by: String,
+    pub reason: String,
+    pub previous_phase: BackgroundRunnerPhase,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tmux_session_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -72,6 +85,15 @@ pub struct BackgroundProbe {
     pub implementation_packet: Option<ImplementationPacketSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_identity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_exit_receipt: Option<super::local_exit::LocalExitReceipt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_policy_launch_evidence:
+        Option<super::shift_host_policy::OffdeskShiftHostPolicyLaunchEvidenceV1>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_policy_launch_evidence: Option<super::read_policy::ReadPolicyLaunchEvidence>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tmux_session_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -122,6 +144,8 @@ pub struct BackgroundProbe {
     pub adaptive_wiki_context: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operator_recovery_ack: Option<BackgroundRecoveryAcknowledgement>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub termination: Option<BackgroundTerminationRecord>,
 }
 
 impl BackgroundProbe {
@@ -138,6 +162,10 @@ impl BackgroundProbe {
             launch_spec_summary: None,
             implementation_packet: None,
             runtime_pid: None,
+            local_exit_receipt: None,
+            runtime_identity: None,
+            host_policy_launch_evidence: None,
+            read_policy_launch_evidence: None,
             tmux_session_name: None,
             working_dir: None,
             log_artifact_path: None,
@@ -163,10 +191,17 @@ impl BackgroundProbe {
             adaptive_wiki_runtime_policy: None,
             adaptive_wiki_context: None,
             operator_recovery_ack: None,
+            termination: None,
         }
     }
 
     pub fn evaluate(&self, now: DateTime<Utc>) -> BackgroundRecoveryDecision {
+        if self.termination.is_some() || self.phase == BackgroundRunnerPhase::Terminated {
+            return BackgroundRecoveryDecision::terminated(
+                "background runner was explicitly terminated by an operator",
+                self,
+            );
+        }
         if self.operator_recovery_ack.is_some()
             && !self.result_artifact_present
             && !self.external_result_present
@@ -178,6 +213,9 @@ impl BackgroundProbe {
         }
 
         match self.runner_kind {
+            BackgroundRunnerKind::LocalTmux if self.local_exit_receipt.is_some() => {
+                self.evaluate_local_background()
+            }
             BackgroundRunnerKind::LocalTmux => self.evaluate_local_tmux(),
             BackgroundRunnerKind::LocalBackground => self.evaluate_local_background(),
             BackgroundRunnerKind::GithubRunner | BackgroundRunnerKind::RemoteWorker => {
@@ -235,6 +273,35 @@ impl BackgroundProbe {
     }
 
     fn evaluate_local_background(&self) -> BackgroundRecoveryDecision {
+        if let Some(receipt) = &self.local_exit_receipt {
+            if receipt.status.is_some_and(|status| status != 0) {
+                return BackgroundRecoveryDecision::failed(
+                    "local supervisor observed nonzero shell wait status",
+                    self,
+                );
+            }
+            if receipt.status.is_none() {
+                if self.runtime_handle_alive && self.worker_heartbeat_stale {
+                    return BackgroundRecoveryDecision::stale(
+                        BackgroundRunnerPhase::StaleLostCallback,
+                        "local supervisor heartbeat is stale before exit receipt",
+                        self,
+                    );
+                }
+                return if self.runtime_handle_alive {
+                    BackgroundRecoveryDecision::running(
+                        "local supervisor has not recorded an exit",
+                        self,
+                    )
+                } else {
+                    BackgroundRecoveryDecision::stale(
+                        BackgroundRunnerPhase::StaleLostCallback,
+                        "local supervisor exit receipt missing or invalid",
+                        self,
+                    )
+                };
+            }
+        }
         if self.result_artifact_present {
             return BackgroundRecoveryDecision::completed(
                 "local background result artifact present",
@@ -344,6 +411,15 @@ impl BackgroundRecoveryDecision {
     fn recovery_acknowledged(evidence: &str, probe: &BackgroundProbe) -> Self {
         Self {
             phase: BackgroundRunnerPhase::RecoveryAcknowledged,
+            terminal: true,
+            evidence: operator_safe_text(evidence),
+            last_log_tail: probe.last_log_tail.as_deref().map(operator_safe_text),
+        }
+    }
+
+    fn terminated(evidence: &str, probe: &BackgroundProbe) -> Self {
+        Self {
+            phase: BackgroundRunnerPhase::Terminated,
             terminal: true,
             evidence: operator_safe_text(evidence),
             last_log_tail: probe.last_log_tail.as_deref().map(operator_safe_text),

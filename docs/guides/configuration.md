@@ -2,8 +2,8 @@
 
 Forager uses a layered configuration system. Settings are resolved in this order:
 
-1. **Global config** -- `~/.forager/config.toml` (or `~/.config/forager/config.toml` on Linux)
-2. **Profile config** -- `~/.forager/profiles/<name>/config.toml`
+1. **Global config** -- `<app-dir>/config.toml`
+2. **Profile config** -- `<app-dir>/profiles/<name>/config.toml`
 3. **Repo config** -- `.forager/config.toml` in the project root
 
 Forager still reads and writes the existing legacy paths when they
@@ -28,11 +28,14 @@ All active settings below can also be edited from the TUI settings screen (press
 
 | Platform | Global Config |
 |----------|--------------|
-| Linux | `$XDG_CONFIG_HOME/forager/config.toml` (defaults to `~/.config/forager/`) |
+| Linux | `$XDG_CONFIG_HOME/forager/config.toml` (defaults to `~/.config/forager/config.toml`) |
 | macOS | `~/.forager/config.toml` |
 
+In the layout below, `<app-dir>` is the platform directory above. Active legacy
+paths can differ; `forager doctor` reports the selected directory.
+
 ```
-~/.forager/
+<app-dir>/
   config.toml              # Global configuration
   trusted_repos.toml       # Hook trust decisions (auto-managed)
   .schema_version          # Migration tracking (auto-managed)
@@ -76,14 +79,14 @@ are rejected as ambiguous, and Telegram asks for a canonical project key.
 ASCII project mentions use token boundaries, so a key embedded in a longer
 ordinary word does not silently change chat or Wiki focus.
 
-The Telegram service installer should receive the workspace root explicitly
-when it cannot infer the nearest directory named `Workspace`:
-
 The default Telegram credential file is
 `$XDG_CONFIG_HOME/forager/telegram.env` on Linux, falling back to
 `~/.config/forager/telegram.env`. On macOS it is
 `~/.forager/telegram.env`. `OFFDESK_TELEGRAM_ENV` and `--env-file` override
 that default.
+
+The Telegram service installer should receive the workspace root explicitly
+when it cannot infer the nearest directory named `Workspace`:
 
 ```bash
 python3 scripts/install_offdesk_telegram_operator_service.py \
@@ -102,8 +105,8 @@ chmod 600 /path/to/telegram.env
 Listener state, feedback, conversation JSONL, update journal, reply outbox, and
 loop-status files are written with mode `0600`. Their parent cache directory is
 created with mode `0700`. The service installer passes explicit
-`--update-journal-file` and `--reply-outbox-file` paths. The journal prevents a
-completed Telegram effect from being executed again, while the outbox retries
+`--update-journal-file` and `--reply-outbox-file` paths. The journal guards replay of
+recorded Telegram effects, while the outbox retries
 an undelivered reply independently of the Telegram offset.
 
 ## General
@@ -125,7 +128,7 @@ orchestrator_command = "forager-orch start"
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `default_tool` | (auto-detect) | Default agent for new sessions. Falls back to the first available tool if unset or unavailable. |
+| `default_tool` | unset | CLI `add` falls back to Claude Code. The TUI selects the configured tool when detected, otherwise the first available tool. Explicit CLI `-c` takes precedence. |
 | `yolo_mode_default` | `false` | Enable YOLO mode by default for new sessions (skip permission prompts). |
 | `auto_orchestrator` | `false` | Create an orchestrator session when a project session is created. |
 | `orchestrator_title` | (built-in title) | Optional title for automatically created orchestrator sessions. |

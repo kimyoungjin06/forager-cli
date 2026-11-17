@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import concurrent.futures
+import json
 import os
 import pathlib
 import re
@@ -193,6 +195,57 @@ def project_risk(readiness: str, dirty: bool | None) -> str:
     return "medium" if readiness == "needs_review" else "high"
 
 
+def project_remote_sync(path: pathlib.Path, git_repo: bool) -> str:
+    if not git_repo:
+        return "unknown"
+    upstream = git_output(
+        path,
+        ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+    )
+    if not upstream:
+        return "unknown"
+    counts = git_output(path, ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])
+    if not counts:
+        return "unknown"
+    parts = counts.split()
+    if len(parts) != 2 or not all(part.isdigit() for part in parts):
+        return "unknown"
+    ahead, behind = (int(part) for part in parts)
+    if ahead and behind:
+        return "diverged"
+    if ahead:
+        return "ahead"
+    if behind:
+        return "behind"
+    return "up_to_date"
+
+
+def project_test_commands(path: pathlib.Path, markers: list[str]) -> list[str]:
+    commands: list[str] = []
+    if "Cargo.toml" in markers:
+        commands.extend(["cargo test", "cargo clippy"])
+    if "package.json" in markers:
+        try:
+            package = json.loads(
+                (path / "package.json").read_text(encoding="utf-8")
+            )
+        except (OSError, ValueError):
+            package = {}
+        scripts = package.get("scripts") if isinstance(package, dict) else {}
+        if isinstance(scripts, dict) and str(scripts.get("test") or "").strip():
+            commands.append("npm test")
+    if "pyproject.toml" in markers:
+        try:
+            pyproject_text = (path / "pyproject.toml").read_text(
+                encoding="utf-8", errors="replace"
+            )
+        except OSError:
+            pyproject_text = ""
+        if "[tool.pytest" in pyproject_text or (path / "pytest.ini").is_file():
+            commands.append("python -m pytest")
+    return commands
+
+
 def display_project_readiness(value: Any) -> str:
     labels = {
         "ready": "준비됨",
@@ -226,6 +279,28 @@ def build_project_candidate(
         display_name = hint
     readiness = project_readiness(markers, git_repo, dirty)
     risk = project_risk(readiness, dirty)
+    remote_sync = project_remote_sync(path, git_repo)
+    available_tests = project_test_commands(path, markers)
+    observed_evidence = [
+        "workspace",
+        "project_markers",
+        "git_repository",
+        "git_branch",
+        "git_head",
+        "git_worktree",
+        "git_remote_sync",
+    ]
+    not_observed_evidence = [
+        "recent_failures",
+        "estimated_runtime_minutes",
+        "requires_network",
+        "requires_secrets",
+        "requires_human_context",
+    ]
+    if available_tests:
+        observed_evidence.append("test_entrypoints")
+    else:
+        not_observed_evidence.append("test_entrypoints")
     reasons: list[str] = []
     if git_repo:
         reasons.append("git repository")
@@ -255,11 +330,29 @@ def build_project_candidate(
         "branch": branch,
         "head": head,
         "dirty": dirty,
+        "current_branch": branch,
+        "head_ref": head,
+        "dirty_tree": dirty,
+        "remote_sync": remote_sync,
+        "recent_failures": [],
+        "recent_failures_observed": False,
+        "available_tests": available_tests,
+        "estimated_runtime_minutes": None,
         "readiness": readiness,
         "risk": risk,
+        "risk_level": risk,
         "autonomy_fit": "high" if readiness == "ready" else "medium" if readiness == "needs_review" else "low",
+        "requires_network": None,
+        "requires_secrets": None,
+        "requires_human_context": None,
         "reasons": unique_nonempty(reasons)[:4],
         "next_step": "init_review",
+        "recommended_next_action": "init_review",
+        "blocked_reason": None,
+        "comparison_evidence": {
+            "observed": observed_evidence,
+            "not_observed": not_observed_evidence,
+        },
     }
 
 
@@ -275,10 +368,23 @@ def ranked_project_candidates(
         agent_intent.get("project_hint") if isinstance(agent_intent, dict) else None,
         agent_intent.get("goal") if isinstance(agent_intent, dict) else None,
     )
-    candidates = [
-        build_project_candidate(path, roots=roots, tokens=token_set, rank=index + 1)
-        for index, path in enumerate(discover_project_paths(roots))
-    ]
+    paths = discover_project_paths(roots)
+    candidates: list[dict[str, Any]] = []
+    if paths:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=min(6, len(paths))
+        ) as pool:
+            candidates = list(
+                pool.map(
+                    lambda item: build_project_candidate(
+                        item[1],
+                        roots=roots,
+                        tokens=token_set,
+                        rank=item[0] + 1,
+                    ),
+                    enumerate(paths),
+                )
+            )
     candidates.sort(
         key=lambda item: (
             -int(item.get("score") or 0),

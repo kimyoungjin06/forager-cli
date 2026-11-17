@@ -51,7 +51,7 @@ cp -r "$ROOT_DIR/book" "$DIST_DIR/docs"
 echo "Copying install script..."
 cp "$ROOT_DIR/scripts/install.sh" "$DIST_DIR/"
 
-# 7. Create a simple 404 page that redirects to home
+# 7. Create a standalone 404 page with local navigation.
 cat > "$DIST_DIR/404.html" << 'EOF'
 <!DOCTYPE html>
 <html lang="en">
@@ -60,17 +60,25 @@ cat > "$DIST_DIR/404.html" << 'EOF'
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Page Not Found - Forager</title>
   <link rel="icon" type="image/svg+xml" href="/forager-cli/assets/logo.svg">
-  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #081625; color: #f8fafc; font: 1rem/1.6 system-ui, sans-serif; }
+    main { max-width: 38rem; padding: 3rem 1.5rem; text-align: center; }
+    img { width: 4rem; height: 4rem; }
+    h1 { margin: 1rem 0; font-size: clamp(2rem, 6vw, 3rem); line-height: 1.1; }
+    p { color: #cbd5e1; }
+    a { display: inline-block; margin: 1rem .5rem 0; padding: .75rem 1.25rem; background: #0075ba; color: white; text-decoration: none; }
+    a:hover { background: #00639d; }
+    a:focus-visible { outline: 3px solid #38bdf8; outline-offset: 4px; }
+  </style>
 </head>
-<body class="bg-slate-950 text-gray-100 min-h-screen flex items-center justify-center">
-  <div class="text-center px-6">
-    <img src="/forager-cli/assets/logo.svg" alt="Forager" class="w-16 h-16 mx-auto mb-6 opacity-50">
-    <h1 class="text-4xl font-bold mb-4">404</h1>
-    <p class="text-gray-400 mb-8">Page not found</p>
-    <a href="/forager-cli/" class="bg-sky-700 hover:bg-sky-600 text-white font-semibold px-6 py-3 rounded-lg transition-colors">
-      Go Home
-    </a>
-  </div>
+<body>
+  <main>
+    <img src="/forager-cli/assets/logo.svg" alt="Forager">
+    <h1>Page not found</h1>
+    <p>This address does not match a published page.</p>
+    <a href="/forager-cli/">Forager home</a>
+    <a href="/forager-cli/docs/">Documentation</a>
+  </main>
 </body>
 </html>
 EOF

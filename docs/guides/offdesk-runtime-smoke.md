@@ -1,5 +1,9 @@
 # Offdesk Runtime Smoke
 
+This is an operator-run validation procedure, not a record that a workload has
+passed. Preparing examples does not select or launch a real unattended run.
+Use the source/build matching your installation and retain actual receipts.
+
 This runbook validates a short Offdesk launch path without starting a long
 overnight campaign. It checks the operator path:
 
@@ -98,7 +102,7 @@ Expected enqueue state:
 Run the first tick:
 
 ```bash
-target/debug/forager -p <profile> offdesk tick --limit 1 --json
+target/debug/forager -p <profile> offdesk tick --project-key <project> --task-id <task-id> --limit 1 --json
 ```
 
 Expected:
@@ -133,7 +137,7 @@ target/debug/forager -p <profile> offdesk ok <approval-id> --json
 Then launch:
 
 ```bash
-target/debug/forager -p <profile> offdesk tick --limit 1 --json
+target/debug/forager -p <profile> offdesk tick --project-key <project> --task-id <task-id> --limit 1 --json
 ```
 
 Expected:
@@ -147,7 +151,7 @@ Expected:
 Poll until the short smoke completes:
 
 ```bash
-target/debug/forager -p <profile> offdesk poll --json
+target/debug/forager -p <profile> offdesk poll <ticket-id> --json
 ```
 
 Inspect the workload directory:

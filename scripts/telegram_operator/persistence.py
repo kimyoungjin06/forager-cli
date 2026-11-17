@@ -13,6 +13,22 @@ from .common import RemoteOperatorTelegramError, load_json, utc_now, write_json
 STATE_SCHEMA = "remote_operator_telegram_state.v1"
 CHAT_HISTORY_MAX_ENTRIES = 12
 CHAT_HISTORY_ENTRY_MAX_CHARS = 400
+CONTROL_SCOPED_STATE_KEYS = (
+    "notification_unconfirmed_events",
+    "session_notification_delivery_evidence",
+    "attention_notified_by_key",
+    "chat_focus_by_chat",
+    "chat_history_by_chat",
+    "last_interaction_context_by_chat",
+    "orchestrator_bootstrap_digest",
+    "pending_dispatch_confirmations_by_chat",
+    "remote_plan_sessions_by_chat",
+    "session_focus_by_chat",
+    "session_input_no_effect_by_key",
+    "telegram_session_keyboard_schema",
+    "waiting_ids_last_scan",
+    "waiting_notified_by_session",
+)
 
 
 class RemoteOperatorStateError(RemoteOperatorTelegramError):
@@ -51,6 +67,50 @@ def load_state(path: pathlib.Path) -> dict[str, Any]:
 def save_state(path: pathlib.Path, state: dict[str, Any]) -> None:
     state["updated_at"] = utc_now()
     write_json(path, state)
+
+
+def bind_control_generation(
+    state: dict[str, Any], generation: str
+) -> dict[str, Any]:
+    """Bind ephemeral controller state to one local credential generation."""
+
+    current = str(generation or "").strip()
+    if not current:
+        raise RemoteOperatorStateError("control generation must not be empty")
+    previous = str(state.get("control_generation_sha256") or "").strip()
+    if previous == current:
+        return {
+            "status": "unchanged",
+            "changed": False,
+            "previous_generation": previous,
+            "current_generation": current,
+            "cleared_state": {},
+        }
+
+    cleared: dict[str, int] = {}
+    for key in CONTROL_SCOPED_STATE_KEYS:
+        value = state.pop(key, None)
+        if isinstance(value, dict):
+            cleared[key] = len(value)
+        elif isinstance(value, list):
+            cleared[key] = len(value)
+        elif value is not None:
+            cleared[key] = 1
+    previous_offset = int(state.get("offset") or 0)
+    state["offset"] = 0
+    state["control_generation_sha256"] = current
+    state["control_generation_bound_at"] = utc_now()
+    state["control_generation_sequence"] = int(
+        state.get("control_generation_sequence") or 0
+    ) + 1
+    return {
+        "status": "rotated" if previous else "initialized",
+        "changed": True,
+        "previous_generation": previous or None,
+        "current_generation": current,
+        "previous_offset": previous_offset,
+        "cleared_state": cleared,
+    }
 
 
 def parse_utc_timestamp(value: Any) -> dt.datetime | None:
@@ -193,7 +253,9 @@ def remember_session_focus(
     title: str,
     tool: str,
     prompt_hash: str = "",
+    prompt_observation_hash: str = "",
     source: str,
+    remote_session_identity: dict[str, Any] | None = None,
 ) -> None:
     if not str(session_id or "").strip():
         return
@@ -201,15 +263,20 @@ def remember_session_focus(
     if not isinstance(focuses, dict):
         focuses = {}
         state["session_focus_by_chat"] = focuses
-    focuses[str(chat_hash or "")] = {
+    focus = {
         "session_id": str(session_id),
         "project": str(project),
         "title": str(title),
         "tool": str(tool),
         "prompt_hash": str(prompt_hash),
+        "prompt_identity": str(prompt_hash),
+        "prompt_observation_hash": str(prompt_observation_hash),
         "source": str(source),
         "updated_at": utc_now(),
     }
+    if isinstance(remote_session_identity, dict):
+        focus["remote_session_identity"] = remote_session_identity
+    focuses[str(chat_hash or "")] = focus
 
 
 def clear_session_focus_for_chat_hash(

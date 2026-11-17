@@ -20,6 +20,7 @@ pub struct OffdeskTickLockMetadata {
 #[derive(Debug)]
 pub struct OffdeskTickLockGuard {
     file: File,
+    root: std::path::PathBuf,
     stale_metadata_replaced: bool,
 }
 
@@ -50,8 +51,18 @@ impl OffdeskTickLockGuard {
             return Err(error.into());
         }
 
-        let stale_metadata_replaced = read_metadata(&mut file)?
-            .is_some_and(|metadata| metadata.acquired_at + stale_after <= now);
+        let stale_metadata_replaced = match read_metadata(&mut file) {
+            Ok(metadata) => {
+                metadata.is_some_and(|metadata| metadata.acquired_at + stale_after <= now)
+            }
+            Err(error) if error.downcast_ref::<serde_json::Error>().is_some() => {
+                // Metadata is diagnostic only. The acquired OS lock, not a PID
+                // or timestamp in this file, is the authority to repair it.
+                tracing::warn!("repairing interrupted tick lock metadata after acquiring OS lock");
+                true
+            }
+            Err(error) => return Err(error),
+        };
         let metadata = OffdeskTickLockMetadata {
             pid: std::process::id(),
             acquired_at: now,
@@ -61,12 +72,21 @@ impl OffdeskTickLockGuard {
 
         Ok(Self {
             file,
+            root: std::fs::canonicalize(profile_dir.as_ref())?,
             stale_metadata_replaced,
         })
     }
 
     pub fn stale_metadata_replaced(&self) -> bool {
         self.stale_metadata_replaced
+    }
+
+    pub(crate) fn ensure_root(&self, root: &Path) -> Result<()> {
+        anyhow::ensure!(
+            std::fs::canonicalize(root)? == self.root,
+            "queue lock belongs to another profile"
+        );
+        Ok(())
     }
 }
 
@@ -141,6 +161,24 @@ mod tests {
         let guard = OffdeskTickLockGuard::acquire(temp.path(), Utc::now(), Duration::minutes(30))?;
 
         assert!(guard.stale_metadata_replaced());
+        Ok(())
+    }
+
+    #[test]
+    fn corrupt_metadata_recovers_only_after_os_lock_is_released() -> Result<()> {
+        let temp = tempdir()?;
+        let path = temp.path().join(TICK_LOCK_FILE);
+        fs::write(&path, b"{\"pid\":")?;
+        let file = OpenOptions::new().read(true).write(true).open(&path)?;
+        file.lock_exclusive()?;
+        assert!(
+            OffdeskTickLockGuard::acquire(temp.path(), Utc::now(), Duration::minutes(30)).is_err()
+        );
+        assert_eq!(fs::read(&path)?, b"{\"pid\":");
+        FileExt::unlock(&file)?;
+        let guard = OffdeskTickLockGuard::acquire(temp.path(), Utc::now(), Duration::minutes(30))?;
+        assert!(guard.stale_metadata_replaced());
+        let _: OffdeskTickLockMetadata = serde_json::from_slice(&fs::read(&path)?)?;
         Ok(())
     }
 }

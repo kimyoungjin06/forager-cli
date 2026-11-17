@@ -31,6 +31,50 @@
 - `scripts/`: installation and utility scripts.
 - `xtask/`: build automation workspace.
 
+## Ondesk Resume, TODOs, and Offdesk Handoffs
+
+- Default to Ondesk. Unless explicitly requested otherwise, create or update
+  TODOs in the project's existing authoritative plan, not a new parallel list.
+  Identify that plan through `PROJECT_STATE.md` and the project entrypoints;
+  if ownership is ambiguous, resolve it before writing. Planning is not
+  permission to launch Offdesk work.
+- Group TODOs into outcome-oriented work packages, normally estimated at
+  30 to 120 minutes including verification and closeout. Small actions belong
+  in a package checklist. Do not invent work, repeat checks, or delay completion
+  to meet a duration target; explicitly allow genuinely small remaining tasks.
+- Keep each approved Offdesk run plan separate from the Ondesk baseline, linked
+  by task IDs and baseline versions. Prepare enough real, ready work for the
+  requested window when available, within explicit scope and resource budgets.
+  Report insufficient work instead of filling the night artificially.
+- When resuming an existing session, read the current plan and relevant return
+  reports before editing or executing. Reconcile changes since the last read,
+  branch/worktree identity, uncommitted work, active task ownership, and pending
+  user decisions. Old conversation context is not the current source of truth.
+- Treat overnight results as review-pending observations, not automatically
+  accepted completions. Consult the project orchestrator or its durable records
+  to answer questions about rationale, changes, evidence, limits, and remaining
+  work. If no orchestrator is available, state that limitation; do not fabricate
+  a response or start another agent without applicable authorization.
+- Record the user's agreed dispositions as a TODO change proposal: accept,
+  partially accept, rework, or defer, with evidence and remaining work. Agent
+  consensus is not user approval. Apply only authorized changes, recheck the
+  baseline before writing, and reread the updated plan before resuming work.
+- Preserve other agents' changes. Use explicit task ownership and isolated
+  workspaces where available; shared plans and canonical documents have one
+  designated integration writer. Do not inject input into another active
+  session or claim a lock exists merely because instructions request one.
+- Prefer updating existing documents over creating Markdown files. Working
+  notes are provisional; immutable evidence is not disposable scratch. At a
+  meaningful task or milestone closeout, consolidate findings into a
+  self-contained report with direct evidence, verification, limits, and next
+  actions. A report does not automatically become canonical knowledge, and
+  temporary classification does not authorize deletion.
+
+Read [Morning Return and Agreement](docs/guides/operation-cycle.md#morning-return-and-agreement)
+when returning from Offdesk. These are agent operating instructions, not a
+claim that automatic resume detection, orchestration, or write enforcement is
+implemented. They do not install templates into other projects.
+
 ## Build, Test, and Development Commands
 
 - `cargo build` / `cargo build --release`: compile (primary release binary at `target/release/forager`; legacy alias binary at `target/release/aoe`).
@@ -69,6 +113,11 @@
 - Use unit tests in-module (`#[cfg(test)]`) for pure logic; use `tests/*.rs` for end-to-end behavior.
 - Tests must be deterministic and clean up after themselves (tmux tests should use unique names like `forager_test_*`).
 - Avoid reading/writing real user state; prefer temp dirs (see `tempfile` usage in `src/session/storage.rs`).
+- Tests that call tmux from the Rust test body must use
+  `tests/support/isolated_process.rs`, not just set HOME on individual CLI calls.
+  Its supervising process owns private HOME/XDG and tmux state and cleans up
+  after failure, worker termination, or a closed parent control pipe. Native
+  model trials keep their separate explicit opt-in and credential gates.
 
 ## Commit & Pull Request Guidelines
 

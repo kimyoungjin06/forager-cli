@@ -180,6 +180,7 @@ pub(super) struct HostedHarnessPromptPacket {
     first_read_file_budget_bytes: u64,
     first_read_total_budget_bytes: u64,
     first_read_required: bool,
+    read_scope_enforced: bool,
     first_read_total_bytes: u64,
     pub(super) first_read_budget_status: String,
     task: String,
@@ -297,6 +298,7 @@ pub(super) fn build_harness_prompt_packet(
         first_read_file_budget_bytes,
         first_read_total_budget_bytes,
         first_read_required: profile.prompt_contract.first_read_required,
+        read_scope_enforced: false,
         first_read_total_bytes,
         first_read_budget_status: if first_read_budget_warning {
             "warning"
@@ -354,6 +356,8 @@ fn render_harness_prompt_markdown(
     output.push_str("\n\n## Operating Contract\n\n");
     output.push_str("- Use this compact prompt as the instruction surface.\n");
     output.push_str("- Read the first-read artifacts before making a decision.\n");
+    output.push_str("- Follow any task-specific read scope. Do not consult local memory or unrelated workspace files unless the task explicitly includes them.\n");
+    output.push_str("- This prompt does not enforce filesystem read isolation; report any extra files actually read.\n");
     output.push_str(
         "- Do not ask the operator to paste full git diffs, raw logs, or scrollback inline.\n",
     );
@@ -426,6 +430,7 @@ mod tests {
         )?;
 
         assert_eq!(packet.first_read_budget_status, "warning");
+        assert!(!packet.read_scope_enforced);
         assert!(packet
             .warnings
             .iter()

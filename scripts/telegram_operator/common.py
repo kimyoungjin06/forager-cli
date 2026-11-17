@@ -17,6 +17,7 @@ class RemoteOperatorTelegramError(RuntimeError):
 
 
 PRIVATE_FILE_MODE = 0o600
+MAX_PRIVATE_ENV_BYTES = 64 * 1024
 
 
 def private_file_mode_issue(path: pathlib.Path) -> str | None:
@@ -37,6 +38,91 @@ def require_private_file(path: pathlib.Path, *, label: str) -> None:
         raise RemoteOperatorTelegramError(
             f"{label} must be private ({issue}); run: chmod 600 {path}"
         )
+
+
+def read_private_text_snapshot(
+    path: pathlib.Path,
+    *,
+    label: str,
+    max_bytes: int = MAX_PRIVATE_ENV_BYTES,
+) -> str:
+    """Read one owner-only regular file through a stable no-follow descriptor."""
+
+    flags = os.O_RDONLY
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        raise RemoteOperatorTelegramError(
+            f"{label} is not a safe readable regular file: {path} ({type(error).__name__})"
+        ) from error
+    try:
+        initial = os.fstat(descriptor)
+        mode = stat.S_IMODE(initial.st_mode)
+        if not stat.S_ISREG(initial.st_mode):
+            raise RemoteOperatorTelegramError(f"{label} must be a regular file: {path}")
+        if initial.st_nlink != 1:
+            raise RemoteOperatorTelegramError(
+                f"{label} must have exactly one filesystem link: {path}"
+            )
+        if mode & 0o077:
+            raise RemoteOperatorTelegramError(
+                f"{label} must be private (permissions_too_open:{mode:04o}); "
+                f"run: chmod 600 {path}"
+            )
+        if hasattr(os, "geteuid") and initial.st_uid != os.geteuid():
+            raise RemoteOperatorTelegramError(
+                f"{label} must be owned by the current user: {path}"
+            )
+        if initial.st_size > max_bytes:
+            raise RemoteOperatorTelegramError(
+                f"{label} exceeds the {max_bytes}-byte read budget: {path}"
+            )
+        chunks: list[bytes] = []
+        remaining = max_bytes + 1
+        while remaining > 0:
+            chunk = os.read(descriptor, min(8192, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        content = b"".join(chunks)
+        if len(content) > max_bytes:
+            raise RemoteOperatorTelegramError(
+                f"{label} grew beyond the {max_bytes}-byte read budget: {path}"
+            )
+        final = os.fstat(descriptor)
+        if (
+            final.st_dev != initial.st_dev
+            or final.st_ino != initial.st_ino
+            or final.st_size != initial.st_size
+            or final.st_mtime_ns != initial.st_mtime_ns
+            or len(content) != final.st_size
+        ):
+            raise RemoteOperatorTelegramError(
+                f"{label} changed while it was being read: {path}"
+            )
+        try:
+            active = path.lstat()
+        except OSError as error:
+            raise RemoteOperatorTelegramError(
+                f"{label} path changed while it was being read: {path} "
+                f"({type(error).__name__})"
+            ) from error
+        if (
+            not stat.S_ISREG(active.st_mode)
+            or active.st_dev != final.st_dev
+            or active.st_ino != final.st_ino
+        ):
+            raise RemoteOperatorTelegramError(
+                f"{label} path changed while it was being read: {path}"
+            )
+        return content.decode("utf-8", errors="replace")
+    finally:
+        os.close(descriptor)
 
 
 def _private_text_writer(path: pathlib.Path, *, append: bool):
@@ -105,13 +191,19 @@ def load_json(path: pathlib.Path) -> Any:
 
 
 def parse_env_file(path: pathlib.Path, *, required: bool) -> dict[str, str]:
-    if not path.exists():
-        if required:
-            raise RemoteOperatorTelegramError(f"telegram env file not found: {path}")
-        return {}
-    require_private_file(path, label="telegram env file")
+    try:
+        content = read_private_text_snapshot(path, label="telegram env file")
+    except RemoteOperatorTelegramError as error:
+        if not required:
+            try:
+                missing = not path.exists()
+            except OSError:
+                missing = False
+            if missing:
+                return {}
+        raise error
     values: dict[str, str] = {}
-    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+    for raw in content.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue

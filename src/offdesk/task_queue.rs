@@ -87,6 +87,8 @@ pub struct OffdeskTask {
     pub log_artifact_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result_artifact_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub review_links: Vec<super::workflow::review_link::RecordedReviewLink>,
 }
 
 impl OffdeskTask {
@@ -124,6 +126,7 @@ impl OffdeskTask {
             reason: input.reason,
             log_artifact_path: input.log_artifact_path,
             result_artifact_path: input.result_artifact_path,
+            review_links: Vec::new(),
         }
     }
 
@@ -151,6 +154,7 @@ impl OffdeskTask {
             mode_assessment.review_stage_required,
         );
         OffdeskTaskView {
+            runtime_sha256: super::workflow::review_link::runtime_sha256(self).unwrap_or_default(),
             task_id: self.task_id.clone(),
             request_id: self.request_id.clone(),
             project_key: self.project_key.clone(),
@@ -195,8 +199,91 @@ impl OffdeskTask {
             reason: operator_safe_text(&self.reason),
             log_artifact_path: self.log_artifact_path.clone(),
             result_artifact_path: self.result_artifact_path.clone(),
+            review: None,
         }
     }
+
+    pub fn operator_view_with_profile(&self, root: &Path) -> OffdeskTaskView {
+        use super::workflow::{ondesk_plan::ReviewState, review_link};
+        let mut view = self.operator_view();
+        let Some(link) = self.review_links.last() else {
+            return view;
+        };
+        let checked = review_link::validate_record(root, self, link);
+        let (state, detail, requires_review) = match checked {
+            Err(error) => (
+                "review_binding_changed".to_string(),
+                operator_safe_text(&error.to_string()),
+                true,
+            ),
+            Ok(()) => {
+                let state = match link.preview.decision.disposition {
+                    ReviewState::Accepted => "recorded_accepted",
+                    ReviewState::PartiallyAccepted => "recorded_partial",
+                    ReviewState::Rework => "recorded_rework",
+                    ReviewState::Deferred => "recorded_defer",
+                    _ => "review_required",
+                };
+                (state.to_string(), format!("Existing operator decision recorded. Result validity: {}. Owning-plan follow-ups: {}.",
+                    link.preview.result_validity, link.preview.decision.remaining_work.len()), false)
+            }
+        };
+        view.review = Some(TaskReviewProjection {
+            state: state.clone(),
+            validity: if requires_review {
+                "unverified_binding_changed".into()
+            } else {
+                link.preview.result_validity.clone()
+            },
+            decision_ref: operator_safe_text(&link.preview.decision_ref),
+            owning_plan: operator_safe_text(
+                &link.preview.request.owning_plan.display().to_string(),
+            ),
+            remaining_work: link
+                .preview
+                .decision
+                .remaining_work
+                .iter()
+                .map(|item| operator_safe_text(item))
+                .collect(),
+            version: link.preview_sha256.clone(),
+            unanswered_questions: link
+                .preview
+                .decision
+                .unanswered_questions
+                .iter()
+                .map(|item| operator_safe_text(item))
+                .collect(),
+        });
+        view.next_safe_action = OffdeskNextSafeAction::new(
+            state,
+            detail,
+            vec![format!(
+                "forager ondesk plan-inspect {} --project-key {}",
+                shell_reference(&super::operator_safe_text(
+                    &link.preview.request.owning_plan.display().to_string()
+                )),
+                shell_reference(&operator_safe_text(&self.project_key))
+            )],
+            requires_review,
+        );
+        view
+    }
+}
+
+fn shell_reference(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TaskReviewProjection {
+    pub state: String,
+    pub validity: String,
+    pub decision_ref: String,
+    pub owning_plan: String,
+    pub remaining_work: Vec<String>,
+    pub version: String,
+    pub unanswered_questions: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -225,6 +312,9 @@ pub struct OffdeskTaskInput {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct OffdeskTaskView {
+    pub runtime_sha256: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub review: Option<TaskReviewProjection>,
     pub task_id: String,
     pub request_id: String,
     pub project_key: String,
@@ -501,6 +591,12 @@ pub fn next_safe_action_for_background_poll(
         BackgroundRunnerPhase::RecoveryAcknowledged => OffdeskNextSafeAction::new(
             "recovery_acknowledged",
             "Background recovery was acknowledged by an operator; no retry, resume, closeout, or accepted-truth action is authorized from this probe.",
+            Vec::new(),
+            false,
+        ),
+        BackgroundRunnerPhase::Terminated => OffdeskNextSafeAction::new(
+            "terminated",
+            "Background runtime was terminated by an operator; no resume, closeout, or accepted-truth action is authorized from this probe.",
             Vec::new(),
             false,
         ),
@@ -816,6 +912,8 @@ pub struct OffdeskStatusNextSafeActionInput {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct OffdeskCloseoutStateSummary {
+    pub historical_invalid: usize,
+    pub reviewed_nonaccepted: usize,
     pub missing_closeout: usize,
     pub pending_review: usize,
     pub revision_required: usize,
@@ -953,24 +1051,104 @@ impl OffdeskTaskStore {
     }
 
     pub fn save(&self, tasks: &[OffdeskTask]) -> Result<()> {
+        let guard = self.lock()?;
+        self.save_locked(tasks, &guard)
+    }
+
+    fn lock(&self) -> Result<super::tick_lock::OffdeskTickLockGuard> {
+        super::tick_lock::OffdeskTickLockGuard::acquire(
+            &self.root,
+            Utc::now(),
+            chrono::Duration::minutes(30),
+        )
+    }
+
+    pub(crate) fn save_locked(
+        &self,
+        tasks: &[OffdeskTask],
+        guard: &super::tick_lock::OffdeskTickLockGuard,
+    ) -> Result<()> {
+        guard.ensure_root(&self.root)?;
         write_tasks(&self.path(), tasks)
     }
 
     pub fn enqueue(&self, task: OffdeskTask) -> Result<()> {
+        let guard = self.lock()?;
         let mut tasks = self.load()?;
         if let Some(existing) = tasks
             .iter_mut()
             .find(|existing| existing.task_id == task.task_id)
         {
+            anyhow::ensure!(
+                super::runtime_occupancy::released(&self.root, existing)?,
+                "cannot replace task with unresolved runtime occupancy"
+            );
             *existing = task;
         } else {
             tasks.push(task);
         }
-        self.save(&tasks)
+        self.save_locked(&tasks, &guard)
     }
 
     pub fn counts(&self) -> Result<OffdeskTaskCounts> {
         Ok(count_tasks(&self.load()?))
+    }
+
+    pub fn link_review(
+        &self,
+        request: &super::workflow::review_link::ReviewLinkRequest,
+        expected_preview_sha256: &str,
+        recorded_by: &str,
+        now: DateTime<Utc>,
+    ) -> Result<&'static str> {
+        use super::workflow::review_link::{preview, RecordedReviewLink};
+        anyhow::ensure!(
+            !recorded_by.trim().is_empty() && recorded_by.len() <= 256,
+            "review link recorder required within bounds"
+        );
+        let guard = self.lock()?;
+        let mut tasks = self.load()?;
+        anyhow::ensure!(
+            tasks
+                .iter()
+                .filter(|t| t.task_id == request.task_id)
+                .count()
+                == 1,
+            "review task missing or ambiguous"
+        );
+        let task = tasks
+            .iter_mut()
+            .find(|task| task.task_id == request.task_id)
+            .unwrap();
+        let observed = preview(&self.root, task, request)?;
+        anyhow::ensure!(
+            observed.sha256()? == expected_preview_sha256,
+            "review preview version changed"
+        );
+        if let Some(existing) = task
+            .review_links
+            .iter()
+            .find(|link| link.preview.request.link_request_id == request.link_request_id)
+        {
+            anyhow::ensure!(
+                existing.preview == observed && existing.preview_sha256 == expected_preview_sha256,
+                "review link request replay conflict"
+            );
+            return Ok("already_applied");
+        }
+        anyhow::ensure!(
+            task.review_links.len() < 32,
+            "review link history full; explicit retention review required"
+        );
+        task.review_links.push(RecordedReviewLink {
+            preview: observed,
+            preview_sha256: expected_preview_sha256.to_string(),
+            recorded_by: recorded_by.to_string(),
+            recorded_at: now,
+        });
+        // Preserve runtime timestamps, original results and all previous links.
+        self.save_locked(&tasks, &guard)?;
+        Ok("applied")
     }
 
     pub fn cancel_task(
@@ -979,6 +1157,18 @@ impl OffdeskTaskStore {
         reason: Option<&str>,
         now: DateTime<Utc>,
     ) -> Result<OffdeskTaskLifecycleReport> {
+        let guard = self.lock()?;
+        self.cancel_task_locked(task_id, reason, now, &guard)
+    }
+
+    pub(crate) fn cancel_task_locked(
+        &self,
+        task_id: &str,
+        reason: Option<&str>,
+        now: DateTime<Utc>,
+        guard: &super::tick_lock::OffdeskTickLockGuard,
+    ) -> Result<OffdeskTaskLifecycleReport> {
+        guard.ensure_root(&self.root)?;
         let mut tasks = self.load()?;
         let index = find_task_index(&tasks, task_id)?;
         let previous_status = tasks[index].status;
@@ -998,7 +1188,7 @@ impl OffdeskTaskStore {
         };
 
         if changed {
-            self.save(&tasks)?;
+            self.save_locked(&tasks, guard)?;
             let task = &tasks[index];
             TaskResumeStore::new(&self.root).cancel(&task.project_key, &task.task_id, now)?;
         }
@@ -1009,6 +1199,7 @@ impl OffdeskTaskStore {
             _ => "task marked cancelled; background runner was left untouched",
         };
         Ok(lifecycle_report(
+            &self.root,
             &tasks[index],
             OffdeskTaskLifecycleAction::Cancel,
             changed,
@@ -1022,6 +1213,7 @@ impl OffdeskTaskStore {
         task_id: &str,
         now: DateTime<Utc>,
     ) -> Result<OffdeskTaskLifecycleReport> {
+        let guard = self.lock()?;
         let mut tasks = self.load()?;
         let index = find_task_index(&tasks, task_id)?;
         let previous_status = tasks[index].status;
@@ -1030,6 +1222,10 @@ impl OffdeskTaskStore {
             OffdeskTaskStatus::Failed
             | OffdeskTaskStatus::ResumePending
             | OffdeskTaskStatus::Cancelled => {
+                anyhow::ensure!(
+                    super::runtime_occupancy::released(&self.root, &tasks[index])?,
+                    "cannot retry task before runtime termination is verified"
+                );
                 requeue_task(&mut tasks[index], now);
                 true
             }
@@ -1037,7 +1233,7 @@ impl OffdeskTaskStore {
         };
 
         if changed {
-            self.save(&tasks)?;
+            self.save_locked(&tasks, &guard)?;
             if previous_status == OffdeskTaskStatus::ResumePending {
                 let task = &tasks[index];
                 TaskResumeStore::new(&self.root).clear_after_recovery(
@@ -1061,6 +1257,7 @@ impl OffdeskTaskStore {
             _ => "task cannot be retried from its current status",
         };
         Ok(lifecycle_report(
+            &self.root,
             &tasks[index],
             OffdeskTaskLifecycleAction::Retry,
             changed,
@@ -1074,11 +1271,16 @@ impl OffdeskTaskStore {
         task_id: &str,
         now: DateTime<Utc>,
     ) -> Result<OffdeskTaskLifecycleReport> {
+        let guard = self.lock()?;
         let mut tasks = self.load()?;
         let index = find_task_index(&tasks, task_id)?;
         let previous_status = tasks[index].status;
 
         let changed = if previous_status == OffdeskTaskStatus::ResumePending {
+            anyhow::ensure!(
+                super::runtime_occupancy::released(&self.root, &tasks[index])?,
+                "cannot resume task before runtime termination is verified"
+            );
             requeue_task(&mut tasks[index], now);
             true
         } else {
@@ -1086,7 +1288,7 @@ impl OffdeskTaskStore {
         };
 
         if changed {
-            self.save(&tasks)?;
+            self.save_locked(&tasks, &guard)?;
             let task = &tasks[index];
             TaskResumeStore::new(&self.root).clear_after_recovery(
                 &task.project_key,
@@ -1103,6 +1305,7 @@ impl OffdeskTaskStore {
             "only resume_pending tasks can be resumed"
         };
         Ok(lifecycle_report(
+            &self.root,
             &tasks[index],
             OffdeskTaskLifecycleAction::Resume,
             changed,
@@ -1116,6 +1319,7 @@ impl OffdeskTaskStore {
         task_id: &str,
         now: DateTime<Utc>,
     ) -> Result<OffdeskTaskLifecycleReport> {
+        let guard = self.lock()?;
         let mut tasks = self.load()?;
         let index = find_task_index(&tasks, task_id)?;
         let previous_status = tasks[index].status;
@@ -1131,7 +1335,7 @@ impl OffdeskTaskStore {
         };
 
         if changed {
-            self.save(&tasks)?;
+            self.save_locked(&tasks, &guard)?;
             let task = &tasks[index];
             TaskResumeStore::new(&self.root).abandon(&task.project_key, &task.task_id, now)?;
         }
@@ -1143,6 +1347,7 @@ impl OffdeskTaskStore {
             _ => "only failed or resume_pending tasks can be abandoned",
         };
         Ok(lifecycle_report(
+            &self.root,
             &tasks[index],
             OffdeskTaskLifecycleAction::Abandon,
             changed,
@@ -1174,16 +1379,46 @@ fn read_tasks(path: &Path) -> Result<Vec<OffdeskTask>> {
     }
     let content = fs::read_to_string(path)?;
     if content.trim().is_empty() {
-        return Ok(Vec::new());
+        anyhow::bail!("task queue is empty or truncated; recovery required");
     }
-    Ok(serde_json::from_str(&content)?)
+    crate::migrations::v005_task_review_links::decode(&content)
 }
 
 fn write_tasks(path: &Path, tasks: &[OffdeskTask]) -> Result<()> {
+    write_tasks_with_checkpoint(path, tasks, |_| Ok(()))
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum QueueWriteStage {
+    FileSynced,
+    Replaced,
+}
+
+fn write_tasks_with_checkpoint(
+    path: &Path,
+    tasks: &[OffdeskTask],
+    checkpoint: impl Fn(QueueWriteStage) -> Result<()>,
+) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(path, serde_json::to_string_pretty(tasks)?)?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("queue path has no parent"))?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    let existing = if path.exists() {
+        Some(fs::read_to_string(path)?)
+    } else {
+        None
+    };
+    let encoded = crate::migrations::v005_task_review_links::encode(tasks, existing.as_deref())?;
+    serde_json::to_writer_pretty(temporary.as_file_mut(), &encoded)?;
+    temporary.as_file().sync_all()?;
+    checkpoint(QueueWriteStage::FileSynced)?;
+    temporary.persist(path)?;
+    checkpoint(QueueWriteStage::Replaced)?;
+    #[cfg(unix)]
+    fs::File::open(parent)?.sync_all()?;
     Ok(())
 }
 
@@ -1204,6 +1439,7 @@ fn requeue_task(task: &mut OffdeskTask, now: DateTime<Utc>) {
 }
 
 fn lifecycle_report(
+    root: &Path,
     task: &OffdeskTask,
     action: OffdeskTaskLifecycleAction,
     changed: bool,
@@ -1211,7 +1447,7 @@ fn lifecycle_report(
     message: &str,
 ) -> OffdeskTaskLifecycleReport {
     OffdeskTaskLifecycleReport {
-        task: task.operator_view(),
+        task: task.operator_view_with_profile(root),
         action,
         changed,
         previous_status,
@@ -1264,6 +1500,150 @@ mod tests {
         store.enqueue(task.clone())?;
 
         assert_eq!(store.load()?, vec![task]);
+        Ok(())
+    }
+
+    #[test]
+    fn queue_write_crash_worker() -> Result<()> {
+        let Some(root) = std::env::var_os("FORAGER_TEST_QUEUE_CRASH_ROOT") else {
+            return Ok(());
+        };
+        let stage = std::env::var("FORAGER_TEST_QUEUE_CRASH_STAGE")?;
+        let store = OffdeskTaskStore::new(std::path::PathBuf::from(root));
+        let _guard = store.lock()?;
+        let mut tasks = store.load()?;
+        tasks[0].reason = "new complete queue".into();
+        write_tasks_with_checkpoint(&store.path(), &tasks, |at| {
+            if (stage == "before_replace" && at == QueueWriteStage::FileSynced)
+                || (stage == "after_replace" && at == QueueWriteStage::Replaced)
+            {
+                // Exit without Rust destructors, leaving the temporary file and
+                // lock cleanup to the OS exactly at the selected boundary.
+                std::process::exit(91);
+            }
+            Ok(())
+        })?;
+        anyhow::bail!("crash boundary was not reached")
+    }
+
+    #[test]
+    fn queue_process_crash_keeps_complete_old_or_new_bytes_and_releases_lock() -> Result<()> {
+        for stage in ["before_replace", "after_replace"] {
+            let temp = tempdir()?;
+            let store = OffdeskTaskStore::new(temp.path());
+            let mut original = OffdeskTask::new(input(), Utc::now());
+            original.reason = "old complete queue".into();
+            store.enqueue(original.clone())?;
+            let output = std::process::Command::new(std::env::current_exe()?)
+                .args([
+                    "--exact",
+                    "offdesk::task_queue::tests::queue_write_crash_worker",
+                ])
+                .env("FORAGER_TEST_QUEUE_CRASH_ROOT", temp.path())
+                .env("FORAGER_TEST_QUEUE_CRASH_STAGE", stage)
+                .output()?;
+            assert_eq!(
+                output.status.code(),
+                Some(91),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stored = store.load()?;
+            let mut expected = original;
+            if stage == "after_replace" {
+                expected.reason = "new complete queue".into();
+            }
+            assert_eq!(stored, vec![expected]);
+            assert!(store.cancel_task("task", None, Utc::now())?.changed);
+            assert_eq!(store.load()?[0].status, OffdeskTaskStatus::Cancelled);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn queue_mutations_share_tick_lock_and_preserve_bytes_on_contention() -> Result<()> {
+        let temp = tempdir()?;
+        let store = OffdeskTaskStore::new(temp.path());
+        let now = Utc::now();
+        let task = OffdeskTask::new(input(), now);
+        store.enqueue(task.clone())?;
+        let before = fs::read(store.path())?;
+        let guard = store.lock()?;
+        assert!(store.enqueue(task.clone()).is_err());
+        assert!(store.cancel_task("task", None, now).is_err());
+        assert!(store.retry_task("task", now).is_err());
+        assert!(store.resume_task("task", now).is_err());
+        assert!(store.abandon_task("task", now).is_err());
+        assert!(store.save(std::slice::from_ref(&task)).is_err());
+        assert_eq!(fs::read(store.path())?, before);
+        let other = tempdir()?;
+        assert!(OffdeskTaskStore::new(other.path())
+            .save_locked(&[], &guard)
+            .is_err());
+        drop(guard);
+        assert!(store.cancel_task("task", None, now)?.changed);
+        Ok(())
+    }
+
+    #[test]
+    fn cancelled_runtime_requires_real_exit_evidence_before_retry() -> Result<()> {
+        let temp = tempdir()?;
+        let store = OffdeskTaskStore::new(temp.path());
+        let now = Utc::now();
+        let mut task = OffdeskTask::new(input(), now);
+        task.workdir = temp.path().display().to_string();
+        task.status = OffdeskTaskStatus::Cancelled;
+        task.background_ticket_id = Some("receipt-test".into());
+        store.enqueue(task.clone())?;
+        assert!(store.retry_task("task", now).is_err());
+        assert!(store.enqueue(OffdeskTask::new(input(), now)).is_err());
+        let (mut command, receipt) = super::super::local_exit::command(temp.path(), "exit 0")?;
+        let mut child = command.spawn()?;
+        let pid = child.id();
+        child.wait()?;
+        let mut probe = BackgroundProbe::new("receipt-test", BackgroundRunnerKind::LocalBackground);
+        probe.task_id = Some(task.task_id.clone());
+        probe.project_key = Some(task.project_key.clone());
+        probe.request_id = Some(task.request_id.clone());
+        probe.working_dir = Some(task.workdir.clone());
+        probe.runtime_pid = Some(pid);
+        probe.runtime_identity = Some("fixture-exited-process".into());
+        probe.local_exit_receipt = Some(receipt);
+        let probes = super::super::BackgroundRunStore::new(temp.path());
+        probe.runtime_pid = Some(std::process::id());
+        probes.save(std::slice::from_ref(&probe))?;
+        assert!(store.retry_task("task", now).is_err());
+        probe.runtime_pid = Some(pid);
+        probe.task_id = Some("wrong-task".into());
+        probes.save(std::slice::from_ref(&probe))?;
+        assert!(store.retry_task("task", now).is_err());
+        probe.task_id = Some(task.task_id);
+        let scope = probe.local_exit_receipt.as_mut().unwrap().wait_scope.take();
+        probes.save(std::slice::from_ref(&probe))?;
+        assert!(store.retry_task("task", now).is_err());
+        probe.local_exit_receipt.as_mut().unwrap().wait_scope = scope;
+        probes.save(&[probe])?;
+        if cfg!(target_os = "linux") {
+            assert!(store.retry_task("task", now)?.changed);
+            assert!(store.load()?[0].background_ticket_id.is_none());
+        } else {
+            let before = store.load()?;
+            assert!(store.retry_task("task", now).is_err());
+            assert_eq!(store.load()?, before);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn truncated_queue_is_not_treated_as_empty() -> Result<()> {
+        let temp = tempdir()?;
+        let store = OffdeskTaskStore::new(temp.path());
+        fs::write(store.path(), b"")?;
+        assert!(store.load().is_err());
+        assert!(store
+            .enqueue(OffdeskTask::new(input(), Utc::now()))
+            .is_err());
+        assert!(fs::read(store.path())?.is_empty());
         Ok(())
     }
 
@@ -1590,6 +1970,14 @@ mod tests {
         });
         store.enqueue(task)?;
 
+        let before = fs::read(store.path())?;
+        assert!(store.retry_task("task", now).is_err());
+        assert_eq!(fs::read(store.path())?, before);
+        // Continue the no-runtime branch; release evidence has separate coverage.
+        let mut tasks = store.load()?;
+        tasks[0].background_ticket_id = None;
+        store.save(&tasks)?;
+
         let report = store.retry_task("task", now + Duration::seconds(1))?;
         let updated = store.load()?.remove(0);
 
@@ -1615,6 +2003,11 @@ mod tests {
         task.last_error = Some("stale".to_string());
         store.enqueue(task)?;
         resume_store.mark_resume_pending(resume_state(now))?;
+
+        assert!(store.resume_task("task", now).is_err());
+        let mut tasks = store.load()?;
+        tasks[0].background_ticket_id = None;
+        store.save(&tasks)?;
 
         let report = store.resume_task("task", now + Duration::seconds(1))?;
         let updated = store.load()?.remove(0);

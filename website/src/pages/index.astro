@@ -10,48 +10,48 @@ import { sitePath } from '../lib/paths';
 const features = [
   {
     icon: 'status',
-    title: 'Local control plane',
-    description: 'Keep intent, approvals, runtime state, recovery decisions, and review outcomes in Forager-owned local state.',
+    title: 'Local task records',
+    description: 'For configured Offdesk tasks, store the selected command, approvals, execution state and artifact references locally.',
   },
   {
     icon: 'tmux',
-    title: 'Hosted harness agents',
-    description: 'Run Claude Code, Codex, OpenCode, Gemini CLI, Mistral Vibe, local scripts, and future harnesses under one supervision contract.',
+    title: 'Agents and paired terminals',
+    description: 'Run an installed coding agent in tmux, open a paired shell, and reattach while the host and session stay running.',
   },
   {
     icon: 'groups',
-    title: 'Evidence-first Offdesk',
-    description: 'Return to heartbeat, progress, logs, result artifacts, packet coverage, closeout receipts, and decision surfaces instead of terminal scrollback.',
+    title: 'Offdesk result review',
+    description: 'Inspect the logs and result artifacts a configured task produced, then record a review decision.',
   },
   {
     icon: 'dashboard',
-    title: 'Ondesk cockpit',
-    description: 'Create sessions, attach to agents, toggle paired terminals, inspect diffs, and recover state from a keyboard-driven dashboard.',
+    title: 'Telegram controls',
+    description: 'With the operator configured, inspect task records and confirm the specific actions it supports from Telegram.',
   },
   {
     icon: 'worktrees',
-    title: 'Worktree isolation',
-    description: 'Give parallel agents separate branches and working directories so experiments, fixes, and reviews do not collide.',
+    title: 'Separate Git worktrees',
+    description: 'Create separate branches and working directories for parallel changes. Worktrees share Git history and are not a security sandbox.',
   },
   {
     icon: 'status',
-    title: 'Reviewed knowledge',
-    description: 'Capture agent lessons as adaptive wiki candidates, then promote only reviewed guidance into reusable project knowledge.',
+    title: 'Wiki candidates',
+    description: 'Store proposed lessons, evidence references and review decisions for later use. Review records do not prove correctness.',
   },
 ];
 
-const promises = [
-  ['Entrust', 'choose a harness-backed agent and bound the work before it runs'],
-  ['Observe', 'capture runtime evidence while the agent works away from the desk'],
-  ['Return', 'resume from evidence, choices, and continuity instead of mystery'],
+const highlights = [
+  ['Sessions', 'list coding agent sessions and attach to their terminals'],
+  ['Worktrees', 'give parallel branch changes separate working directories'],
+  ['Review', 'inspect configured task records, logs and result artifacts'],
 ];
 ---
 
 <Base
-  title="Forager - Local Meta-Harness for AI Agents"
-  description="Forager lets people entrust meaningful work to harness-backed AI agents and return to evidence, choices, and continuity instead of mystery."
-  ogTitle="Forager - Local Meta-Harness for AI Agents"
-  ogDescription="Run Claude Code, Codex, OpenCode, local LLM scripts, and future harness-backed agents under local approval, evidence, recovery, and review control."
+  title="Forager - Coding Agent Session Manager"
+  description="Manage coding agent sessions and Git worktrees in a tmux-based terminal UI. Optional Offdesk workflows add task queues, execution approvals and result review."
+  ogTitle="Forager - Coding Agent Session Manager"
+  ogDescription="A tmux-based session manager with Git worktrees and optional task queues, execution approvals and result review for configured commands."
 >
   <Nav />
 
@@ -63,32 +63,25 @@ const promises = [
       <div class="mx-auto flex min-h-[calc(100vh-9rem)] max-w-6xl flex-col justify-between">
         <div class="flex flex-col gap-10">
           <div class="flex flex-col gap-6">
-            <a href="https://www.kisti.re.kr/" class="institution-badge inline-flex w-fit items-center gap-4 rounded-lg px-4 py-3" aria-label="KISTI">
-              <img src={sitePath('/assets/kisti-logo-en.png')} alt="KISTI">
-              <span class="hidden h-7 w-px bg-slate-300 sm:block"></span>
-              <span class="hidden text-sm font-semibold uppercase text-slate-700 sm:block">Local Agent Operations</span>
-            </a>
-
             <div class="max-w-4xl">
-              <p class="mb-5 text-sm font-semibold uppercase tracking-[0.18em] text-brand-300">Forager</p>
+              <p class="mb-5 text-sm font-semibold text-brand-300">Coding agent session manager</p>
               <h1 class="max-w-4xl text-5xl font-bold leading-[1.02] tracking-tight text-white md:text-7xl">
-                Entrust agent work. Return to evidence, choices, and continuity.
+                Manage agent sessions.<br>Review their work.
               </h1>
               <p class="mt-7 max-w-3xl text-xl leading-relaxed text-slate-200 md:text-2xl">
-                Forager is a local meta-harness for harness-backed agents. It does
-                not replace Claude Code, Codex, OpenHands, OpenCode, or local LLM
-                scripts. It supervises them with approval gates, durable runtime
-                evidence, reviewable handoffs, and deliberate knowledge promotion.
+                Run coding CLIs in tmux, switch between sessions and inspect
+                their diffs. For configured Offdesk tasks, queue commands and
+                review the logs and result artifacts they produce.
               </p>
             </div>
           </div>
 
           <div class="flex flex-col gap-4 sm:flex-row">
-            <a href={sitePath('/docs/project-direction.html')} class="bg-brand-700 px-7 py-3.5 text-center text-base font-semibold text-white transition-colors hover:bg-brand-600">
-              Read the direction
+            <a href={sitePath('/docs/installation.html')} class="bg-brand-700 px-7 py-3.5 text-center text-base font-semibold text-white transition-colors hover:bg-brand-600">
+              Install Forager
             </a>
-            <a href={sitePath('/docs/guides/operation-cycle.html')} class="border border-white/20 bg-white/10 px-7 py-3.5 text-center text-base font-semibold text-white transition-colors hover:border-brand-300 hover:bg-white/15">
-              See the operating loop
+            <a href="#workflow" class="border border-white/20 bg-white/10 px-7 py-3.5 text-center text-base font-semibold text-white transition-colors hover:border-brand-300 hover:bg-white/15">
+              See the workflow
             </a>
             <a href="https://github.com/kimyoungjin06/forager-cli" target="_blank" rel="noopener" class="inline-flex items-center justify-center gap-2 border border-white/20 bg-surface-950/80 px-7 py-3.5 text-base font-semibold text-white transition-colors hover:border-brand-300 hover:bg-surface-900">
               <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
@@ -98,7 +91,7 @@ const promises = [
         </div>
 
         <div class="mt-12 grid gap-4 md:grid-cols-3">
-          {promises.map(([title, description]) => (
+          {highlights.map(([title, description]) => (
             <div class="promise-panel border border-white/[0.14] bg-surface-950/[0.78] p-5">
               <p class="text-sm font-semibold uppercase tracking-[0.16em] text-brand-300">{title}</p>
               <p class="mt-3 text-base leading-relaxed text-slate-200">{description}</p>
@@ -111,16 +104,15 @@ const promises = [
     <section class="border-y border-surface-200 bg-white px-6 py-16 text-surface-950">
       <div class="mx-auto grid max-w-6xl gap-8 md:grid-cols-[1.05fr_1fr] md:items-center">
         <div>
-          <p class="mb-4 text-sm font-semibold uppercase tracking-[0.16em] text-brand-700">The product boundary</p>
+          <p class="mb-4 text-sm font-semibold text-brand-700">Start with one session</p>
           <h2 class="text-3xl font-bold leading-tight md:text-5xl">
-            Forager is not trying to be the smartest agent.
+            Sessions, branches<br>and task records.
           </h2>
         </div>
         <p class="text-lg leading-relaxed text-slate-700">
-          It is trying to make agent work governable, inspectable, recoverable,
-          and transferable. Hosted harnesses own their agent loops. Forager owns
-          the local approval, evidence, recovery, review, and knowledge-promotion
-          contract around them.
+          Use your existing coding CLI. Forager lists sessions and worktrees
+          around it. Start interactively, then configure an Offdesk task if you
+          need a queued command with approval and review records.
         </p>
       </div>
     </section>
@@ -128,33 +120,40 @@ const promises = [
     <section class="bg-slate-50 px-6 py-20 text-surface-950">
       <div class="mx-auto max-w-6xl">
         <div class="mb-12 max-w-3xl">
-          <p class="mb-4 text-sm font-semibold uppercase tracking-[0.16em] text-brand-700">What it supervises</p>
-          <h2 class="text-3xl font-bold md:text-5xl">Different harnesses, one local contract.</h2>
+          <p class="mb-4 text-sm font-semibold uppercase tracking-[0.16em] text-brand-700">Interactive sessions</p>
+          <h2 class="text-3xl font-bold md:text-5xl">Use the coding CLI you already know.</h2>
           <p class="mt-5 text-lg leading-relaxed text-slate-700">
-            Use stronger commercial harnesses when budget and latency allow it,
-            local-model episodes when constraints require it, and deterministic
-            scripts when a task should be auditable before it is intelligent.
+            Forager detects these installed tools for interactive sessions.
+            Your selected tool runs its own agent loop; Forager manages the
+            surrounding session and work records.
           </p>
         </div>
 
         <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {['Claude Code', 'Codex', 'OpenCode', 'Gemini CLI', 'Mistral Vibe', 'OpenHands-ready', 'Local LLM scripts', 'Future agent loops'].map((name) => (
+          {['Claude Code', 'Codex', 'OpenCode', 'Gemini CLI', 'Mistral Vibe'].map((name) => (
             <div class="harness-chip border border-slate-200 bg-white px-5 py-4 text-base font-semibold text-slate-800">
               {name}
             </div>
           ))}
         </div>
+        <p class="mt-6 max-w-3xl text-base leading-relaxed text-slate-600">
+          Local models and other scripts can be configured as command workloads.
+          Check the runner and required artifacts for each task; launching a
+          command alone does not demonstrate that it can complete or resume the
+          work. <a href={sitePath('/docs/offdesk-operation-status.html')} class="font-semibold text-brand-700 underline underline-offset-4">Check the supported scope</a>.
+        </p>
       </div>
     </section>
 
     <section class="px-6 py-20">
       <div class="mx-auto max-w-6xl">
         <div class="mb-12 max-w-3xl">
-          <p class="mb-4 text-sm font-semibold uppercase tracking-[0.16em] text-brand-300">Core surfaces</p>
-          <h2 class="text-3xl font-bold text-white md:text-5xl">The work is only useful if it can come back cleanly.</h2>
+          <p class="mb-4 text-sm font-semibold uppercase tracking-[0.16em] text-brand-300">Features</p>
+          <h2 class="text-3xl font-bold text-white md:text-5xl">Session tools and optional task workflows.</h2>
           <p class="mt-5 text-lg leading-relaxed text-slate-400">
-            Forager gives operators compact human surfaces and durable machine
-            evidence, so long-running work can be reviewed instead of guessed at.
+            Use the TUI for sessions, or configure task records and remote
+            controls for longer work. Inspect available artifacts before
+            deciding whether a result meets the task's requirements.
           </p>
         </div>
 
@@ -170,15 +169,15 @@ const promises = [
       </div>
     </section>
 
-    <section class="border-y border-surface-800/70 bg-surface-900/70 px-6 py-20">
+    <section id="workflow" class="scroll-mt-20 border-y border-surface-800/70 bg-surface-900/70 px-6 py-20">
       <div class="mx-auto grid max-w-6xl gap-12 lg:grid-cols-[0.95fr_1.05fr] lg:items-start">
         <div>
           <p class="mb-4 text-sm font-semibold uppercase tracking-[0.16em] text-brand-300">Ondesk to Offdesk to Ondesk</p>
-          <h2 class="text-3xl font-bold leading-tight text-white md:text-5xl">The loop keeps autonomy bounded.</h2>
+          <h2 class="text-3xl font-bold leading-tight text-white md:text-5xl">Prepare. Run. Review. Continue.</h2>
           <p class="mt-5 text-lg leading-relaxed text-slate-400">
-            The operator stays in control at the transitions that matter:
-            preparing work, approving runtime mutation, reviewing evidence,
-            closing out, and promoting reusable knowledge.
+            These are operator steps for explicitly configured tasks. Select
+            the scope, inspect the returned artifacts and record the next step.
+            A run can fail, stop early or return incomplete artifacts.
           </p>
           <div class="mt-8">
             <InstallBlock />
@@ -190,20 +189,20 @@ const promises = [
             <p class="leading-relaxed text-slate-400">Capture intent, target repo, branch/worktree, agent mode, work slices, required artifacts, and approval scope.</p>
           </Step>
 
-          <Step number={2} title="Launch under explicit approval">
-            <p class="leading-relaxed text-slate-400">Run hosted harness agents through local supervision, preserving the command summary, runtime handle, and evidence paths.</p>
+          <Step number={2} title="Approve configured execution">
+            <p class="leading-relaxed text-slate-400">Check the runner, command and working directory, then approve the selected queued task.</p>
           </Step>
 
-          <Step number={3} title="Return to evidence">
-            <p class="leading-relaxed text-slate-400">Inspect heartbeat, progress, logs, result artifacts, packet coverage, stale or failed state, and review recommendations.</p>
+          <Step number={3} title="Inspect available artifacts">
+            <p class="leading-relaxed text-slate-400">Inspect task state, logs, result artifacts and any configured progress signals. Record missing artifacts and unresolved questions.</p>
           </Step>
 
-          <Step number={4} title="Hand off to a fresh harness">
-            <p class="leading-relaxed text-slate-400">Use return packages and prompt packages so the next Codex, Claude Code, OpenHands, or local-model session starts from durable state.</p>
+          <Step number={4} title="Agree on the next step">
+            <p class="leading-relaxed text-slate-400">Record the accepted, reworked or deferred outcome in the project's owning TODO. Keep open questions visible.</p>
           </Step>
 
-          <Step number={5} title="Promote only reviewed knowledge" showLine={false}>
-            <p class="leading-relaxed text-slate-400">Keep lessons provisional until they are reviewed and promoted into the adaptive wiki.</p>
+          <Step number={5} title="Prepare a continuation" showLine={false}>
+            <p class="leading-relaxed text-slate-400">Attach to a surviving session, or use a saved handoff to start another session with a specific next task.</p>
           </Step>
         </div>
       </div>
@@ -213,17 +212,17 @@ const promises = [
       <div class="mx-auto max-w-6xl">
         <div class="grid gap-10 lg:grid-cols-[1fr_1.2fr] lg:items-center">
           <div>
-            <p class="mb-4 text-sm font-semibold uppercase tracking-[0.16em] text-brand-700">The operator promise</p>
+            <p class="mb-4 text-sm font-semibold uppercase tracking-[0.16em] text-brand-700">Available interfaces</p>
             <h2 class="text-3xl font-bold leading-tight md:text-5xl">
-              The next morning should take minutes, not archaeology.
+              Review the result.<br>Choose what happens next.
             </h2>
           </div>
           <div class="grid gap-4 sm:grid-cols-2">
             {[
-              ['Telegram', 'compact decisions and alerts'],
-              ['WebUI', 'richer evidence and comparison review'],
-              ['TUI', 'live session control and recovery'],
-              ['CLI/JSON', 'automation and audit source of truth'],
+              ['Telegram', 'configured inspection, confirmations and alerts'],
+              ['WebUI', 'sample views and optional local exports'],
+              ['TUI', 'session attachment, status estimates and diffs'],
+              ['CLI/JSON', 'local records and scripting interfaces'],
             ].map(([surface, role]) => (
               <div class="surface-role border border-slate-200 bg-slate-50 p-5">
                 <p class="text-lg font-bold text-slate-950">{surface}</p>
@@ -231,18 +230,24 @@ const promises = [
               </div>
             ))}
           </div>
-          <div class="mt-8 flex flex-col gap-3 sm:flex-row">
+          <p class="text-base leading-relaxed text-slate-600 lg:col-span-2">
+            The workspace pages below are static previews with sample data.
+            Connect local exports for your own projects; local actions require
+            a separately configured bridge. Tagged downloads and newer source
+            changes are described in the <a href={sitePath('/docs/offdesk-operation-status.html')} class="font-semibold text-brand-700 underline underline-offset-4">operation status</a>.
+          </p>
+          <div class="flex flex-wrap gap-3 lg:col-span-2">
             <a href={sitePath('/dashboard/')} class="bg-brand-700 px-6 py-3 text-center text-base font-semibold text-white transition-colors hover:bg-brand-600">
-              Open dashboard
+              Preview dashboard
             </a>
             <a href={sitePath('/graph/')} class="border border-slate-300 bg-white px-6 py-3 text-center text-base font-semibold text-slate-950 transition-colors hover:border-brand-500 hover:text-brand-800">
-              Open graph
+              Preview graph
             </a>
             <a href={sitePath('/settings/')} class="border border-slate-300 bg-white px-6 py-3 text-center text-base font-semibold text-slate-950 transition-colors hover:border-brand-500 hover:text-brand-800">
-              Open settings
+              Preview settings
             </a>
             <a href={sitePath('/review/')} class="border border-slate-300 bg-white px-6 py-3 text-center text-base font-semibold text-slate-950 transition-colors hover:border-brand-500 hover:text-brand-800">
-              Open review surface
+              Preview review surface
             </a>
             <a href={sitePath('/guides/offdesk-morning-review/')} class="border border-slate-300 bg-white px-6 py-3 text-center text-base font-semibold text-slate-950 transition-colors hover:border-brand-500 hover:text-brand-800">
               Morning review guide
@@ -256,11 +261,10 @@ const promises = [
       <div class="mx-auto max-w-4xl text-center">
         <img src={sitePath('/assets/logo.svg')} alt="Forager" class="mx-auto mb-8 h-16 w-16" width="64" height="64" loading="lazy">
         <p class="text-sm font-semibold uppercase tracking-[0.18em] text-brand-300">Start small</p>
-        <h2 class="mt-4 text-3xl font-bold leading-tight text-white md:text-5xl">Run one agent session. Then make it recoverable.</h2>
+        <h2 class="mt-4 text-3xl font-bold leading-tight text-white md:text-5xl">Start with one agent session.</h2>
         <p class="mx-auto mt-5 max-w-2xl text-lg leading-relaxed text-slate-400">
-          Forager still starts as a tmux-backed session manager. The deeper value
-          appears as your work gets longer, more parallel, and more expensive to
-          reconstruct from memory.
+          Add a coding CLI, attach to its terminal and inspect its diff. Explore
+          queued task workflows after checking their configuration and scope.
         </p>
         <div class="mt-10 flex flex-col justify-center gap-4 sm:flex-row">
           <a href={sitePath('/docs/quick-start.html')} class="bg-brand-700 px-8 py-4 text-lg font-semibold text-white transition-colors hover:bg-brand-600">

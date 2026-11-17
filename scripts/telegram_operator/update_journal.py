@@ -7,11 +7,15 @@ import pathlib
 from typing import Any
 
 from .common import append_jsonl, utc_now, write_private_text_atomic
+from .command_envelope import command_envelope_binding_issue
 from .persistence import RemoteOperatorStateError
 
 
-UPDATE_JOURNAL_SCHEMA = "remote_operator_telegram_update_journal.v2"
-LEGACY_UPDATE_JOURNAL_SCHEMA = "remote_operator_telegram_update_journal.v1"
+UPDATE_JOURNAL_SCHEMA = "remote_operator_telegram_update_journal.v3"
+LEGACY_UPDATE_JOURNAL_SCHEMAS = {
+    "remote_operator_telegram_update_journal.v1",
+    "remote_operator_telegram_update_journal.v2",
+}
 VALID_STATUSES = {
     "started",
     "effect_committed",
@@ -46,7 +50,7 @@ def _records(path: pathlib.Path) -> list[dict[str, Any]]:
                 f"update journal row {line_number} must be an object: {path}"
             )
         schema = record.get("schema")
-        if schema not in {UPDATE_JOURNAL_SCHEMA, LEGACY_UPDATE_JOURNAL_SCHEMA}:
+        if schema not in {UPDATE_JOURNAL_SCHEMA, *LEGACY_UPDATE_JOURNAL_SCHEMAS}:
             raise RemoteOperatorStateError(
                 f"update journal row {line_number} has an unsupported schema: {path}"
             )
@@ -55,9 +59,9 @@ def _records(path: pathlib.Path) -> list[dict[str, Any]]:
         input_hash = record.get("input_hash")
         # The short-lived v1 format omitted input_hash from its completed row.
         # Recover it from the preceding started row so deployed journals remain
-        # readable while all new transitions are written as v2.
+        # readable while all new transitions are written as v3.
         if (
-            schema == LEGACY_UPDATE_JOURNAL_SCHEMA
+            schema == "remote_operator_telegram_update_journal.v1"
             and isinstance(record_update_id, int)
             and not isinstance(record_update_id, bool)
             and (not isinstance(input_hash, str) or not input_hash)
@@ -99,6 +103,45 @@ def _assert_input_matches(
         raise RemoteOperatorStateError(
             f"update {update_id} input hash does not match its durable journal entry"
         )
+
+
+def _assert_envelope_matches(
+    envelope: dict[str, Any],
+    *,
+    update_id: int,
+    input_hash: str,
+    chat_hash: str,
+    user_hash: str,
+) -> None:
+    issue = command_envelope_binding_issue(
+        envelope,
+        update_id=update_id,
+        input_hash=input_hash,
+        chat_hash=chat_hash,
+        user_hash=user_hash,
+    )
+    if issue:
+        raise RemoteOperatorStateError(
+            f"update {update_id} command envelope is invalid: {issue}"
+        )
+
+
+def _transition_envelope(
+    previous: dict[str, Any], result: dict[str, Any]
+) -> dict[str, Any] | None:
+    candidate = result.get("remote_command_envelope")
+    if isinstance(candidate, dict):
+        previous_envelope = previous.get("remote_command_envelope")
+        if isinstance(previous_envelope, dict) and (
+            candidate.get("envelope_id") != previous_envelope.get("envelope_id")
+            or candidate.get("nonce") != previous_envelope.get("nonce")
+        ):
+            raise RemoteOperatorStateError(
+                f"update {previous.get('update_id')} command envelope changed during processing"
+            )
+        return candidate
+    previous_envelope = previous.get("remote_command_envelope")
+    return previous_envelope if isinstance(previous_envelope, dict) else None
 
 
 def journal_health_issue(path: pathlib.Path) -> str | None:
@@ -151,13 +194,29 @@ def begin_update(
     input_hash: str,
     chat_hash: str,
     user_hash: str,
+    command_envelope: dict[str, Any],
 ) -> dict[str, Any] | None:
+    _assert_envelope_matches(
+        command_envelope,
+        update_id=update_id,
+        input_hash=input_hash,
+        chat_hash=chat_hash,
+        user_hash=user_hash,
+    )
     previous = latest_update_record(path, update_id)
     if previous:
         _assert_input_matches(previous, update_id=update_id, input_hash=input_hash)
         if previous.get("status") == "completed":
             return previous
         if previous.get("status") == "retry_authorized":
+            previous_envelope = previous.get("remote_command_envelope")
+            if isinstance(previous_envelope, dict):
+                if previous_envelope.get("envelope_id") != command_envelope.get("envelope_id"):
+                    raise RemoteOperatorStateError(
+                        f"update {update_id} command envelope does not match its authorized retry"
+                    )
+                command_envelope.clear()
+                command_envelope.update(previous_envelope)
             previous = None
         else:
             raise RemoteOperatorStateError(
@@ -172,6 +231,7 @@ def begin_update(
         "input_hash": input_hash,
         "chat_id_hash": chat_hash,
         "user_id_hash": user_hash,
+        "remote_command_envelope": command_envelope,
     }
     try:
         append_jsonl(path, record, durable=True)
@@ -209,7 +269,23 @@ def mark_effect_committed(
         "input_hash": input_hash,
         "result_status": str(result.get("status") or "unknown"),
         "effect": result.get("effect") if isinstance(result.get("effect"), dict) else None,
+        "action_outcome": (
+            result.get("action_outcome")
+            if isinstance(result.get("action_outcome"), dict)
+            else None
+        ),
+        "response_card": (
+            result.get("response_card")
+            if isinstance(result.get("response_card"), dict)
+            else None
+        ),
+        "feedback_workflow": (
+            result.get("feedback_workflow")
+            if isinstance(result.get("feedback_workflow"), dict)
+            else None
+        ),
         "delivery_id": result.get("delivery_id"),
+        "remote_command_envelope": _transition_envelope(previous, result),
     }
     try:
         append_jsonl(path, record, durable=True)
@@ -254,8 +330,24 @@ def complete_update(
             if isinstance(result.get("effect"), dict)
             else previous.get("effect")
         ),
+        "action_outcome": (
+            result.get("action_outcome")
+            if isinstance(result.get("action_outcome"), dict)
+            else previous.get("action_outcome")
+        ),
+        "response_card": (
+            result.get("response_card")
+            if isinstance(result.get("response_card"), dict)
+            else previous.get("response_card")
+        ),
+        "feedback_workflow": (
+            result.get("feedback_workflow")
+            if isinstance(result.get("feedback_workflow"), dict)
+            else previous.get("feedback_workflow")
+        ),
         "delivery_id": result.get("delivery_id") or previous.get("delivery_id"),
         "sent_message_id": result.get("sent_message_id"),
+        "remote_command_envelope": _transition_envelope(previous, result),
     }
     try:
         append_jsonl(path, record, durable=True)
@@ -300,6 +392,7 @@ def reconcile_update(
         "result_status": "manual_retry_authorized" if resolution == "retry" else "manually_completed",
         "send_status": "not_attempted",
         "effect": None,
+        "remote_command_envelope": previous.get("remote_command_envelope"),
     }
     try:
         append_jsonl(path, record, durable=True)

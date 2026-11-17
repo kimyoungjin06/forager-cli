@@ -58,7 +58,10 @@ pub(super) fn build_closeout_report(
         .filter(|probe| closeout_probe_matches(probe, args))
         .collect::<Vec<_>>();
 
-    let closeout_tasks = tasks.iter().map(closeout_task_summary).collect::<Vec<_>>();
+    let closeout_tasks = tasks
+        .iter()
+        .map(|task| closeout_task_summary(task, &profile_dir))
+        .collect::<Vec<_>>();
     let closeout_background_runs = background_runs
         .iter()
         .map(closeout_background_summary)

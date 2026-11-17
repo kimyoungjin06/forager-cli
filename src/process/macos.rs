@@ -328,6 +328,10 @@ pub fn bounded_directory_snapshot(
     ))
 }
 
+pub fn filesystem_link_count(metadata: &Metadata) -> u64 {
+    metadata.nlink()
+}
+
 pub fn filesystem_file_identity(metadata: &Metadata) -> (u64, u64) {
     (metadata.dev(), metadata.ino())
 }

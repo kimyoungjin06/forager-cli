@@ -7,7 +7,7 @@ import { sitePath } from '../../lib/paths';
 
 <Base
   title="Offdesk Closeout Guide - Forager"
-  description="Generate a dry-run closeout plan, cleanup manifest, commercial review packet, and Ondesk return package before resuming work after offdesk automation."
+  description="Generate a dry-run closeout plan, cleanup manifest, review packet, and Ondesk return package before resuming work after offdesk automation."
 >
   <Nav />
 
@@ -32,7 +32,7 @@ import { sitePath } from '../../lib/paths';
         <h2>Run Closeout</h2>
         <pre><code>forager offdesk closeout --project-key &lt;project-key&gt; --dry-run</code></pre>
         <p>
-          The command writes a closeout artifact directory under the active profile:
+          The command writes a closeout artifact directory under the active profile. The historical filename COMMERCIAL_REVIEW_PACKET.md can be used by an operator or an explicitly selected reviewer:
         </p>
         <pre><code>offdesk_closeouts/&lt;timestamp&gt;_&lt;closeout-id&gt;/
   closeout_plan.json
@@ -64,16 +64,15 @@ import { sitePath } from '../../lib/paths';
       <section>
         <h2>Record Review</h2>
         <p>
-          Generating the packet is not the same as approving the closeout. After reviewing the commercial packet, record the verdict:
+          Generating the packet is not the same as approving the closeout. After inspecting the packet and underlying evidence, record the verdict. This command records your supplied review; it does not call a model or verify the review:
         </p>
         <pre><code>forager offdesk closeout-review \
   --closeout-id &lt;closeout-id&gt; \
   --verdict approved \
-  --reviewer gpt-5.5 \
-  --review-provider gpt-5.5 \
+  --reviewer operator \
   --review-file &lt;path-to-review-output&gt;</code></pre>
         <p>
-          Only an approved review record clears the TUI closeout-required signal. Revise and blocked verdicts remain evidence but keep the return path reviewable.
+          An accepted closeout receipt clears the closeout-required signal; approval with unresolved follow-ups keeps it visible. Legacy approved records retain their compatibility behavior. Acceptance records a decision, not proof that the result is correct.
         </p>
       </section>
 
@@ -85,7 +84,7 @@ import { sitePath } from '../../lib/paths';
           <li><strong>Delete candidate:</strong> disabled by default in the first closeout surface.</li>
         </ul>
         <p>
-          Any future move, archive, or delete action must pass commercial model review and explicit human approval through the normal approval path. Recording a closeout review still does not apply file operations.
+          The planner supplies no cleanup executor. Separately proposed file operations need review of the exact paths and applicable operator authority. Recording a closeout verdict does not apply or authorize those operations.
         </p>
       </section>
 

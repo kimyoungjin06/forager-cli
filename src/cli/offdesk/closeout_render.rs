@@ -512,10 +512,23 @@ fn render_documentation_governance_return_markdown(
         "- audit source: `{}` profile for `{}`\n",
         governance.audit_profile, governance.workdir
     ));
-    output.push_str(&format!("- full audit command: `{}`\n", governance.command));
+    output.push_str(&format!(
+        "- bounded audit command: `{}`\n",
+        governance.command
+    ));
     if let Some(error) = &governance.error {
         output.push_str(&format!("- audit unavailable: {}\n", error));
         return;
+    }
+    if let Some(coverage) = &governance.coverage {
+        output.push_str(&format!(
+            "- inspection coverage: {}\n",
+            if coverage["complete"] == true {
+                "complete within owner policy"
+            } else {
+                "partial; inspect skipped paths and budget diagnostics in JSON"
+            }
+        ));
     }
     if governance.recommendations.is_empty() {
         output.push_str("- No documentation governance recommendations.\n");

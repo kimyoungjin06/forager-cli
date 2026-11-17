@@ -1,11 +1,15 @@
 //! Pending action approvals for offdesk execution.
 
-use anyhow::Result;
+use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Duration, Utc};
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs::{self, File, OpenOptions};
+use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -13,8 +17,13 @@ use super::provider::{ProviderFallbackCandidate, ProviderFallbackRecommendation}
 use super::redaction::operator_safe_text;
 
 const APPROVALS_FILE: &str = "pending_action_approvals.json";
+const APPROVALS_LOCK_FILE: &str = "pending_action_approvals.lock";
 const ACTION_AUDIT_FILE: &str = "action_audit.jsonl";
 const APPROVAL_BRIEF_SCHEMA: &str = "approval_brief.v1";
+pub const OFFDESK_SHIFT_ARM_APPROVAL_METADATA_SCHEMA: &str =
+    "offdesk_shift_arm_approval_metadata.v1";
+const APPROVAL_SNAPSHOT_HASH_DOMAIN: &[u8] = b"forager.approval-ledger.snapshot.v1\0";
+const MAX_APPROVAL_LEDGER_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -92,6 +101,9 @@ impl PendingActionApproval {
 pub enum ActionApprovalMetadata {
     ProviderFallback(Box<ProviderFallbackApprovalMetadata>),
     ArtifactRetention(Box<ArtifactRetentionApprovalMetadata>),
+    RetentionV2(Box<crate::document_lifecycle::RetentionApprovalMetadataV2>),
+    DocumentLifecycle(Box<crate::document_lifecycle::DocumentLifecycleApprovalMetadataV1>),
+    OffdeskShiftArm(Box<OffdeskShiftArmApprovalMetadataV1>),
 }
 
 impl ActionApprovalMetadata {
@@ -133,14 +145,54 @@ impl ActionApprovalMetadata {
     pub fn as_provider_fallback(&self) -> Option<&ProviderFallbackApprovalMetadata> {
         match self {
             Self::ProviderFallback(metadata) => Some(metadata),
-            Self::ArtifactRetention(_) => None,
+            Self::ArtifactRetention(_)
+            | Self::RetentionV2(_)
+            | Self::DocumentLifecycle(_)
+            | Self::OffdeskShiftArm(_) => None,
         }
     }
 
     pub fn as_artifact_retention(&self) -> Option<&ArtifactRetentionApprovalMetadata> {
         match self {
             Self::ArtifactRetention(metadata) => Some(metadata),
-            Self::ProviderFallback(_) => None,
+            Self::ProviderFallback(_)
+            | Self::RetentionV2(_)
+            | Self::DocumentLifecycle(_)
+            | Self::OffdeskShiftArm(_) => None,
+        }
+    }
+
+    pub fn as_retention_v2(
+        &self,
+    ) -> Option<&crate::document_lifecycle::RetentionApprovalMetadataV2> {
+        match self {
+            Self::RetentionV2(metadata) => Some(metadata),
+            Self::ProviderFallback(_)
+            | Self::ArtifactRetention(_)
+            | Self::DocumentLifecycle(_)
+            | Self::OffdeskShiftArm(_) => None,
+        }
+    }
+
+    pub fn as_document_lifecycle(
+        &self,
+    ) -> Option<&crate::document_lifecycle::DocumentLifecycleApprovalMetadataV1> {
+        match self {
+            Self::DocumentLifecycle(metadata) => Some(metadata),
+            Self::ProviderFallback(_)
+            | Self::ArtifactRetention(_)
+            | Self::RetentionV2(_)
+            | Self::OffdeskShiftArm(_) => None,
+        }
+    }
+
+    pub fn as_offdesk_shift_arm(&self) -> Option<&OffdeskShiftArmApprovalMetadataV1> {
+        match self {
+            Self::OffdeskShiftArm(metadata) => Some(metadata),
+            Self::ProviderFallback(_)
+            | Self::ArtifactRetention(_)
+            | Self::RetentionV2(_)
+            | Self::DocumentLifecycle(_) => None,
         }
     }
 
@@ -148,8 +200,27 @@ impl ActionApprovalMetadata {
         match self {
             Self::ProviderFallback(metadata) => metadata.approval_brief.as_ref(),
             Self::ArtifactRetention(metadata) => metadata.approval_brief.as_ref(),
+            Self::RetentionV2(metadata) => Some(&metadata.approval_brief),
+            Self::DocumentLifecycle(metadata) => Some(&metadata.approval_brief),
+            Self::OffdeskShiftArm(metadata) => Some(&metadata.approval_brief),
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OffdeskShiftArmApprovalMetadataV1 {
+    pub schema: String,
+    pub generated_at: DateTime<Utc>,
+    pub shift_id: String,
+    pub manifest_sha256: String,
+    pub plan_id: String,
+    pub plan_review_id: String,
+    pub starts_at: DateTime<Utc>,
+    pub stops_at: DateTime<Utc>,
+    pub task_count: usize,
+    pub routine_count: usize,
+    pub approval_brief: ApprovalBrief,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -505,14 +576,35 @@ pub struct ApprovalLedger {
     root: PathBuf,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ApprovalLedgerSession {
     ledger: ApprovalLedger,
+    bounded_root: Option<File>,
+    bounded_root_identity: Option<(u64, u64)>,
+    _lock: ApprovalLedgerLockGuard,
+    snapshot: ApprovalLedgerSnapshot,
     approvals: Vec<PendingActionApproval>,
     lookup: HashMap<ApprovalLookupKey, Vec<usize>>,
     transitions: Vec<QueuedApprovalTransition>,
     dirty: bool,
     expired_through: DateTime<Utc>,
+}
+
+#[derive(Debug)]
+struct ApprovalLedgerLockGuard {
+    file: File,
+}
+
+impl Drop for ApprovalLedgerLockGuard {
+    fn drop(&mut self) {
+        let _ = FileExt::unlock(&self.file);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ApprovalLedgerSnapshot {
+    exists: bool,
+    content_sha256: String,
 }
 
 impl ApprovalLedger {
@@ -528,19 +620,28 @@ impl ApprovalLedger {
         self.root.join(ACTION_AUDIT_FILE)
     }
 
-    pub fn load(&self) -> Result<Vec<PendingActionApproval>> {
-        read_approvals(&self.approvals_path())
+    fn lock_path(&self) -> PathBuf {
+        self.root.join(APPROVALS_LOCK_FILE)
     }
 
+    pub fn load(&self) -> Result<Vec<PendingActionApproval>> {
+        Ok(read_approvals_with_snapshot(&self.approvals_path())?.0)
+    }
+
+    #[cfg(test)]
     pub fn save(&self, approvals: &[PendingActionApproval]) -> Result<()> {
-        write_approvals(&self.approvals_path(), approvals)
+        let _lock = self.acquire_lock()?;
+        let (_, snapshot) = read_approvals_with_snapshot(&self.approvals_path())?;
+        self.replace_approvals_locked(&snapshot, approvals)?;
+        Ok(())
     }
 
     pub fn begin_session(
         &self,
         now: DateTime<Utc>,
     ) -> Result<(ApprovalLedgerSession, Vec<PendingActionApproval>)> {
-        let mut approvals = self.load()?;
+        let lock = self.acquire_lock()?;
+        let (mut approvals, snapshot) = read_approvals_with_snapshot(&self.approvals_path())?;
         let expired = expire_due_collect(&mut approvals, now);
         let transitions = expired
             .iter()
@@ -555,6 +656,10 @@ impl ApprovalLedger {
         Ok((
             ApprovalLedgerSession {
                 ledger: self.clone(),
+                bounded_root: None,
+                bounded_root_identity: None,
+                _lock: lock,
+                snapshot,
                 lookup: build_approval_lookup(&approvals),
                 approvals,
                 transitions,
@@ -565,73 +670,192 @@ impl ApprovalLedger {
         ))
     }
 
+    pub(crate) fn begin_bounded_session(
+        &self,
+        now: DateTime<Utc>,
+    ) -> Result<(ApprovalLedgerSession, Vec<PendingActionApproval>)> {
+        let root = crate::process::open_bounded_root(&self.root)
+            .with_context(|| format!("open approval root {}", self.root.display()))?;
+        let root_identity = crate::process::filesystem_file_identity(&root.metadata()?)
+            .context("approval root lacks a stable filesystem identity")?;
+        let lock_file = crate::process::open_or_create_bounded_regular_file(
+            &root,
+            Path::new(APPROVALS_LOCK_FILE),
+        )?;
+        ensure_owner_only(&lock_file, &self.lock_path())?;
+        lock_file
+            .lock_exclusive()
+            .with_context(|| format!("lock approval ledger {}", self.lock_path().display()))?;
+        ensure_root_identity(&self.root, root_identity)?;
+        let (mut approvals, snapshot) = read_approvals_with_snapshot_bounded(&root)?;
+        ensure_root_identity(&self.root, root_identity)?;
+        let expired = expire_due_collect(&mut approvals, now);
+        let transitions = expired
+            .iter()
+            .cloned()
+            .map(|approval| QueuedApprovalTransition {
+                transition: "expire",
+                approval,
+                detail: "expired".to_string(),
+            })
+            .collect::<Vec<_>>();
+        let dirty = !expired.is_empty();
+        Ok((
+            ApprovalLedgerSession {
+                ledger: self.clone(),
+                bounded_root: Some(root),
+                bounded_root_identity: Some(root_identity),
+                _lock: ApprovalLedgerLockGuard { file: lock_file },
+                snapshot,
+                lookup: build_approval_lookup(&approvals),
+                approvals,
+                transitions,
+                dirty,
+                expired_through: now,
+            },
+            expired,
+        ))
+    }
+
+    fn acquire_lock(&self) -> Result<ApprovalLedgerLockGuard> {
+        fs::create_dir_all(&self.root)
+            .with_context(|| format!("create approval root {}", self.root.display()))?;
+        let lock_path = self.lock_path();
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let file = options
+            .open(&lock_path)
+            .with_context(|| format!("open approval lock {}", lock_path.display()))?;
+        ensure_owner_only(&file, &lock_path)?;
+        file.lock_exclusive()
+            .with_context(|| format!("lock approval ledger {}", lock_path.display()))?;
+        Ok(ApprovalLedgerLockGuard { file })
+    }
+
+    fn mutate<T>(
+        &self,
+        mutation: impl FnOnce(
+            &mut Vec<PendingActionApproval>,
+            &mut Vec<QueuedApprovalTransition>,
+        ) -> Result<(T, bool)>,
+    ) -> Result<T> {
+        let _lock = self.acquire_lock()?;
+        let (mut approvals, mut snapshot) = read_approvals_with_snapshot(&self.approvals_path())?;
+        let mut transitions = Vec::new();
+        let (value, dirty) = mutation(&mut approvals, &mut transitions)?;
+        // Direct commands have always materialized an empty ledger on first use.
+        if dirty || !snapshot.exists {
+            snapshot = self.replace_approvals_locked(&snapshot, &approvals)?;
+        }
+        if !transitions.is_empty() {
+            self.verify_snapshot_locked(&snapshot)?;
+            self.append_queued_transitions_locked(&transitions)?;
+        }
+        Ok(value)
+    }
+
+    fn replace_approvals_locked(
+        &self,
+        expected: &ApprovalLedgerSnapshot,
+        approvals: &[PendingActionApproval],
+    ) -> Result<ApprovalLedgerSnapshot> {
+        verify_approval_snapshot(&self.approvals_path(), expected)?;
+        let bytes = serde_json::to_vec_pretty(approvals)?;
+        atomic_replace_owner_only(&self.approvals_path(), &bytes)?;
+        let (reloaded, snapshot) = read_approvals_with_snapshot(&self.approvals_path())?;
+        if reloaded != approvals {
+            bail!("durable approval replacement did not re-read as the committed state");
+        }
+        Ok(snapshot)
+    }
+
+    fn verify_snapshot_locked(&self, expected: &ApprovalLedgerSnapshot) -> Result<()> {
+        verify_approval_snapshot(&self.approvals_path(), expected)
+    }
+
     pub fn evaluate_action(
         &self,
         request: ActionApprovalRequest,
         brief: Option<&ExecutionBrief>,
         now: DateTime<Utc>,
     ) -> Result<ApprovalDecision> {
-        let mut approvals = self.load()?;
-        expire_due_in_place(&mut approvals, now);
+        self.mutate(|approvals, transitions| {
+            let expired = expire_due_collect(approvals, now);
+            let mut dirty = !expired.is_empty();
+            transitions.extend(
+                expired
+                    .into_iter()
+                    .map(|approval| QueuedApprovalTransition {
+                        transition: "expire",
+                        approval,
+                        detail: "expired".to_string(),
+                    }),
+            );
 
-        if let Some(grant) = approvals
-            .iter()
-            .find(|approval| approved_session_grant_covers(approval, &request, now))
-        {
-            self.save(&approvals)?;
-            return Ok(ApprovalDecision::Proceed(grant.approval_mode));
-        }
-
-        if let Some(index) = approvals
-            .iter()
-            .position(|approval| approved_once_grant_covers(approval, &request, now))
-        {
-            let approval_mode = approvals[index].approval_mode;
-            approvals[index].status = ApprovalStatus::Superseded;
-            let consumed = approvals[index].clone();
-            self.save(&approvals)?;
-            self.append_transition("supersede", &consumed, "consumed")?;
-            return Ok(ApprovalDecision::Proceed(approval_mode));
-        }
-
-        if let Some(pending) = approvals
-            .iter()
-            .find(|approval| pending_approval_covers(approval, &request, now))
-        {
-            let pending = pending.clone();
-            self.save(&approvals)?;
-            return Ok(ApprovalDecision::Pending(Box::new(pending)));
-        }
-
-        let decision = match request.risk_level {
-            RiskLevel::Safe => ApprovalDecision::Proceed(ApprovalMode::EnvelopeAuto),
-            RiskLevel::RuntimeMutation
-                if brief.is_some_and(|brief| brief.allows_runtime(&request, now)) =>
+            if let Some(approval_mode) = approvals
+                .iter()
+                .find(|approval| approved_session_grant_covers(approval, &request, now))
+                .map(|approval| approval.approval_mode)
             {
-                ApprovalDecision::Proceed(ApprovalMode::EnvelopeAuto)
+                return Ok((ApprovalDecision::Proceed(approval_mode), dirty));
             }
-            RiskLevel::CanonicalMutation
-                if brief.is_some_and(|brief| brief.allows_canonical(&request, now)) =>
+
+            if let Some(index) = approvals
+                .iter()
+                .position(|approval| approved_once_grant_covers(approval, &request, now))
             {
-                ApprovalDecision::Proceed(ApprovalMode::EnvelopeAuto)
+                let approval_mode = approvals[index].approval_mode;
+                approvals[index].status = ApprovalStatus::Superseded;
+                let consumed = approvals[index].clone();
+                dirty = true;
+                transitions.push(QueuedApprovalTransition {
+                    transition: "supersede",
+                    approval: consumed,
+                    detail: "consumed".to_string(),
+                });
+                return Ok((ApprovalDecision::Proceed(approval_mode), dirty));
             }
-            RiskLevel::RuntimeMutation
-            | RiskLevel::CanonicalMutation
-            | RiskLevel::Destructive
-            | RiskLevel::ExternalSideEffect => {
-                let approval = pending_approval_from_request(request, now);
-                approvals.push(approval.clone());
-                self.save(&approvals)?;
-                self.append_transition("pending", &approval, "created")?;
-                ApprovalDecision::Pending(Box::new(approval))
+
+            if let Some(pending) = approvals
+                .iter()
+                .find(|approval| pending_approval_covers(approval, &request, now))
+                .cloned()
+            {
+                return Ok((ApprovalDecision::Pending(Box::new(pending)), dirty));
             }
-        };
 
-        if !matches!(decision, ApprovalDecision::Pending(_)) {
-            self.save(&approvals)?;
-        }
+            let decision = match request.risk_level {
+                RiskLevel::Safe => ApprovalDecision::Proceed(ApprovalMode::EnvelopeAuto),
+                RiskLevel::RuntimeMutation
+                    if brief.is_some_and(|brief| brief.allows_runtime(&request, now)) =>
+                {
+                    ApprovalDecision::Proceed(ApprovalMode::EnvelopeAuto)
+                }
+                RiskLevel::CanonicalMutation
+                    if brief.is_some_and(|brief| brief.allows_canonical(&request, now)) =>
+                {
+                    ApprovalDecision::Proceed(ApprovalMode::EnvelopeAuto)
+                }
+                RiskLevel::RuntimeMutation
+                | RiskLevel::CanonicalMutation
+                | RiskLevel::Destructive
+                | RiskLevel::ExternalSideEffect => {
+                    let approval = pending_approval_from_request(request, now);
+                    approvals.push(approval.clone());
+                    dirty = true;
+                    transitions.push(QueuedApprovalTransition {
+                        transition: "pending",
+                        approval: approval.clone(),
+                        detail: "created".to_string(),
+                    });
+                    ApprovalDecision::Pending(Box::new(approval))
+                }
+            };
 
-        Ok(decision)
+            Ok((decision, dirty))
+        })
     }
 
     pub fn approve_oldest_pending(
@@ -674,13 +898,21 @@ impl ApprovalLedger {
     }
 
     pub fn expire_due(&self, now: DateTime<Utc>) -> Result<Vec<PendingActionApproval>> {
-        let mut approvals = self.load()?;
-        let expired = expire_due_collect(&mut approvals, now);
-        self.save(&approvals)?;
-        for approval in &expired {
-            self.append_transition("expire", approval, "expired")?;
-        }
-        Ok(expired)
+        self.mutate(|approvals, transitions| {
+            let expired = expire_due_collect(approvals, now);
+            transitions.extend(
+                expired
+                    .iter()
+                    .cloned()
+                    .map(|approval| QueuedApprovalTransition {
+                        transition: "expire",
+                        approval,
+                        detail: "expired".to_string(),
+                    }),
+            );
+            let dirty = !expired.is_empty();
+            Ok((expired, dirty))
+        })
     }
 
     pub fn denied_matches(&self, request: &ActionApprovalRequest) -> Result<bool> {
@@ -699,29 +931,31 @@ impl ApprovalLedger {
         resolved_by: impl Into<String>,
         now: DateTime<Utc>,
     ) -> Result<Vec<PendingActionApproval>> {
-        let mut approvals = self.load()?;
         let resolved_by = operator_safe_text(&resolved_by.into());
-        let mut superseded = Vec::new();
-
-        for approval in approvals.iter_mut().filter(|approval| {
-            approval.status == ApprovalStatus::Denied
-                && approval.project_key == project_key
-                && approval.request_id == request_id
-                && approval.task_id == task_id
-                && approval.action == action
-        }) {
-            approval.status = ApprovalStatus::Superseded;
-            approval.resolved_at = Some(now);
-            approval.resolved_by = Some(resolved_by.clone());
-            superseded.push(approval.clone());
-        }
-
-        self.save(&approvals)?;
-        for approval in &superseded {
-            self.append_transition("supersede_denied", approval, "new_approval_retry")?;
-        }
-
-        Ok(superseded)
+        self.mutate(|approvals, transitions| {
+            let mut superseded = Vec::new();
+            for approval in approvals.iter_mut().filter(|approval| {
+                approval.status == ApprovalStatus::Denied
+                    && approval.project_key == project_key
+                    && approval.request_id == request_id
+                    && approval.task_id == task_id
+                    && approval.action == action
+            }) {
+                approval.status = ApprovalStatus::Superseded;
+                approval.resolved_at = Some(now);
+                approval.resolved_by = Some(resolved_by.clone());
+                superseded.push(approval.clone());
+            }
+            transitions.extend(superseded.iter().cloned().map(|approval| {
+                QueuedApprovalTransition {
+                    transition: "supersede_denied",
+                    approval,
+                    detail: "new_approval_retry".to_string(),
+                }
+            }));
+            let dirty = !superseded.is_empty();
+            Ok((superseded, dirty))
+        })
     }
 
     fn resolve_pending(
@@ -731,63 +965,65 @@ impl ApprovalLedger {
         resolved_by: String,
         now: DateTime<Utc>,
     ) -> Result<Option<PendingActionApproval>> {
-        let mut approvals = self.load()?;
-        expire_due_in_place(&mut approvals, now);
-        let target_index = match approval_id {
-            Some(approval_id) => approvals.iter().position(|approval| {
-                approval.status == ApprovalStatus::Pending && approval.approval_id == approval_id
-            }),
-            None => approvals
-                .iter()
-                .enumerate()
-                .filter(|(_, approval)| approval.status == ApprovalStatus::Pending)
-                .min_by_key(|(_, approval)| approval.created_at)
-                .map(|(index, _)| index),
-        };
+        self.mutate(|approvals, transitions| {
+            let expired = expire_due_collect(approvals, now);
+            let mut dirty = !expired.is_empty();
+            transitions.extend(
+                expired
+                    .into_iter()
+                    .map(|approval| QueuedApprovalTransition {
+                        transition: "expire",
+                        approval,
+                        detail: "expired".to_string(),
+                    }),
+            );
+            let target_index = match approval_id {
+                Some(approval_id) => approvals.iter().position(|approval| {
+                    approval.status == ApprovalStatus::Pending
+                        && approval.approval_id == approval_id
+                }),
+                None => approvals
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, approval)| approval.status == ApprovalStatus::Pending)
+                    .min_by_key(|(_, approval)| approval.created_at)
+                    .map(|(index, _)| index),
+            };
 
-        let Some(target_index) = target_index else {
-            self.save(&approvals)?;
-            return Ok(None);
-        };
-        let approval = &mut approvals[target_index];
-
-        approval.status = status;
-        approval.resolved_at = Some(now);
-        approval.resolved_by = Some(operator_safe_text(&resolved_by));
-        let resolved = approval.clone();
-
-        self.save(&approvals)?;
-        let transition = match status {
-            ApprovalStatus::Approved => "approve",
-            ApprovalStatus::Denied => "deny",
-            _ => "resolve",
-        };
-        self.append_transition(transition, &resolved, transition)?;
-        Ok(Some(resolved))
+            let Some(target_index) = target_index else {
+                return Ok((None, dirty));
+            };
+            let approval = &mut approvals[target_index];
+            approval.status = status;
+            approval.resolved_at = Some(now);
+            approval.resolved_by = Some(operator_safe_text(&resolved_by));
+            let resolved = approval.clone();
+            let transition = match status {
+                ApprovalStatus::Approved => "approve",
+                ApprovalStatus::Denied => "deny",
+                _ => "resolve",
+            };
+            transitions.push(QueuedApprovalTransition {
+                transition,
+                approval: resolved.clone(),
+                detail: transition.to_string(),
+            });
+            dirty = true;
+            Ok((Some(resolved), dirty))
+        })
     }
 
-    fn append_transition(
+    fn append_queued_transitions_locked(
         &self,
-        transition: &'static str,
-        approval: &PendingActionApproval,
-        detail: &str,
+        transitions: &[QueuedApprovalTransition],
     ) -> Result<()> {
-        self.append_queued_transitions(&[QueuedApprovalTransition {
-            transition,
-            approval: approval.clone(),
-            detail: detail.to_string(),
-        }])
-    }
-
-    fn append_queued_transitions(&self, transitions: &[QueuedApprovalTransition]) -> Result<()> {
         if transitions.is_empty() {
             return Ok(());
         }
         fs::create_dir_all(&self.root)?;
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(self.action_audit_path())?;
+        let path = self.action_audit_path();
+        let existed = path.exists();
+        let mut bytes = Vec::new();
         for transition in transitions {
             let approval = &transition.approval;
             let entry = ActionAuditEntry {
@@ -813,13 +1049,112 @@ impl ApprovalLedger {
                 detail: &transition.detail,
                 recorded_at: Utc::now(),
             };
-            writeln!(file, "{}", serde_json::to_string(&entry)?)?;
+            serde_json::to_writer(&mut bytes, &entry)?;
+            bytes.push(b'\n');
+        }
+        let mut options = OpenOptions::new();
+        options.create(true).append(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut file = options
+            .open(&path)
+            .with_context(|| format!("open approval audit {}", path.display()))?;
+        ensure_owner_only(&file, &path)?;
+        file.write_all(&bytes)
+            .with_context(|| format!("append approval audit {}", path.display()))?;
+        file.sync_all()
+            .with_context(|| format!("sync approval audit {}", path.display()))?;
+        if !existed {
+            sync_parent_directory(&path)?;
         }
         Ok(())
     }
 }
 
+pub(crate) fn load_approvals_bounded_read_only(
+    root_path: &Path,
+) -> Result<(Vec<PendingActionApproval>, String, (u64, u64))> {
+    let root = crate::process::open_bounded_root(root_path)
+        .with_context(|| format!("open approval root {}", root_path.display()))?;
+    let root_identity = crate::process::filesystem_file_identity(&root.metadata()?)
+        .context("approval root lacks a stable filesystem identity")?;
+    let (approvals, snapshot) = read_approvals_with_snapshot_bounded(&root)?;
+    verify_approval_snapshot_bounded(&root, &snapshot)?;
+    let active_metadata = fs::symlink_metadata(root_path)
+        .with_context(|| format!("reinspect approval root {}", root_path.display()))?;
+    if active_metadata.file_type().is_symlink()
+        || !active_metadata.is_dir()
+        || crate::process::filesystem_file_identity(&active_metadata) != Some(root_identity)
+        || crate::process::filesystem_file_identity(&root.metadata()?) != Some(root_identity)
+    {
+        bail!("approval root changed during bounded read-only load");
+    }
+    Ok((approvals, snapshot.content_sha256, root_identity))
+}
+
 impl ApprovalLedgerSession {
+    pub(crate) fn bounded_root_identity(&self) -> Option<(u64, u64)> {
+        self.bounded_root_identity
+    }
+
+    pub(crate) fn ensure_bounded_root_active(&self) -> Result<()> {
+        if let Some(identity) = self.bounded_root_identity {
+            ensure_root_identity(&self.ledger.root, identity)?;
+        }
+        Ok(())
+    }
+
+    pub fn approvals(&self) -> &[PendingActionApproval] {
+        &self.approvals
+    }
+
+    pub fn approval(&self, approval_id: &str) -> Option<&PendingActionApproval> {
+        self.approvals
+            .iter()
+            .find(|approval| approval.approval_id == approval_id)
+    }
+
+    /// Resolve only the exact version inspected by the caller under this ledger lock.
+    pub(crate) fn approve_exact_pending(
+        &mut self,
+        expected: &PendingActionApproval,
+        resolved_by: &str,
+        now: DateTime<Utc>,
+    ) -> Result<PendingActionApproval> {
+        self.ensure_bounded_root_active()?;
+        let resolved_by = operator_safe_text(resolved_by.trim());
+        anyhow::ensure!(
+            !resolved_by.is_empty() && resolved_by.len() <= 256,
+            "operator identity must contain 1 to 256 bytes"
+        );
+        let approval = self
+            .approvals
+            .iter_mut()
+            .find(|a| a.approval_id == expected.approval_id)
+            .context("reviewed approval disappeared")?;
+        anyhow::ensure!(
+            approval == expected,
+            "reviewed approval changed before confirmation"
+        );
+        anyhow::ensure!(
+            approval.status == ApprovalStatus::Pending
+                && approval.created_at <= now
+                && approval.expires_at >= now,
+            "reviewed approval is not fresh and pending"
+        );
+        approval.status = ApprovalStatus::Approved;
+        approval.resolved_at = Some(now);
+        approval.resolved_by = Some(resolved_by);
+        let resolved = approval.clone();
+        self.dirty = true;
+        self.transitions.push(QueuedApprovalTransition {
+            transition: "approve",
+            approval: resolved.clone(),
+            detail: "approve_exact_local_review".to_string(),
+        });
+        Ok(resolved)
+    }
+
     pub fn denied_matches(&self, request: &ActionApprovalRequest) -> bool {
         let lookup_key = ApprovalLookupKey::from_request(request);
         self.lookup
@@ -1016,12 +1351,33 @@ impl ApprovalLedgerSession {
     }
 
     pub fn flush(&mut self) -> Result<()> {
+        self.ensure_bounded_root_active()?;
         if self.dirty {
-            self.ledger.save(&self.approvals)?;
+            self.snapshot = match self.bounded_root.as_ref() {
+                Some(root) => {
+                    replace_approvals_locked_bounded(root, &self.snapshot, &self.approvals)?
+                }
+                None => self
+                    .ledger
+                    .replace_approvals_locked(&self.snapshot, &self.approvals)?,
+            };
             self.dirty = false;
         }
-        let transitions = std::mem::take(&mut self.transitions);
-        self.ledger.append_queued_transitions(&transitions)?;
+        if !self.transitions.is_empty() {
+            match self.bounded_root.as_ref() {
+                Some(root) => {
+                    verify_approval_snapshot_bounded(root, &self.snapshot)?;
+                    append_queued_transitions_bounded(root, &self.transitions)?;
+                }
+                None => {
+                    self.ledger.verify_snapshot_locked(&self.snapshot)?;
+                    self.ledger
+                        .append_queued_transitions_locked(&self.transitions)?;
+                }
+            }
+            self.transitions.clear();
+        }
+        self.ensure_bounded_root_active()?;
         Ok(())
     }
 }
@@ -1146,10 +1502,6 @@ fn pending_approval_covers(
         && approval_identity_matches(approval, request)
 }
 
-fn expire_due_in_place(approvals: &mut [PendingActionApproval], now: DateTime<Utc>) {
-    let _ = expire_due_collect(approvals, now);
-}
-
 fn expire_due_collect(
     approvals: &mut [PendingActionApproval],
     now: DateTime<Utc>,
@@ -1166,22 +1518,283 @@ fn expire_due_collect(
     expired
 }
 
-fn read_approvals(path: &Path) -> Result<Vec<PendingActionApproval>> {
-    if !path.exists() {
-        return Ok(Vec::new());
+fn read_approvals_with_snapshot(
+    path: &Path,
+) -> Result<(Vec<PendingActionApproval>, ApprovalLedgerSnapshot)> {
+    let (exists, bytes) = read_approval_bytes(path)?;
+    let snapshot = approval_snapshot(exists, &bytes);
+    if bytes.iter().all(u8::is_ascii_whitespace) {
+        return Ok((Vec::new(), snapshot));
     }
-    let content = fs::read_to_string(path)?;
-    if content.trim().is_empty() {
-        return Ok(Vec::new());
-    }
-    Ok(serde_json::from_str(&content)?)
+    let approvals = serde_json::from_slice(&bytes)
+        .with_context(|| format!("parse approval ledger {}", path.display()))?;
+    Ok((approvals, snapshot))
 }
 
-fn write_approvals(path: &Path, approvals: &[PendingActionApproval]) -> Result<()> {
+fn read_approvals_with_snapshot_bounded(
+    root: &File,
+) -> Result<(Vec<PendingActionApproval>, ApprovalLedgerSnapshot)> {
+    let (exists, bytes) = read_approval_bytes_bounded(root)?;
+    let snapshot = approval_snapshot(exists, &bytes);
+    if bytes.iter().all(u8::is_ascii_whitespace) {
+        return Ok((Vec::new(), snapshot));
+    }
+    let approvals = serde_json::from_slice(&bytes).context("parse bounded approval ledger")?;
+    Ok((approvals, snapshot))
+}
+
+fn read_approval_bytes_bounded(root: &File) -> Result<(bool, Vec<u8>)> {
+    let mut file = match crate::process::open_bounded_regular_file(root, Path::new(APPROVALS_FILE))
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok((false, Vec::new())),
+        Err(error) => return Err(error).context("open bounded approval ledger"),
+    };
+    ensure_owner_only(&file, Path::new(APPROVALS_FILE))?;
+    let initial_metadata = file.metadata().context("inspect bounded approval ledger")?;
+    let mut bytes = Vec::new();
+    Read::by_ref(&mut file)
+        .take(MAX_APPROVAL_LEDGER_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .context("read bounded approval ledger")?;
+    if bytes.len() as u64 > MAX_APPROVAL_LEDGER_BYTES {
+        bail!("bounded approval ledger exceeds its read budget");
+    }
+    let final_metadata = file
+        .metadata()
+        .context("reinspect bounded approval ledger")?;
+    let active = crate::process::open_bounded_regular_file(root, Path::new(APPROVALS_FILE))
+        .context("reopen active bounded approval ledger")?;
+    let active_metadata = active
+        .metadata()
+        .context("inspect active bounded approval ledger")?;
+    if crate::process::filesystem_file_identity(&initial_metadata)
+        != crate::process::filesystem_file_identity(&final_metadata)
+        || crate::process::filesystem_file_identity(&final_metadata)
+            != crate::process::filesystem_file_identity(&active_metadata)
+        || initial_metadata.len() != final_metadata.len()
+        || final_metadata.len() != active_metadata.len()
+        || initial_metadata.modified().ok() != final_metadata.modified().ok()
+        || final_metadata.modified().ok() != active_metadata.modified().ok()
+    {
+        bail!("bounded approval ledger changed during read");
+    }
+    Ok((true, bytes))
+}
+
+fn read_approval_bytes(path: &Path) -> Result<(bool, Vec<u8>)> {
+    match fs::read(path) {
+        Ok(bytes) => Ok((true, bytes)),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok((false, Vec::new())),
+        Err(error) => {
+            Err(error).with_context(|| format!("read approval ledger {}", path.display()))
+        }
+    }
+}
+
+fn approval_snapshot(exists: bool, bytes: &[u8]) -> ApprovalLedgerSnapshot {
+    let mut hasher = Sha256::new();
+    hasher.update(APPROVAL_SNAPSHOT_HASH_DOMAIN);
+    hasher.update([u8::from(exists)]);
+    hasher.update((bytes.len() as u64).to_be_bytes());
+    hasher.update(bytes);
+    ApprovalLedgerSnapshot {
+        exists,
+        content_sha256: format!("{:x}", hasher.finalize()),
+    }
+}
+
+fn verify_approval_snapshot(path: &Path, expected: &ApprovalLedgerSnapshot) -> Result<()> {
+    let (exists, bytes) = read_approval_bytes(path)?;
+    if approval_snapshot(exists, &bytes) != *expected {
+        bail!(
+            "approval ledger changed after the exclusive session reload: {}",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+fn verify_approval_snapshot_bounded(root: &File, expected: &ApprovalLedgerSnapshot) -> Result<()> {
+    let (exists, bytes) = read_approval_bytes_bounded(root)?;
+    if approval_snapshot(exists, &bytes) != *expected {
+        bail!("bounded approval ledger changed after the exclusive session reload");
+    }
+    Ok(())
+}
+
+fn replace_approvals_locked_bounded(
+    root: &File,
+    expected: &ApprovalLedgerSnapshot,
+    approvals: &[PendingActionApproval],
+) -> Result<ApprovalLedgerSnapshot> {
+    verify_approval_snapshot_bounded(root, expected)?;
+    let bytes = serde_json::to_vec_pretty(approvals)?;
+    let temporary_name = format!(".{APPROVALS_FILE}.{}.tmp", Uuid::new_v4());
+    let temporary_path = Path::new(&temporary_name);
+    let result = (|| -> Result<()> {
+        let mut file = crate::process::create_new_bounded_regular_file(root, temporary_path)
+            .context("create bounded approval temp")?;
+        ensure_owner_only(&file, temporary_path)?;
+        file.write_all(&bytes)
+            .context("write bounded approval temp")?;
+        file.sync_all().context("sync bounded approval temp")?;
+        drop(file);
+        crate::process::replace_bounded_root_file(root, temporary_path, Path::new(APPROVALS_FILE))
+            .context("atomically replace bounded approval ledger")
+    })();
+    if result.is_err() {
+        let _ = crate::process::remove_bounded_root_file(root, temporary_path);
+    }
+    result?;
+    let (reloaded, snapshot) = read_approvals_with_snapshot_bounded(root)?;
+    if reloaded != approvals {
+        bail!("durable bounded approval replacement did not re-read committed state");
+    }
+    Ok(snapshot)
+}
+
+fn append_queued_transitions_bounded(
+    root: &File,
+    transitions: &[QueuedApprovalTransition],
+) -> Result<()> {
+    if transitions.is_empty() {
+        return Ok(());
+    }
+    let bytes = action_audit_bytes(transitions)?;
+    let existed =
+        crate::process::open_bounded_regular_file(root, Path::new(ACTION_AUDIT_FILE)).is_ok();
+    let mut file =
+        crate::process::open_or_create_bounded_regular_file(root, Path::new(ACTION_AUDIT_FILE))
+            .context("open bounded approval audit")?;
+    ensure_owner_only(&file, Path::new(ACTION_AUDIT_FILE))?;
+    file.seek(SeekFrom::End(0))
+        .context("seek bounded approval audit")?;
+    file.write_all(&bytes)
+        .context("append bounded approval audit")?;
+    file.sync_all().context("sync bounded approval audit")?;
+    if !existed {
+        root.sync_all().context("sync bounded approval root")?;
+    }
+    Ok(())
+}
+
+fn action_audit_bytes(transitions: &[QueuedApprovalTransition]) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    for transition in transitions {
+        let approval = &transition.approval;
+        let entry = ActionAuditEntry {
+            transition: transition.transition,
+            approval_id: &approval.approval_id,
+            action_id: approval.action_id(),
+            status: approval.status,
+            result: approval.status,
+            scope: approval.scope,
+            project_key: &approval.project_key,
+            request_id: &approval.request_id,
+            task_id: &approval.task_id,
+            action: &approval.action,
+            risk_level: approval.risk_level,
+            approval_mode: approval.approval_mode,
+            source_surface: &approval.source_surface,
+            preview: &approval.preview,
+            reason: &approval.reason,
+            created_at: approval.created_at,
+            expires_at: approval.expires_at,
+            resolved_at: approval.resolved_at,
+            resolved_by: approval.resolved_by.as_deref(),
+            detail: &transition.detail,
+            recorded_at: Utc::now(),
+        };
+        serde_json::to_writer(&mut bytes, &entry)?;
+        bytes.push(b'\n');
+    }
+    Ok(bytes)
+}
+
+fn ensure_root_identity(path: &Path, expected: (u64, u64)) -> Result<()> {
+    let reopened = crate::process::open_bounded_root(path)
+        .with_context(|| format!("reopen approval root {}", path.display()))?;
+    if crate::process::filesystem_file_identity(&reopened.metadata()?) != Some(expected) {
+        bail!("active profile root was replaced while approval lock was held");
+    }
+    Ok(())
+}
+
+fn atomic_replace_owner_only(path: &Path, bytes: &[u8]) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(path, serde_json::to_string_pretty(approvals)?)?;
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(APPROVALS_FILE);
+    let temporary = path.with_file_name(format!(".{file_name}.{}.tmp", Uuid::new_v4()));
+    let result = (|| -> Result<()> {
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut file = options
+            .open(&temporary)
+            .with_context(|| format!("create approval temp {}", temporary.display()))?;
+        file.write_all(bytes)
+            .with_context(|| format!("write approval temp {}", temporary.display()))?;
+        file.sync_all()
+            .with_context(|| format!("sync approval temp {}", temporary.display()))?;
+        drop(file);
+        fs::rename(&temporary, path).with_context(|| {
+            format!(
+                "atomically replace approval ledger {} from {}",
+                path.display(),
+                temporary.display()
+            )
+        })?;
+        sync_parent_directory(path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn sync_parent_directory(path: &Path) -> Result<()> {
+    let parent = path
+        .parent()
+        .context("approval persistence path has no parent directory")?;
+    #[cfg(unix)]
+    {
+        File::open(parent)
+            .with_context(|| format!("open approval parent {}", parent.display()))?
+            .sync_all()
+            .with_context(|| format!("sync approval parent {}", parent.display()))?;
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = parent;
+    }
+    Ok(())
+}
+
+fn ensure_owner_only(file: &File, path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        let permissions = file
+            .metadata()
+            .with_context(|| format!("read approval permissions {}", path.display()))?
+            .permissions();
+        if permissions.mode() & 0o777 != 0o600 {
+            file.set_permissions(fs::Permissions::from_mode(0o600))
+                .with_context(|| format!("set owner-only permissions {}", path.display()))?;
+            file.sync_all()
+                .with_context(|| format!("sync owner-only permissions {}", path.display()))?;
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (file, path);
+    }
     Ok(())
 }
 
@@ -1192,6 +1805,7 @@ mod tests {
         ProviderCapacityStatus, ProviderFallbackApplyScope, ProviderFallbackAuthStatus,
         ProviderFallbackSource,
     };
+    use std::sync::{Arc, Barrier};
     use tempfile::tempdir;
 
     fn request(risk_level: RiskLevel) -> ActionApprovalRequest {
@@ -1284,6 +1898,7 @@ mod tests {
             decision,
             ApprovalDecision::Proceed(ApprovalMode::EnvelopeAuto)
         );
+        assert!(ledger.approvals_path().is_file());
         assert!(ledger.load()?.is_empty());
         Ok(())
     }
@@ -1704,6 +2319,319 @@ mod tests {
         let audit = fs::read_to_string(ledger.action_audit_path())?;
         assert!(audit.contains("\"transition\":\"supersede\""));
         assert!(audit.contains("\"transition\":\"pending\""));
+        Ok(())
+    }
+
+    #[test]
+    fn ledger_session_holds_the_exclusive_lock_until_drop() -> Result<()> {
+        let temp = tempdir()?;
+        let ledger = ApprovalLedger::new(temp.path());
+        let (session, _) = ledger.begin_session(Utc::now())?;
+        let contender = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(ledger.lock_path())?;
+
+        let error = contender
+            .try_lock_exclusive()
+            .expect_err("session must retain the exclusive approval lock");
+        assert_eq!(error.kind(), ErrorKind::WouldBlock);
+
+        drop(session);
+        contender.try_lock_exclusive()?;
+        FileExt::unlock(&contender)?;
+        Ok(())
+    }
+
+    #[test]
+    fn concurrent_direct_writers_preserve_both_pending_approvals() -> Result<()> {
+        let temp = tempdir()?;
+        let ledger = ApprovalLedger::new(temp.path());
+        let barrier = Arc::new(Barrier::new(3));
+        let now = Utc::now();
+        let mut handles = Vec::new();
+
+        for task_id in ["first", "second"] {
+            let ledger = ledger.clone();
+            let barrier = Arc::clone(&barrier);
+            let task_id = task_id.to_string();
+            handles.push(std::thread::spawn(move || -> Result<()> {
+                let mut request = request(RiskLevel::RuntimeMutation);
+                request.task_id = task_id;
+                barrier.wait();
+                assert!(matches!(
+                    ledger.evaluate_action(request, None, now)?,
+                    ApprovalDecision::Pending(_)
+                ));
+                Ok(())
+            }));
+        }
+
+        barrier.wait();
+        for handle in handles {
+            handle.join().expect("approval writer thread panicked")?;
+        }
+
+        let approvals = ledger.load()?;
+        assert_eq!(approvals.len(), 2);
+        assert!(approvals.iter().any(|approval| approval.task_id == "first"));
+        assert!(approvals
+            .iter()
+            .any(|approval| approval.task_id == "second"));
+        let audit = fs::read_to_string(ledger.action_audit_path())?;
+        assert_eq!(audit.matches("\"transition\":\"pending\"").count(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn concurrent_evaluation_resolution_and_expiration_preserve_all_changes() -> Result<()> {
+        let temp = tempdir()?;
+        let ledger = ApprovalLedger::new(temp.path());
+        let now = Utc::now();
+        let to_resolve = approval(
+            "to_resolve",
+            ApprovalStatus::Pending,
+            "project",
+            "request",
+            "resolve-task",
+            "dispatch",
+            now,
+        );
+        let mut to_expire = approval(
+            "to_expire",
+            ApprovalStatus::Pending,
+            "project",
+            "request",
+            "expire-task",
+            "dispatch",
+            now,
+        );
+        to_expire.expires_at = now + Duration::seconds(1);
+        ledger.save(&[to_resolve, to_expire])?;
+
+        let barrier = Arc::new(Barrier::new(4));
+        let resolver = {
+            let ledger = ledger.clone();
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || -> Result<()> {
+                barrier.wait();
+                let resolved = ledger.approve_pending(
+                    Some("to_resolve"),
+                    "operator",
+                    now + Duration::seconds(2),
+                )?;
+                assert!(resolved.is_some());
+                Ok(())
+            })
+        };
+        let expirer = {
+            let ledger = ledger.clone();
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || -> Result<()> {
+                barrier.wait();
+                ledger.expire_due(now + Duration::seconds(2))?;
+                Ok(())
+            })
+        };
+        let evaluator = {
+            let ledger = ledger.clone();
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || -> Result<()> {
+                let mut request = request(RiskLevel::RuntimeMutation);
+                request.task_id = "new-task".to_string();
+                barrier.wait();
+                assert!(matches!(
+                    ledger.evaluate_action(request, None, now + Duration::seconds(2))?,
+                    ApprovalDecision::Pending(_)
+                ));
+                Ok(())
+            })
+        };
+
+        barrier.wait();
+        for handle in [resolver, expirer, evaluator] {
+            handle.join().expect("approval writer thread panicked")?;
+        }
+
+        let approvals = ledger.load()?;
+        assert_eq!(approvals.len(), 3);
+        assert_eq!(approvals[0].status, ApprovalStatus::Approved);
+        assert_eq!(approvals[1].status, ApprovalStatus::Expired);
+        assert_eq!(approvals[2].status, ApprovalStatus::Pending);
+        let audit = fs::read_to_string(ledger.action_audit_path())?;
+        assert_eq!(audit.matches("\"transition\":\"approve\"").count(), 1);
+        assert_eq!(audit.matches("\"transition\":\"expire\"").count(), 1);
+        assert_eq!(audit.matches("\"transition\":\"pending\"").count(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn stale_session_snapshot_cannot_overwrite_external_state() -> Result<()> {
+        let temp = tempdir()?;
+        let ledger = ApprovalLedger::new(temp.path());
+        let now = Utc::now();
+        let (mut session, _) = ledger.begin_session(now)?;
+        session.evaluate_action(request(RiskLevel::RuntimeMutation), None, now)?;
+
+        let external = vec![approval(
+            "external",
+            ApprovalStatus::Pending,
+            "external-project",
+            "external-request",
+            "external-task",
+            "external-action",
+            now,
+        )];
+        fs::write(
+            ledger.approvals_path(),
+            serde_json::to_vec_pretty(&external)?,
+        )?;
+
+        let error = session
+            .flush()
+            .expect_err("stale session must not replace externally changed state");
+        assert!(error
+            .to_string()
+            .contains("approval ledger changed after the exclusive session reload"));
+        assert_eq!(ledger.load()?, external);
+        Ok(())
+    }
+
+    #[test]
+    fn bounded_session_rejects_replaced_profile_root() -> Result<()> {
+        let temp = tempdir()?;
+        let root = temp.path().join("profile");
+        let detached = temp.path().join("detached-profile");
+        fs::create_dir(&root)?;
+        #[cfg(unix)]
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700))?;
+        let ledger = ApprovalLedger::new(&root);
+        let now = Utc::now();
+        let (mut session, _) = ledger.begin_bounded_session(now)?;
+        session.evaluate_action(request(RiskLevel::RuntimeMutation), None, now)?;
+
+        fs::rename(&root, &detached)?;
+        fs::create_dir(&root)?;
+        #[cfg(unix)]
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700))?;
+
+        let error = session
+            .flush()
+            .expect_err("a bounded approval session must reject a replaced profile root");
+        assert!(error
+            .to_string()
+            .contains("active profile root was replaced"));
+        assert!(!root.join(APPROVALS_FILE).exists());
+        assert!(!detached.join(APPROVALS_FILE).exists());
+        Ok(())
+    }
+
+    #[test]
+    fn bounded_exact_confirmation_rejects_stale_snapshot_and_preserves_other_pending() -> Result<()>
+    {
+        let temp = tempdir()?;
+        let ledger = ApprovalLedger::new(temp.path());
+        let now = Utc::now();
+        let first = approval(
+            "first",
+            ApprovalStatus::Pending,
+            "project",
+            "request",
+            "task",
+            "arm",
+            now,
+        );
+        let second = approval(
+            "second",
+            ApprovalStatus::Pending,
+            "other",
+            "request-other",
+            "task-other",
+            "arm",
+            now,
+        );
+        ledger.save(&[first.clone(), second.clone()])?;
+        {
+            let (mut session, _) = ledger.begin_bounded_session(now)?;
+            let mut stale = first.clone();
+            stale.reason = "older-reason".into();
+            assert!(session
+                .approve_exact_pending(&stale, "operator", now)
+                .is_err());
+            assert!(session.approve_exact_pending(&first, " ", now).is_err());
+            let resolved = session.approve_exact_pending(&first, "local-operator", now)?;
+            assert_eq!(resolved.status, ApprovalStatus::Approved);
+            assert!(session
+                .approve_exact_pending(&first, "operator", now)
+                .is_err());
+            assert_eq!(session.approval("second"), Some(&second));
+            session.flush()?;
+        }
+        let stored = ledger.load()?;
+        assert_eq!(
+            stored
+                .iter()
+                .find(|a| a.approval_id == "first")
+                .unwrap()
+                .resolved_by
+                .as_deref(),
+            Some("local-operator")
+        );
+        assert_eq!(
+            stored.iter().find(|a| a.approval_id == "second"),
+            Some(&second)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn audit_failure_is_explicit_and_session_flush_can_retry() -> Result<()> {
+        let temp = tempdir()?;
+        let ledger = ApprovalLedger::new(temp.path());
+        let now = Utc::now();
+        fs::create_dir_all(ledger.action_audit_path())?;
+        let (mut session, _) = ledger.begin_session(now)?;
+        session.evaluate_action(request(RiskLevel::RuntimeMutation), None, now)?;
+
+        let error = session
+            .flush()
+            .expect_err("audit directory must make the append fail");
+        assert!(error.to_string().contains("open approval audit"));
+        assert_eq!(ledger.load()?.len(), 1);
+
+        fs::remove_dir(ledger.action_audit_path())?;
+        session.flush()?;
+        let audit = fs::read_to_string(ledger.action_audit_path())?;
+        assert_eq!(audit.matches("\"transition\":\"pending\"").count(), 1);
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn approval_persistence_files_are_owner_only() -> Result<()> {
+        let temp = tempdir()?;
+        let ledger = ApprovalLedger::new(temp.path());
+        ledger.evaluate_action(request(RiskLevel::RuntimeMutation), None, Utc::now())?;
+
+        for path in [
+            ledger.approvals_path(),
+            ledger.action_audit_path(),
+            ledger.lock_path(),
+        ] {
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o644))?;
+        }
+        let mut second = request(RiskLevel::RuntimeMutation);
+        second.task_id = "second".to_string();
+        ledger.evaluate_action(second, None, Utc::now())?;
+
+        for path in [
+            ledger.approvals_path(),
+            ledger.action_audit_path(),
+            ledger.lock_path(),
+        ] {
+            let mode = fs::metadata(&path)?.permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "{} must be owner-only", path.display());
+        }
         Ok(())
     }
 }

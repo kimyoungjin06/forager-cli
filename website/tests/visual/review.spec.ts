@@ -199,22 +199,22 @@ test('landing page links to the review surface', async ({ page }) => {
 
   await expect(
     page.getByRole('heading', {
-      name: 'Entrust agent work. Return to evidence, choices, and continuity.',
+      name: /Manage agent sessions\.\s*Review their work\./,
     }),
   ).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Open review surface' })).toHaveAttribute(
+  await expect(page.getByRole('link', { name: 'Preview review surface', exact: true })).toHaveAttribute(
     'href',
     '/forager-cli/review/',
   );
-  await expect(page.getByRole('link', { name: 'Open dashboard' })).toHaveAttribute(
+  await expect(page.getByRole('link', { name: 'Preview dashboard', exact: true })).toHaveAttribute(
     'href',
     '/forager-cli/dashboard/',
   );
-  await expect(page.getByRole('link', { name: 'Open graph' })).toHaveAttribute(
+  await expect(page.getByRole('link', { name: 'Preview graph', exact: true })).toHaveAttribute(
     'href',
     GRAPH_ROUTE,
   );
-  await expect(page.getByRole('link', { name: 'Open settings' })).toHaveAttribute(
+  await expect(page.getByRole('link', { name: 'Preview settings', exact: true })).toHaveAttribute(
     'href',
     SETTINGS_ROUTE,
   );

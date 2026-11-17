@@ -12,7 +12,8 @@ use crate::offdesk::{
 };
 use crate::offdesk::{load_orchestration_signals, OrchestrationSignals};
 use crate::session::{
-    app_dir_resolution, get_profile_dir, project_registry, Instance, Status, Storage,
+    app_dir_resolution, get_profile_dir, project_registry, AutoOrchestratorStartupPreflightV1,
+    Instance, RemoteSessionIdentityV1, Status, Storage,
 };
 
 #[derive(Args)]
@@ -28,6 +29,10 @@ pub struct StatusArgs {
     /// Output as JSON
     #[arg(long)]
     json: bool,
+
+    /// Include identity-checked terminal text for waiting notifications (sensitive).
+    #[arg(long, requires = "json")]
+    notification_capture: bool,
 }
 
 #[derive(Default)]
@@ -47,8 +52,26 @@ struct SessionStatusJson {
     tool: String,
     path: String,
     status: String,
+    yolo_mode: bool,
+    auto_orchestrator: bool,
+    created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auto_orchestrator_startup_preflight: Option<AutoOrchestratorStartupPreflightV1>,
     /// Registry project key resolved from the session path, if any
     project: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remote_session_identity: Option<RemoteSessionIdentityV1>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remote_session_identity_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    notification_capture: Option<NotificationCaptureJson>,
+}
+
+#[derive(Serialize)]
+struct NotificationCaptureJson {
+    schema: &'static str,
+    binding_sha256: String,
+    tail: String,
 }
 
 #[derive(Serialize)]
@@ -144,19 +167,70 @@ fn session_status_rows(
     instances: &[crate::session::Instance],
     registry: &[project_registry::ProjectRegistryEntry],
 ) -> Vec<SessionStatusJson> {
+    session_status_rows_with_capture(instances, registry, false)
+}
+
+fn session_status_rows_with_capture(
+    instances: &[crate::session::Instance],
+    registry: &[project_registry::ProjectRegistryEntry],
+    capture: bool,
+) -> Vec<SessionStatusJson> {
     instances
         .iter()
-        .map(|inst| SessionStatusJson {
-            id: inst.id.clone(),
-            title: inst.title.clone(),
-            tool: inst.tool.clone(),
-            path: inst.project_path.clone(),
-            status: status_label(inst.status).to_string(),
-            project: project_registry::resolve_project_for_path(
+        .map(|inst| {
+            let project = project_registry::resolve_unique_project_for_path(
                 std::path::Path::new(&inst.project_path),
                 registry,
             )
-            .map(|entry| entry.key),
+            .ok()
+            .flatten()
+            .map(|entry| entry.key);
+            let identity = matches!(
+                inst.status,
+                Status::Running | Status::Waiting | Status::Idle
+            )
+            .then(|| RemoteSessionIdentityV1::observe(inst, project.as_deref()))
+            .transpose();
+            let (remote_session_identity, remote_session_identity_status) = match identity {
+                Ok(value) => (value, None),
+                Err(_) => (None, Some("unavailable".to_string())),
+            };
+            let auto_orchestrator =
+                crate::session::auto_orchestrator::is_auto_orchestrator_role(inst);
+            let auto_orchestrator_startup_preflight = auto_orchestrator
+                .then(|| crate::session::auto_orchestrator::startup_preflight(inst));
+            let notification_capture = if capture && inst.status == Status::Waiting {
+                remote_session_identity.as_ref().and_then(|identity| {
+                    identity
+                        .capture_notification_tail(inst, project.as_deref())
+                        .ok()
+                        .map(|tail| NotificationCaptureJson {
+                            schema: "notification_capture.v1",
+                            binding_sha256: identity.binding_sha256.clone(),
+                            tail,
+                        })
+                })
+            } else {
+                None
+            };
+            SessionStatusJson {
+                id: inst.id.clone(),
+                title: inst.title.clone(),
+                tool: inst.tool.clone(),
+                path: inst.project_path.clone(),
+                status: status_label(inst.status).to_string(),
+                yolo_mode: inst.yolo_mode,
+                // Older stored coordinators predate the explicit provenance
+                // bit. The default title still occupies the orchestrator role
+                // because provisioning treats it as the one-per-project row.
+                auto_orchestrator,
+                created_at: inst.created_at.to_rfc3339(),
+                auto_orchestrator_startup_preflight,
+                project,
+                remote_session_identity,
+                remote_session_identity_status,
+                notification_capture,
+            }
         })
         .collect()
 }
@@ -187,6 +261,7 @@ struct StatusJson {
     cancelled_offdesk_tasks: usize,
     stale_background_runs: usize,
     failed_background_runs: usize,
+    historical_failed_background_runs: usize,
     closeout_required_offdesk_tasks: usize,
     closeout_state: OffdeskCloseoutStateSummary,
     offdesk_next_safe_actions: Vec<OffdeskNextSafeAction>,
@@ -240,6 +315,7 @@ fn build_status_json(
         cancelled_offdesk_tasks: offdesk_summary.tasks.cancelled,
         stale_background_runs: offdesk_summary.background_stale,
         failed_background_runs: offdesk_summary.background_failed,
+        historical_failed_background_runs: offdesk_summary.background_failed_history,
         closeout_required_offdesk_tasks: offdesk_summary.closeout_required,
         closeout_state: offdesk_summary.closeout_state,
         offdesk_next_safe_actions,
@@ -388,7 +464,8 @@ pub async fn run(profile: &str, args: StatusArgs) -> Result<()> {
 
     if args.json {
         let registry = project_registry::load_registry();
-        let sessions = session_status_rows(&instances, &registry);
+        let sessions =
+            session_status_rows_with_capture(&instances, &registry, args.notification_capture);
         let foreign_sessions = detect_foreign_sessions(storage.profile(), &instances);
         let status_json = build_status_json(
             storage.profile(),
@@ -593,6 +670,9 @@ fn print_offdesk_summary(
     if summary.tasks.failed > 0 || summary.tasks.resume_pending > 0 {
         println!("Recovery: run `forager offdesk tasks` for retry, resume, and abandon commands.");
     }
+    if summary.background_failed_history > 0 {
+        println!("History: {} retired failed run(s), with matching closeout and descendant-wait evidence; no resume or acceptance implied.", summary.background_failed_history);
+    }
     if summary.closeout_required > 0 {
         println!(
             "Closeout state: {} missing, {} pending review, {} revise/blocked, {} approved with follow-ups, {} stale package, {} stale review, {} accepted, {} approved, {} retired incomplete.",
@@ -720,6 +800,8 @@ fn shorten_path(path: &str) -> String {
 mod tests {
     use super::*;
     use crate::session::{Instance, Status};
+    use anyhow::Context;
+    use tempfile::tempdir;
 
     fn instance_with_status(status: Status) -> Instance {
         let mut inst = Instance::new("test", "/tmp/test");
@@ -741,5 +823,123 @@ mod tests {
         assert_eq!(counts.error, 1);
         assert_eq!(counts.idle, 1);
         assert_eq!(counts.total, 3);
+    }
+
+    #[test]
+    #[ignore = "requires the disposable notification container, never run on the host"]
+    fn notification_capture_disposable_status_opt_in() -> Result<()> {
+        anyhow::ensure!(
+            std::path::Path::new("/.dockerenv").exists(),
+            "container required"
+        );
+        anyhow::ensure!(
+            std::env::var("FORAGER_NOTIFICATION_DISPOSABLE").as_deref() == Ok("1"),
+            "explicit disposable opt-in required"
+        );
+        let temp = tempdir()?;
+        let mut instance = Instance::new("capture-status", &temp.path().to_string_lossy());
+        instance.tool = "codex".to_string();
+        instance.command = "printf 'STATUS_CAPTURE_SENTINEL\\n› Ask Codex to do anything\\ngpt-6-astra high · project · Main [default]\\n'; exec sleep 60".to_string();
+        let session = instance.tmux_session()?;
+        session.create(&instance.project_path, Some(&instance.command))?;
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        instance.update_status();
+        assert_eq!(instance.status, Status::Waiting);
+        let rows = session_status_rows(std::slice::from_ref(&instance), &[]);
+        assert!(!serde_json::to_value(&rows[0])?
+            .as_object()
+            .unwrap()
+            .contains_key("notification_capture"));
+        let rows = session_status_rows_with_capture(std::slice::from_ref(&instance), &[], true);
+        let capture = rows[0]
+            .notification_capture
+            .as_ref()
+            .context("capture missing")?;
+        assert!(capture.tail.contains("STATUS_CAPTURE_SENTINEL"));
+        assert_eq!(
+            capture.binding_sha256,
+            rows[0]
+                .remote_session_identity
+                .as_ref()
+                .unwrap()
+                .binding_sha256
+        );
+        let mut child = std::process::Command::new("python3")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/support/assert_notification_pipeline.py"
+            ))
+            .stdin(std::process::Stdio::piped())
+            .spawn()?;
+        use std::io::Write;
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(&serde_json::to_vec(&rows[0])?)?;
+        assert!(child.wait()?.success());
+        instance.status = Status::Running;
+        let rows = session_status_rows_with_capture(&[instance], &[], true);
+        assert!(rows[0].notification_capture.is_none());
+        session.kill()?;
+        Ok(())
+    }
+
+    #[test]
+    fn live_status_emits_one_transport_neutral_session_identity_when_available() -> Result<()> {
+        if std::process::Command::new("tmux")
+            .arg("-V")
+            .output()
+            .is_err()
+        {
+            return Ok(());
+        }
+        let temp = tempdir()?;
+        let mut instance = Instance::new("status-identity", &temp.path().to_string_lossy());
+        instance.tool = "bash".to_string();
+        instance.command = "sleep 30".to_string();
+        instance.status = Status::Running;
+        let session = instance.tmux_session()?;
+        session.create(&instance.project_path, Some("sleep 30"))?;
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        let rows = session_status_rows(&[instance], &[]);
+        session.kill()?;
+        assert_eq!(rows.len(), 1);
+        if cfg!(target_os = "linux") {
+            let identity = rows[0]
+                .remote_session_identity
+                .as_ref()
+                .context("live status omitted remote session identity")?;
+            identity.validate()?;
+            assert_eq!(identity.schema, "remote_session_identity.v1");
+            assert!(rows[0].remote_session_identity_status.is_none());
+        } else {
+            assert!(rows[0].remote_session_identity.is_none());
+            assert_eq!(
+                rows[0].remote_session_identity_status.as_deref(),
+                Some("unavailable")
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn status_exposes_yolo_and_auto_orchestrator_provenance() {
+        let mut instance = Instance::new("custom-coordinator", "/tmp/project");
+        instance.yolo_mode = true;
+        instance.auto_orchestrator = true;
+
+        let rows = session_status_rows(&[instance], &[]);
+
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].yolo_mode);
+        assert!(rows[0].auto_orchestrator);
+        assert!(!rows[0].created_at.is_empty());
+        let preflight = rows[0]
+            .auto_orchestrator_startup_preflight
+            .as_ref()
+            .expect("auto orchestrator preflight");
+        assert_eq!(preflight.schema, "auto_orchestrator_startup_preflight.v1");
     }
 }

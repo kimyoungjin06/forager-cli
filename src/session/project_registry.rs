@@ -72,6 +72,10 @@ pub fn load_registry_from(path: &Path) -> Vec<ProjectRegistryEntry> {
     if file.schema.as_deref() != Some(PROJECT_REGISTRY_SCHEMA) {
         return Vec::new();
     }
+    registry_entries(file)
+}
+
+fn registry_entries(file: RegistryFile) -> Vec<ProjectRegistryEntry> {
     file.projects
         .into_iter()
         .map(|(key, entry)| ProjectRegistryEntry {
@@ -93,6 +97,63 @@ pub fn load_registry_from(path: &Path) -> Vec<ProjectRegistryEntry> {
             key,
         })
         .collect()
+}
+
+/// Unlike routing's degrading loader, inventory must expose unreadable or
+/// malformed input instead of treating it as an empty registry.
+pub(crate) struct ProjectRegistryInspection {
+    pub entries: Vec<ProjectRegistryEntry>,
+    pub aliases: BTreeMap<String, Vec<String>>,
+    pub content_sha256: String,
+}
+
+pub(crate) fn load_registry_checked(path: &Path) -> anyhow::Result<ProjectRegistryInspection> {
+    use anyhow::{ensure, Context};
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+
+    ensure!(
+        std::fs::metadata(path)?.is_file(),
+        "registry must be a regular file"
+    );
+    let file = std::fs::File::open(path).context("open project registry")?;
+    ensure!(
+        file.metadata()?.is_file(),
+        "registry must be a regular file"
+    );
+    let mut raw = String::new();
+    file.take(1_048_577).read_to_string(&mut raw)?;
+    ensure!(raw.len() <= 1_048_576, "registry exceeds 1 MiB");
+    let file: RegistryFile = toml::from_str(&raw).context("parse project registry")?;
+    ensure!(
+        file.schema.as_deref() == Some(PROJECT_REGISTRY_SCHEMA),
+        "unsupported project registry schema"
+    );
+    let value: toml::Value = toml::from_str(&raw)?;
+    let mut aliases = BTreeMap::new();
+    if let Some(projects) = value.get("projects").and_then(toml::Value::as_table) {
+        for (key, project) in projects {
+            let Some(values) = project.get("aliases") else {
+                continue;
+            };
+            let values = values
+                .as_array()
+                .context("project aliases must be an array")?;
+            let mut names = Vec::new();
+            for name in values {
+                let name = name.as_str().context("project aliases must be strings")?;
+                if !name.trim().is_empty() {
+                    names.push(name.trim().to_string());
+                }
+            }
+            aliases.insert(key.clone(), names);
+        }
+    }
+    Ok(ProjectRegistryInspection {
+        entries: registry_entries(file),
+        aliases,
+        content_sha256: format!("{:x}", Sha256::digest(raw.as_bytes())),
+    })
 }
 
 /// Slug usable as a project key and wiki profile name.
@@ -284,6 +345,38 @@ pub fn resolve_project_for_path(
         .cloned()
 }
 
+/// Resolve exactly one project for an authority-bearing operation.
+///
+/// Presentation and mutation boundaries must not inherit the registry's
+/// first-match display behavior when overlapping workspace patterns exist.
+pub fn resolve_unique_project_for_path(
+    path: &Path,
+    registry: &[ProjectRegistryEntry],
+) -> anyhow::Result<Option<ProjectRegistryEntry>> {
+    let text = path.to_string_lossy();
+    let matches = registry
+        .iter()
+        .filter(|entry| {
+            entry
+                .workspace_patterns
+                .iter()
+                .any(|pattern| text.contains(pattern.as_str()))
+        })
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [] => Ok(None),
+        [entry] => Ok(Some((*entry).clone())),
+        _ => anyhow::bail!(
+            "project path matches multiple registry entries: {}",
+            matches
+                .iter()
+                .map(|entry| entry.key.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -321,6 +414,30 @@ wiki_profile = "twinpaper-review"
         assert_eq!(resolved.wiki_profile.as_deref(), Some("twinpaper-review"));
         assert_eq!(resolved.session_group.as_deref(), Some("Twin"));
         assert!(resolve_project_for_path(Path::new("/elsewhere"), &registry).is_none());
+    }
+
+    #[test]
+    fn authority_resolution_rejects_overlapping_project_patterns() {
+        let registry = vec![
+            ProjectRegistryEntry {
+                key: "one".to_string(),
+                display_name: "One".to_string(),
+                workspace_patterns: vec!["workspace".to_string()],
+                session_group: None,
+                wiki_profile: Some("one-wiki".to_string()),
+            },
+            ProjectRegistryEntry {
+                key: "two".to_string(),
+                display_name: "Two".to_string(),
+                workspace_patterns: vec!["demo-project".to_string()],
+                session_group: None,
+                wiki_profile: Some("two-wiki".to_string()),
+            },
+        ];
+        let error =
+            resolve_unique_project_for_path(Path::new("/workspace/demo-project"), &registry)
+                .unwrap_err();
+        assert!(error.to_string().contains("multiple registry entries"));
     }
 
     #[test]

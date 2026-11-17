@@ -7,7 +7,7 @@ import { sitePath } from '../../lib/paths';
 
 <Base
   title="tmux Workflow for AI Coding Agents - Forager"
-  description="Use tmux as the reliable foundation under Forager's local meta-harness for harness-backed AI coding agents. Session persistence, keyboard workflow, and status detection."
+  description="Use Forager to manage tmux coding sessions, reattach while the host stays running, and inspect agent status estimates."
 >
   <Nav />
 
@@ -23,7 +23,7 @@ import { sitePath } from '../../lib/paths';
       <section>
         <h2>Why tmux Is the Foundation</h2>
         <p>
-          AI coding agents run in terminals and often take a long time to complete tasks. If your terminal closes, the agent dies. tmux solves this by running sessions in the background -- they persist across disconnects, reboots, and SSH drops.
+          Coding agents often run for longer than an SSH connection or terminal window stays open. tmux can keep their processes running after a client disconnects, while the host and tmux server remain up. A reboot ends those processes.
         </p>
         <p>
           tmux also handles windowing, splitting, and session management natively. It is the standard tool for this kind of work, with decades of stability and a minimal resource footprint.
@@ -52,7 +52,7 @@ import { sitePath } from '../../lib/paths';
         <ul>
           <li><code>j</code> / <code>k</code> or arrow keys to navigate sessions</li>
           <li><code>Enter</code> to attach to a session</li>
-          <li><code>a</code> to add a new session</li>
+          <li><code>n</code> to add a new session</li>
           <li><code>d</code> to delete a session</li>
           <li><code>g</code> to manage groups</li>
           <li><code>/</code> to search sessions</li>
@@ -66,16 +66,15 @@ import { sitePath } from '../../lib/paths';
       <section>
         <h2>Session Persistence</h2>
         <p>
-          Because everything runs in tmux, your agents survive:
+          While the host and tmux server stay running, sessions can continue after:
         </p>
         <ul>
           <li>Closing the Forager TUI</li>
           <li>Closing your terminal emulator</li>
           <li>SSH disconnects</li>
-          <li>System sleep/wake cycles</li>
         </ul>
         <p>
-          Reopen <code>forager</code> and your sessions are all there, with current status automatically detected. Long-running agent tasks complete in the background without you needing to keep anything open.
+          Reopen <code>forager</code> to reattach to surviving sessions. Background execution does not guarantee task completion; inspect the terminal, logs and results. A host reboot or tmux server exit ends the live sessions.
         </p>
       </section>
 
@@ -85,9 +84,9 @@ import { sitePath } from '../../lib/paths';
           Raw tmux is powerful but requires memorizing session names and switching commands. Forager adds a visual layer:
         </p>
         <ul>
-          <li><strong>Dashboard view</strong> with real-time status for each session</li>
+          <li><strong>Dashboard view</strong> with periodically refreshed status estimates</li>
           <li><strong>Session groups</strong> for organization</li>
-          <li><strong>Status detection</strong> that shows agent activity without entering each session</li>
+          <li><strong>Status detection</strong> based on process and terminal patterns; inspect the session to confirm its state</li>
           <li><strong>Integrated lifecycle</strong> for <a href={sitePath('/guides/git-worktrees-ai-development/')}>git worktrees</a></li>
         </ul>
         <p>

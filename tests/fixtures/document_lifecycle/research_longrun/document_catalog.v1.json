@@ -1,0 +1,236 @@
+{
+  "schema": "document_catalog.v1",
+  "generated_at": "2026-08-19T02:00:00Z",
+  "project_key": "fixture-research-longrun",
+  "roots": [
+    {
+      "root_id": "root_research",
+      "source_kind": "project_registry",
+      "project_key": "fixture-research-longrun",
+      "canonical_path": "/fixtures/research-longrun",
+      "path_identity_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+    }
+  ],
+  "scan": {
+    "complete": true,
+    "budgets": {
+      "max_files": 5000,
+      "max_directory_entries": 50000,
+      "max_total_bytes": 104857600,
+      "max_file_bytes": 52428800,
+      "max_elapsed_ms": 15000
+    },
+    "usage": {
+      "files_observed": 3,
+      "directory_entries_observed": 8,
+      "bytes_hashed": 2109440,
+      "bytes_extracted": 12400,
+      "largest_file_bytes_read": 2097040,
+      "elapsed_ms": 96
+    },
+    "reached_limits": [],
+    "excluded_scope": [
+      {
+        "relative_path": "data/raw",
+        "reason": "configured_data_root",
+        "detail": "Raw research data is governed outside the document catalog."
+      }
+    ],
+    "incomplete_scope": []
+  },
+  "coverage": [
+    {
+      "media_family": "markdown",
+      "observed_files": 2,
+      "metadata_complete_files": 2,
+      "body_searchable_files": 2,
+      "body_extracted_files": 2,
+      "extraction_errors": 0,
+      "body_coverage": "complete"
+    },
+    {
+      "media_family": "pdf",
+      "observed_files": 1,
+      "metadata_complete_files": 1,
+      "body_searchable_files": 0,
+      "body_extracted_files": 0,
+      "extraction_errors": 0,
+      "body_coverage": "metadata_only"
+    }
+  ],
+  "source_identities": {
+    "filesystem_snapshot": {
+      "schema": "filesystem_observation.v1",
+      "identity": "fs_research_001",
+      "content_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "observed_at": "2026-08-19T02:00:00Z"
+    },
+    "lifecycle_ledger": {
+      "schema": "document_lifecycle_ledger.v1",
+      "identity": "ledger_research_007",
+      "content_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "observed_at": "2026-08-19T01:55:00Z"
+    },
+    "artifact_index": {
+      "schema": "artifact_index.v1",
+      "identity": "artifact_index_research_004",
+      "content_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+      "observed_at": "2026-08-19T01:58:00Z"
+    }
+  },
+  "authority_boundary": {
+    "projection_only": true,
+    "filesystem_observation_owns": ["relative_path", "size_bytes", "content_sha256", "git_state"],
+    "lifecycle_ledger_owns": ["document_id", "activity_state", "retention_disposition"],
+    "artifact_index_owns": ["artifact_id", "artifact_role", "artifact_retention_evidence"],
+    "search_visibility_mutation_authorized": false,
+    "file_mutation_authorized": false
+  },
+  "entries": [
+    {
+      "observation_id": "doc_observation_research_state",
+      "document_id": "document_research_state",
+      "artifact_id": null,
+      "project_key": "fixture-research-longrun",
+      "root_id": "root_research",
+      "relative_path": "CURRENT_STATE.md",
+      "media_family": "markdown",
+      "media_type": "text/markdown",
+      "size_bytes": 6400,
+      "modified_at": "2026-08-18T18:00:00Z",
+      "content_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+      "git_state": "tracked",
+      "role": "current_state",
+      "role_authority": "reviewed",
+      "subject_key": "project-state",
+      "subject_authority": "reviewed",
+      "audience": ["researcher", "agent"],
+      "scope_ref": "fixture-research-longrun",
+      "owner_entrypoint_ref": null,
+      "activity_state": "active",
+      "activity_authority": "reviewed",
+      "retention_disposition": "keep",
+      "retention_authority": "reviewed",
+      "generated": false,
+      "generated_authority": "reviewed",
+      "rebuild_ref": null,
+      "entrypoint_refs": [],
+      "outbound_refs": [
+        {"kind": "relative_path", "value": "contracts/analysis-contract-v3.md"},
+        {"kind": "relative_path", "value": "reports/final-report.pdf"}
+      ],
+      "inbound_ref_count": 0,
+      "exact_duplicate_refs": [],
+      "possible_predecessor_refs": [],
+      "review_after": "2026-09-01T00:00:00Z",
+      "scan_findings": []
+    },
+    {
+      "observation_id": "doc_observation_research_contract",
+      "document_id": "document_research_contract_v3",
+      "artifact_id": null,
+      "project_key": "fixture-research-longrun",
+      "root_id": "root_research",
+      "relative_path": "contracts/analysis-contract-v3.md",
+      "media_family": "markdown",
+      "media_type": "text/markdown",
+      "size_bytes": 6000,
+      "modified_at": "2026-08-17T10:00:00Z",
+      "content_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+      "git_state": "tracked",
+      "role": "decision",
+      "role_authority": "reviewed",
+      "subject_key": "analysis-contract",
+      "subject_authority": "reviewed",
+      "audience": ["researcher", "reviewer", "agent"],
+      "scope_ref": "analysis-v3",
+      "owner_entrypoint_ref": {"kind": "document", "value": "document_research_state"},
+      "activity_state": "active",
+      "activity_authority": "reviewed",
+      "retention_disposition": "preserved",
+      "retention_authority": "reviewed",
+      "generated": false,
+      "generated_authority": "reviewed",
+      "rebuild_ref": null,
+      "entrypoint_refs": [
+        {"kind": "document", "value": "document_research_state"}
+      ],
+      "outbound_refs": [],
+      "inbound_ref_count": 1,
+      "exact_duplicate_refs": [],
+      "possible_predecessor_refs": [],
+      "review_after": null,
+      "scan_findings": []
+    },
+    {
+      "observation_id": "doc_observation_research_report",
+      "document_id": "document_research_report",
+      "artifact_id": "artifact_final_report",
+      "project_key": "fixture-research-longrun",
+      "root_id": "root_research",
+      "relative_path": "reports/final-report.pdf",
+      "media_family": "pdf",
+      "media_type": "application/pdf",
+      "size_bytes": 2097040,
+      "modified_at": "2026-08-18T19:00:00Z",
+      "content_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+      "git_state": "tracked",
+      "role": "deliverable",
+      "role_authority": "reviewed",
+      "subject_key": "final-report",
+      "subject_authority": "reviewed",
+      "audience": ["reviewer"],
+      "scope_ref": "analysis-v3",
+      "owner_entrypoint_ref": {"kind": "document", "value": "document_research_state"},
+      "activity_state": "active",
+      "activity_authority": "reviewed",
+      "retention_disposition": "preserved",
+      "retention_authority": "reviewed",
+      "generated": true,
+      "generated_authority": "reviewed",
+      "rebuild_ref": "run_manifest_analysis_v3",
+      "entrypoint_refs": [
+        {"kind": "document", "value": "document_research_state"}
+      ],
+      "outbound_refs": [],
+      "inbound_ref_count": 1,
+      "exact_duplicate_refs": [],
+      "possible_predecessor_refs": [],
+      "review_after": null,
+      "scan_findings": [
+        {
+          "code": "body_metadata_only",
+          "severity": "info",
+          "authority": "observed",
+          "message": "PDF body text is not part of Phase 0 coverage."
+        }
+      ]
+    }
+  ],
+  "crosswalk_findings": [
+    {
+      "observation_id": "doc_observation_research_state",
+      "document_id": "document_research_state",
+      "artifact_id": null,
+      "status": "catalog_only",
+      "conflict": null,
+      "message": "Reviewed document identity has no artifact identity."
+    },
+    {
+      "observation_id": "doc_observation_research_contract",
+      "document_id": "document_research_contract_v3",
+      "artifact_id": null,
+      "status": "catalog_only",
+      "conflict": null,
+      "message": "Reviewed document identity has no artifact identity."
+    },
+    {
+      "observation_id": "doc_observation_research_report",
+      "document_id": "document_research_report",
+      "artifact_id": "artifact_final_report",
+      "status": "unified",
+      "conflict": null,
+      "message": "Exact current path and content hash bind document and artifact selectors."
+    }
+  ]
+}

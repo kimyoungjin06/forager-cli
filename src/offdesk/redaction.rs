@@ -2,7 +2,10 @@
 
 use regex::{Captures, Regex};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::sync::OnceLock;
+
+const OPERATOR_SAFE_IDENTITY_PREFIX: &str = "redacted_id_sha256_";
 
 fn private_key_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
@@ -30,7 +33,7 @@ fn api_key_prefix_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
         Regex::new(
-            r"\b(?:sk-[A-Za-z0-9_-]{16,}|xox[baprs]-[A-Za-z0-9-]{16,}|gh[pousr]_[A-Za-z0-9_]{20,}|AIza[A-Za-z0-9_-]{20,})\b",
+            r"(?P<prefix>^|[^A-Za-z0-9])(?:sk-[A-Za-z0-9_-]{16,}|xox[baprs]-[A-Za-z0-9-]{16,}|gh[pousr]_[A-Za-z0-9_]{20,}|AIza[A-Za-z0-9_-]{20,})\b",
         )
         .expect("valid API key prefix regex")
     })
@@ -167,8 +170,12 @@ pub fn force_redact_with_report(input: &str) -> RedactionOutcome {
         redacted,
     );
     (output, redacted) = replace_counted(output, bearer_re(), "Bearer [REDACTED]", redacted);
-    (output, redacted) =
-        replace_counted(output, api_key_prefix_re(), "[REDACTED_API_KEY]", redacted);
+    (output, redacted) = replace_counted(
+        output,
+        api_key_prefix_re(),
+        "$prefix[REDACTED_API_KEY]",
+        redacted,
+    );
     (output, redacted) = replace_assignments(output, redacted);
     (output, redacted) = replace_counted(output, db_url_re(), "[REDACTED_DB_URL]", redacted);
     (output, redacted) = replace_counted(output, jwt_re(), "[REDACTED_JWT]", redacted);
@@ -183,6 +190,49 @@ pub fn force_redact_with_report(input: &str) -> RedactionOutcome {
 /// Apply context fencing and secret redaction for operator-facing text.
 pub fn operator_safe_text(input: &str) -> String {
     operator_safe_report(input).text
+}
+
+/// Return a stable, operator-safe selector for an internal identity.
+///
+/// Most generated identities are already safe and remain unchanged. Legacy
+/// identities that contain secret-shaped text become a full SHA-256 alias so
+/// distinct raw identities never collapse onto the same redaction marker.
+pub fn operator_safe_identity(input: &str) -> String {
+    let safe = operator_safe_text(input);
+    if safe == input && !input.starts_with(OPERATOR_SAFE_IDENTITY_PREFIX) {
+        return safe;
+    }
+
+    let mut hasher = Sha256::new();
+    if safe == input {
+        hasher.update(b"forager.operator-safe-identity.reserved.v1\0");
+    } else {
+        hasher.update(b"forager.operator-safe-identity.v1\0");
+    }
+    hasher.update(input.as_bytes());
+    format!("{OPERATOR_SAFE_IDENTITY_PREFIX}{:x}", hasher.finalize())
+}
+
+/// Normalize an operator-provided or already projected identity without
+/// re-hashing a canonical public alias.
+pub fn operator_safe_identity_selector(input: &str) -> String {
+    let input = input.trim();
+    if is_operator_safe_identity_alias(input) {
+        input.to_string()
+    } else {
+        operator_safe_identity(input)
+    }
+}
+
+fn is_operator_safe_identity_alias(input: &str) -> bool {
+    input
+        .strip_prefix(OPERATOR_SAFE_IDENTITY_PREFIX)
+        .is_some_and(|digest| {
+            digest.len() == 64
+                && digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+        })
 }
 
 /// Apply context fencing and secret redaction, returning a report for audit surfaces.
@@ -310,6 +360,48 @@ mod tests {
         assert!(!output.text.contains("hidden"));
         assert!(!output.text.contains("sk-secret"));
         assert!(!output.text.contains("secret123"));
+    }
+
+    #[test]
+    fn redacts_api_keys_after_identifier_separators() {
+        let input = "audit_sk-secretsecretsecretsecret event-sk-secretsecretsecretsecret";
+
+        let output = operator_safe_report(input);
+
+        assert!(output.changed);
+        assert_eq!(output.secrets_redacted, 2);
+        assert_eq!(
+            output.text,
+            "audit_[REDACTED_API_KEY] event-[REDACTED_API_KEY]"
+        );
+    }
+
+    #[test]
+    fn operator_safe_identities_do_not_collapse_distinct_redacted_values() {
+        let first = "wiki-entry-sk-aaaaaaaaaaaaaaaa";
+        let second = "wiki-entry-sk-bbbbbbbbbbbbbbbb";
+
+        assert_eq!(operator_safe_text(first), operator_safe_text(second));
+        let first_alias = operator_safe_identity(first);
+        let second_alias = operator_safe_identity(second);
+
+        assert_ne!(first_alias, second_alias);
+        assert!(first_alias.starts_with("redacted_id_sha256_"));
+        assert_eq!(first_alias.len(), "redacted_id_sha256_".len() + 64);
+        assert!(!first_alias.contains("sk-aaaaaaaa"));
+        assert_eq!(operator_safe_identity(first), first_alias);
+        assert_eq!(operator_safe_identity("wiki_entry_safe"), "wiki_entry_safe");
+
+        let reserved_raw = first_alias.clone();
+        let reserved_alias = operator_safe_identity(&reserved_raw);
+        assert_ne!(reserved_alias, reserved_raw);
+        assert!(reserved_alias.starts_with(OPERATOR_SAFE_IDENTITY_PREFIX));
+        assert_eq!(operator_safe_identity(&reserved_raw), reserved_alias);
+        assert_eq!(operator_safe_identity_selector(&first_alias), first_alias);
+        assert_eq!(
+            operator_safe_identity_selector(first),
+            operator_safe_identity(first)
+        );
     }
 
     #[test]

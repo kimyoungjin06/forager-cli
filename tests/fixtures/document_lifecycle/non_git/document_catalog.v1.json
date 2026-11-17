@@ -1,0 +1,98 @@
+{
+  "schema": "document_catalog.v1",
+  "generated_at": "2026-08-19T03:00:00Z",
+  "project_key": "fixture-non-git",
+  "roots": [
+    {
+      "root_id": "root_non_git",
+      "source_kind": "explicit",
+      "project_key": "fixture-non-git",
+      "canonical_path": "/fixtures/non-git",
+      "path_identity_sha256": "8888888888888888888888888888888888888888888888888888888888888888"
+    }
+  ],
+  "scan": {
+    "complete": true,
+    "budgets": {"max_files": 100, "max_directory_entries": 1000, "max_total_bytes": 1048576, "max_file_bytes": 262144, "max_elapsed_ms": 3000},
+    "usage": {"files_observed": 1, "directory_entries_observed": 1, "bytes_hashed": 900, "bytes_extracted": 900, "largest_file_bytes_read": 900, "elapsed_ms": 4},
+    "reached_limits": [],
+    "excluded_scope": [],
+    "incomplete_scope": []
+  },
+  "coverage": [
+    {
+      "media_family": "restructured_text",
+      "observed_files": 1,
+      "metadata_complete_files": 1,
+      "body_searchable_files": 1,
+      "body_extracted_files": 1,
+      "extraction_errors": 0,
+      "body_coverage": "complete"
+    }
+  ],
+  "source_identities": {
+    "filesystem_snapshot": {
+      "schema": "filesystem_observation.v1",
+      "identity": "fs_non_git_001",
+      "content_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+      "observed_at": "2026-08-19T03:00:00Z"
+    },
+    "lifecycle_ledger": null,
+    "artifact_index": null
+  },
+  "authority_boundary": {
+    "projection_only": true,
+    "filesystem_observation_owns": ["relative_path", "size_bytes", "content_sha256", "git_state"],
+    "lifecycle_ledger_owns": ["document_id", "activity_state", "retention_disposition"],
+    "artifact_index_owns": ["artifact_id", "artifact_role", "artifact_retention_evidence"],
+    "search_visibility_mutation_authorized": false,
+    "file_mutation_authorized": false
+  },
+  "entries": [
+    {
+      "observation_id": "doc_observation_non_git_readme",
+      "document_id": null,
+      "artifact_id": null,
+      "project_key": "fixture-non-git",
+      "root_id": "root_non_git",
+      "relative_path": "README.rst",
+      "media_family": "restructured_text",
+      "media_type": "text/x-rst",
+      "size_bytes": 900,
+      "modified_at": null,
+      "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab",
+      "git_state": "outside_git",
+      "role": "entrypoint",
+      "role_authority": "observed",
+      "subject_key": null,
+      "subject_authority": null,
+      "audience": [],
+      "scope_ref": null,
+      "owner_entrypoint_ref": null,
+      "activity_state": "unknown",
+      "activity_authority": null,
+      "retention_disposition": "unclassified",
+      "retention_authority": null,
+      "generated": false,
+      "generated_authority": "declared",
+      "rebuild_ref": null,
+      "entrypoint_refs": [],
+      "outbound_refs": [],
+      "inbound_ref_count": 0,
+      "exact_duplicate_refs": [],
+      "possible_predecessor_refs": [],
+      "review_after": null,
+      "scan_findings": []
+    }
+  ],
+  "crosswalk_findings": [
+    {
+      "observation_id": "doc_observation_non_git_readme",
+      "document_id": null,
+      "artifact_id": null,
+      "status": "catalog_only",
+      "conflict": null,
+      "message": "Non-Git documents remain observable without inferred disposal state."
+    }
+  ]
+}

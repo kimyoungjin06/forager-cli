@@ -49,20 +49,59 @@ pub struct RemoteSessionIdentityV1 {
 }
 
 impl RemoteSessionIdentityV1 {
+    /// Capture only while the full observed identity still matches this envelope.
+    pub fn capture_notification_tail(
+        &self,
+        instance: &Instance,
+        project_key: Option<&str>,
+    ) -> Result<String> {
+        self.validate()?;
+        let tmux = instance.tmux_session()?;
+        let runtime = tmux.runtime_identity()?;
+        ensure!(
+            Self::observe_at_runtime(instance, project_key, Some(&runtime))? == *self,
+            "notification identity changed before capture"
+        );
+        let text = tmux.capture_exact_runtime(&runtime)?;
+        ensure!(
+            Self::observe_at_runtime(instance, project_key, Some(&runtime))? == *self,
+            "notification identity changed after capture"
+        );
+        let rows: Vec<_> = text
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .collect();
+        Ok(rows[rows.len().saturating_sub(15)..].join("\n"))
+    }
+
     pub fn observe(instance: &Instance, project_key: Option<&str>) -> Result<Self> {
+        Self::observe_at_runtime(instance, project_key, None)
+    }
+
+    fn observe_at_runtime(
+        instance: &Instance,
+        project_key: Option<&str>,
+        expected_runtime: Option<&str>,
+    ) -> Result<Self> {
         let harness_kind = instance.tool.trim().to_string();
         ensure!(!harness_kind.is_empty(), "session harness kind is empty");
         let harness_launch_sha256 = hash_parts(
             HARNESS_HASH_DOMAIN,
             &[harness_kind.as_str(), instance.get_tool_command()],
         );
-        Self::observe_with_launch_hash(instance, project_key, &harness_launch_sha256)
+        Self::observe_with_launch_hash(
+            instance,
+            project_key,
+            &harness_launch_sha256,
+            expected_runtime,
+        )
     }
 
     fn observe_with_launch_hash(
         instance: &Instance,
         project_key: Option<&str>,
         harness_launch_sha256: &str,
+        expected_runtime: Option<&str>,
     ) -> Result<Self> {
         ensure!(
             is_sha256(harness_launch_sha256),
@@ -84,6 +123,12 @@ impl RemoteSessionIdentityV1 {
 
         let tmux_session = instance.tmux_session()?;
         let runtime_before = tmux_session.runtime_identity()?;
+        if let Some(expected) = expected_runtime {
+            ensure!(
+                runtime_before == expected,
+                "notification runtime changed during identity observation"
+            );
+        }
         let runtime_fields = parse_tmux_runtime_identity(&runtime_before)?;
         let pane_pid = runtime_fields[3]
             .parse::<u32>()
@@ -349,7 +394,6 @@ fn is_sha256(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(target_os = "linux")]
     use tempfile::tempdir;
 
     fn fixture() -> RemoteSessionIdentityV1 {
@@ -396,6 +440,72 @@ mod tests {
             mutate(&mut forged);
             assert!(forged.validate().is_err());
         }
+    }
+
+    #[test]
+    #[ignore = "requires the disposable notification container, never run on the host"]
+    fn notification_capture_disposable_identity_binding() -> Result<()> {
+        ensure!(Path::new("/.dockerenv").exists(), "container required");
+        ensure!(
+            std::env::var("FORAGER_NOTIFICATION_DISPOSABLE").as_deref() == Ok("1"),
+            "explicit disposable opt-in required"
+        );
+        let temp = tempdir()?;
+        let mut instance = Instance::new("capture-bound", &temp.path().to_string_lossy());
+        instance.tool = "bash".to_string();
+        instance.command = "printf 'BOUND_CAPTURE_SENTINEL\\n'; exec sleep 60".to_string();
+        let session = instance.tmux_session()?;
+        session.create(&instance.project_path, Some(&instance.command))?;
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        let identity = RemoteSessionIdentityV1::observe(&instance, Some("capture-test"))?;
+        let tail = identity.capture_notification_tail(&instance, Some("capture-test"))?;
+        ensure!(
+            tail.contains("BOUND_CAPTURE_SENTINEL"),
+            "capture missing exact pane text"
+        );
+        ensure!(
+            identity
+                .capture_notification_tail(&instance, Some("other-project"))
+                .is_err(),
+            "wrong identity accepted"
+        );
+        let runtime = session.runtime_identity()?;
+        let session_id = runtime.split('|').next().context("session id")?;
+        let split = std::process::Command::new("tmux")
+            .args([
+                "split-window",
+                "-t",
+                session_id,
+                "printf 'OTHER_PANE_SENTINEL\\n'; exec sleep 60",
+            ])
+            .output()?;
+        ensure!(split.status.success(), "split failed");
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        ensure!(
+            identity
+                .capture_notification_tail(&instance, Some("capture-test"))
+                .is_err(),
+            "old pane identity accepted"
+        );
+        let replacement = RemoteSessionIdentityV1::observe(&instance, Some("capture-test"))?;
+        let replacement_tail =
+            replacement.capture_notification_tail(&instance, Some("capture-test"))?;
+        ensure!(
+            replacement_tail.contains("OTHER_PANE_SENTINEL"),
+            "new pane text missing"
+        );
+        ensure!(
+            !replacement_tail.contains("BOUND_CAPTURE_SENTINEL"),
+            "cross-pane contamination"
+        );
+        session.kill()?;
+        ensure!(
+            replacement
+                .capture_notification_tail(&instance, Some("capture-test"))
+                .is_err(),
+            "absent runtime accepted"
+        );
+        Ok(())
     }
 
     #[cfg(target_os = "linux")]

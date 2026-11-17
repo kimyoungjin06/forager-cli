@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install systemd user timers for armed-gated overnight autonomy.
+"""Install systemd user timers for reviewed bounded Offdesk shifts.
 
 Renders three timer/service pairs that call offdesk_autonomy_run.py:
 
@@ -7,10 +7,10 @@ Renders three timer/service pairs that call offdesk_autonomy_run.py:
   forager-autonomy-distill  daily 02:00       (operator-owned nightly playbook)
   forager-autonomy-brief    daily 08:50       (morning brief, then disarm)
 
-The timers fire regardless, but every service exits immediately unless the
-operator has armed the window (Telegram proposal card or
-`offdesk_autonomy_run.py --arm`), so installing them is inert by itself.
-`forager offdesk pause` still halts dispatch independently of arming.
+The timers fire regardless, but the adapter discovers at most one active Rust
+shift, pins its exact ID, and executes only a due typed manifest routine.
+Installing the timers creates no standing execution authority. `forager
+offdesk pause` still halts dispatch independently of the shift lifecycle.
 """
 
 from __future__ import annotations
@@ -29,9 +29,9 @@ from deploy_harness_scripts import deploy as deploy_harness_scripts
 RUNNER = deploy_harness_scripts() / "offdesk_autonomy_run.py"
 
 UNITS = [
-    ("forager-autonomy-tick", "*:00/10", "tick", "Forager offdesk tick heartbeat (armed-gated)"),
-    ("forager-autonomy-distill", "*-*-* 02:00:00", "distill", "Forager nightly wiki distillation (armed-gated)"),
-    ("forager-autonomy-brief", "*-*-* 08:50:00", "brief", "Forager morning brief + disarm (armed-gated)"),
+    ("forager-autonomy-tick", "*:00/10", "tick", "Forager bounded-shift tick heartbeat"),
+    ("forager-autonomy-distill", "*-*-* 02:00:00", "distill", "Forager bounded-shift Wiki prereview"),
+    ("forager-autonomy-brief", "*-*-* 08:50:00", "brief", "Forager bounded-shift morning review"),
 ]
 
 
@@ -126,7 +126,7 @@ def main() -> int:
     if args.enable:
         for name, _, _, _ in UNITS:
             subprocess.run(["systemctl", "--user", "enable", "--now", f"{name}.timer"], check=False, capture_output=True)
-        print("timers enabled; they stay inert until autonomy is armed")
+        print("timers enabled; they stay inert without one reviewed active shift")
     return 0
 
 

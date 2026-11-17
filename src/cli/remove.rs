@@ -4,6 +4,7 @@ use anyhow::Result;
 use clap::Args;
 
 use crate::containers;
+use crate::offdesk::operator_safe_text;
 use crate::session::{GroupTree, Instance, Storage};
 
 #[derive(Args)]
@@ -91,17 +92,23 @@ pub async fn run(profile: &str, args: RemoveArgs) -> Result<()> {
             match GitWorktree::new(main_repo) {
                 Ok(git_wt) => {
                     if let Err(e) = git_wt.remove_worktree(&worktree_path, args.force) {
-                        eprintln!("Warning: failed to remove worktree: {}", e);
+                        eprintln!(
+                            "Warning: failed to remove worktree: {}",
+                            operator_safe_text(&e.to_string())
+                        );
                         eprintln!(
                             "You may need to remove it manually with: git worktree remove {}",
-                            inst.project_path
+                            operator_safe_text(&inst.project_path)
                         );
                     } else {
                         println!("✓ Worktree removed");
                     }
                 }
                 Err(e) => {
-                    eprintln!("Warning: failed to access git repository: {}", e);
+                    eprintln!(
+                        "Warning: failed to access git repository: {}",
+                        operator_safe_text(&e.to_string())
+                    );
                 }
             }
         } else {
@@ -121,7 +128,10 @@ pub async fn run(profile: &str, args: RemoveArgs) -> Result<()> {
     if let Ok(tmux_session) = crate::tmux::Session::new(&inst.id, &inst.title) {
         if tmux_session.exists() {
             if let Err(e) = tmux_session.kill() {
-                eprintln!("Warning: failed to kill tmux session: {}", e);
+                eprintln!(
+                    "Warning: failed to kill tmux session: {}",
+                    operator_safe_text(&e.to_string())
+                );
                 eprintln!("Session removed from Forager but may still be running in tmux");
             }
         }
@@ -138,7 +148,10 @@ pub async fn run(profile: &str, args: RemoveArgs) -> Result<()> {
                 );
                 if container.exists().unwrap_or(false) {
                     if let Err(e) = container.remove(true) {
-                        eprintln!("Warning: failed to remove legacy sandbox container: {}", e);
+                        eprintln!(
+                            "Warning: failed to remove legacy sandbox container: {}",
+                            operator_safe_text(&e.to_string())
+                        );
                     } else {
                         println!("✓ Legacy sandbox container removed");
                     }

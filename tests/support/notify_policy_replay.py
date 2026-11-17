@@ -20,6 +20,26 @@ sys.path.insert(0, scripts_dir)
 
 import offdesk_remote_operator_telegram as mod  # noqa: E402
 import telegram_operator.dispatch as dispatch  # noqa: E402
+from telegram_operator.remote_session_identity import signed_identity  # noqa: E402
+
+session_identity = signed_identity(
+    {
+        "schema": "remote_session_identity.v1",
+        "machine_identity_sha256": "1" * 64,
+        "project_key": "scoreboard",
+        "project_root_identity_sha256": "2" * 64,
+        "worktree_kind": "direct_project_root",
+        "worktree_identity_sha256": "3" * 64,
+        "harness_kind": "codex",
+        "harness_launch_sha256": "4" * 64,
+        "session_id": "dd33247c689b41aa",
+        "session_record_identity_sha256": "5" * 64,
+        "transport_kind": "tmux",
+        "transport_session_identity_sha256": "6" * 64,
+        "pane_identity_sha256": "7" * 64,
+        "process_identity_sha256": "8" * 64,
+    }
+)
 
 status_file = workdir / "status.json"
 status_file.write_text(
@@ -32,6 +52,7 @@ status_file.write_text(
                     "project": "scoreboard",
                     "status": "waiting",
                     "tool": "codex",
+                    "remote_session_identity": session_identity,
                 }
             ]
         }
@@ -63,8 +84,9 @@ mod.edit_message = lambda *a, **k: None
 mod.summarize_waiting_prompt = lambda args, tail: "승인 대기"
 dispatch.find_tmux_session_name = lambda session_id: "fake_tmux"
 # The pane never changes: this is the frozen prompt from 2026-08-06.
-pane = {"tail": "frozen prompt pane"}
+pane = {"tail": "Allow this command?\n❯ 1. Yes\n2. No"}
 dispatch.capture_session_tail = lambda name, lines=15: pane["tail"]
+dispatch.capture_notification_tail = lambda name, lines=15: pane["tail"]
 
 clock = FakeClock(real_time.mktime(real_time.strptime("2026-08-06 20:26", "%Y-%m-%d %H:%M")))
 mod.time = clock
@@ -92,7 +114,7 @@ state: dict = {}
 if scenario == "changed":
     # Four cards exhausted prompt A, but prompt B appeared without the session
     # leaving waiting between polls. The per-prompt cap must reset for B.
-    old_hash = dispatch.pane_prompt_hash("old frozen prompt pane")
+    old_hash = dispatch.session_prompt_identity("old frozen prompt pane", "codex")
     state = {
         "waiting_ids_last_scan": ["dd33247c689b41aa"],
         "waiting_notified_by_session": {
@@ -110,6 +132,13 @@ overnight = 0
 tapped = False
 
 for _ in range(int(14.2 * 60)):
+    capture_status = json.loads(status_file.read_text())
+    capture_status["sessions"][0]["notification_capture"] = {
+        "schema": "notification_capture.v1",
+        "binding_sha256": session_identity["binding_sha256"],
+        "tail": pane["tail"],
+    }
+    status_file.write_text(json.dumps(capture_status))
     before = len(sent)
     mod.scan_and_notify_waiting_sessions(args, config, state)
     if len(sent) > before:
@@ -120,8 +149,9 @@ for _ in range(int(14.2 * 60)):
         if scenario == "tapped" and not tapped:
             # The operator taps the first card. The pane does not move, so the
             # dispatcher reports no_effect and the prompt is marked dead.
-            prompt_hash = dispatch.pane_prompt_hash(
-                dispatch.capture_session_tail("fake_tmux", lines=15)
+            prompt_hash = dispatch.session_prompt_identity(
+                dispatch.capture_session_tail("fake_tmux", lines=15),
+                "codex",
             )
             mod.record_session_input_outcome(
                 state,

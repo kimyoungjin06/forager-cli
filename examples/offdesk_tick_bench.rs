@@ -6,7 +6,7 @@ use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
 use clap::{Parser, ValueEnum};
 use forager::offdesk::{
-    ApprovalLedger, ApprovalMode, ApprovalScope, ApprovalStatus, BackgroundRunnerKind, OffdeskTask,
+    ApprovalMode, ApprovalScope, ApprovalStatus, BackgroundRunnerKind, OffdeskTask,
     OffdeskTaskInput, OffdeskTaskStore, OffdeskTickOptions, OffdeskTickReport,
     PendingActionApproval, RiskLevel,
 };
@@ -344,7 +344,12 @@ fn seed_approvals(
             approval(index, status, task_id, now)
         })
         .collect::<Vec<_>>();
-    ApprovalLedger::new(root).save(&approvals)
+    fs::create_dir_all(root)?;
+    fs::write(
+        root.join("pending_action_approvals.json"),
+        serde_json::to_vec_pretty(&approvals)?,
+    )?;
+    Ok(())
 }
 
 fn approval(

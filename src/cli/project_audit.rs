@@ -6,11 +6,12 @@ use clap::{Args, ValueEnum};
 use regex::Regex;
 use serde::Serialize;
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
+
+mod bounded_io;
+use bounded_io::AuditIo;
 
 const CURRENT_SURFACES: &[&str] = &["CURRENT_STATE.md", "PROJECT_STATE.md"];
 const STANDARD_SURFACES: &[&str] = &["NEXT_ACTIONS.md", "DECISIONS.md", "DELIVERABLES.md"];
@@ -129,6 +130,14 @@ pub fn audit_recommendations_for_project(
     audit_profile: DocumentationAuditProfile,
     large_log_lines: usize,
 ) -> Result<Vec<AuditRecommendation>> {
+    Ok(audit_for_project(path, audit_profile, large_log_lines)?.0)
+}
+
+pub(super) fn audit_for_project(
+    path: &Path,
+    audit_profile: DocumentationAuditProfile,
+    large_log_lines: usize,
+) -> Result<(Vec<AuditRecommendation>, Value)> {
     let args = ProjectAuditDocsArgs {
         path: path.to_path_buf(),
         audit_profile,
@@ -139,7 +148,8 @@ pub fn audit_recommendations_for_project(
         json_out: None,
         md_out: None,
     };
-    Ok(build_audit_result(&args)?.recommendations)
+    let result = build_audit_result(&args)?;
+    Ok((result.recommendations, result.summary["coverage"].clone()))
 }
 
 pub fn run_audit_docs(args: ProjectAuditDocsArgs) -> Result<()> {
@@ -175,31 +185,33 @@ fn build_audit_result(args: &ProjectAuditDocsArgs) -> Result<DocumentationAuditR
         bail!("project path is not a directory: {}", root.display());
     }
 
+    let mut io = AuditIo::new(&root)?;
     let mut findings = Vec::new();
     let mut summary = serde_json::Map::new();
     summary.insert(
         "surfaces".to_string(),
-        audit_surfaces(&root, args.audit_profile, &mut findings),
+        audit_surfaces(&root, args.audit_profile, &mut findings, &mut io),
     );
     summary.insert(
         "entrypoints".to_string(),
-        audit_entrypoints(&root, &mut findings),
-    );
-    summary.insert(
-        "deliverables".to_string(),
-        audit_deliverables(&root, &mut findings)?,
+        audit_entrypoints(&root, &mut findings, &mut io),
     );
     summary.insert(
         "decisions".to_string(),
-        audit_decision_sources(&root, &mut findings),
+        audit_decision_sources(&root, &mut findings, &mut io),
     );
     summary.insert(
         "current_freshness".to_string(),
-        audit_current_freshness(&root, &mut findings, args.current_stale_days),
+        audit_current_freshness(&root, &mut findings, args.current_stale_days, &mut io),
+    );
+    io.scan();
+    summary.insert(
+        "deliverables".to_string(),
+        audit_deliverables(&root, &mut findings, &mut io)?,
     );
     summary.insert(
         "logs".to_string(),
-        audit_logs(&root, &mut findings, args.large_log_lines),
+        audit_logs(&root, &mut findings, args.large_log_lines, &mut io),
     );
     let adaptive_profile = args
         .adaptive_profile_dir
@@ -210,6 +222,18 @@ fn build_audit_result(args: &ProjectAuditDocsArgs) -> Result<DocumentationAuditR
         audit_adaptive_wiki(adaptive_profile.as_deref(), &mut findings),
     );
 
+    let coverage = io.coverage();
+    if coverage["complete"] == false {
+        add_finding(
+            &mut findings,
+            "warn",
+            "audit_scope_incomplete",
+            "Some paths or contents were not inspected within the owner audit policy.",
+            None,
+            Some("Review summary.coverage before interpreting missing or zero counts."),
+        );
+    }
+    summary.insert("coverage".to_string(), coverage);
     let summary = Value::Object(summary);
     let recommendations = build_recommendations(&root, &summary, &findings);
 
@@ -228,16 +252,29 @@ fn audit_surfaces(
     root: &Path,
     profile: DocumentationAuditProfile,
     findings: &mut Vec<AuditFinding>,
+    io: &mut AuditIo,
 ) -> Value {
     let mut existing = BTreeMap::new();
     for name in CURRENT_SURFACES.iter().chain(STANDARD_SURFACES.iter()) {
-        existing.insert((*name).to_string(), root.join(name).exists());
+        existing.insert((*name).to_string(), io.exists(&root.join(name)));
     }
-    let current_present = CURRENT_SURFACES.iter().any(|name| root.join(name).exists());
+    let current_present = if CURRENT_SURFACES
+        .iter()
+        .any(|name| existing[*name] == Some(true))
+    {
+        Some(true)
+    } else if CURRENT_SURFACES
+        .iter()
+        .all(|name| existing[*name] == Some(false))
+    {
+        Some(false)
+    } else {
+        None
+    };
 
     for surface in profile.required_surfaces() {
         if *surface == "current" {
-            if !current_present {
+            if current_present == Some(false) {
                 add_finding(
                     findings,
                     "warn",
@@ -249,7 +286,7 @@ fn audit_surfaces(
                     ),
                 );
             }
-        } else if !existing.get(*surface).copied().unwrap_or(false) {
+        } else if existing.get(*surface) == Some(&Some(false)) {
             add_finding(
                 findings,
                 "warn",
@@ -267,7 +304,7 @@ fn audit_surfaces(
     })
 }
 
-fn audit_entrypoints(root: &Path, findings: &mut Vec<AuditFinding>) -> Value {
+fn audit_entrypoints(root: &Path, findings: &mut Vec<AuditFinding>, io: &mut AuditIo) -> Value {
     let mut summary = serde_json::Map::new();
     let current_names = CURRENT_SURFACES
         .iter()
@@ -276,10 +313,12 @@ fn audit_entrypoints(root: &Path, findings: &mut Vec<AuditFinding>) -> Value {
         .collect::<BTreeSet<_>>();
     for name in ["README.md", "AGENTS.md"] {
         let path = root.join(name);
-        if !path.exists() {
+        if io.exists(&path) == Some(false) {
             continue;
         }
-        let text = read_text_lossy(&path);
+        let Some(text) = io.read_text(&path) else {
+            continue;
+        };
         let mentioned_current = current_names
             .iter()
             .filter(|candidate| text.contains(**candidate))
@@ -311,10 +350,18 @@ fn audit_entrypoints(root: &Path, findings: &mut Vec<AuditFinding>) -> Value {
     Value::Object(summary)
 }
 
-fn audit_deliverables(root: &Path, findings: &mut Vec<AuditFinding>) -> Result<Value> {
-    let output_candidates = collect_output_candidates(root)?;
+fn audit_deliverables(
+    root: &Path,
+    findings: &mut Vec<AuditFinding>,
+    io: &mut AuditIo,
+) -> Result<Value> {
+    let output_candidates = collect_output_candidates(root, io);
     let deliverables = root.join("DELIVERABLES.md");
-    if !deliverables.exists() {
+    let present = io.exists(&deliverables);
+    if present.is_none() {
+        return Ok(json!({"present": null, "inspected": false}));
+    }
+    if present == Some(false) {
         if !output_candidates.is_empty() {
             add_finding(
                 findings,
@@ -329,24 +376,34 @@ fn audit_deliverables(root: &Path, findings: &mut Vec<AuditFinding>) -> Result<V
             );
         }
         let mut largest_output_candidates = output_candidates.clone();
-        largest_output_candidates.sort_by_key(|path| std::cmp::Reverse(file_size(path)));
+        largest_output_candidates.sort_by_cached_key(|path| std::cmp::Reverse(io.file_size(path)));
         largest_output_candidates.truncate(RECOMMENDATION_PATH_LIMIT);
         return Ok(json!({
             "present": false,
             "paths": 0,
             "missing_paths": [],
             "output_candidates": output_candidates.len(),
-            "largest_output_candidates": path_size_rows(root, &largest_output_candidates)
+            "largest_output_candidates": path_size_rows(root, &largest_output_candidates, io)
         }));
     }
 
-    let paths = extract_backtick_paths(&read_text_lossy(&deliverables));
+    let Some(text) = io.read_text(&deliverables) else {
+        return Ok(
+            json!({"present": true, "inspected": false, "output_candidates": output_candidates.len()}),
+        );
+    };
+    let paths = io.path_references(&text, &deliverables);
     let referenced = paths.iter().cloned().collect::<BTreeSet<_>>();
     let mut missing = Vec::new();
     let mut existing_paths = Vec::new();
+    let mut uninspected = Vec::new();
     for value in &paths {
         let candidate = root.join(value);
-        if !candidate.exists() {
+        if io.exists(&candidate).is_none() {
+            uninspected.push(value.clone());
+            continue;
+        }
+        if io.exists(&candidate) == Some(false) {
             missing.push(value.clone());
             add_finding(
                 findings,
@@ -362,7 +419,7 @@ fn audit_deliverables(root: &Path, findings: &mut Vec<AuditFinding>) -> Result<V
     }
 
     let retention_managed =
-        collect_retention_managed_outputs(root, &output_candidates, &referenced);
+        collect_retention_managed_outputs(root, &output_candidates, &referenced, io);
     let referenced_outputs = paths
         .iter()
         .filter(|value| has_deliverable_extension(Path::new(value)))
@@ -385,18 +442,18 @@ fn audit_deliverables(root: &Path, findings: &mut Vec<AuditFinding>) -> Result<V
         if referenced.contains(&path_rel) {
             continue;
         }
-        if manifest_covers_output(path, root, &referenced) {
+        if manifest_covers_output(path, root, &referenced, io) {
             manifest_covered.push(path.clone());
             continue;
         }
-        if equivalent_latest_alias_is_referenced(path, root, &referenced)?
+        if equivalent_latest_alias_is_referenced(path, root, &referenced, io)
             || retention_managed.contains(path)
         {
             continue;
         }
         unreferenced.push(path.clone());
     }
-    unreferenced.sort_by_key(|path| std::cmp::Reverse(file_size(path)));
+    unreferenced.sort_by_cached_key(|path| std::cmp::Reverse(io.file_size(path)));
     let largest_unreferenced = unreferenced.iter().take(10).cloned().collect::<Vec<_>>();
     let retention_managed_rows = retention_managed.iter().cloned().collect::<Vec<_>>();
 
@@ -414,7 +471,7 @@ fn audit_deliverables(root: &Path, findings: &mut Vec<AuditFinding>) -> Result<V
         );
     }
 
-    let latest_aliases = audit_latest_aliases(root, &existing_paths, findings)?;
+    let latest_aliases = audit_latest_aliases(root, &existing_paths, findings, io)?;
     let local_outputs = existing_paths
         .iter()
         .map(|path| rel_path(root, path))
@@ -429,28 +486,36 @@ fn audit_deliverables(root: &Path, findings: &mut Vec<AuditFinding>) -> Result<V
         "present": true,
         "paths": paths.len(),
         "missing_paths": missing,
+        "uninspected_paths": uninspected,
         "output_candidates": output_candidates.len(),
         "referenced_human_outputs": referenced_outputs,
         "manifest_covered_human_outputs": manifest_covered.len(),
         "retention_managed_human_outputs": retention_managed.len(),
-        "retention_managed_human_output_paths": path_size_rows(root, &retention_managed_rows),
+        "retention_managed_human_output_paths": path_size_rows(root, &retention_managed_rows, io),
         "unreferenced_human_outputs": unreferenced.len(),
-        "unreferenced_human_output_review_sample": path_size_rows(root, &largest_unreferenced),
-        "largest_unreferenced_human_outputs": path_size_rows(root, &largest_unreferenced),
+        "unreferenced_human_output_review_sample": path_size_rows(root, &largest_unreferenced, io),
+        "largest_unreferenced_human_outputs": path_size_rows(root, &largest_unreferenced, io),
         "latest_aliases": latest_aliases,
         "local_outputs": local_outputs
     }))
 }
 
-fn audit_decision_sources(root: &Path, findings: &mut Vec<AuditFinding>) -> Value {
+fn audit_decision_sources(
+    root: &Path,
+    findings: &mut Vec<AuditFinding>,
+    io: &mut AuditIo,
+) -> Value {
     let decisions = root.join("DECISIONS.md");
-    if !decisions.exists() {
+    if io.exists(&decisions) == Some(false) {
         return json!({"present": false, "sources": 0, "missing_sources": []});
     }
-    let sources = extract_backtick_paths(&read_text_lossy(&decisions));
+    let Some(text) = io.read_text(&decisions) else {
+        return json!({"present": true, "inspected": false});
+    };
+    let sources = io.path_references(&text, &decisions);
     let mut missing = Vec::new();
     for value in &sources {
-        if !root.join(value).exists() {
+        if io.exists(&root.join(value)) == Some(false) {
             missing.push(value.clone());
             add_finding(
                 findings,
@@ -469,16 +534,20 @@ fn audit_current_freshness(
     root: &Path,
     findings: &mut Vec<AuditFinding>,
     stale_days: i64,
+    io: &mut AuditIo,
 ) -> Value {
     let Some(current) = CURRENT_SURFACES
         .iter()
         .map(|name| root.join(name))
-        .find(|path| path.exists())
+        .find(|path| io.exists(path) == Some(true))
     else {
         return json!({"present": false});
     };
 
-    let updated = parse_updated_date(&read_text_lossy(&current));
+    let Some(text) = io.read_text(&current) else {
+        return json!({"present": true, "inspected": false});
+    };
+    let updated = parse_updated_date(&text);
     let mut summary = serde_json::Map::new();
     summary.insert("present".to_string(), json!(true));
     summary.insert("path".to_string(), json!(rel_path(root, &current)));
@@ -503,11 +572,16 @@ fn audit_current_freshness(
     let newest = ["DECISIONS.md", "DELIVERABLES.md", "NEXT_ACTIONS.md"]
         .iter()
         .map(|name| root.join(name))
-        .filter(|path| path.exists())
-        .max_by_key(|path| modified_time(path));
+        .filter_map(|path| {
+            io.metadata(&path)
+                .and_then(|m| m.modified().ok())
+                .map(|time| (path, time))
+        })
+        .max_by_key(|(_, time)| *time);
 
-    if let Some(newest) = newest {
-        let newest_date = modified_date(&newest);
+    if let Some((newest, time)) = newest {
+        let datetime: DateTime<Utc> = time.into();
+        let newest_date = Some(datetime.date_naive());
         summary.insert(
             "newest_watched_surface".to_string(),
             json!(rel_path(root, &newest)),
@@ -533,16 +607,25 @@ fn audit_current_freshness(
     Value::Object(summary)
 }
 
-fn audit_logs(root: &Path, findings: &mut Vec<AuditFinding>, large_log_lines: usize) -> Value {
+fn audit_logs(
+    root: &Path,
+    findings: &mut Vec<AuditFinding>,
+    large_log_lines: usize,
+    io: &mut AuditIo,
+) -> Value {
     let mut logs = Vec::new();
-    for path in collect_files(root) {
+    for path in io.files().to_vec() {
         let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
             continue;
         };
         if !LOG_NAMES.contains(&name) {
             continue;
         }
-        let line_count = read_text_lossy(&path).lines().count();
+        let Some(text) = io.read_text(&path) else {
+            logs.push(json!({"path": rel_path(root, &path), "lines": null, "inspected": false}));
+            continue;
+        };
+        let line_count = text.lines().count();
         if line_count >= large_log_lines {
             add_finding(
                 findings,
@@ -638,33 +721,32 @@ fn audit_adaptive_wiki(profile_dir: Option<&Path>, findings: &mut Vec<AuditFindi
     Value::Object(summary)
 }
 
-fn collect_output_candidates(root: &Path) -> Result<Vec<PathBuf>> {
-    let mut candidates = Vec::new();
-    for name in OUTPUT_ROOTS {
-        let base = root.join(name);
-        if !base.exists() {
-            continue;
-        }
-        for path in collect_files(&base) {
-            if has_deliverable_extension(&path) {
-                candidates.push(path);
-            }
-        }
-    }
-    candidates.sort();
-    Ok(candidates)
+fn collect_output_candidates(root: &Path, io: &AuditIo) -> Vec<PathBuf> {
+    io.files()
+        .iter()
+        .filter(|path| {
+            OUTPUT_ROOTS
+                .iter()
+                .any(|name| path.starts_with(root.join(name)))
+                && has_deliverable_extension(path)
+        })
+        .cloned()
+        .collect()
 }
 
 fn collect_retention_managed_outputs(
     root: &Path,
     output_candidates: &[PathBuf],
     referenced: &BTreeSet<String>,
+    io: &mut AuditIo,
 ) -> BTreeSet<PathBuf> {
     let retention_review = root.join("RETENTION_REVIEW.md");
-    if !retention_review.exists() {
+    if io.exists(&retention_review) == Some(false) {
         return BTreeSet::new();
     }
-    let managed_refs = extract_backtick_paths(&read_text_lossy(&retention_review))
+    let text = io.read_text(&retention_review).unwrap_or_default();
+    let managed_refs = io
+        .path_references(&text, &retention_review)
         .into_iter()
         .collect::<BTreeSet<_>>();
     output_candidates
@@ -681,16 +763,17 @@ fn equivalent_latest_alias_is_referenced(
     path: &Path,
     root: &Path,
     referenced: &BTreeSet<String>,
-) -> Result<bool> {
+    io: &mut AuditIo,
+) -> bool {
     let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-        return Ok(false);
+        return false;
     };
     if name.contains("latest") {
-        return Ok(false);
+        return false;
     }
     let path_rel = rel_path(root, path);
     if referenced.contains(&path_rel) {
-        return Ok(true);
+        return true;
     }
     for reference in referenced {
         let ref_path = root.join(reference);
@@ -700,26 +783,33 @@ fn equivalent_latest_alias_is_referenced(
         if ref_path.parent() != path.parent()
             || !ref_name.contains("latest")
             || ref_path.extension() != path.extension()
-            || !ref_path.exists()
-            || file_size(&ref_path) != file_size(path)
+            || io.exists(&ref_path) != Some(true)
+            || io.file_size(&ref_path) != io.file_size(path)
         {
             continue;
         }
-        if file_sha256(&ref_path)? == file_sha256(path)? {
-            return Ok(true);
+        if let (Some(left), Some(right)) = (io.hash(&ref_path), io.hash(path)) {
+            if left == right {
+                return true;
+            }
         }
     }
-    Ok(false)
+    false
 }
 
-fn manifest_covers_output(path: &Path, root: &Path, referenced: &BTreeSet<String>) -> bool {
+fn manifest_covers_output(
+    path: &Path,
+    root: &Path,
+    referenced: &BTreeSet<String>,
+    io: &mut AuditIo,
+) -> bool {
     if !has_deliverable_extension(path) {
         return false;
     }
     referenced.iter().any(|reference| {
         let ref_path = root.join(reference);
         ref_path.parent() == path.parent()
-            && ref_path.exists()
+            && io.exists(&ref_path) == Some(true)
             && ref_path.extension().and_then(|value| value.to_str()) == Some("json")
             && ref_path
                 .file_name()
@@ -732,6 +822,7 @@ fn audit_latest_aliases(
     root: &Path,
     existing_paths: &[PathBuf],
     findings: &mut Vec<AuditFinding>,
+    io: &mut AuditIo,
 ) -> Result<Vec<Value>> {
     let mut aliases = Vec::new();
     for path in existing_paths {
@@ -746,16 +837,19 @@ fn audit_latest_aliases(
         };
         let prefix = name.split("latest").next().unwrap_or_default();
         let suffix = name.split("latest").nth(1).unwrap_or_default();
-        let alias_hash = file_sha256(path)?;
+        let Some(alias_hash) = io.hash(path) else {
+            aliases.push(json!({"path": rel_path(root, path), "inspected": false}));
+            continue;
+        };
         let mut matching = Vec::new();
         let mut candidate_siblings = 0usize;
-        for sibling in fs::read_dir(parent).with_context(|| format!("read {}", parent.display()))? {
-            let sibling = sibling?.path();
+        let mut complete = io.sibling_inventory_complete(parent);
+        for sibling in io.files().to_vec() {
             let Some(sibling_name) = sibling.file_name().and_then(|value| value.to_str()) else {
                 continue;
             };
             if sibling == *path
-                || !sibling.is_file()
+                || sibling.parent() != Some(parent)
                 || sibling_name.contains("latest")
                 || !sibling_name.starts_with(prefix)
                 || !sibling_name.ends_with(suffix)
@@ -763,11 +857,13 @@ fn audit_latest_aliases(
                 continue;
             }
             candidate_siblings += 1;
-            if file_sha256(&sibling)? == alias_hash {
-                matching.push(rel_path(root, &sibling));
+            match io.hash(&sibling) {
+                Some(hash) if hash == alias_hash => matching.push(rel_path(root, &sibling)),
+                None => complete = false,
+                _ => {}
             }
         }
-        if matching.is_empty() {
+        if matching.is_empty() && complete {
             add_finding(
                 findings,
                 "warn",
@@ -780,6 +876,7 @@ fn audit_latest_aliases(
         aliases.push(json!({
             "path": rel_path(root, path),
             "candidate_siblings": candidate_siblings,
+            "complete": complete,
             "matching_siblings": matching
         }));
     }
@@ -822,27 +919,6 @@ fn parse_updated_date(text: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(value, "%Y-%m-%d").ok()
 }
 
-fn collect_files(root: &Path) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    collect_files_into(root, &mut files);
-    files.sort();
-    files
-}
-
-fn collect_files_into(root: &Path, files: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(root) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_files_into(&path, files);
-        } else if path.is_file() {
-            files.push(path);
-        }
-    }
-}
-
 fn has_deliverable_extension(path: &Path) -> bool {
     let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
         return false;
@@ -851,51 +927,17 @@ fn has_deliverable_extension(path: &Path) -> bool {
     DELIVERABLE_EXTENSIONS.contains(&normalized.as_str())
 }
 
-fn path_size_rows(root: &Path, paths: &[PathBuf]) -> Vec<Value> {
+fn path_size_rows(root: &Path, paths: &[PathBuf], io: &mut AuditIo) -> Vec<Value> {
     paths
         .iter()
-        .map(|path| json!({"path": rel_path(root, path), "bytes": file_size(path)}))
+        .map(|path| json!({"path": rel_path(root, path), "bytes": io.file_size(path)}))
         .collect()
-}
-
-fn read_text_lossy(path: &Path) -> String {
-    fs::read(path)
-        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-        .unwrap_or_default()
-}
-
-fn file_size(path: &Path) -> u64 {
-    path.metadata()
-        .map(|metadata| metadata.len())
-        .unwrap_or_default()
-}
-
-fn file_sha256(path: &Path) -> Result<String> {
-    let mut file = fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0u8; 1024 * 64];
-    loop {
-        let bytes_read = file
-            .read(&mut buffer)
-            .with_context(|| format!("read {}", path.display()))?;
-        if bytes_read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..bytes_read]);
-    }
-    Ok(format!("{:x}", hasher.finalize()))
 }
 
 fn modified_time(path: &Path) -> std::time::SystemTime {
     path.metadata()
         .and_then(|metadata| metadata.modified())
         .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
-}
-
-fn modified_date(path: &Path) -> Option<NaiveDate> {
-    let time = modified_time(path);
-    let datetime: DateTime<Utc> = time.into();
-    Some(datetime.date_naive())
 }
 
 fn add_finding(
@@ -921,6 +963,15 @@ fn build_recommendations(
     findings: &[AuditFinding],
 ) -> Vec<AuditRecommendation> {
     let mut recommendations = Vec::new();
+    if summary.pointer("/coverage/complete") == Some(&json!(false)) {
+        recommendations.push(AuditRecommendation {
+            priority: "normal".into(), kind: "review_audit_coverage".into(),
+            title: "Review documentation audit coverage".into(),
+            rationale: "The bounded owner audit skipped paths or could not inspect some contents; counts cover only inspected files.".into(),
+            suggested_action: "Inspect summary.coverage and select a bounded follow-up scope for unresolved paths.".into(),
+            paths: vec![], command: None,
+        });
+    }
 
     let missing_deliverable_paths = findings
         .iter()
@@ -1175,6 +1226,14 @@ fn build_markdown_report(result: &DocumentationAuditResult) -> String {
     ));
     output.push_str("## Summary\n\n");
     output.push_str(&format!(
+        "- Coverage: `{}`. Counts describe inspected files only.\n",
+        if result.summary.pointer("/coverage/complete") == Some(&json!(true)) {
+            "complete within owner policy"
+        } else {
+            "partial; inspect JSON coverage diagnostics"
+        }
+    ));
+    output.push_str(&format!(
         "- Output candidates: `{}`\n",
         summary_u64(&result.summary, "/deliverables/output_candidates")
     ));
@@ -1267,6 +1326,14 @@ fn print_human_summary(result: &DocumentationAuditResult) {
     println!("  profile:  {}", result.profile);
     println!("  findings: {}", result.findings.len());
     println!("  recs:     {}", result.recommendations.len());
+    println!(
+        "  coverage: {}",
+        if result.summary.pointer("/coverage/complete") == Some(&json!(true)) {
+            "complete within owner policy"
+        } else {
+            "partial; use --json to inspect skipped paths and limits"
+        }
+    );
     for severity in ["error", "warn", "info"] {
         let count = result
             .findings
@@ -1331,4 +1398,48 @@ fn rel_path(root: &Path, path: &Path) -> String {
         .to_string_lossy()
         .replace('\\', "/")
         .replace(['\n', '\r'], " ")
+}
+
+#[cfg(test)]
+mod bounded_tests {
+    use super::*;
+    use std::os::unix::fs::symlink;
+    use tempfile::tempdir;
+
+    #[test]
+    fn uninspected_references_and_oversized_aliases_never_become_missing_or_verified() -> Result<()>
+    {
+        let root = tempdir()?;
+        let external = tempdir()?;
+        fs::write(external.path().join("report.pdf"), "outside")?;
+        symlink(external.path(), root.path().join("outputs"))?;
+        fs::write(
+            root.path().join("DELIVERABLES.md"),
+            "`outputs/report.pdf`\n`../unknown.pdf`\n",
+        )?;
+        let (recommendations, coverage) =
+            audit_for_project(root.path(), DocumentationAuditProfile::Standard, 10)?;
+        assert_eq!(coverage["complete"], false);
+        assert!(recommendations
+            .iter()
+            .any(|r| r.kind == "review_audit_coverage"));
+        assert!(!recommendations
+            .iter()
+            .any(|r| r.kind == "repair_deliverables_surface"));
+        fs::remove_file(root.path().join("outputs"))?;
+        fs::create_dir(root.path().join("outputs"))?;
+        let file = fs::File::create(root.path().join("outputs/report_latest.pdf"))?;
+        file.set_len(5 * 1024 * 1024)?;
+        fs::write(
+            root.path().join("DELIVERABLES.md"),
+            "`outputs/report_latest.pdf`\n",
+        )?;
+        let (recommendations, coverage) =
+            audit_for_project(root.path(), DocumentationAuditProfile::Standard, 10)?;
+        assert_eq!(coverage["complete"], false);
+        assert!(!recommendations
+            .iter()
+            .any(|r| r.kind == "verify_latest_aliases"));
+        Ok(())
+    }
 }

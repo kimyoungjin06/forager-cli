@@ -22,13 +22,21 @@ use super::{
 #[serde(rename_all = "snake_case")]
 pub enum CloseoutDecisionResolution {
     PreserveInPlace,
+    PreserveInPlaceAdministrative,
+    NotApplicableAdministrative,
 }
 
 impl CloseoutDecisionResolution {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::PreserveInPlace => "preserve_in_place",
+            Self::PreserveInPlaceAdministrative => "preserve_in_place_administrative",
+            Self::NotApplicableAdministrative => "not_applicable_administrative",
         }
+    }
+
+    pub fn administrative_only(self) -> bool {
+        self != Self::PreserveInPlace
     }
 }
 
@@ -74,6 +82,10 @@ pub struct CloseoutReviewArtifactPaths {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CloseoutDecisionResolutionRecord {
+    pub reconciled_legacy_governance_wiki_flag: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub artifact_reads: Vec<CloseoutArtifactRead>,
+    pub source_review_sha256: String,
     pub kind: String,
     pub decision: String,
     pub reason: String,
@@ -82,6 +94,12 @@ pub struct CloseoutDecisionResolutionRecord {
     pub source_review_record_json: String,
     pub source_receipt_id: Option<String>,
     pub does_not_authorize: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CloseoutArtifactRead {
+    pub path: String,
+    pub sha256: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -247,16 +265,27 @@ pub fn build_closeout_decision_record(
     let kind = operator_safe_text(kind.trim());
     let reason = truncate_closeout_text(&operator_safe_text(reason.trim()), 2000);
     let reviewer = operator_safe_text(reviewer.trim());
+    let administrative_only = decision.administrative_only();
     if kind.is_empty() {
         bail!("closeout decision kind must not be empty");
     }
     if reason.is_empty() {
         bail!("closeout decision reason must not be empty");
     }
-    if decision == CloseoutDecisionResolution::PreserveInPlace && kind != "archive_review" {
+    if matches!(
+        decision,
+        CloseoutDecisionResolution::PreserveInPlace
+            | CloseoutDecisionResolution::PreserveInPlaceAdministrative
+    ) && kind != "archive_review"
+    {
         bail!(
             "preserve-in-place closeout decisions are currently supported only for archive_review"
         );
+    }
+    if decision == CloseoutDecisionResolution::NotApplicableAdministrative
+        && kind != "documentation_governance_review"
+    {
+        bail!("not-applicable administrative decisions require documentation_governance_review");
     }
 
     let source_receipt = source_review
@@ -302,20 +331,36 @@ pub fn build_closeout_decision_record(
             "closeout decision resolution cannot accept a stale closeout; regenerate closeout first"
         );
     }
-    if closeout_receipt_evidence_status(source_receipt) == "missing" {
+    if !administrative_only && closeout_receipt_evidence_status(source_receipt) == "missing" {
         bail!("closeout decision resolution cannot bypass missing evidence status");
     }
-    if !missing_evidence.is_empty()
-        || !required_first_reads.is_empty()
-        || !unsafe_operations.is_empty()
+    if !administrative_only
+        && (!missing_evidence.is_empty()
+            || !required_first_reads.is_empty()
+            || !unsafe_operations.is_empty())
     {
         bail!("closeout decision resolution cannot bypass missing evidence, required reads, or unsafe operations");
     }
-    let wiki_promotion_state = closeout_receipt_wiki_state(source_receipt);
-    if matches!(
-        wiki_promotion_state,
-        "review_required" | "audit_unavailable"
-    ) {
+    let mut wiki_promotion_state = closeout_receipt_wiki_state(source_receipt);
+    let reconciled_legacy_governance_wiki_flag = administrative_only
+        && kind == "documentation_governance_review"
+        && matches!(
+            wiki_promotion_state,
+            "review_required" | "audit_unavailable"
+        )
+        && !plan
+            .as_object()
+            .is_some_and(|object| object.keys().any(|key| key.contains("wiki")))
+        && super::closeout_receipt::legacy_governance_wiki_state(plan) == wiki_promotion_state;
+    if reconciled_legacy_governance_wiki_flag {
+        wiki_promotion_state = "not_requested";
+    }
+    if !administrative_only
+        && matches!(
+            wiki_promotion_state,
+            "review_required" | "audit_unavailable"
+        )
+    {
         bail!("closeout decision resolution cannot bypass wiki promotion follow-ups");
     }
 
@@ -325,7 +370,7 @@ pub fn build_closeout_decision_record(
         .collect::<Vec<_>>();
     let executed_scope = closeout_executed_scope(&applies_to_tasks);
     let does_not_authorize = closeout_decision_does_not_authorize();
-    let resolved_open_decisions = matched_decisions
+    let new_resolutions = matched_decisions
         .into_iter()
         .map(|open_decision| CloseoutResolvedDecision {
             kind: kind.clone(),
@@ -337,7 +382,20 @@ pub fn build_closeout_decision_record(
             does_not_authorize: does_not_authorize.clone(),
         })
         .collect::<Vec<_>>();
+    let mut resolved_open_decisions: Vec<CloseoutResolvedDecision> = source_receipt
+        .get("resolved_open_decisions")
+        .map(|value| serde_json::from_value(value.clone()))
+        .transpose()?
+        .unwrap_or_default();
+    anyhow::ensure!(
+        resolved_open_decisions.len() + new_resolutions.len() <= 128,
+        "closeout decision history exceeds bounds"
+    );
+    resolved_open_decisions.extend(new_resolutions);
     let decision_resolution = CloseoutDecisionResolutionRecord {
+        reconciled_legacy_governance_wiki_flag,
+        artifact_reads: vec![],
+        source_review_sha256: String::new(),
         kind: kind.clone(),
         decision: decision.as_str().to_string(),
         reason: reason.clone(),
@@ -352,23 +410,14 @@ pub fn build_closeout_decision_record(
     };
     let retention_review = closeout_retention_status_after_preserve_in_place(
         source_receipt,
-        remaining_decisions.is_empty(),
+        kind == "archive_review" || (!administrative_only && remaining_decisions.is_empty()),
     );
-    let has_followups = !remaining_decisions.is_empty() || retention_review == "required";
-    let acceptance_status = if has_followups {
-        "approved_with_followups"
-    } else {
-        "accepted"
-    };
-    let verification_status = if has_followups { "pending" } else { "recorded" };
-    let accepted_scope = if acceptance_status == "accepted" {
-        executed_scope.clone()
-    } else {
-        vec![
-            "No final accepted scope; receipt requires follow-up review before accepted truth."
-                .to_string(),
-        ]
-    };
+    // A file/governance disposition never approves the executed result.
+    let acceptance_status = "approved_with_followups";
+    let verification_status = "pending";
+    let accepted_scope = vec![
+        "Administrative disposition only; result acceptance requires its own review.".to_string(),
+    ];
     let next_safe_action = closeout_receipt_next_safe_action(
         acceptance_status,
         stale_task_count,
@@ -413,9 +462,9 @@ pub fn build_closeout_decision_record(
         reviewer,
         review_provider: Some("operator_decision_resolution".to_string()),
         review_file: None,
-        unsafe_operations: Vec::new(),
-        missing_evidence: Vec::new(),
-        required_first_reads: Vec::new(),
+        unsafe_operations: closeout_receipt.unsafe_operations.clone(),
+        missing_evidence: closeout_receipt.missing_evidence.clone(),
+        required_first_reads: closeout_receipt.required_first_reads.clone(),
         notes: Some(format!(
             "Resolved closeout decision `{kind}` with `{}`. Reason: {reason}",
             decision.as_str()
@@ -767,7 +816,58 @@ mod tests {
     }
 
     #[test]
-    fn decision_resolution_accepts_when_the_only_followup_is_resolved() {
+    fn administrative_followup_preserves_evidence_limits_without_accepting_output() {
+        let mut source = source_review("review_required");
+        source["closeout_receipt"]["missing_evidence"] = json!(["historical read-scope limit"]);
+        source["closeout_receipt"]["required_first_reads"] = json!(["evidence.md"]);
+        source["closeout_receipt"]["unsafe_operations"] = json!(["preserve original log"]);
+        source["closeout_receipt"]["evidence_status"] = json!("missing");
+        let record = build_closeout_decision_record(CloseoutDecisionRecordBuildInput {
+            plan: &json!({"summary": {}}),
+            source_review: &source,
+            source_review_record_json: "source_review.json",
+            profile: "default",
+            artifact_dir: "closeout",
+            artifacts: artifacts(),
+            closeout_id: "closeout-test",
+            closeout_generated_at: None,
+            applies_to_tasks: vec![task("task-1")],
+            kind: "archive_review",
+            decision: CloseoutDecisionResolution::PreserveInPlaceAdministrative,
+            reviewer: "operator",
+            reason: "Keep original evidence; the protocol remains rework.",
+            reviewed_at: Utc::now(),
+            review_id: "decision-test",
+        })
+        .unwrap();
+        assert_eq!(
+            record.closeout_receipt.acceptance_status,
+            "approved_with_followups"
+        );
+        assert_eq!(record.closeout_receipt.verification_status, "pending");
+        assert_eq!(record.closeout_receipt.evidence_status, "missing");
+        assert_eq!(
+            record.closeout_receipt.missing_evidence,
+            ["historical read-scope limit"]
+        );
+        assert_eq!(
+            record.closeout_receipt.required_first_reads,
+            ["evidence.md"]
+        );
+        assert_eq!(
+            record.missing_evidence,
+            record.closeout_receipt.missing_evidence
+        );
+        assert_ne!(
+            record.closeout_receipt.accepted_scope,
+            record.closeout_receipt.executed_scope
+        );
+        assert!(record.closeout_receipt.open_decisions.is_empty());
+        assert!(!record.applies_file_operations);
+    }
+
+    #[test]
+    fn decision_resolution_does_not_accept_when_the_only_followup_is_resolved() {
         let source = source_review("no_candidate");
         let reviewed_at = Utc::now();
         let record = build_closeout_decision_record(CloseoutDecisionRecordBuildInput {
@@ -789,11 +889,14 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(record.closeout_receipt.acceptance_status, "accepted");
-        assert_eq!(record.closeout_receipt.verification_status, "recorded");
+        assert_eq!(
+            record.closeout_receipt.acceptance_status,
+            "approved_with_followups"
+        );
+        assert_eq!(record.closeout_receipt.verification_status, "pending");
         assert!(record.closeout_receipt.open_decisions.is_empty());
         assert_eq!(record.closeout_receipt.resolved_open_decisions.len(), 1);
-        assert_eq!(
+        assert_ne!(
             record.closeout_receipt.accepted_scope,
             record.closeout_receipt.executed_scope
         );
@@ -926,5 +1029,106 @@ mod tests {
         assert!(error
             .to_string()
             .contains("accepted closeouts cannot be retired"));
+    }
+}
+
+#[cfg(test)]
+mod administrative_chain_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn resolve(
+        plan: &Value,
+        source: &Value,
+        kind: &str,
+        decision: CloseoutDecisionResolution,
+    ) -> CloseoutReviewRecord {
+        build_closeout_decision_record(CloseoutDecisionRecordBuildInput {
+            plan,
+            source_review: source,
+            source_review_record_json: "prior.json",
+            profile: "default",
+            artifact_dir: "private",
+            artifacts: CloseoutReviewArtifactPaths {
+                closeout_plan_json: "plan.json".into(),
+                review_record_json: "new.json".into(),
+                closeout_receipt_json: "receipt.json".into(),
+                return_package_markdown: "return.md".into(),
+            },
+            closeout_id: "c",
+            closeout_generated_at: None,
+            applies_to_tasks: vec![],
+            kind,
+            decision,
+            reviewer: "operator",
+            reason: "preserve sources; existing rework is unchanged",
+            reviewed_at: Utc::now(),
+            review_id: "r",
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn administrative_chain_keeps_preservation_history_and_reconciles_only_legacy_governance_flag()
+    {
+        let plan = json!({"documentation_governance":{"recommendation_count":1}});
+        let source = json!({"verdict":"approved","closeout_receipt":{"acceptance_status":"approved_with_followups",
+            "evidence_status":"missing","wiki_promotion_state":"review_required","retention_review":"required","stale_task_count":0,
+            "unsafe_operations":["archive_candidate: runner.log; preserve in place"],"missing_evidence":["historical read-scope limit"],
+            "required_first_reads":[],"open_decisions":[{"kind":"archive_review","detail":"keep log","suggested_command":"inspect"},
+                {"kind":"documentation_governance_review","detail":"packet scope","suggested_command":"inspect owner"}]}});
+        let archive = resolve(
+            &plan,
+            &source,
+            "archive_review",
+            CloseoutDecisionResolution::PreserveInPlaceAdministrative,
+        );
+        let next = serde_json::to_value(&archive).unwrap();
+        let governance = resolve(
+            &plan,
+            &next,
+            "documentation_governance_review",
+            CloseoutDecisionResolution::NotApplicableAdministrative,
+        );
+        assert_eq!(governance.closeout_receipt.resolved_open_decisions.len(), 2);
+        assert_eq!(
+            governance.closeout_receipt.wiki_promotion_state,
+            "not_requested"
+        );
+        assert!(
+            governance
+                .decision_resolution
+                .unwrap()
+                .reconciled_legacy_governance_wiki_flag
+        );
+        assert_eq!(
+            governance.closeout_receipt.unsafe_operations,
+            archive.closeout_receipt.unsafe_operations
+        );
+        assert_eq!(
+            governance.closeout_receipt.missing_evidence,
+            ["historical read-scope limit"]
+        );
+        assert_eq!(
+            governance.closeout_receipt.acceptance_status,
+            "approved_with_followups"
+        );
+        let explicit = json!({"documentation_governance":{"recommendation_count":1},"wiki_review":{"status":"review_required"}});
+        let held = resolve(
+            &explicit,
+            &next,
+            "documentation_governance_review",
+            CloseoutDecisionResolution::NotApplicableAdministrative,
+        );
+        assert_eq!(
+            held.closeout_receipt.wiki_promotion_state,
+            "review_required"
+        );
+        assert!(
+            !held
+                .decision_resolution
+                .unwrap()
+                .reconciled_legacy_governance_wiki_flag
+        );
     }
 }

@@ -1,7 +1,8 @@
 //! tmux session management
 
-use anyhow::{bail, Result};
-use std::process::Command;
+use anyhow::{bail, ensure, Context, Result};
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 use super::{refresh_session_cache, tmux_session_exists, LEGACY_SESSION_PREFIX, SESSION_PREFIX};
 use crate::cli::truncate_id;
@@ -52,6 +53,28 @@ impl Session {
 
     pub fn create(&self, working_dir: &str, command: Option<&str>) -> Result<()> {
         self.create_with_size(working_dir, command, None)
+    }
+
+    /// Multiple command arguments bypass the server's shell startup files.
+    pub(crate) fn create_direct(&self, working_dir: &str, argv: &[String]) -> Result<()> {
+        anyhow::ensure!(
+            !self.exists(),
+            "restricted launch requires a fresh tmux session"
+        );
+        anyhow::ensure!(
+            argv.len() >= 2,
+            "direct tmux launch requires multiple arguments"
+        );
+        let mut args = build_create_args(&self.name, working_dir, None, None, &[]);
+        args.extend_from_slice(argv);
+        let output = Command::new("tmux").args(args).output()?;
+        anyhow::ensure!(
+            output.status.success(),
+            "direct tmux launch failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        refresh_session_cache();
+        Ok(())
     }
 
     pub fn create_with_size(
@@ -143,6 +166,7 @@ impl Session {
     }
 
     pub fn attach(&self) -> Result<()> {
+        let _frontend = crate::maintenance::admit_frontend()?;
         if !self.exists() {
             bail!("Session does not exist: {}", self.name);
         }
@@ -158,18 +182,23 @@ impl Session {
                 // This handles cases where TMUX env var is inherited but we're
                 // not actually inside a tmux client (e.g., terminal spawned
                 // from within tmux via `open -a Terminal`).
-                let status = Command::new("tmux")
-                    .args(["attach-session", "-t", target_name])
-                    .status()?;
+                let status =
+                    super::maintenance_client::attach_status(Command::new("tmux").args([
+                        "attach-session",
+                        "-t",
+                        target_name,
+                    ]))?;
 
                 if !status.success() {
                     bail!("Failed to attach to tmux session");
                 }
             }
         } else {
-            let status = Command::new("tmux")
-                .args(["attach-session", "-t", target_name])
-                .status()?;
+            let status = super::maintenance_client::attach_status(Command::new("tmux").args([
+                "attach-session",
+                "-t",
+                target_name,
+            ]))?;
 
             if !status.success() {
                 bail!("Failed to attach to tmux session");
@@ -181,6 +210,81 @@ impl Session {
 
     pub fn capture_pane(&self, lines: usize) -> Result<String> {
         self.capture_pane_with_size(lines, None, None)
+    }
+
+    /// Paste one bounded literal line and submit it to an exact live pane.
+    ///
+    /// The text is supplied over stdin to a private tmux buffer, so it is not
+    /// interpreted by a shell or exposed in the process argument list.
+    pub(crate) fn send_literal_line(
+        &self,
+        message: &str,
+        expected_runtime_identity: &str,
+    ) -> Result<()> {
+        if !self.exists() {
+            bail!("tmux session is not running");
+        }
+        if message.is_empty() || message.len() > 2048 || message.contains(['\n', '\r', '\0']) {
+            bail!("tmux literal input must be one non-empty line within 2048 bytes");
+        }
+
+        if self.runtime_identity()? != expected_runtime_identity {
+            bail!("tmux runtime changed before literal input");
+        }
+        let target = pane_target_from_runtime_identity(expected_runtime_identity)?;
+        let buffer = format!("forager-wiki-context-{}", uuid::Uuid::new_v4());
+        let mut child = Command::new("tmux")
+            .args(["load-buffer", "-b", &buffer, "-"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        child
+            .stdin
+            .take()
+            .context("open tmux wiki context input")?
+            .write_all(message.as_bytes())?;
+        let loaded = child.wait_with_output()?;
+        if !loaded.status.success() {
+            bail!(
+                "failed to load bounded tmux input: {}",
+                String::from_utf8_lossy(&loaded.stderr).trim()
+            );
+        }
+
+        if self.runtime_identity()? != expected_runtime_identity {
+            let _ = Command::new("tmux")
+                .args(["delete-buffer", "-b", &buffer])
+                .status();
+            bail!("tmux runtime changed while preparing literal input");
+        }
+
+        let sent = Command::new("tmux")
+            .args([
+                "paste-buffer",
+                "-p",
+                "-d",
+                "-b",
+                &buffer,
+                "-t",
+                &target,
+                ";",
+                "send-keys",
+                "-t",
+                &target,
+                "Enter",
+            ])
+            .output()?;
+        if !sent.status.success() {
+            let _ = Command::new("tmux")
+                .args(["delete-buffer", "-b", &buffer])
+                .status();
+            bail!(
+                "failed to submit bounded tmux input: {}",
+                String::from_utf8_lossy(&sent.stderr).trim()
+            );
+        }
+        Ok(())
     }
 
     pub fn capture_pane_with_size(
@@ -210,6 +314,23 @@ impl Session {
         } else {
             Ok(String::new())
         }
+    }
+
+    pub(crate) fn capture_exact_runtime(&self, expected: &str) -> Result<String> {
+        let target = pane_target_from_runtime_identity(expected)?;
+        ensure!(
+            self.runtime_identity()? == expected,
+            "capture runtime changed"
+        );
+        let output = Command::new("tmux")
+            .args(["capture-pane", "-p", "-t", &target])
+            .output()?;
+        ensure!(output.status.success(), "exact pane capture failed");
+        ensure!(
+            self.runtime_identity()? == expected,
+            "capture runtime changed"
+        );
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
     pub fn get_pane_pid(&self) -> Option<u32> {
@@ -253,6 +374,25 @@ impl Session {
             &content, tool, None,
         ))
     }
+}
+
+fn pane_target_from_runtime_identity(runtime_identity: &str) -> Result<String> {
+    let fields = runtime_identity.split('|').collect::<Vec<_>>();
+    ensure!(
+        fields.len() == 4
+            && fields[0].starts_with('$')
+            && fields[0][1..].bytes().all(|byte| byte.is_ascii_digit())
+            && !fields[0][1..].is_empty()
+            && fields[1].bytes().all(|byte| byte.is_ascii_digit())
+            && !fields[1].is_empty()
+            && fields[2].starts_with('%')
+            && fields[2][1..].bytes().all(|byte| byte.is_ascii_digit())
+            && !fields[2][1..].is_empty()
+            && fields[3].bytes().all(|byte| byte.is_ascii_digit())
+            && !fields[3].is_empty(),
+        "tmux runtime identity has an invalid shape"
+    );
+    Ok(fields[2].to_string())
 }
 
 fn sanitize_session_name(name: &str) -> String {
@@ -401,5 +541,22 @@ mod tests {
         let env_index = args.iter().position(|arg| arg == "-e").unwrap();
         assert_eq!(args[env_index + 1], "CLAUDE_CONFIG_DIR=/tmp/Claude Config");
         assert_eq!(args.last().unwrap(), "claude");
+    }
+
+    #[test]
+    fn runtime_identity_targets_the_exact_pane() {
+        assert_eq!(
+            pane_target_from_runtime_identity("$12|1720000000|%34|5678").unwrap(),
+            "%34"
+        );
+        for invalid in [
+            "$12|1720000000|5678",
+            "session|1720000000|%34|5678",
+            "$12|created|%34|5678",
+            "$12|1720000000|pane|5678",
+            "$12|1720000000|%34|pid",
+        ] {
+            assert!(pane_target_from_runtime_identity(invalid).is_err());
+        }
     }
 }

@@ -33,6 +33,11 @@ def public_remote_plan_session(session: dict[str, Any]) -> dict[str, Any]:
     draft = session.get("plan_draft")
     if isinstance(draft, dict):
         public["plan_draft"] = public_plan_draft(draft)
+    comparison = session.get("plan_draft_comparison")
+    if isinstance(comparison, dict):
+        public["plan_draft_comparison"] = public_plan_draft_comparison(
+            comparison
+        )
     registration = session.get("plan_registration")
     if isinstance(registration, dict):
         public["plan_registration"] = public_plan_registration(registration)
@@ -143,11 +148,26 @@ def public_plan_draft(draft: dict[str, Any]) -> dict[str, Any]:
     return public
 
 
+def public_plan_draft_comparison(
+    comparison: dict[str, Any]
+) -> dict[str, Any]:
+    public = dict(comparison)
+    public["candidates"] = [
+        public_plan_draft(candidate)
+        for candidate in comparison.get("candidates") or []
+        if isinstance(candidate, dict)
+    ]
+    return public
+
+
 def public_plan_registration(registration: dict[str, Any]) -> dict[str, Any]:
     public = dict(registration)
     plan_path = str(public.pop("plan_artifact_path", "") or "")
     if plan_path:
         public["plan_artifact_path_hash"] = sha256_short(plan_path)
+    selection_path = str(public.pop("selection_receipt_path", "") or "")
+    if selection_path:
+        public["selection_receipt_path_hash"] = sha256_short(selection_path)
     command = public.get("registration_command")
     if isinstance(command, list):
         public["registration_command"] = [
@@ -583,4 +603,8 @@ def public_offdesk_task_view(task: dict[str, Any]) -> dict[str, Any]:
         value = str(task.get(key) or "")
         if value:
             public[f"{key}_hash"] = sha256_short(value)
+    review = task.get("review")
+    if isinstance(review, dict):
+        public["review"] = {key: review[key] for key in ("state", "validity", "version", "remaining_work", "unanswered_questions", "decision_ref") if key in review}
+        public["review"]["owning_plan_hash"] = sha256_short(str(review.get("owning_plan") or ""))
     return public

@@ -272,7 +272,7 @@ def build_agent_chat_prompt(
         )
     else:
         tool_budget_line = (
-            "You have 0 tool calls left. You MUST finish now with 'answer' or 'propose_plan'."
+            "You have 0 read-only tool calls left. You MUST finish now with 'answer', 'send_agent' or 'propose_plan'."
         )
     return "\n".join(
         [
@@ -532,6 +532,61 @@ def _session_message_clarification(
     }
 
 
+def explicit_session_message_intent(
+    chat_text: str, operator_snapshot: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Resolve a literal addressed payload without letting a model rewrite it."""
+    match = re.fullmatch(
+        r"([^\n]+?)\s*(?:에게|한테)\s+아래(?:처럼|와 같이)\s+"
+        r"(?:입력|전달)해\s*줘[.!:]?\s*\n(.*)",
+        chat_text.strip(), re.DOTALL,
+    )
+    if not match:
+        return None
+    target, message = match.group(1).strip(), match.group(2).strip()
+    snapshot = operator_snapshot or {}
+    sessions = [s for s in snapshot.get("live_agent_sessions", [])
+                if isinstance(s, dict) and s.get("id")]
+    project, separator, title = target.partition(":")
+    keys = set()
+    if separator:
+        for entry in snapshot.get("registered_projects", []):
+            aliases = [entry.get("key"), entry.get("display_name"), *(entry.get("aliases") or [])]
+            if project.strip().casefold() in {str(a).casefold() for a in aliases if a}:
+                keys.add(entry.get("key"))
+        keys.update(s.get("project") for s in sessions
+                    if str(s.get("project") or "").casefold() == project.strip().casefold())
+        # Accept a qualified abbreviation only when unique across the registry,
+        # including projects with no live sessions. Never fuzzy-match a title.
+        abbreviation = project.strip().casefold()
+        if not keys and abbreviation.isascii() and len(abbreviation) >= 4:
+            known_keys = {str(e.get("key") or "") for e in snapshot.get("registered_projects", [])}
+            known_keys.update(str(s.get("project") or "") for s in sessions)
+            keys = {key for key in known_keys if key.casefold().startswith(abbreviation)}
+    else:
+        title = target
+    candidates = [s for s in sessions
+                  if (not separator or s.get("project") in keys)
+                  and title.strip().casefold() in {
+                      str(s.get("title") or "").casefold(), str(s["id"]).casefold()}]
+    intent = {"status": "classified", "intent": "session_message", "confidence": 1.0,
+              "source": "literal_addressed_message", "requires_clarification": False,
+              "assistant_reply": "", "session_message": message}
+    if len(candidates) != 1 or (separator and len(keys) != 1):
+        return _session_message_clarification(intent, status="literal_target_unresolved", candidates=candidates)
+    if not message or len(message) > 2000:
+        return _session_message_clarification(
+            intent, status="literal_payload_invalid", candidates=candidates,
+            question="전달하지 않았습니다. 본문을 1~2000자로 지정해 주세요.")
+    selected = candidates[0]
+    context = snapshot.get("conversation_session") or {}
+    if context.get("source") == "reply_card" and context.get("id") != selected["id"]:
+        return _session_message_clarification(
+            intent, status="literal_reply_target_conflict", candidates=candidates,
+            question="전달하지 않았습니다. 답장한 카드와 지정한 대상이 다릅니다. 대상 카드에서 다시 요청해 주세요.")
+    return {**intent, "session_id": selected["id"], "session_target_status": "resolved"}
+
+
 def validate_session_message_intent(
     intent: dict[str, Any],
     *,
@@ -540,6 +595,17 @@ def validate_session_message_intent(
 ) -> dict[str, Any]:
     """Fail closed unless one deterministic live session matches the request."""
 
+    explicit = explicit_session_message_intent(chat_text, operator_snapshot)
+    if explicit is not None:
+        return explicit
+    if intent.get("intent") == "chat" and re.search(
+        r"(?:전달|전송|입력)(?:할게|하겠|합니다|했습니다|했어요|했어|완료)|"
+        r"\b(?:I(?:'ll| will) (?:send|relay)|(?:sent|delivered) (?:your |the )?message)",
+        str(intent.get("assistant_reply") or ""), re.IGNORECASE,
+    ):
+        return _session_message_clarification(
+            intent, status="unexecuted_delivery_claim", candidates=[],
+            question="세션에 입력을 보내지 않았습니다. '프로젝트:세션에게 아래처럼 입력해줘' 다음 줄에 전달할 본문을 적어 주세요.")
     if intent.get("status") != "classified" or intent.get("intent") != "session_message":
         return intent
 
@@ -684,6 +750,9 @@ def chat_with_agent(
     gets no tool budget and must answer in one shot.
     """
 
+    explicit = explicit_session_message_intent(chat_text, operator_snapshot)
+    if explicit is not None:
+        return explicit
     agent_config = resolve_agent_config(args)
     if agent_config.get("mode") == "off":
         return fallback_agent_chat(reason="local_agent_disabled", agent_config=agent_config)

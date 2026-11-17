@@ -8,7 +8,6 @@ import json
 import os
 import pathlib
 import re
-import stat
 import subprocess
 import sys
 from typing import Any
@@ -19,6 +18,10 @@ DEFAULT_CACHE_DIR = pathlib.Path.home() / ".cache" / "forager"
 
 
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
+from telegram_operator.common import (
+    RemoteOperatorTelegramError,
+    read_private_text_snapshot,
+)
 from telegram_operator.config import default_telegram_env_file
 
 
@@ -89,8 +92,8 @@ def parse_args() -> argparse.Namespace:
         "--autonomy-propose",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help="Propose starting the armed overnight autonomy window via Telegram when the "
-        "workstation goes idle. Off by default; the operator's tap is the only approval.",
+        help="Propose arming the latest reviewed bounded shift via Telegram when the "
+        "workstation goes idle. Off by default; the operator's tap resolves only that manifest.",
     )
     parser.add_argument(
         "--session-notify",
@@ -149,13 +152,10 @@ def service_path(service_name: str) -> pathlib.Path:
 
 
 def secure_env_file(path: pathlib.Path) -> None:
-    if not path.is_file():
-        raise SystemExit(f"Telegram env file not found: {path}")
-    mode = stat.S_IMODE(path.stat().st_mode)
-    if mode & 0o077:
-        raise SystemExit(
-            f"Telegram env file must be private (mode {mode:04o}); run: chmod 600 {path}"
-        )
+    try:
+        read_private_text_snapshot(path, label="Telegram env file")
+    except RemoteOperatorTelegramError as error:
+        raise SystemExit(str(error)) from error
 
 
 def service_workspace_roots(args: argparse.Namespace) -> list[pathlib.Path]:

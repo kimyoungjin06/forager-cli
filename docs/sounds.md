@@ -2,6 +2,9 @@
 
 Forager can play sound effects when agent sessions change state, providing audio feedback for transitions like starting, running, waiting, idle, and error states.
 
+Sounds follow inferred session-state changes. A waiting or idle sound is not
+proof that the requested work completed or that an error was resolved.
+
 ## Features
 
 - 🔊 State transition sounds (start, running, waiting, idle, error)

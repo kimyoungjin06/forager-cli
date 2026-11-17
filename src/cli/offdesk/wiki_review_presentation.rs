@@ -5,15 +5,17 @@
 //! reports for JSON and terminal consumers.
 
 use anyhow::Result;
+use serde::Serialize;
 
-use crate::offdesk::AdaptiveWikiReviewReport;
+use super::operator_safe_json_value;
+use crate::offdesk::{operator_safe_text, AdaptiveWikiReviewReport};
 
 pub(super) fn present_wiki_review_report(
     report: &AdaptiveWikiReviewReport,
     json: bool,
 ) -> Result<()> {
     if json {
-        println!("{}", serde_json::to_string_pretty(report)?);
+        present_operator_safe_json(report)?;
         return Ok(());
     }
 
@@ -24,7 +26,7 @@ pub(super) fn present_wiki_review_report(
         report.summary.proposals,
         report.summary.open_proposals,
         report.summary.filtered_out_proposals,
-        report.report_dir
+        operator_safe_text(&report.report_dir)
     );
     println!(
         "  checked: {} entries, {} candidates, {} usage records, {} audit records, {} correction records, {} review events",
@@ -68,7 +70,7 @@ pub(super) fn present_wiki_review_report(
                 format!(
                     "{:?} by {}{}",
                     lifecycle.decision,
-                    empty_dash(&lifecycle.actor),
+                    operator_safe_or_dash(&lifecycle.actor),
                     stale
                 )
             })
@@ -76,38 +78,55 @@ pub(super) fn present_wiki_review_report(
         println!(
             "  - {:?} {} {} ({:?}, {}): {}",
             proposal.action,
-            proposal.subject_kind,
-            proposal.subject_id,
+            operator_safe_text(&proposal.subject_kind),
+            operator_safe_text(&proposal.subject_id),
             proposal.risk,
             lifecycle,
-            proposal.title
+            operator_safe_text(&proposal.title)
         );
         if let Some(lifecycle) = proposal.lifecycle.as_ref() {
             println!(
                 "    lifecycle: event={} at={} reason={}",
-                lifecycle.latest_event_id,
+                operator_safe_text(&lifecycle.latest_event_id),
                 lifecycle.decided_at.to_rfc3339(),
-                empty_dash(&lifecycle.reason)
+                operator_safe_or_dash(&lifecycle.reason)
             );
             if !lifecycle.stale_evidence_refs.is_empty() {
                 println!(
                     "    stale evidence: {}",
-                    lifecycle.stale_evidence_refs.join(", ")
+                    operator_safe_list(&lifecycle.stale_evidence_refs)
                 );
             }
         }
         if let Some(command) = proposal.suggested_command.as_deref() {
-            println!("    command: {command}");
+            println!("    command: {}", operator_safe_text(command));
         }
-        println!("    evidence: {}", proposal.evidence_refs.join(", "));
+        println!(
+            "    evidence: {}",
+            operator_safe_list(&proposal.evidence_refs)
+        );
     }
     Ok(())
 }
 
-fn empty_dash(value: &str) -> &str {
+fn operator_safe_or_dash(value: &str) -> String {
     if value.is_empty() {
-        "-"
+        "-".to_string()
     } else {
-        value
+        operator_safe_text(value)
     }
+}
+
+fn operator_safe_list(values: &[String]) -> String {
+    values
+        .iter()
+        .map(|value| operator_safe_text(value))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn present_operator_safe_json(value: &impl Serialize) -> Result<()> {
+    let value = operator_safe_json_value(serde_json::to_value(value)?);
+    println!("{}", serde_json::to_string_pretty(&value)?);
+    Ok(())
 }

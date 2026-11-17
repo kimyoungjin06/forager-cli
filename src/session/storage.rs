@@ -5,7 +5,9 @@ use std::fs;
 use std::path::PathBuf;
 use tracing::warn;
 
-use super::{get_profile_dir, normalize_profile_name, Group, GroupTree, Instance};
+use super::{
+    get_profile_dir, normalize_profile_name, profile_dir_path, Group, GroupTree, Instance,
+};
 
 pub struct Storage {
     profile: String,
@@ -19,6 +21,19 @@ impl Storage {
         let profile_dir = get_profile_dir(&profile_name)?;
         let sessions_path = profile_dir.join("sessions.json");
 
+        Ok(Self {
+            profile: profile_name,
+            sessions_path,
+        })
+    }
+
+    /// Resolve session storage without creating the profile directory.
+    ///
+    /// Read-only CLI observations use this constructor so querying a missing
+    /// profile cannot initialize app state or trigger a migration side effect.
+    pub fn new_read_only(profile: &str) -> Result<Self> {
+        let profile_name = normalize_profile_name(profile)?;
+        let sessions_path = profile_dir_path(&profile_name)?.join("sessions.json");
         Ok(Self {
             profile: profile_name,
             sessions_path,

@@ -5,11 +5,13 @@
 //! renders completed reports for JSON and terminal consumers.
 
 use anyhow::Result;
+use serde::Serialize;
 
-use super::wiki_scope_label;
+use super::{operator_safe_json_value, wiki_scope_label};
 use crate::offdesk::{
-    AdaptiveWikiCorrectionRecurrenceReport, AdaptiveWikiEpisodeEvaluationReport,
-    AdaptiveWikiLiveEpisodeTraceReport, AdaptiveWikiPromotionEvidenceChainReport,
+    operator_safe_text, AdaptiveWikiCorrectionRecurrenceReport,
+    AdaptiveWikiEpisodeEvaluationReport, AdaptiveWikiLiveEpisodeTraceReport,
+    AdaptiveWikiPromotionEvidenceChainReport,
 };
 
 pub(super) fn present_wiki_episode_evaluation_report(
@@ -17,7 +19,7 @@ pub(super) fn present_wiki_episode_evaluation_report(
     json: bool,
 ) -> Result<()> {
     if json {
-        println!("{}", serde_json::to_string_pretty(report)?);
+        present_operator_safe_json(report)?;
         return Ok(());
     }
 
@@ -25,9 +27,9 @@ pub(super) fn present_wiki_episode_evaluation_report(
     let status = if report.passed { "passed" } else { "failed" };
     println!(
         "Adaptive wiki episode evaluation {action} at {} ({status})",
-        report.report_dir
+        operator_safe_text(&report.report_dir)
     );
-    println!("  target: {}", report.target_entry_id);
+    println!("  target: {}", operator_safe_text(&report.target_entry_id));
     println!(
         "  in-scope: {} entries  out-of-scope: {} entries",
         report.summary.in_scope_projection_count, report.summary.out_of_scope_projection_count
@@ -46,29 +48,31 @@ pub(super) fn present_wiki_episode_evaluation_report(
     } else {
         println!("  failures:");
         for failure in &report.failures {
-            println!("    - {failure}");
+            println!("    - {}", operator_safe_text(failure));
         }
     }
     if !report.in_scope_projection.is_empty() {
         println!(
             "  in-scope ids: {}",
-            report
-                .in_scope_projection
-                .iter()
-                .map(|entry| entry.id.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
+            operator_safe_ids(
+                report
+                    .in_scope_projection
+                    .iter()
+                    .map(|entry| entry.id.as_str()),
+                ", ",
+            )
         );
     }
     if !report.out_of_scope_projection.is_empty() {
         println!(
             "  out-of-scope ids: {}",
-            report
-                .out_of_scope_projection
-                .iter()
-                .map(|entry| entry.id.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
+            operator_safe_ids(
+                report
+                    .out_of_scope_projection
+                    .iter()
+                    .map(|entry| entry.id.as_str()),
+                ", ",
+            )
         );
     }
     Ok(())
@@ -79,14 +83,15 @@ pub(super) fn present_wiki_live_episode_trace_report(
     json: bool,
 ) -> Result<()> {
     if json {
-        println!("{}", serde_json::to_string_pretty(report)?);
+        present_operator_safe_json(report)?;
         return Ok(());
     }
 
     let action = if report.dry_run { "planned" } else { "wrote" };
     println!(
         "Adaptive wiki live episode trace {action} {} events at {}",
-        report.summary.events, report.report_dir
+        report.summary.events,
+        operator_safe_text(&report.report_dir)
     );
     println!(
         "  tasks: {}  runtime usage: {}  projections: {}  candidates: {}  corrections: {}",
@@ -115,10 +120,10 @@ pub(super) fn present_wiki_live_episode_trace_report(
             "  - {:?} {} task={} request={} entries={} {}",
             event.kind,
             event.occurred_at.to_rfc3339(),
-            event.task_id.as_deref().unwrap_or("-"),
-            event.request_id.as_deref().unwrap_or("-"),
-            event.entry_ids.join(","),
-            event.summary
+            operator_safe_optional(event.task_id.as_deref()),
+            operator_safe_optional(event.request_id.as_deref()),
+            operator_safe_ids(event.entry_ids.iter().map(String::as_str), ","),
+            operator_safe_text(&event.summary)
         );
     }
     Ok(())
@@ -129,20 +134,21 @@ pub(super) fn present_wiki_correction_recurrence_report(
     json: bool,
 ) -> Result<()> {
     if json {
-        println!("{}", serde_json::to_string_pretty(report)?);
+        present_operator_safe_json(report)?;
         return Ok(());
     }
 
     let action = if report.dry_run { "planned" } else { "wrote" };
     println!(
         "Adaptive wiki correction recurrence {action} at {} ({:?})",
-        report.report_dir, report.assessment
+        operator_safe_text(&report.report_dir),
+        report.assessment
     );
-    println!("  entry: {}", report.entry_id);
+    println!("  entry: {}", operator_safe_text(&report.entry_id));
     if let Some(scope) = &report.scope {
         println!(
             "  scope: {}",
-            wiki_scope_label(scope.scope, &scope.scope_ref)
+            operator_safe_text(&wiki_scope_label(scope.scope, &scope.scope_ref))
         );
     }
     if let Some(promotion_at) = report.promotion_at {
@@ -164,7 +170,7 @@ pub(super) fn present_wiki_correction_recurrence_report(
     if !report.failures.is_empty() {
         println!("  failures:");
         for failure in &report.failures {
-            println!("    - {failure}");
+            println!("    - {}", operator_safe_text(failure));
         }
     }
     Ok(())
@@ -175,16 +181,16 @@ pub(super) fn present_wiki_promotion_chain_report(
     json: bool,
 ) -> Result<()> {
     if json {
-        println!("{}", serde_json::to_string_pretty(report)?);
+        present_operator_safe_json(report)?;
         return Ok(());
     }
 
     let action = if report.dry_run { "planned" } else { "wrote" };
     println!(
         "Adaptive wiki promotion evidence chain {action} at {}",
-        report.report_dir
+        operator_safe_text(&report.report_dir)
     );
-    println!("  entry: {}", report.entry_id);
+    println!("  entry: {}", operator_safe_text(&report.entry_id));
     println!(
         "  promotion audit={} candidate snapshot={} entry snapshot={} current entry={}",
         report.summary.promotion_audit_found,
@@ -200,15 +206,35 @@ pub(super) fn present_wiki_promotion_chain_report(
         println!(
             "  promoted at {} candidate={} actor={}",
             audit.created_at.to_rfc3339(),
-            audit.candidate_id.as_deref().unwrap_or("-"),
-            audit.actor
+            operator_safe_optional(audit.candidate_id.as_deref()),
+            operator_safe_text(&audit.actor)
         );
     }
     if !report.failures.is_empty() {
         println!("  failures:");
         for failure in &report.failures {
-            println!("    - {failure}");
+            println!("    - {}", operator_safe_text(failure));
         }
     }
     Ok(())
+}
+
+fn present_operator_safe_json(value: &impl Serialize) -> Result<()> {
+    let value = operator_safe_json_value(serde_json::to_value(value)?);
+    println!("{}", serde_json::to_string_pretty(&value)?);
+    Ok(())
+}
+
+fn operator_safe_optional(value: Option<&str>) -> String {
+    value
+        .map(operator_safe_text)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn operator_safe_ids<'a>(values: impl Iterator<Item = &'a str>, separator: &str) -> String {
+    values
+        .map(operator_safe_text)
+        .collect::<Vec<_>>()
+        .join(separator)
 }

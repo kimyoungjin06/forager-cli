@@ -1,8 +1,10 @@
 # Adaptive Wiki
 
 Forager's adaptive wiki is the active Offdesk learning layer inspired by
-Hermes' memory and operator-preference patterns. It is not a raw transcript
-store and it is not a prompt-injection channel. The canonical record is shared,
+Hermes' memory and operator-preference patterns. It stores scoped lessons
+and review decisions rather than whole transcripts. Projected instructions
+are still model context and can influence behavior; review gates and fences
+are not a prompt-injection security boundary. The canonical record is shared,
 while the AI and human surfaces are generated as separate projections.
 
 ## Goals
@@ -11,7 +13,8 @@ while the AI and human surfaces are generated as separate projections.
   operator decisions as durable wiki records.
 - Keep one canonical source of truth while avoiding prompt-sized human wiki
   pages in the model context.
-- Require promotion before a learned candidate can affect future execution.
+- Require promotion for the normal canonical projection. Explicit run-local
+  experimental overlays follow the separate trial path below.
 - Preserve evidence refs so operators can audit why an entry exists.
 - Benchmark adaptive behavior, not just memory recall.
 
@@ -61,8 +64,9 @@ Trial entries are deliberately constrained:
   KST target, or at a short fallback expiry.
 - Trial context is injected in a separate
   `<provisional-adaptive-wiki-context>` fenced block.
-- Trial context cannot change commands, files, workdirs, providers, models,
-  approvals, or canonical adaptive wiki entries.
+- Forager does not rewrite command, workdir, provider, model, approval or
+  canonical wiki records from trial context. The receiving harness can still
+  act on instructions within its existing tool permissions.
 - Morning Ondesk review is the only final promotion authority.
 
 Morning review should compare the original candidate, Council trial decision,
@@ -129,12 +133,14 @@ Canonical entries use this conceptual schema:
 
 `auto_apply` is representable in the schema but is not wired into Offdesk
 runtime dispatch in v0. Runtime integration starts with `context_only` and
-`confirm` projection exposure so learned knowledge cannot silently mutate
-behavior.
+`confirm` projection exposure. Forager does not derive launch arguments or
+approval changes from projected text. The harness still interprets that text
+under its own tool and permission policy.
 
 ## Projection Boundary
 
-The AI projection is compact, redacted, and execution-oriented:
+The AI projection is compact and execution-oriented. Pattern-based redaction
+can miss unfamiliar sensitive content; inspect it before external sharing:
 
 ```json
 {
@@ -971,10 +977,11 @@ scripts/offdesk_wiki_llm_harness.py \
   --iterations 2
 ```
 
-For `qwen3-coder-next:latest`, the harness has been validated with
-`--max-budget 12288 --num-ctx 16384` while keeping `think:false`. Live workload
-probes also showed that JSON-contract outputs should use API-level JSON mode
-rather than relying on prompt wording alone.
+Earlier harness notes report `qwen3-coder-next:latest` prompt-contract probes
+with `--max-budget 12288 --num-ctx 16384` and `think:false`, including a preference
+for API-level JSON mode. These are experiment settings, not recommended global
+limits or qualification of independent coding and context recovery. Preserve
+the exact run output when assessing a different model or workload.
 
 Results are preserved by default under the selected profile in
 `wiki_llm_harness_runs/<timestamp>/results.json`. The summary includes
@@ -1051,19 +1058,14 @@ forager offdesk launch \
   dispatch.runtime
 ```
 
-For overnight runs, prefer a wall-clock stop time over a fixed duration:
-
-```bash
-OFFDESK_RUN_UNTIL_KST=09:00 \
-OFFDESK_LLM_BASE_URL=http://<gpu-server>:11434 \
-OFFDESK_LLM_MODEL=qwen3-coder-next:latest \
-<bounded-workload-command>
-```
-
-The prepared manifest records the estimated duration and target timestamp, but
-the runtime workload recomputes the next `09:00 Asia/Seoul` when it actually
-starts. That keeps approval or tick delays from accidentally pushing the run
-past the morning review window.
+For overnight runs, select an absolute stop timestamp and inspect the runner's
+actual stop behavior. A generic command does not acquire a deadline merely by
+setting an environment variable. The TwinPaper-specific prepare/runtime helpers
+support `--run-until-local` and `--run-until-kst`; their clock calculation chooses
+the next occurrence at preparation and again at runtime start. Starting after
+the chosen clock time can therefore select the following day. This calculation
+alone does not enforce a previously selected morning deadline. Bind an absolute
+stop through the selected shift/runner contract when required.
 
 Every prepare run writes `LAUNCH_DRY_RUN.md`, an operator-facing launch review
 packet with the preflight verdict, blockers, safety boundary, key artifacts, and
@@ -1083,16 +1085,17 @@ approval before `offdesk tick` can launch the workload.
 The prepared task uses `dispatch.runtime` and `local-tmux` by default, so
 `offdesk tick` should stop at an operator-required approval before the workload
 starts. Approve the pending `dispatch.runtime` action and run `offdesk tick
---limit 1` only when the operator is ready to begin the bounded run. Use
+--project-key <project-key> --task-id <task-id> --limit 1` only when the operator
+is ready to begin the bounded run. Use
 `--runner local-background` only for short smoke workloads; long Python
 workloads should use tmux so the process remains inspectable after the tick
 command exits.
 
 The current launch path is covered by a short smoke runbook:
 [`Offdesk Runtime Smoke`](guides/offdesk-runtime-smoke.md).
-That smoke validates prepare, enqueue, approval, local-tmux launch, polling,
-result artifacts, and deterministic post-run review without starting an
-overnight campaign.
+That procedure exercises prepare, enqueue, approval, local-tmux launch,
+polling, result artifacts and post-run review. The runbook is not a saved PASS;
+retain the selected run's receipts and failures separately.
 
 The workload report separates raw pass/fail from operator judgement. `REPORT.md`
 and `result.json` include an `assessment` block with `overall_verdict`,

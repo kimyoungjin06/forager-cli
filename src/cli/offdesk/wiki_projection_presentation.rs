@@ -5,9 +5,12 @@
 //! read-only projection results.
 
 use anyhow::Result;
+use serde::Serialize;
 
-use super::adaptive_wiki_agent_modes_label;
-use crate::offdesk::{AdaptiveWikiProjectionComparisonReport, AdaptiveWikiProjectionReport};
+use super::{adaptive_wiki_agent_modes_label, operator_safe_json_value};
+use crate::offdesk::{
+    operator_safe_text, AdaptiveWikiProjectionComparisonReport, AdaptiveWikiProjectionReport,
+};
 
 pub(super) fn present_wiki_projection(
     report: &AdaptiveWikiProjectionReport,
@@ -16,9 +19,9 @@ pub(super) fn present_wiki_projection(
 ) -> Result<()> {
     if json {
         if include_report {
-            println!("{}", serde_json::to_string_pretty(report)?);
+            present_operator_safe_json(report)?;
         } else {
-            println!("{}", serde_json::to_string_pretty(&report.selected)?);
+            present_operator_safe_json(&report.selected)?;
         }
         return Ok(());
     }
@@ -40,11 +43,11 @@ pub(super) fn present_wiki_projection(
     for entry in &report.selected {
         println!(
             "{:<44} {:<16} {:<16} {:<18} {}",
-            entry.id,
+            operator_safe_text(&entry.id),
             format!("{:?}", entry.scope).to_lowercase(),
             format!("{:?}", entry.activation_mode).to_lowercase(),
             adaptive_wiki_agent_modes_label(&entry.agent_modes),
-            entry.instruction
+            operator_safe_text(&entry.instruction)
         );
     }
     Ok(())
@@ -55,7 +58,7 @@ pub(super) fn present_wiki_projection_comparison(
     json: bool,
 ) -> Result<()> {
     if json {
-        println!("{}", serde_json::to_string_pretty(report)?);
+        present_operator_safe_json(report)?;
         return Ok(());
     }
 
@@ -83,19 +86,19 @@ pub(super) fn present_wiki_projection_comparison(
     if !report.summary.selected_only_in_warn.is_empty() {
         println!(
             "  selected only in warn: {}",
-            report.summary.selected_only_in_warn.join(", ")
+            operator_safe_list(&report.summary.selected_only_in_warn)
         );
     }
     if !report.summary.selected_only_in_strict.is_empty() {
         println!(
             "  selected only in strict: {}",
-            report.summary.selected_only_in_strict.join(", ")
+            operator_safe_list(&report.summary.selected_only_in_strict)
         );
     }
     if !report.summary.review_expired_excluded.is_empty() {
         println!(
             "  review_expired_excluded: {}",
-            report.summary.review_expired_excluded.join(", ")
+            operator_safe_list(&report.summary.review_expired_excluded)
         );
     }
     Ok(())
@@ -135,10 +138,10 @@ fn print_wiki_projection_report(report: &AdaptiveWikiProjectionReport) {
         for entry in &report.selected {
             println!(
                 "    {} {:?} {:?}:{} {:?} agent_modes={} evidence={}",
-                entry.id,
+                operator_safe_text(&entry.id),
                 entry.kind,
                 entry.scope,
-                entry.scope_ref,
+                operator_safe_text(&entry.scope_ref),
                 entry.confidence,
                 adaptive_wiki_agent_modes_label(&entry.agent_modes),
                 entry.evidence_count
@@ -150,7 +153,9 @@ fn print_wiki_projection_report(report: &AdaptiveWikiProjectionReport) {
         for rejection in &report.rejected {
             println!(
                 "    {} {:?}: {}",
-                rejection.entry_id, rejection.reason, rejection.detail
+                operator_safe_text(&rejection.entry_id),
+                rejection.reason,
+                operator_safe_text(&rejection.detail)
             );
         }
     }
@@ -159,10 +164,10 @@ fn print_wiki_projection_report(report: &AdaptiveWikiProjectionReport) {
         for conflict in &report.conflicts {
             println!(
                 "    {} <-> {} {}: {}",
-                conflict.entry_id,
-                conflict.conflicting_entry_id,
-                conflict.signature,
-                conflict.detail
+                operator_safe_text(&conflict.entry_id),
+                operator_safe_text(&conflict.conflicting_entry_id),
+                operator_safe_text(&conflict.signature),
+                operator_safe_text(&conflict.detail)
             );
         }
     }
@@ -171,8 +176,25 @@ fn print_wiki_projection_report(report: &AdaptiveWikiProjectionReport) {
         for warning in &report.review_expired {
             println!(
                 "    {} {:?}: review_after={} {}",
-                warning.entry_id, warning.scope, warning.review_after, warning.detail
+                operator_safe_text(&warning.entry_id),
+                warning.scope,
+                warning.review_after,
+                operator_safe_text(&warning.detail)
             );
         }
     }
+}
+
+fn operator_safe_list(values: &[String]) -> String {
+    values
+        .iter()
+        .map(|value| operator_safe_text(value))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn present_operator_safe_json(value: &impl Serialize) -> Result<()> {
+    let value = operator_safe_json_value(serde_json::to_value(value)?);
+    println!("{}", serde_json::to_string_pretty(&value)?);
+    Ok(())
 }

@@ -1,13 +1,14 @@
 # Hosted Harness Agents
 
-Forager's product boundary is not the agent loop itself. A hosted harness agent
-is an agent built by another harness and launched under Forager's local
-approval, evidence, recovery, and review contract.
+A hosted harness agent runs another coding CLI through a configured Forager
+runner. Forager records the task and execution around that CLI; the CLI owns
+its agent loop and tool use. This page describes the built-in prompt profiles
+and the intended integration contract. It does not qualify every workload or
+harness version for unattended execution or recovery.
 
-Examples include Claude Code, Codex, OpenCode, OpenHands, Aider, SWE-agent,
-Gemini CLI, Mistral Vibe, deterministic review scripts, and local LLM harnesses.
-Forager should be able to supervise these workers without pretending that they
-share the same prompts, tool policies, model routing, or internal memory.
+Interactive detection of Claude Code, Codex, OpenCode, Gemini CLI and Mistral
+Vibe is separate from hosted prompt-profile support. OpenHands, Aider and other
+future harnesses are integration candidates.
 
 ## Boundary
 
@@ -19,31 +20,37 @@ The hosted harness owns:
 - tool policy inside the harness;
 - intermediate reasoning and interaction style.
 
-Forager owns:
+For configured Offdesk paths, Forager stores or manages:
 
 - task intent and scope;
 - approval gates;
 - launch command and working directory;
-- mutation boundary;
+- the requested mutation scope;
 - runtime handle and liveness evidence;
-- heartbeat, progress, logs, and result artifacts;
+- configured progress signals, logs, and result artifact references;
 - recovery decision and closeout state;
 - review package and next-harness handoff;
-- adaptive wiki candidate capture and reviewed promotion.
+- adaptive wiki candidates and recorded promotion decisions.
 
-Completed execution does not mean accepted truth. A hosted agent may report that
-it is done, but Forager should treat the work as accepted only after evidence,
-risk, and next-action surfaces are reviewable.
+The profile's mutation scope describes the requested operating boundary. A
+repository path or Git worktree does not enforce a general file, process or
+network sandbox. Enforcement of the agent's tool calls depends on that harness
+and any separately configured restrictions.
+
+Completed execution and recorded acceptance are separate states. A review
+receipt records a decision about the submitted artifacts, not proof that the
+result is correct or that every permitted operation was observed.
 
 ## Minimum Hosted Harness Contract
 
-Each hosted harness agent profile should define:
+An integration should define the following fields. Their presence describes
+the intended contract, not universal enforcement by every runner:
 
 | Field | Purpose |
 | --- | --- |
 | Launch command | Exact command Forager may run after approval |
 | Working directory | Repo, worktree, or scratch path used by the agent |
-| Mutation scope | What files, branches, network calls, or side effects are allowed |
+| Mutation scope | Requested file, branch and side-effect scope; enforcement must be established separately |
 | Evidence sources | Paths or probes for heartbeat, progress, logs, and result artifacts |
 | Result artifact | The artifact used to summarize what the run produced |
 | Failure signal | How Forager detects error, stale, cancelled, or incomplete states |
@@ -97,15 +104,20 @@ runtime smoke should fail before launch if the first-read packet is missing or
 too large. Use `--max-first-read-total-bytes` to lower the total budget for a
 specific smoke.
 
-The v1 support target is intentionally narrow:
+The built-in profile registry currently reports:
 
-| Harness | Status | Reason |
+| Harness | Registry status | Available scope |
 | --- | --- | --- |
-| Codex CLI | supported | Primary current golden-loop harness. |
-| Claude Code | supported | Primary current golden-loop harness alongside Codex. |
-| Gemini CLI | planned | Registry exists, but the hosted harness evidence contract still needs a disposable smoke task. |
-| OpenHands | planned | Future integration candidate. |
-| Aider | planned | Future integration candidate. |
+| Codex CLI | `supported` | Built-in launch metadata and compact prompt/first-read profile for `local-tmux`. |
+| Claude Code | `supported` | Built-in launch metadata and compact prompt/first-read profile for `local-tmux`. |
+| Gemini CLI | `planned` | Registry entry exists; hosted artifact integration still needs a disposable smoke task. |
+| OpenHands | `planned` | Future integration candidate. |
+| Aider | `planned` | Future integration candidate. |
+
+`supported` is the registry label for a built-in profile. Qualify the selected
+command, harness version, task artifacts and recovery behavior separately; the
+label does not establish a successful overnight workflow. See
+[operation status](offdesk-operation-status.md) for validation boundaries.
 
 ## Preferred Integration Path
 

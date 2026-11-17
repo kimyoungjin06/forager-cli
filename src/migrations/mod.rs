@@ -11,13 +11,21 @@
 mod v001_xdg_linux;
 mod v002_seed_sandbox_from_volumes;
 mod v003_yolo_mode_config;
+mod v004_serial_shift_selection;
+pub(crate) mod v005_task_review_links;
+mod v006_shift_weekly_usage;
+mod v007_preparation_review_binding;
+mod v008_preparation_requirements;
+pub(crate) mod v009_historical_review_boundary;
+pub(crate) mod v010_historical_review_prefix;
+pub(crate) mod v011_narrative_review_reconciliation;
 
 use anyhow::Result;
 use std::fs;
 use std::path::PathBuf;
 use tracing::{debug, info};
 
-const CURRENT_VERSION: u32 = 3;
+const CURRENT_VERSION: u32 = 11;
 const VERSION_FILE: &str = ".schema_version";
 
 struct Migration {
@@ -27,6 +35,7 @@ struct Migration {
 }
 
 const MIGRATIONS: &[Migration] = &[
+    // Capability-only; old records and approval hashes remain byte-identical.
     Migration {
         version: 1,
         name: "xdg_linux",
@@ -41,6 +50,46 @@ const MIGRATIONS: &[Migration] = &[
         version: 3,
         name: "yolo_mode_config",
         run: v003_yolo_mode_config::run,
+    },
+    Migration {
+        version: 4,
+        name: "serial_shift_selection",
+        run: v004_serial_shift_selection::run,
+    },
+    Migration {
+        version: 5,
+        name: "task_review_links",
+        run: v005_task_review_links::run,
+    },
+    Migration {
+        version: 6,
+        name: "shift_weekly_usage",
+        run: v006_shift_weekly_usage::run,
+    },
+    Migration {
+        version: 7,
+        name: "preparation_review_binding",
+        run: v007_preparation_review_binding::run,
+    },
+    Migration {
+        version: 8,
+        name: "preparation_requirements",
+        run: v008_preparation_requirements::run,
+    },
+    Migration {
+        version: 9,
+        name: "historical_review_boundary",
+        run: v009_historical_review_boundary::run,
+    },
+    Migration {
+        version: 10,
+        name: "historical_review_prefix",
+        run: v010_historical_review_prefix::run,
+    },
+    Migration {
+        version: 11,
+        name: "narrative_review_reconciliation",
+        run: v011_narrative_review_reconciliation::run,
     },
 ];
 

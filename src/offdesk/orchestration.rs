@@ -2,7 +2,9 @@
 //! `forager status`: overnight autonomy state and the wiki candidate queue
 //! across every registered knowledge plane.
 
-use crate::session::{get_profile_dir, project_registry};
+use crate::session::{profile_dir_path, project_registry};
+
+use super::{OffdeskShiftStatusV1, OffdeskShiftStore};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OrchestrationSignals {
@@ -12,21 +14,22 @@ pub struct OrchestrationSignals {
 }
 
 pub fn load_orchestration_signals(profile: &str) -> OrchestrationSignals {
-    let autonomy_armed = get_profile_dir(profile)
+    let now = chrono::Utc::now();
+    let autonomy_armed = OffdeskShiftStore::read_only(profile)
+        .and_then(|store| store.snapshot())
         .ok()
-        .map(|dir| dir.join("offdesk_autonomy_armed.json"))
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-        .map(|state| {
-            state
-                .get("armed")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false)
-                && state
-                    .get("until")
-                    .and_then(|v| v.as_str())
-                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-                    .is_some_and(|until| until > chrono::Utc::now())
+        .and_then(|snapshot| snapshot.active().cloned())
+        .map(|record| {
+            record.state.is_some_and(|state| {
+                matches!(
+                    state.status,
+                    OffdeskShiftStatusV1::Armed | OffdeskShiftStatusV1::Running
+                ) && now >= record.manifest.window.starts_at
+                    && now <= record.manifest.window.stops_at
+                    && record
+                        .arm_receipt
+                        .is_some_and(|receipt| now <= receipt.expires_at)
+            })
         })
         .unwrap_or(false);
 
@@ -36,7 +39,7 @@ pub fn load_orchestration_signals(profile: &str) -> OrchestrationSignals {
         let Some(wiki_profile) = &entry.wiki_profile else {
             continue;
         };
-        let Ok(dir) = get_profile_dir(wiki_profile) else {
+        let Ok(dir) = profile_dir_path(wiki_profile) else {
             continue;
         };
         if let Ok(state) = super::AdaptiveWikiStore::new(dir).load_candidates() {

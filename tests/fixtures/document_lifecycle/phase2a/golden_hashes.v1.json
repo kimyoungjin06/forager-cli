@@ -1,0 +1,16 @@
+{
+  "schema": "document_lifecycle_golden_hashes.v1",
+  "approval_source_sha256": [
+    "a844bc9d7187a5a13f07e28e2171cb4694dce11b5fd43c17d5f52dd587711772",
+    "e6a1cca4a6347141ceefabfb8c31e7bb68da4dad906584d80ff1197f6093a455"
+  ],
+  "payload_sha256": [
+    "2997425e3ed2b0a8c0f269e102a9e7ea654c2fe5ab6a18fe7fe8b78c3f8250ca",
+    "21eb01a52ea9c6015211e43872bf3f66b5984bb41aba25b6b03b2b38682f02ba"
+  ],
+  "event_sha256": [
+    "80805aeaa6215671158ac3e41ebb2a2e7fb0410c2ab90382d434f3237cf4555c",
+    "91e79f96cface2df9a8744ac8f7776fab566db806279ce64ddc40d69e76ba0e8"
+  ],
+  "ordered_event_hashes_sha256": "b3044958366eae9b6cd18318174fd396949d5d9d4a12f31d1b62126c70c5d494"
+}

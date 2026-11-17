@@ -205,6 +205,7 @@ impl SettingsView {
             SettingsCategory::Updates,
             SettingsCategory::Tmux,
             SettingsCategory::Sound,
+            SettingsCategory::Night,
         ];
         categories.insert(1, SettingsCategory::Claude);
         if scope == SettingsScope::Global {

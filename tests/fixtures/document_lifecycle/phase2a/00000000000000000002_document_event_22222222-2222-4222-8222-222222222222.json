@@ -1,0 +1,73 @@
+{
+  "schema": "document_lifecycle_event.v1",
+  "payload": {
+    "sequence": 2,
+    "event_id": "document_event_22222222-2222-4222-8222-222222222222",
+    "event_kind": "revalidate_observation",
+    "recorded_at": "2026-08-20T00:30:00Z",
+    "previous_event_sha256": "80805aeaa6215671158ac3e41ebb2a2e7fb0410c2ab90382d434f3237cf4555c",
+    "project_key": "phase2a-project",
+    "root_id": "root_phase2a",
+    "root_path_identity_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "root_instance_identity_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "document_id": "document_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "expected_document_head_event_id": "document_event_11111111-1111-4111-8111-111111111111",
+    "observation": {
+      "observation_id": "doc_observation_c6e3d97cf2e444c8d9a791db",
+      "relative_path": "docs/report.md",
+      "size_bytes": 124,
+      "modified_at": "2026-08-20T00:20:00Z",
+      "content_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "before": {
+      "activity_state": "active",
+      "retention_disposition": "unclassified",
+      "successor_document_id": null,
+      "active_owner_document_id": null,
+      "summary_document_id": null,
+      "review_after": null
+    },
+    "after": {
+      "activity_state": "active",
+      "retention_disposition": "unclassified",
+      "successor_document_id": null,
+      "active_owner_document_id": null,
+      "summary_document_id": null,
+      "review_after": null
+    },
+    "proposal_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "approval_source": {
+      "schema": "document_lifecycle_approval_source.v1",
+      "approval_id": "approval_dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "action_id": "action_eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      "scope": "once",
+      "project_key": "phase2a-project",
+      "request_id": "request_phase2a",
+      "task_id": "task_phase2a",
+      "action": "document.lifecycle.transition",
+      "risk_level": "canonical_mutation",
+      "approval_mode": "operator_required",
+      "created_at": "2026-08-20T00:20:00Z",
+      "expires_at": "2026-08-20T01:20:00Z",
+      "status": "approved",
+      "resolved_at": "2026-08-20T00:25:00Z",
+      "resolved_by": "telegram:owner",
+      "source_surface": "telegram",
+      "preview_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "reason_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "metadata_schema": "document_lifecycle_approval_metadata.v1",
+      "metadata_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "proposal_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "target_identity": {
+        "kind": "document",
+        "document_id": "document_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "expected_head_event_id": "document_event_11111111-1111-4111-8111-111111111111"
+      }
+    },
+    "approval_source_sha256": "e6a1cca4a6347141ceefabfb8c31e7bb68da4dad906584d80ff1197f6093a455",
+    "reason": "Revalidate changed bytes at the reviewed path.",
+    "idempotency_key": "lifecycle_apply_two"
+  },
+  "payload_sha256": "21eb01a52ea9c6015211e43872bf3f66b5984bb41aba25b6b03b2b38682f02ba",
+  "event_sha256": "91e79f96cface2df9a8744ac8f7776fab566db806279ce64ddc40d69e76ba0e8"
+}

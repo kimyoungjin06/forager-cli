@@ -7,7 +7,7 @@ import { sitePath } from '../../lib/paths';
 
 <Base
   title="Offdesk Morning Review Workflow - Forager"
-  description="Use Forager to plan safe offdesk agent work, review overnight evidence, approve recovery actions, and promote adaptive wiki knowledge only after inspection."
+  description="Prepare configured Offdesk tasks, inspect logs and result artifacts, and record review decisions before choosing the next step."
 >
   <Nav />
 
@@ -16,17 +16,17 @@ import { sitePath } from '../../lib/paths';
       <header class="mb-12">
         <h1 class="text-4xl md:text-5xl font-bold text-white mb-6 leading-tight">Offdesk Morning Review Workflow</h1>
         <p class="text-lg text-gray-400 leading-relaxed">
-          Forager is not only a session manager. It is a safe loop for handing work to AI agents while you are away, then reviewing durable evidence before the next decision.
+          Forager provides task queues, execution approvals and review records for configured commands. Before leaving a task unattended, check its runner, scope and stop conditions. On return, inspect the artifacts it actually produced.
         </p>
       </header>
 
       <section>
         <h2>The Loop</h2>
         <ol>
-          <li><strong>Ondesk planning:</strong> create focused sessions, isolate branches with worktrees, and decide which tasks are safe to run unattended.</li>
+          <li><strong>Ondesk planning:</strong> create focused sessions, use separate branch checkouts, and select tasks with an explicit scope, runner and stop conditions.</li>
           <li><strong>Offdesk execution:</strong> queue durable tasks behind approval gates, provider fallback checks, recovery records, and audit trails.</li>
           <li><strong>Morning review:</strong> inspect task status, background probes, debug bundles, maintenance reports, Council decisions, result artifacts, implementation packet coverage, and closeout needs.</li>
-          <li><strong>Closeout:</strong> generate the dry-run cleanup plan, commercial review packet, and Ondesk return package before resuming hands-on work.</li>
+          <li><strong>Closeout:</strong> generate the dry-run cleanup plan, review packet, and Ondesk return package before resuming hands-on work.</li>
           <li><strong>Knowledge promotion:</strong> promote adaptive wiki candidates only after reviewing evidence, counterexamples, scope, and freshness.</li>
         </ol>
       </section>
@@ -69,11 +69,11 @@ forager offdesk closeout --dry-run</code></pre>
         </p>
         <pre><code>forager offdesk closeout --project-key &lt;project&gt; --dry-run</code></pre>
         <p>
-          Closeout writes a plan, cleanup manifest, commercial review packet, and return package. It does not move, delete, archive, or mutate project files.
+          Closeout writes a plan, cleanup manifest, review packet, and return package. It does not move, delete, archive, or mutate project files.
         </p>
         <pre><code>forager offdesk closeout-review --closeout-id &lt;closeout-id&gt; --verdict approved</code></pre>
         <p>
-          The review record is the durable evidence that the closeout packet was inspected. Packet generation alone does not approve file cleanup.
+          The review record stores the submitted verdict. It does not establish how thoroughly the packet was inspected or whether the result is correct. Packet generation alone does not approve file cleanup.
         </p>
         <p>
           Read the <a href={sitePath('/guides/offdesk-closeout/')}>Offdesk Closeout Guide</a> when file cleanup, archive candidates, or handoff context are part of the return path.
@@ -97,10 +97,10 @@ forager offdesk wiki export-markdown --output ./adaptive-wiki-review</code></pre
       <section>
         <h2>Decision Rules</h2>
         <ul>
-          <li>Do not claim completion unless a result artifact, task status, or test output proves it.</li>
+          <li>Compare completion claims with the task's requirements and checks. A terminal status or result file alone does not establish success.</li>
           <li>Do not let wiki context change commands, workdirs, provider choices, models, or approvals.</li>
           <li>Use Council output as a read-only recommendation, not as permission to mutate state.</li>
-          <li>Do not move, delete, or archive closeout candidates without commercial review and explicit human approval.</li>
+          <li>Review exact paths and applicable operator authority before separately moving, deleting, or archiving closeout candidates. The closeout verdict alone does not authorize cleanup.</li>
           <li>Convert failures into recovery tasks, maintenance requests, or revised plans instead of silent retries.</li>
         </ul>
       </section>

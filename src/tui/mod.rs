@@ -32,6 +32,7 @@ use crate::session::resolve_config;
 use crate::update::check_for_update;
 
 pub async fn run(profile: &str) -> Result<()> {
+    let _frontend = crate::maintenance::admit_frontend()?;
     // Run pending migrations with a spinner so users see progress
     if migrations::has_pending_migrations() {
         const SPINNER_FRAMES: &[char] = &['◐', '◓', '◑', '◒'];

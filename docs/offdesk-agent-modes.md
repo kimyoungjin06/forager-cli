@@ -6,6 +6,10 @@ outputs, wiki projection scope, and evaluation criteria. Capability checks,
 approval requirements, provider/model routing, command safety, workdir safety,
 and redaction rules remain separate safety rails.
 
+The mode vocabulary and aliases are implemented. The role and review rules
+below describe the intended workflow; selecting a mode does not automatically
+run a separate reviewer or certify its output.
+
 ## Vocabulary
 
 Target canonical modes:

@@ -3,6 +3,7 @@
 use anyhow::Result;
 use clap::Subcommand;
 
+use crate::offdesk::operator_safe_text;
 use crate::sound;
 
 #[derive(Subcommand)]
@@ -60,7 +61,10 @@ async fn install_bundled() -> Result<()> {
             Ok(())
         }
         Err(e) => {
-            eprintln!("\n❌ Failed to install sounds: {}", e);
+            eprintln!(
+                "\n❌ Failed to install sounds: {}",
+                operator_safe_text(&e.to_string())
+            );
             eprintln!("\n💡 Troubleshooting:");
             eprintln!("  • Check your internet connection");
             eprintln!("  • Try again later if GitHub is unavailable");
@@ -117,7 +121,10 @@ fn test_sound(name: &str) -> Result<()> {
         }
         Err(e) => {
             println!("✗");
-            eprintln!("\n❌ Failed to play sound: {}", e);
+            eprintln!(
+                "\n❌ Failed to play sound: {}",
+                operator_safe_text(&e.to_string())
+            );
             eprintln!("\n💡 Troubleshooting:");
             if cfg!(target_os = "linux") {
                 eprintln!("  • Ensure audio tools are installed:");

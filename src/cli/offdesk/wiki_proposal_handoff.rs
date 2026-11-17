@@ -14,7 +14,7 @@ use super::{
     require_non_empty_arg, shell_quote_arg, wiki_store,
 };
 use crate::offdesk::{
-    AdaptiveWikiReviewProposal, AdaptiveWikiReviewProposalAction,
+    operator_safe_text, AdaptiveWikiReviewProposal, AdaptiveWikiReviewProposalAction,
     AdaptiveWikiReviewProposalDecision, AdaptiveWikiReviewQueueFilter, AdaptiveWikiScope,
 };
 
@@ -126,7 +126,9 @@ pub(super) async fn wiki_proposal_handoff(
     let proposal = report
         .proposals
         .iter()
-        .find(|proposal| proposal.id == args.proposal_id)
+        .find(|proposal| {
+            proposal.id == crate::offdesk::operator_safe_identity_selector(args.proposal_id.trim())
+        })
         .ok_or_else(|| {
             anyhow::anyhow!(
                 "Adaptive wiki review proposal not found: {}",
@@ -453,7 +455,7 @@ fn manual_handoff_missing(reason: &str) -> ParameterizedHandoffPreview {
 
 fn fallback_proposal_handoff_command(proposal: &AdaptiveWikiReviewProposal) -> Option<String> {
     let reason = format!("curator review: {}", proposal.title);
-    let subject_id = crate::offdesk::operator_safe_text(&proposal.subject_id);
+    let subject_id = crate::offdesk::operator_safe_identity_selector(&proposal.subject_id);
     let reason = crate::offdesk::operator_safe_text(&reason);
     match (proposal.action, proposal.subject_kind.as_str()) {
         (AdaptiveWikiReviewProposalAction::Reject, "candidate") => Some(format!(
@@ -782,7 +784,7 @@ fn projection_conflict_entry_ids(proposal: &AdaptiveWikiReviewProposal) -> Vec<S
         let Some(entry_id) = evidence_ref.strip_prefix("entry:") else {
             continue;
         };
-        let entry_id = crate::offdesk::operator_safe_text(entry_id);
+        let entry_id = crate::offdesk::operator_safe_identity_selector(entry_id);
         if !entry_id.is_empty() && !ids.iter().any(|existing| existing == &entry_id) {
             ids.push(entry_id);
         }
@@ -857,7 +859,7 @@ fn counterexample_command(entry_id: &str, evidence_ref: &str, reason: &str) -> S
 }
 
 fn handoff_subject_arg(subject_id: &str) -> String {
-    shell_quote_arg(&crate::offdesk::operator_safe_text(subject_id))
+    shell_quote_arg(&crate::offdesk::operator_safe_identity_selector(subject_id))
 }
 
 fn handoff_arg_value(value: Option<&str>) -> Option<String> {
@@ -907,13 +909,16 @@ fn manual_handoff_reason(proposal: &AdaptiveWikiReviewProposal) -> &'static str 
 fn print_wiki_proposal_handoff(preview: &WikiProposalHandoffPreview) {
     println!(
         "Adaptive wiki proposal handoff {}: {}",
-        preview.proposal_id, preview.status
+        operator_safe_text(&preview.proposal_id),
+        operator_safe_text(preview.status)
     );
     println!(
         "  proposal: {:?} {} {}",
-        preview.action, preview.subject_kind, preview.subject_id
+        preview.action,
+        operator_safe_text(&preview.subject_kind),
+        operator_safe_text(&preview.subject_id)
     );
-    println!("  reason: {}", preview.reason);
+    println!("  reason: {}", operator_safe_text(&preview.reason));
     if let Some(decision) = preview.lifecycle_decision {
         println!(
             "  lifecycle: {:?}{}",
@@ -926,7 +931,7 @@ fn print_wiki_proposal_handoff(preview: &WikiProposalHandoffPreview) {
         );
     }
     if let Some(command) = preview.command.as_deref() {
-        println!("  command: {command}");
+        println!("  command: {}", operator_safe_text(command));
     }
     if !preview.required_inputs.is_empty() {
         println!("  required inputs:");
@@ -937,18 +942,34 @@ fn print_wiki_proposal_handoff(preview: &WikiProposalHandoffPreview) {
             } else {
                 "conditional"
             };
-            println!("    {flag} ({required}): {}", input.description);
+            println!(
+                "    {} ({required}): {}",
+                operator_safe_text(flag),
+                operator_safe_text(input.description)
+            );
         }
     }
     if !preview.mutation_options.is_empty() {
         println!("  mutation options:");
         for option in &preview.mutation_options {
-            println!("    {}: {}", option.mutation, option.command_template);
-            println!("      {}", option.description);
+            println!(
+                "    {}: {}",
+                operator_safe_text(option.mutation),
+                operator_safe_text(&option.command_template)
+            );
+            println!("      {}", operator_safe_text(option.description));
         }
     }
     if !preview.evidence_refs.is_empty() {
-        println!("  evidence: {}", preview.evidence_refs.join(", "));
+        println!(
+            "  evidence: {}",
+            preview
+                .evidence_refs
+                .iter()
+                .map(|value| operator_safe_text(value))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
     }
 }
 

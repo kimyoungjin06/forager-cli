@@ -18,11 +18,12 @@ This opens the dashboard. You'll see an empty session list on first run.
 forager add /path/to/project
 ```
 
-The session appears in the dashboard with status **Idle**.
+This registers a session without launching the agent. Select it in the TUI to
+start and attach, or add `--launch` to the CLI command.
 
 ## Attach to a Session
 
-Select a session and press `Enter` to attach. You're now inside a tmux session running your AI agent (Claude Code by default).
+Select a session and press `Enter` to start or attach to its tmux-backed agent.
 
 To return to the TUI, press **`Ctrl+b d`** (the standard tmux detach shortcut).
 
@@ -45,11 +46,17 @@ forager add . -w feat/my-feature -b
 # TUI: press n, fill in the worktree branch field
 ```
 
-This creates a new git branch, a worktree directory, and a session pointing at it. When you delete the session, Forager offers to clean up the worktree too.
+This creates a new git branch, a worktree directory, and a session pointing
+at it. The TUI offers cleanup when deleting a managed worktree session. CLI
+`remove` preserves the directory unless `--delete-worktree` is selected.
+Quitting the TUI with `q` leaves tmux sessions running; deleting a session stops
+its tmux session.
 
 ## Choose a Different Agent
 
-By default, Forager uses Claude Code. To use a different tool:
+The CLI uses `session.default_tool` when configured and otherwise defaults to
+Claude Code. The TUI offers detected tools and selects the configured default
+when available, otherwise the first available tool. Use `-c` to choose explicitly:
 
 ```bash
 forager add -c opencode .
@@ -77,6 +84,7 @@ In the TUI, select the tool from the dropdown in the new session dialog.
 
 ## Next Steps
 
-- [Workflow Guide](guides/workflow.md) -- recommended setup with bare repos and parallel agents
+- [Workflow Guide](guides/workflow.md) -- regular clones, optional bare repos and parallel sessions
+- [Operation Cycle](guides/operation-cycle.md) -- prepare configured Offdesk work and review results
 - [Repo Config & Hooks](guides/repo-config.md) -- per-project settings
 - [CLI Reference](cli/reference.md) -- every command and flag

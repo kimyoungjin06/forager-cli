@@ -1,0 +1,24 @@
+Document hygiene contract v1
+
+This contract is advisory guidance plus an observable closeout contract. It does not intercept arbitrary filesystem writes, change document search visibility, or authorize file movement, quarantine, or disposal.
+
+Before writing a meaningful document:
+1. Search the active document view for the intended subject, role, audience, and scope.
+2. Inspect the current project entrypoint and any document that already owns the subject.
+3. Declare exactly one intent: update_existing, append_record, create_versioned_record, create_new_document, or no_document.
+4. For create_versioned_record or create_new_document, state why updating is insufficient and name the active entrypoint that will link or register the result.
+
+While writing:
+1. Preserve the authority and lifecycle labels of the owning document.
+2. Do not use names such as final_v2, new_final, or latest_revised as the only current-state mechanism.
+3. Do not overwrite immutable evidence or a frozen reviewed contract.
+4. Keep generated projections distinguishable from authored sources.
+
+Before closeout:
+1. List every created, replaced, or materially rewritten document.
+2. Verify that every meaningful new document is linked from an active entrypoint or registered as immutable evidence, a run artifact, or a deliverable.
+3. Identify every predecessor without hiding it before review.
+4. Report the effective intent and document hygiene findings for the task delta.
+5. Leave archive, quarantine, and disposal as review items unless a separately approved mutation workflow is explicitly in scope.
+
+Updating an existing current owner is the default. New documents are appropriate only for a distinct deliverable, audience, scope, authority, immutable record, or append-only record.

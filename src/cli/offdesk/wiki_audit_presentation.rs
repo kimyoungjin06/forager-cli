@@ -7,14 +7,17 @@
 use std::path::Path;
 
 use anyhow::Result;
+use serde::Serialize;
 
+use super::operator_safe_json_value;
 use crate::offdesk::{
-    AdaptiveWikiGraphReport, AdaptiveWikiLintReport, AdaptiveWikiMarkdownExportReport,
+    operator_safe_text, AdaptiveWikiGraphReport, AdaptiveWikiLintReport,
+    AdaptiveWikiMarkdownExportReport,
 };
 
 pub(super) fn present_wiki_lint(report: &AdaptiveWikiLintReport, json: bool) -> Result<()> {
     if json {
-        println!("{}", serde_json::to_string_pretty(report)?);
+        present_operator_safe_json(report)?;
         return Ok(());
     }
 
@@ -29,7 +32,10 @@ pub(super) fn present_wiki_lint(report: &AdaptiveWikiLintReport, json: bool) -> 
     for issue in &report.issues {
         println!(
             "  - {:?} {} {}: {}",
-            issue.severity, issue.subject_kind, issue.subject_id, issue.message
+            issue.severity,
+            operator_safe_text(&issue.subject_kind),
+            operator_safe_text(&issue.subject_id),
+            operator_safe_text(&issue.message)
         );
     }
     Ok(())
@@ -40,14 +46,16 @@ pub(super) fn present_wiki_markdown_export(
     json: bool,
 ) -> Result<()> {
     if json {
-        println!("{}", serde_json::to_string_pretty(report)?);
+        present_operator_safe_json(report)?;
         return Ok(());
     }
 
     let action = if report.dry_run { "planned" } else { "wrote" };
     println!(
         "Adaptive wiki markdown export {} {} files to {}",
-        action, report.summary.files_planned, report.output_dir
+        action,
+        report.summary.files_planned,
+        operator_safe_text(&report.output_dir)
     );
     println!(
         "  status: {:?}  reexport_recommended={}",
@@ -60,7 +68,9 @@ pub(super) fn present_wiki_markdown_export(
     for file in &report.files {
         println!(
             "  - {} ({} bytes, sha256:{})",
-            file.path, file.bytes, file.sha256
+            operator_safe_text(&file.path),
+            file.bytes,
+            operator_safe_text(&file.sha256)
         );
     }
     Ok(())
@@ -74,7 +84,7 @@ pub(super) fn present_wiki_graph(
     json: bool,
 ) -> Result<()> {
     if json {
-        println!("{}", serde_json::to_string_pretty(report)?);
+        present_operator_safe_json(report)?;
         return Ok(());
     }
 
@@ -100,14 +110,24 @@ pub(super) fn present_wiki_graph(
             "  export: {} {} files to {}",
             action,
             files,
-            output.display()
+            operator_safe_text(output.to_string_lossy().as_ref())
         );
     }
     for issue in report.review_issues.iter().take(8) {
         println!(
             "  - {:?} {}:{} #{} {}",
-            issue.severity, issue.subject_kind, issue.subject_id, issue.tag, issue.code
+            issue.severity,
+            operator_safe_text(&issue.subject_kind),
+            operator_safe_text(&issue.subject_id),
+            operator_safe_text(&issue.tag),
+            operator_safe_text(&issue.code)
         );
     }
+    Ok(())
+}
+
+fn present_operator_safe_json(value: &impl Serialize) -> Result<()> {
+    let value = operator_safe_json_value(serde_json::to_value(value)?);
+    println!("{}", serde_json::to_string_pretty(&value)?);
     Ok(())
 }

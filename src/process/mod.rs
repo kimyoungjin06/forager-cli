@@ -11,6 +11,58 @@ use std::time::{Instant, SystemTime};
 #[cfg(target_os = "linux")]
 mod linux;
 
+pub const READ_POLICY_MIN_ABI: u32 = 5;
+pub const READ_POLICY_RUNTIME_PATHS: &[&str] = &[
+    "/usr",
+    "/bin",
+    "/lib",
+    "/lib64",
+    "/etc/ld.so.cache",
+    "/etc/nsswitch.conf",
+    "/etc/hosts",
+    "/etc/resolv.conf",
+    "/etc/ssl/certs",
+];
+
+pub fn landlock_abi() -> std::io::Result<u32> {
+    #[cfg(target_os = "linux")]
+    {
+        linux::landlock::abi()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "Landlock requires Linux",
+        ))
+    }
+}
+
+pub(crate) fn restrict_command_filesystem(
+    command: &mut Command,
+    working_dir: &Path,
+    root: File,
+    metadata_boot_identity: bool,
+) -> std::io::Result<u32> {
+    #[cfg(target_os = "linux")]
+    {
+        linux::landlock::restrict_command(command, working_dir, root, metadata_boot_identity)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (command, working_dir, root, metadata_boot_identity);
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "Landlock requires Linux",
+        ))
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub use linux::cgroup::{
+    inspect_cgroup_v2, seal_empty_cgroup_v2, CgroupV2Identity, CgroupV2Observation, CgroupV2Seal,
+};
+
 #[cfg(target_os = "macos")]
 mod macos;
 
@@ -90,6 +142,44 @@ pub fn open_bounded_root(root: &Path) -> io::Result<File> {
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         File::open(root)
+    }
+}
+
+pub fn local_supervisor_command(
+    source: &str,
+    receipt: &Path,
+    nonce: &str,
+    scope: &str,
+) -> (Command, bool) {
+    #[cfg(target_os = "linux")]
+    {
+        (
+            linux::local_supervisor_command(source, receipt, nonce, scope),
+            true,
+        )
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = scope;
+        let mut command = Command::new("sh");
+        command.arg("-c").arg("sh -c \"$1\"; result=$?; umask 077; printf '{\"nonce\":\"%s\",\"status\":%s}\\n' \"$3\" \"$result\" > \"$2\"; exit \"$result\"")
+            .arg("forager-local-wait").arg(source).arg(receipt).arg(nonce);
+        (command, false)
+    }
+}
+
+pub fn prepare_contained_command(
+    command: &mut Command,
+    parent: &Path,
+) -> anyhow::Result<serde_json::Value> {
+    #[cfg(target_os = "linux")]
+    {
+        linux::cgroup::prepare_command(command, parent)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (command, parent);
+        anyhow::bail!("explicit cgroup containment requires Linux")
     }
 }
 
@@ -463,6 +553,22 @@ pub fn filesystem_file_identity(metadata: &Metadata) -> Option<(u64, u64)> {
         Some(macos::filesystem_file_identity(metadata))
     }
 
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = metadata;
+        None
+    }
+}
+
+pub fn filesystem_link_count(metadata: &Metadata) -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        Some(linux::filesystem_link_count(metadata))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Some(macos::filesystem_link_count(metadata))
+    }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         let _ = metadata;

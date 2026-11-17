@@ -1,5 +1,9 @@
 # Offdesk Long-Run Validation
 
+This is an operator-run validation procedure, not a record that a workload has
+passed. Preparing examples does not select or launch a real unattended run.
+Use the source/build matching your installation and retain actual receipts.
+
 This runbook is the next step after the short
 [`Offdesk Runtime Smoke`](offdesk-runtime-smoke.md). The smoke proves the
 launch path. A longer run should prove whether the operating cycle produces
@@ -72,7 +76,7 @@ Use the generated script so the preflight guard stays attached:
 
 ```bash
 bash <workload-output>/offdesk_enqueue_command.sh
-target/debug/forager -p <profile> offdesk tick --limit 1 --json
+target/debug/forager -p <profile> offdesk tick --project-key <project> --task-id <task-id> --limit 1 --json
 target/debug/forager -p <profile> offdesk pending --json
 ```
 
@@ -84,15 +88,23 @@ Approve only the row that matches the packet:
 - task id matches `prepared_task.json`;
 - preview matches the launch dry run.
 
-This approval does not authorize provider fallback, cleanup, closeout file
-operations, or wiki promotion.
+After matching the approval, record it and advance only that task:
+
+```bash
+target/debug/forager -p <profile> offdesk ok <approval-id>
+target/debug/forager -p <profile> offdesk tick --project-key <project> --task-id <task-id> --limit 1 --json
+```
+
+Use the returned background ticket ID for polling. `poll` reconciles runtime
+state and may write profile records. This approval does not authorize provider
+fallback, cleanup, closeout file operations, or wiki promotion.
 
 ## Monitor
 
 Poll and inspect live evidence together:
 
 ```bash
-target/debug/forager -p <profile> offdesk poll --json
+target/debug/forager -p <profile> offdesk poll <ticket-id> --json
 target/debug/forager -p <profile> offdesk tasks --project-key <project-key> --task-id <task-id> --json
 tail -80 <workload-output>/offdesk-runner.log
 cat <workload-output>/heartbeat.json

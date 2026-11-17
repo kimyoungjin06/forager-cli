@@ -286,11 +286,23 @@ pub async fn run(profile: &str, args: AddArgs) -> Result<()> {
         println!("  YOLO:    enabled");
     }
     if let Some(auto) = &auto_orchestrator {
-        let state = if auto.launched { "started" } else { "created" };
+        let state = if auto.launched {
+            "started"
+        } else if auto.startup_preflight.allows_automatic_launch() {
+            "created"
+        } else {
+            "blocked by startup preflight"
+        };
         println!(
             "  Orch:    {} ({}, id={})",
             auto.title, state, auto.session_id
         );
+        if let Some(reason) = auto.startup_preflight.reason {
+            println!("  Reason:  {:?}", reason);
+        }
+        for command in &auto.startup_preflight.recovery_commands {
+            println!("  Recover: {}", command);
+        }
     }
 
     if args.launch {

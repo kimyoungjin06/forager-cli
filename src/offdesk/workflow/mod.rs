@@ -4,10 +4,20 @@ mod closeout_receipt;
 mod closeout_records;
 mod decision;
 mod implementation_packet_coverage;
+pub mod offdesk_preparation;
+pub mod ondesk_delivery;
+pub mod ondesk_plan;
+pub mod ondesk_plan_adoption;
+pub mod ondesk_plan_store;
+pub mod ondesk_return;
+pub mod ondesk_return_binding;
+pub mod ondesk_review;
+pub mod ondesk_task_binding;
 mod plan_launch_prep;
 mod plan_registration;
 mod plan_registry;
 mod plan_review;
+pub mod review_link;
 mod wiki_proposal_receipt;
 
 pub use closeout_receipt::{
@@ -20,9 +30,9 @@ pub use closeout_receipt::{
 };
 pub use closeout_records::{
     build_closeout_decision_record, build_closeout_retirement_record, build_closeout_review_record,
-    CloseoutDecisionRecordBuildInput, CloseoutDecisionResolution, CloseoutDecisionResolutionRecord,
-    CloseoutRetirementRecord, CloseoutRetirementRecordBuildInput, CloseoutReviewArtifactPaths,
-    CloseoutReviewRecord, CloseoutReviewRecordBuildInput,
+    CloseoutArtifactRead, CloseoutDecisionRecordBuildInput, CloseoutDecisionResolution,
+    CloseoutDecisionResolutionRecord, CloseoutRetirementRecord, CloseoutRetirementRecordBuildInput,
+    CloseoutReviewArtifactPaths, CloseoutReviewRecord, CloseoutReviewRecordBuildInput,
 };
 pub use decision::{
     normalize_decision_choice, receipt_decision_record, resolve_decision_record,
@@ -63,3 +73,13 @@ pub use wiki_proposal_receipt::{
     AdaptiveWikiProposalReceiptCheck, AdaptiveWikiProposalReceiptInput,
     AdaptiveWikiProposalReceiptSubject,
 };
+
+pub mod preparation_capabilities;
+
+pub mod task_execution_review;
+
+pub mod codex_review_invocation;
+pub(crate) mod invocation_inputs;
+pub mod metadata_consumer_invocation;
+pub mod native_worker_invocation;
+pub mod worker_invocation;

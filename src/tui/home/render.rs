@@ -36,6 +36,7 @@ impl HomeView {
         theme: &Theme,
         update_info: Option<&UpdateInfo>,
     ) {
+        self.session_tab_areas.clear();
         // Settings view takes over the whole screen
         if let Some(ref mut settings) = self.settings_view {
             settings.render(frame, area, theme);
@@ -45,6 +46,16 @@ impl HomeView {
                     dialog.render(frame, area, theme);
                 }
             }
+            return;
+        }
+
+        if let Some(ref mut morning) = self.morning_view {
+            morning.render(frame, area, theme);
+            return;
+        }
+
+        if let Some(ref mut night) = self.night_view {
+            night.render(frame, area, theme);
             return;
         }
 
@@ -156,6 +167,7 @@ impl HomeView {
             .title_style(Style::default().fg(title_color).bold());
 
         let inner = block.inner(area);
+        self.list_area = inner;
         frame.render_widget(block, area);
 
         if self.instances.is_empty() && self.groups.is_empty() {
@@ -190,7 +202,7 @@ impl HomeView {
 
         let list =
             List::new(list_items).highlight_style(Style::default().bg(theme.session_selection));
-        let mut list_state = ListState::default();
+        let mut list_state = self.list_state.clone();
         list_state.select((!indices.is_empty()).then_some(self.cursor));
 
         // A plain List always renders from row zero. Keeping the cursor only
@@ -199,6 +211,7 @@ impl HomeView {
         // selected row visible and makes the initial screen stable at any
         // session count.
         frame.render_stateful_widget(list, inner, &mut list_state);
+        self.list_state = list_state;
 
         // Render search bar if active
         if self.search_active {
@@ -348,7 +361,7 @@ impl HomeView {
         }
     }
 
-    fn render_session_switcher_bar(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
+    fn render_session_switcher_bar(&mut self, frame: &mut Frame, area: Rect, theme: &Theme) {
         if area.width == 0 || area.height == 0 {
             return;
         }
@@ -378,7 +391,18 @@ impl HomeView {
                     } else {
                         session_style
                     };
-                    spans.push(Span::styled(format!("[{}]", label), style));
+                    let tab = Span::styled(format!("[{}]", label), style);
+                    let offset: usize = spans.iter().map(Span::width).sum();
+                    let width = tab
+                        .width()
+                        .min(usize::from(area.width).saturating_sub(offset));
+                    if width > 0 {
+                        self.session_tab_areas.push((
+                            Rect::new(area.x + offset as u16, area.y, width as u16, 1),
+                            id.clone(),
+                        ));
+                    }
+                    spans.push(tab);
                 }
             }
 
@@ -442,6 +466,7 @@ impl HomeView {
                             content_area,
                             inst,
                             &self.preview_cache.content,
+                            &self.preview_cache.wiki_context_summary,
                             theme,
                         );
                     }
@@ -469,6 +494,7 @@ impl HomeView {
                             inst,
                             self.terminal_preview_cache.terminal_running,
                             &self.terminal_preview_cache.content,
+                            &self.terminal_preview_cache.wiki_context_summary,
                             theme,
                         );
                     }
@@ -488,7 +514,7 @@ impl HomeView {
         area: Rect,
         theme: &Theme,
     ) -> Rect {
-        const REVIEW_HEIGHT: u16 = 7;
+        const REVIEW_HEIGHT: u16 = 8;
 
         if !self.offdesk_resume.has_morning_review() || area.height < REVIEW_HEIGHT + 3 {
             return area;
@@ -518,7 +544,7 @@ impl HomeView {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme.border))
-            .title(" Offdesk Morning Review ")
+            .title(" Offdesk Morning Review [M detail] ")
             .title_style(Style::default().fg(theme.title).bold());
         let inner = block.inner(area);
         frame.render_widget(block, area);
@@ -546,6 +572,17 @@ impl HomeView {
                         summary.resume_pending_tasks, summary.failed_tasks, summary.cancelled_tasks
                     ),
                     value_style,
+                ),
+            ]),
+            Line::from(vec![
+                Span::styled("Shift: ", label_style),
+                Span::styled(
+                    summary.shift_review_label(),
+                    if summary.shift_attention_count() > 0 || summary.shift_review_error.is_some() {
+                        accent_style
+                    } else {
+                        value_style
+                    },
                 ),
             ]),
             Line::from(vec![

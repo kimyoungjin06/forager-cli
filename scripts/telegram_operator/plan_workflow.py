@@ -11,6 +11,7 @@ main script routes an active session's input here.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import pathlib
 import re
@@ -34,9 +35,10 @@ from .plan_messages import (
     render_plan_closeout_review_handoff_message,
     render_plan_closeout_verdict_failed_message,
     render_plan_closeout_verdict_message,
+    render_plan_draft_compared_message,
     render_plan_draft_failed_message,
     render_plan_draft_required_message,
-    render_plan_draft_validated_message,
+    render_plan_draft_selected_message,
     render_plan_enqueue_handoff_created_message,
     render_plan_enqueue_handoff_failed_message,
     render_plan_enqueue_handoff_required_message,
@@ -51,6 +53,7 @@ from .plan_messages import (
     render_plan_gate_request_required_message,
     render_plan_gate_resolution_done_message,
     render_plan_gate_resolution_failed_message,
+    render_plan_gate_resolution_hash_required_message,
     render_plan_gate_resolution_required_message,
     render_plan_launch_prep_failed_message,
     render_plan_launch_prep_prepared_message,
@@ -61,7 +64,10 @@ from .plan_messages import (
     render_plan_registration_stale_message,
     render_plan_review_approved_message,
     render_plan_review_failed_message,
+    render_plan_review_hash_required_message,
+    render_plan_review_rejected_message,
     render_plan_review_required_message,
+    render_plan_review_revision_required_message,
     render_plan_runtime_monitor_failed_message,
     render_plan_runtime_monitor_message,
     render_plan_runtime_monitor_required_message,
@@ -105,6 +111,7 @@ from .receipts import (
     create_runtime_start_from_enqueue_run,
     prepare_plan_launch_packet,
     run_project_init_packet,
+    select_plan_draft,
     sha256_hex,
     sha256_id,
 )
@@ -113,6 +120,9 @@ from .rendering import (
     REMOTE_PLAN_INIT_CONTEXT_KIND,
     REMOTE_PLAN_SESSION_CONTEXT_KIND,
     mobile_card_contract,
+    plan_context_choice_labels,
+    plan_context_identity,
+    plan_session_callback_id,
     sanitize_text,
 )
 from .schemas import (
@@ -121,6 +131,7 @@ from .schemas import (
     PLAN_GATE_RESOLUTION_SCHEMA,
     PLAN_REGISTRATION_SCHEMA,
     PLAN_REVIEW_SCHEMA,
+    PLAN_DRAFT_SELECTION_SCHEMA,
 )
 
 
@@ -143,6 +154,7 @@ def remote_plan_selection_context(session: dict[str, Any]) -> dict[str, Any]:
         "context_kind": REMOTE_PLAN_SESSION_CONTEXT_KIND,
         "focus_kind": "remote_plan_session",
         "focus_ref": session.get("session_id"),
+        "workflow_stage": session.get("stage"),
         "focus_label": "계획 대상 선택",
         "next_command": None,
         "choice_labels": [remote_plan_choice_label(candidate) for candidate in candidates],
@@ -150,9 +162,28 @@ def remote_plan_selection_context(session: dict[str, Any]) -> dict[str, Any]:
 
 
 def remote_plan_init_context(session: dict[str, Any]) -> dict[str, Any]:
+    context = _remote_plan_init_context(session)
+    context["workflow_stage"] = session.get("stage")
+    return context
+
+
+def _remote_plan_init_context(session: dict[str, Any]) -> dict[str, Any]:
     candidate = session.get("selected_candidate") if isinstance(session.get("selected_candidate"), dict) else {}
     stage = str(session.get("stage") or "")
-    if stage == "plan_gate_request_created":
+    if stage in {"plan_drafts_compared", "plan_draft_selection_failed"}:
+        comparison = (
+            session.get("plan_draft_comparison")
+            if isinstance(session.get("plan_draft_comparison"), dict)
+            else {}
+        )
+        labels = [
+            str(item.get("selection_label") or "").strip()
+            for item in comparison.get("candidates") or []
+            if isinstance(item, dict)
+            and item.get("status") == "validated"
+            and str(item.get("selection_label") or "").strip()
+        ]
+        labels.append("보류")
         return {
             "schema": INTERACTION_CONTEXT_SCHEMA,
             "command": "remote_plan_init_review",
@@ -162,7 +193,53 @@ def remote_plan_init_context(session: dict[str, Any]) -> dict[str, Any]:
             "focus_ref": session.get("session_id"),
             "focus_label": candidate.get("display_name") or "프로젝트",
             "next_command": None,
-            "choice_labels": ["게이트 승인", "게이트 거절", "보류"],
+            "choice_labels": labels,
+        }
+    if stage in {"plan_registered", "plan_review_failed"}:
+        labels = plan_review_choice_labels(session)
+        if labels:
+            labels.append("보류")
+        else:
+            labels = ["다시 선택", "보류"]
+        return {
+            "schema": INTERACTION_CONTEXT_SCHEMA,
+            "command": "remote_plan_init_review",
+            "profile": session.get("profile") or "default",
+            "context_kind": REMOTE_PLAN_INIT_CONTEXT_KIND,
+            "focus_kind": "remote_plan_session",
+            "focus_ref": session.get("session_id"),
+            "focus_label": candidate.get("display_name") or "프로젝트",
+            "next_command": None,
+            "choice_labels": labels,
+        }
+    if stage in {"plan_review_revision_required", "plan_review_rejected"}:
+        return {
+            "schema": INTERACTION_CONTEXT_SCHEMA,
+            "command": "remote_plan_init_review",
+            "profile": session.get("profile") or "default",
+            "context_kind": REMOTE_PLAN_INIT_CONTEXT_KIND,
+            "focus_kind": "remote_plan_session",
+            "focus_ref": session.get("session_id"),
+            "focus_label": candidate.get("display_name") or "프로젝트",
+            "next_command": None,
+            "choice_labels": ["다시 선택", "보류"],
+        }
+    if stage in {"plan_gate_request_created", "plan_gate_resolution_failed"}:
+        labels = gate_resolution_choice_labels(session)
+        if labels:
+            labels.append("보류")
+        else:
+            labels = ["보류"]
+        return {
+            "schema": INTERACTION_CONTEXT_SCHEMA,
+            "command": "remote_plan_init_review",
+            "profile": session.get("profile") or "default",
+            "context_kind": REMOTE_PLAN_INIT_CONTEXT_KIND,
+            "focus_kind": "remote_plan_session",
+            "focus_ref": session.get("session_id"),
+            "focus_label": candidate.get("display_name") or "프로젝트",
+            "next_command": None,
+            "choice_labels": labels,
         }
     if stage == "plan_gate_approved":
         return {
@@ -284,8 +361,6 @@ def remote_plan_init_context(session: dict[str, Any]) -> dict[str, Any]:
         }
     if stage == "project_init_previewed":
         primary = "초기화 생성"
-    elif stage in {"plan_registered", "plan_review_failed"}:
-        primary = "계획 승인"
     elif stage in {"plan_review_approved", "plan_launch_prep_failed"}:
         primary = "실행 준비 검토"
     elif stage in {"plan_launch_prep_prepared", "plan_gate_request_failed"}:
@@ -312,6 +387,38 @@ def remote_plan_init_context(session: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+PLAN_CALLBACK_PAYLOAD_RE = re.compile(
+    r"^@([0-9a-f]{8}):([0-9a-f]{16}):([0-9]{1,2})$"
+)
+
+
+def resolve_remote_plan_callback_payload(
+    session: dict[str, Any], payload: str
+) -> tuple[str | None, str | None]:
+    """Resolve a bounded Plan callback against the current session context."""
+
+    value = str(payload or "").strip()
+    match = PLAN_CALLBACK_PAYLOAD_RE.fullmatch(value)
+    if not match:
+        return value, None
+    sid, expected_context_hash, raw_index = match.groups()
+    session_id = str(session.get("session_id") or "")
+    if plan_session_callback_id(session_id) != sid:
+        return None, "plan_session_changed"
+    context = (
+        remote_plan_selection_context(session)
+        if str(session.get("stage") or "") == "project_selection"
+        else remote_plan_init_context(session)
+    )
+    if plan_context_identity(context) != expected_context_hash:
+        return None, "plan_context_changed"
+    labels = plan_context_choice_labels(context)
+    index = int(raw_index)
+    if index >= len(labels):
+        return None, "plan_choice_missing"
+    return labels[index], None
+
+
 def project_init_create_text(text: str) -> bool:
     normalized = str(text or "").strip().lower()
     return normalized in {
@@ -336,6 +443,26 @@ def plan_draft_create_text(text: str) -> bool:
     }
 
 
+def plan_draft_candidate_for_text(
+    comparison: dict[str, Any], text: str
+) -> dict[str, Any] | None:
+    normalized = " ".join(str(text or "").strip().lower().split())
+    if not normalized:
+        return None
+    for candidate in comparison.get("candidates") or []:
+        if not isinstance(candidate, dict) or candidate.get("status") != "validated":
+            continue
+        values = {
+            str(candidate.get("selection_label") or "").strip().lower(),
+            str(candidate.get("strategy_key") or "").strip().lower(),
+            str(candidate.get("strategy_label") or "").strip().lower(),
+            str(candidate.get("comparison_rank") or "").strip().lower(),
+        }
+        if normalized in values:
+            return candidate
+    return None
+
+
 def plan_registration_create_text(text: str) -> bool:
     normalized = str(text or "").strip().lower()
     return normalized in {
@@ -347,16 +474,35 @@ def plan_registration_create_text(text: str) -> bool:
     }
 
 
-def plan_review_approve_text(text: str) -> bool:
-    normalized = str(text or "").strip().lower()
-    return normalized in {
-        "계획 승인",
-        "계획승인",
-        "승인",
-        "plan approve",
-        "approve plan",
-        "approve",
-    }
+PLAN_REVIEW_ACTION_ALIASES = {
+    "계획 승인": "approved",
+    "계획승인": "approved",
+    "승인": "approved",
+    "plan approve": "approved",
+    "approve plan": "approved",
+    "approve": "approved",
+    "수정 요청": "revision_required",
+    "계획 수정": "revision_required",
+    "수정 필요": "revision_required",
+    "request revision": "revision_required",
+    "revision required": "revision_required",
+    "계획 거절": "rejected",
+    "계획 거부": "rejected",
+    "거절": "rejected",
+    "reject plan": "rejected",
+    "rejected": "rejected",
+}
+
+
+def plan_review_request(text: str) -> tuple[str | None, str | None]:
+    normalized = " ".join(str(text or "").strip().lower().split())
+    for label, decision in PLAN_REVIEW_ACTION_ALIASES.items():
+        if normalized == label:
+            return decision, None
+        prefix = f"{label} "
+        if normalized.startswith(prefix):
+            return decision, normalized[len(prefix) :].strip() or None
+    return None, None
 
 
 def plan_launch_prep_create_text(text: str) -> bool:
@@ -387,31 +533,42 @@ def plan_gate_request_text(text: str) -> bool:
     }
 
 
+GATE_APPROVAL_ACTION_ALIASES = {
+    "게이트 승인": True,
+    "게이트승인": True,
+    "실행 승인": True,
+    "실행승인": True,
+    "approve gate": True,
+    "gate approve": True,
+    "approve approval": True,
+    "게이트 거절": False,
+    "게이트거절": False,
+    "게이트 반려": False,
+    "실행 거절": False,
+    "실행거절": False,
+    "deny gate": False,
+    "gate deny": False,
+    "deny approval": False,
+}
+
+
+def gate_approval_request(text: str) -> tuple[bool | None, str | None]:
+    normalized = " ".join(str(text or "").strip().lower().split())
+    for label, approve in GATE_APPROVAL_ACTION_ALIASES.items():
+        if normalized == label:
+            return approve, None
+        prefix = f"{label} "
+        if normalized.startswith(prefix):
+            return approve, normalized[len(prefix) :].strip() or None
+    return None, None
+
+
 def gate_approval_approve_text(text: str) -> bool:
-    normalized = str(text or "").strip().lower()
-    return normalized in {
-        "게이트 승인",
-        "게이트승인",
-        "실행 승인",
-        "실행승인",
-        "approve gate",
-        "gate approve",
-        "approve approval",
-    }
+    return gate_approval_request(text)[0] is True
 
 
 def gate_approval_deny_text(text: str) -> bool:
-    normalized = str(text or "").strip().lower()
-    return normalized in {
-        "게이트 거절",
-        "게이트거절",
-        "게이트 반려",
-        "실행 거절",
-        "실행거절",
-        "deny gate",
-        "gate deny",
-        "deny approval",
-    }
+    return gate_approval_request(text)[0] is False
 
 
 def execution_brief_create_text(text: str) -> bool:
@@ -574,6 +731,7 @@ def register_plan_draft(
 ) -> dict[str, Any]:
     project_key = str(draft.get("project_key") or "project")
     plan_path = pathlib.Path(str(draft.get("plan_artifact_path") or ""))
+    expected_plan_sha256 = draft.get("plan_sha256")
     artifact_dir = args.remote_plan_artifact_dir.expanduser() / str(session.get("session_id") or "session")
     receipt_path = artifact_dir / "PLAN_REGISTRATION.json"
     receipt = {
@@ -583,11 +741,64 @@ def register_plan_draft(
         "profile": args.profile,
         "project_key": project_key,
         "plan_artifact_path": str(plan_path),
-        "expected_plan_sha256": draft.get("plan_sha256"),
+        "expected_plan_sha256": expected_plan_sha256,
         "execution_authorized": False,
         "approval_authorized": False,
         "runtime_authorized": False,
     }
+    if draft.get("schema") == PLAN_DRAFT_SELECTION_SCHEMA:
+        selection_path = pathlib.Path(str(draft.get("artifact_path") or ""))
+        receipt["selection_receipt_path"] = str(selection_path)
+        receipt["expected_selection_sha256"] = draft.get("receipt_sha256")
+        try:
+            selection_raw = selection_path.read_bytes()
+            selection_receipt = json.loads(selection_raw)
+        except (OSError, json.JSONDecodeError) as error:
+            receipt.update(
+                {
+                    "status": "error",
+                    "error": sanitize_text(
+                        f"plan selection receipt unavailable: {error}",
+                        max_chars=400,
+                    ),
+                    "artifact_path": str(receipt_path),
+                }
+            )
+            write_json(receipt_path, receipt)
+            return receipt
+        current_selection_sha256 = sha256_hex(selection_raw)
+        receipt["current_selection_sha256"] = current_selection_sha256
+        selection_matches = (
+            isinstance(selection_receipt, dict)
+            and draft.get("receipt_sha256") == current_selection_sha256
+            and selection_receipt.get("schema") == PLAN_DRAFT_SELECTION_SCHEMA
+            and selection_receipt.get("session_id") == session.get("session_id")
+            and selection_receipt.get("status") == "selected"
+            and selection_receipt.get("strategy_key") == draft.get("strategy_key")
+        )
+        receipt["selection_hash_matched"] = selection_matches
+        if not selection_matches:
+            receipt.update(
+                {
+                    "status": "stale",
+                    "error": "plan selection receipt changed before registration",
+                    "artifact_path": str(receipt_path),
+                }
+            )
+            write_json(receipt_path, receipt)
+            return receipt
+        project_key = str(selection_receipt.get("project_key") or "project")
+        plan_path = pathlib.Path(
+            str(selection_receipt.get("plan_artifact_path") or "")
+        )
+        expected_plan_sha256 = selection_receipt.get("plan_sha256")
+        receipt.update(
+            {
+                "project_key": project_key,
+                "plan_artifact_path": str(plan_path),
+                "expected_plan_sha256": expected_plan_sha256,
+            }
+        )
     try:
         current_sha = sha256_hex(plan_path.read_bytes())
     except OSError as error:
@@ -601,7 +812,7 @@ def register_plan_draft(
         write_json(receipt_path, receipt)
         return receipt
     receipt["current_plan_sha256"] = current_sha
-    if draft.get("plan_sha256") != current_sha:
+    if expected_plan_sha256 != current_sha:
         receipt.update(
             {
                 "status": "stale",
@@ -692,12 +903,53 @@ def registered_plan_ref(registration: dict[str, Any]) -> str:
     return ""
 
 
-def approve_registered_plan(
+def plan_registration_observed_hash(registration: dict[str, Any]) -> str:
+    output = (
+        registration.get("registration_output")
+        if isinstance(registration.get("registration_output"), dict)
+        else {}
+    )
+    source_sha256 = str(output.get("source_sha256") or "").strip().lower()
+    if re.fullmatch(r"[a-f0-9]{64}", source_sha256):
+        return f"sha256:{source_sha256}"
+    return ""
+
+
+def plan_review_action_token(session: dict[str, Any], observed_hash: str) -> str:
+    session_id = str(session.get("session_id") or "").strip()
+    if not session_id or not observed_hash:
+        return ""
+    payload = f"{session_id}|{observed_hash}|plan_review.v1"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def plan_review_choice_labels(session: dict[str, Any]) -> list[str]:
+    registration = (
+        session.get("plan_registration")
+        if isinstance(session.get("plan_registration"), dict)
+        else {}
+    )
+    observed_hash = plan_registration_observed_hash(registration)
+    token = plan_review_action_token(session, observed_hash)
+    if not token:
+        return []
+    return [
+        f"계획 승인 {token}",
+        f"수정 요청 {token}",
+        f"계획 거절 {token}",
+    ]
+
+
+def review_registered_plan(
     args: argparse.Namespace,
     *,
     session: dict[str, Any],
     registration: dict[str, Any],
+    decision: str,
+    received_action_token: str | None,
 ) -> dict[str, Any]:
+    if decision not in {"approved", "revision_required", "rejected"}:
+        raise ValueError(f"unsupported plan review decision: {decision}")
     output = registration.get("registration_output") if isinstance(registration.get("registration_output"), dict) else {}
     artifacts = output.get("artifacts") if isinstance(output.get("artifacts"), dict) else {}
     project_key = str(output.get("project_key") or registration.get("project_key") or "project")
@@ -705,7 +957,9 @@ def approve_registered_plan(
     artifact_dir = args.remote_plan_artifact_dir.expanduser() / str(session.get("session_id") or "session")
     receipt_path = artifact_dir / "PLAN_REVIEW.json"
     copied_source_json = str(artifacts.get("copied_source_json") or "").strip()
-    expected_source_sha = str(output.get("source_sha256") or "").strip()
+    expected_source_sha = str(output.get("source_sha256") or "").strip().lower()
+    observed_hash = plan_registration_observed_hash(registration)
+    expected_action_token = plan_review_action_token(session, observed_hash)
     receipt = {
         "schema": PLAN_REVIEW_SCHEMA,
         "created_at": utc_now(),
@@ -716,6 +970,11 @@ def approve_registered_plan(
         "registration_json": str(artifacts.get("registration_json") or ""),
         "copied_source_json": copied_source_json,
         "expected_source_sha256": expected_source_sha,
+        "decision": decision,
+        "observed_hash": observed_hash,
+        "action_token": expected_action_token,
+        "received_action_token": str(received_action_token or ""),
+        "observed_hash_matched": False,
         "plan_review_authorized": True,
         "approval_authorized": False,
         "execution_authorized": False,
@@ -733,30 +992,73 @@ def approve_registered_plan(
         )
         write_json(receipt_path, receipt)
         return receipt
-    if copied_source_json and expected_source_sha:
-        try:
-            current_sha = sha256_hex(pathlib.Path(copied_source_json).read_bytes())
-        except OSError as error:
-            receipt.update(
-                {
-                    "status": "error",
-                    "error": sanitize_text(f"registered plan source unavailable: {error}", max_chars=400),
-                    "artifact_path": str(receipt_path),
-                }
-            )
-            write_json(receipt_path, receipt)
-            return receipt
-        receipt["current_source_sha256"] = current_sha
-        if current_sha != expected_source_sha:
-            receipt.update(
-                {
-                    "status": "stale",
-                    "error": "registered plan source changed after registration",
-                    "artifact_path": str(receipt_path),
-                }
-            )
-            write_json(receipt_path, receipt)
-            return receipt
+    if not observed_hash or not expected_action_token:
+        receipt.update(
+            {
+                "status": "error",
+                "error": "registered plan observed hash unavailable",
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    if not copied_source_json or not expected_source_sha:
+        receipt.update(
+            {
+                "status": "error",
+                "error": "registered plan source evidence unavailable",
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    if str(received_action_token or "").strip().lower() != expected_action_token:
+        receipt.update(
+            {
+                "status": "stale",
+                "error": "plan review action does not match the displayed plan hash",
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    try:
+        current_sha = sha256_hex(pathlib.Path(copied_source_json).read_bytes())
+    except OSError as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(
+                    f"registered plan source unavailable: {error}", max_chars=400
+                ),
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt["current_source_sha256"] = current_sha
+    if current_sha != expected_source_sha or f"sha256:{current_sha}" != observed_hash:
+        receipt.update(
+            {
+                "status": "stale",
+                "error": "registered plan source changed after registration",
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt["observed_hash_matched"] = True
+    cli_decision = "revision-required" if decision == "revision_required" else decision
+    reason = {
+        "approved": "Telegram operator approved the registered plan for a separate launch-preparation review.",
+        "revision_required": "Telegram operator requested revision of the registered plan before launch preparation.",
+        "rejected": "Telegram operator rejected the registered plan direction.",
+    }[decision]
+    follow_up = {
+        "approved": "Prepare launch packet in a separate command.",
+        "revision_required": "Revise and register a new plan before another review.",
+        "rejected": "Discard or replace the plan before another review.",
+    }[decision]
     command = [args.forager_bin]
     if args.profile:
         command.extend(["--profile", args.profile])
@@ -766,16 +1068,30 @@ def approve_registered_plan(
             "plan-review",
             plan_ref,
             "--decision",
-            "approved",
+            cli_decision,
             "--reviewer",
             "telegram",
             "--reason",
-            "Telegram operator approved the registered plan for a separate launch-preparation review.",
+            reason,
             "--follow-up",
-            "Prepare launch packet in a separate command.",
-            "--json",
+            follow_up,
         ]
     )
+    if decision == "revision_required":
+        command.extend(
+            [
+                "--blocker",
+                "Operator requested plan revision before launch preparation.",
+            ]
+        )
+    elif decision == "rejected":
+        command.extend(
+            [
+                "--blocker",
+                "Operator rejected the current plan direction.",
+            ]
+        )
+    command.append("--json")
     receipt["review_command"] = command
     try:
         process = subprocess.run(
@@ -819,9 +1135,20 @@ def approve_registered_plan(
         )
         write_json(receipt_path, receipt)
         return receipt
+    if review_output.get("decision") != decision:
+        receipt.update(
+            {
+                "status": "error",
+                "error": "plan review returned an unexpected decision",
+                "review_output": review_output,
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
     receipt.update(
         {
-            "status": "approved" if review_output.get("decision") == "approved" else "reviewed",
+            "status": decision,
             "review_output": review_output,
             "artifact_path": str(receipt_path),
         }
@@ -890,6 +1217,10 @@ def request_gate_for_launch_prep(
         write_json(receipt_path, receipt)
         return receipt
     receipt["current_launch_prep_sha256"] = current_sha
+    receipt["observed_hash"] = f"sha256:{current_sha}"
+    receipt["observed_hash_matched"] = not expected_launch_prep_sha or (
+        current_sha == expected_launch_prep_sha
+    )
     if expected_launch_prep_sha and current_sha != expected_launch_prep_sha:
         receipt.update(
             {
@@ -976,6 +1307,7 @@ def request_gate_for_launch_prep(
             "artifact_path": str(receipt_path),
         }
     )
+    receipt["action_token"] = gate_resolution_action_token(session, receipt)
     write_json(receipt_path, receipt)
     return receipt
 
@@ -984,6 +1316,40 @@ def gate_request_approval(gate_request: dict[str, Any]) -> dict[str, Any]:
     output = gate_request.get("gate_output") if isinstance(gate_request.get("gate_output"), dict) else {}
     approval = output.get("approval") if isinstance(output.get("approval"), dict) else {}
     return approval
+
+
+def gate_request_observed_hash(gate_request: dict[str, Any]) -> str:
+    current_sha = str(gate_request.get("current_launch_prep_sha256") or "").strip().lower()
+    if re.fullmatch(r"[a-f0-9]{64}", current_sha):
+        return f"sha256:{current_sha}"
+    observed_hash = str(gate_request.get("observed_hash") or "").strip().lower()
+    if re.fullmatch(r"sha256:[a-f0-9]{64}", observed_hash):
+        return observed_hash
+    return ""
+
+
+def gate_resolution_action_token(
+    session: dict[str, Any], gate_request: dict[str, Any]
+) -> str:
+    session_id = str(session.get("session_id") or "").strip()
+    approval_id = str(gate_request_approval(gate_request).get("approval_id") or "").strip()
+    observed_hash = gate_request_observed_hash(gate_request)
+    if not session_id or not approval_id or not observed_hash:
+        return ""
+    payload = f"{session_id}|{approval_id}|{observed_hash}|gate_resolution.v1"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def gate_resolution_choice_labels(session: dict[str, Any]) -> list[str]:
+    gate_request = (
+        session.get("plan_gate_request")
+        if isinstance(session.get("plan_gate_request"), dict)
+        else {}
+    )
+    token = gate_resolution_action_token(session, gate_request)
+    if not token:
+        return []
+    return [f"게이트 승인 {token}", f"게이트 거절 {token}"]
 
 
 def pending_approval_snapshot(
@@ -1041,6 +1407,7 @@ def resolve_gate_approval(
     session: dict[str, Any],
     gate_request: dict[str, Any],
     approve: bool,
+    received_action_token: str | None,
 ) -> dict[str, Any]:
     expected = gate_request_approval(gate_request)
     approval_id = str(expected.get("approval_id") or "").strip()
@@ -1049,6 +1416,8 @@ def resolve_gate_approval(
     task_id = str(gate_request.get("task_id") or expected.get("task_id") or "")
     launch_prep_json = str(gate_request.get("launch_prep_json") or "").strip()
     expected_launch_prep_sha = str(gate_request.get("expected_launch_prep_sha256") or gate_request.get("current_launch_prep_sha256") or "").strip()
+    observed_hash = gate_request_observed_hash(gate_request)
+    expected_action_token = gate_resolution_action_token(session, gate_request)
     artifact_dir = args.remote_plan_artifact_dir.expanduser() / str(session.get("session_id") or "session")
     receipt_path = artifact_dir / "PLAN_GATE_RESOLUTION.json"
     decision = "approved" if approve else "denied"
@@ -1064,9 +1433,13 @@ def resolve_gate_approval(
         "task_id": task_id,
         "launch_prep_json": launch_prep_json,
         "expected_launch_prep_sha256": expected_launch_prep_sha,
-        "approval_resolution_authorized": True,
-        "approval_authorized": bool(approve),
-        "gate_approval_authorized": bool(approve),
+        "observed_hash": observed_hash,
+        "action_token": expected_action_token,
+        "received_action_token": str(received_action_token or ""),
+        "observed_hash_matched": False,
+        "approval_resolution_authorized": False,
+        "approval_authorized": False,
+        "gate_approval_authorized": False,
         "execution_authorized": False,
         "launch_authorized": False,
         "enqueue_authorized": False,
@@ -1082,30 +1455,65 @@ def resolve_gate_approval(
         )
         write_json(receipt_path, receipt)
         return receipt
-    if launch_prep_json and expected_launch_prep_sha:
-        try:
-            current_sha = sha256_hex(pathlib.Path(launch_prep_json).read_bytes())
-        except OSError as error:
-            receipt.update(
-                {
-                    "status": "error",
-                    "error": sanitize_text(f"launch-preparation packet unavailable: {error}", max_chars=400),
-                    "artifact_path": str(receipt_path),
-                }
-            )
-            write_json(receipt_path, receipt)
-            return receipt
-        receipt["current_launch_prep_sha256"] = current_sha
-        if current_sha != expected_launch_prep_sha:
-            receipt.update(
-                {
-                    "status": "stale",
-                    "error": "launch-preparation packet changed after gate request",
-                    "artifact_path": str(receipt_path),
-                }
-            )
-            write_json(receipt_path, receipt)
-            return receipt
+    if not observed_hash or not expected_action_token:
+        receipt.update(
+            {
+                "status": "error",
+                "error": "launch-preparation observed hash unavailable",
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    if str(received_action_token or "").strip().lower() != expected_action_token:
+        receipt.update(
+            {
+                "status": "stale",
+                "error": "gate action does not match the displayed launch-preparation hash",
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    if not launch_prep_json:
+        receipt.update(
+            {
+                "status": "error",
+                "error": "launch-preparation packet path unavailable",
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    try:
+        current_sha = sha256_hex(pathlib.Path(launch_prep_json).read_bytes())
+    except OSError as error:
+        receipt.update(
+            {
+                "status": "error",
+                "error": sanitize_text(
+                    f"launch-preparation packet unavailable: {error}", max_chars=400
+                ),
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt["current_launch_prep_sha256"] = current_sha
+    if (
+        (expected_launch_prep_sha and current_sha != expected_launch_prep_sha)
+        or f"sha256:{current_sha}" != observed_hash
+    ):
+        receipt.update(
+            {
+                "status": "stale",
+                "error": "launch-preparation packet changed after gate request",
+                "artifact_path": str(receipt_path),
+            }
+        )
+        write_json(receipt_path, receipt)
+        return receipt
+    receipt["observed_hash_matched"] = True
     pending, pending_error = pending_approval_snapshot(args, approval_id=approval_id)
     if pending_error or pending is None:
         receipt.update(
@@ -1139,6 +1547,9 @@ def resolve_gate_approval(
         )
         write_json(receipt_path, receipt)
         return receipt
+    receipt["approval_resolution_authorized"] = True
+    receipt["approval_authorized"] = bool(approve)
+    receipt["gate_approval_authorized"] = bool(approve)
     command = [args.forager_bin]
     if args.profile:
         command.extend(["--profile", args.profile])
@@ -1248,11 +1659,15 @@ def active_remote_plan_session(state: dict[str, Any], chat_hash: str) -> dict[st
         "project_init_previewed",
         "project_init_created",
         "project_init_failed",
+        "plan_drafts_compared",
+        "plan_draft_selection_failed",
         "plan_draft_validated",
         "plan_draft_failed",
         "plan_registered",
         "plan_registration_failed",
         "plan_review_approved",
+        "plan_review_revision_required",
+        "plan_review_rejected",
         "plan_review_failed",
         "plan_launch_prep_prepared",
         "plan_launch_prep_failed",
@@ -1327,7 +1742,6 @@ def remote_plan_action_text(text: str) -> bool:
             project_init_create_text,
             plan_draft_create_text,
             plan_registration_create_text,
-            plan_review_approve_text,
             plan_launch_prep_create_text,
             plan_gate_request_text,
             gate_approval_approve_text,
@@ -1341,7 +1755,7 @@ def remote_plan_action_text(text: str) -> bool:
             closeout_packet_create_text,
             closeout_review_handoff_create_text,
         )
-    ) or closeout_verdict_request(text)[0] is not None
+    ) or plan_review_request(text)[0] is not None or closeout_verdict_request(text)[0] is not None
 
 
 def candidate_directly_selected(candidate: dict[str, Any], text: str) -> bool:
@@ -1405,6 +1819,13 @@ def remote_plan_session_should_handle_text(
         return remote_plan_project_selection_text(args, session, normalized)
     if stage == "project_path_required":
         return bool(resolve_manual_project_path(args, normalized)) or remote_plan_search_request_text(normalized)
+    if stage in {"plan_drafts_compared", "plan_draft_selection_failed"}:
+        comparison = (
+            session.get("plan_draft_comparison")
+            if isinstance(session.get("plan_draft_comparison"), dict)
+            else {}
+        )
+        return plan_draft_candidate_for_text(comparison, normalized) is not None
     if stage in {"plan_enqueue_handoff_created", "plan_workload_path_required", "plan_workload_binding_failed"}:
         return bool(resolve_prepared_task_path(normalized))
     return False
@@ -1529,6 +1950,16 @@ def handle_remote_plan_session_input(
         "session_id": session.get("session_id"),
     }
     stage = str(session.get("stage") or "")
+    plan_review_decision, plan_review_token = plan_review_request(normalized)
+    gate_approval_decision, gate_approval_token = gate_approval_request(normalized)
+    plan_draft_comparison = (
+        session.get("plan_draft_comparison")
+        if isinstance(session.get("plan_draft_comparison"), dict)
+        else {}
+    )
+    selected_plan_draft = plan_draft_candidate_for_text(
+        plan_draft_comparison, normalized
+    )
     if remote_plan_defer_text(normalized):
         session["stage"] = "deferred"
         store_remote_plan_session(state, chat_hash, session)
@@ -1553,6 +1984,7 @@ def handle_remote_plan_session_input(
         session.pop("project_init_preview", None)
         session.pop("project_init_run", None)
         session.pop("plan_draft", None)
+        session.pop("plan_draft_comparison", None)
         session.pop("plan_registration", None)
         session.pop("plan_review", None)
         session.pop("plan_launch_prep", None)
@@ -2070,19 +2502,33 @@ def handle_remote_plan_session_input(
                 "selected_project_key": binding.get("project_key"),
             }
             attach_choice_surface(result, choice_context)
-    elif gate_approval_approve_text(normalized) or gate_approval_deny_text(normalized):
+    elif gate_approval_decision is not None:
         gate_request = session.get("plan_gate_request") if isinstance(session.get("plan_gate_request"), dict) else {}
-        approve = gate_approval_approve_text(normalized)
-        if stage != "plan_gate_request_created" or gate_request.get("status") != "pending_approval":
+        expected_gate_token = gate_resolution_action_token(session, gate_request)
+        if (
+            stage not in {"plan_gate_request_created", "plan_gate_resolution_failed"}
+            or gate_request.get("status") != "pending_approval"
+        ):
             result["parsed_command"] = {**parsed, "selection_status": "gate_request_required"}
             message_preview = render_plan_gate_resolution_required_message(profile=args.profile)
+            attach_choice_surface(result, remote_plan_init_context(session))
+        elif not gate_approval_token or gate_approval_token != expected_gate_token:
+            result["parsed_command"] = {
+                **parsed,
+                "selection_status": "plan_gate_observed_hash_required",
+                "gate_decision": "approved" if gate_approval_decision else "denied",
+            }
+            message_preview = render_plan_gate_resolution_hash_required_message(
+                profile=args.profile
+            )
             attach_choice_surface(result, remote_plan_init_context(session))
         else:
             resolution = resolve_gate_approval(
                 args,
                 session=session,
                 gate_request=gate_request,
-                approve=approve,
+                approve=gate_approval_decision,
+                received_action_token=gate_approval_token,
             )
             session["plan_gate_resolution"] = resolution
             if resolution.get("status") in {"approved", "denied"}:
@@ -2134,19 +2580,49 @@ def handle_remote_plan_session_input(
                 "selected_project_key": gate_request.get("project_key"),
             }
             attach_choice_surface(result, choice_context)
-    elif plan_review_approve_text(normalized):
+    elif plan_review_decision is not None:
         registration = session.get("plan_registration") if isinstance(session.get("plan_registration"), dict) else {}
         if stage not in {"plan_registered", "plan_review_failed"} or registration.get("status") != "registered":
             result["parsed_command"] = {**parsed, "selection_status": "plan_registration_required"}
             message_preview = render_plan_review_required_message(profile=args.profile)
             attach_choice_surface(result, remote_plan_init_context(session))
+        elif not plan_review_token:
+            result["parsed_command"] = {
+                **parsed,
+                "selection_status": "plan_review_observed_hash_required",
+                "review_decision": plan_review_decision,
+            }
+            message_preview = render_plan_review_hash_required_message(
+                profile=args.profile
+            )
+            attach_choice_surface(result, remote_plan_init_context(session))
         else:
-            review = approve_registered_plan(args, session=session, registration=registration)
+            review = review_registered_plan(
+                args,
+                session=session,
+                registration=registration,
+                decision=plan_review_decision,
+                received_action_token=plan_review_token,
+            )
             session["plan_review"] = review
             if review.get("status") == "approved":
                 session["stage"] = "plan_review_approved"
                 message_preview = render_plan_review_approved_message(profile=args.profile, session=session)
                 selection_status = "plan_review_approved"
+                choice_context = remote_plan_init_context(session)
+            elif review.get("status") == "revision_required":
+                session["stage"] = "plan_review_revision_required"
+                message_preview = render_plan_review_revision_required_message(
+                    profile=args.profile, session=session
+                )
+                selection_status = "plan_review_revision_required"
+                choice_context = remote_plan_init_context(session)
+            elif review.get("status") == "rejected":
+                session["stage"] = "plan_review_rejected"
+                message_preview = render_plan_review_rejected_message(
+                    profile=args.profile, session=session
+                )
+                selection_status = "plan_review_rejected"
                 choice_context = remote_plan_init_context(session)
             else:
                 session["stage"] = "plan_review_failed"
@@ -2159,12 +2635,48 @@ def handle_remote_plan_session_input(
             result["parsed_command"] = {
                 **parsed,
                 "selection_status": selection_status,
+                "review_decision": plan_review_decision,
                 "selected_project_key": review.get("project_key"),
             }
             attach_choice_surface(result, choice_context)
+    elif stage in {"plan_drafts_compared", "plan_draft_selection_failed"} and selected_plan_draft:
+        draft = select_plan_draft(
+            args,
+            session=session,
+            comparison=plan_draft_comparison,
+            candidate=selected_plan_draft,
+        )
+        session["plan_draft"] = draft
+        if draft.get("status") == "selected":
+            session["stage"] = "plan_draft_validated"
+            message_preview = render_plan_draft_selected_message(
+                profile=args.profile, session=session
+            )
+            selection_status = "plan_draft_selected"
+        else:
+            session["stage"] = "plan_draft_selection_failed"
+            message_preview = render_plan_draft_failed_message(
+                profile=args.profile, session=session
+            )
+            selection_status = (
+                "plan_draft_selection_stale"
+                if draft.get("status") == "stale"
+                else "plan_draft_selection_failed"
+            )
+        store_remote_plan_session(state, chat_hash, session)
+        result["parsed_command"] = {
+            **parsed,
+            "selection_status": selection_status,
+            "selected_project_key": draft.get("project_key"),
+            "selected_strategy_key": draft.get("strategy_key"),
+        }
+        attach_choice_surface(result, remote_plan_init_context(session))
     elif plan_registration_create_text(normalized):
         draft = session.get("plan_draft") if isinstance(session.get("plan_draft"), dict) else {}
-        if stage != "plan_draft_validated" or draft.get("status") != "validated":
+        if stage != "plan_draft_validated" or draft.get("status") not in {
+            "validated",
+            "selected",
+        }:
             result["parsed_command"] = {**parsed, "selection_status": "plan_draft_required"}
             message_preview = render_plan_registration_required_message(profile=args.profile)
             attach_choice_surface(result, remote_plan_init_context(session))
@@ -2200,12 +2712,17 @@ def handle_remote_plan_session_input(
             message_preview = render_plan_draft_required_message(profile=args.profile)
             attach_choice_surface(result, remote_plan_init_context(session))
         else:
-            draft = create_plan_draft(args, session=session, init_run=init_run)
-            session["plan_draft"] = draft
-            if draft.get("status") == "validated":
-                session["stage"] = "plan_draft_validated"
-                message_preview = render_plan_draft_validated_message(profile=args.profile, session=session)
-                selection_status = "plan_draft_validated"
+            comparison = create_plan_draft(
+                args, session=session, init_run=init_run
+            )
+            session["plan_draft_comparison"] = comparison
+            session.pop("plan_draft", None)
+            if comparison.get("status") == "compared":
+                session["stage"] = "plan_drafts_compared"
+                message_preview = render_plan_draft_compared_message(
+                    profile=args.profile, session=session
+                )
+                selection_status = "plan_drafts_compared"
             else:
                 session["stage"] = "plan_draft_failed"
                 message_preview = render_plan_draft_failed_message(profile=args.profile, session=session)

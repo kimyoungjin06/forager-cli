@@ -10,7 +10,7 @@ use anyhow::{bail, Result};
 use clap::Args;
 use std::path::PathBuf;
 
-use crate::session::project_registry::{load_registry, resolve_project_for_path};
+use crate::session::project_registry::{load_registry, resolve_unique_project_for_path};
 use crate::session::{repo_config, GroupTree, Instance, Storage};
 
 #[derive(Args)]
@@ -90,7 +90,7 @@ pub async fn run(profile: &str, args: GoArgs) -> Result<()> {
     let tool = super::add::detect_tool(&command)?;
 
     let mut registry = load_registry();
-    let mut project = resolve_project_for_path(&path, &registry);
+    let mut project = resolve_unique_project_for_path(&path, &registry)?;
 
     if args.register {
         if let Some(entry) = &project {
@@ -110,7 +110,7 @@ pub async fn run(profile: &str, args: GoArgs) -> Result<()> {
                 entry.wiki_profile.as_deref().unwrap_or("-")
             );
             registry = load_registry();
-            project = resolve_project_for_path(&path, &registry);
+            project = resolve_unique_project_for_path(&path, &registry)?;
         }
     }
 
@@ -132,9 +132,11 @@ pub async fn run(profile: &str, args: GoArgs) -> Result<()> {
         }
     }
 
-    if !args.no_brief {
-        refresh_wiki_brief(project.as_ref(), &path).await;
-    }
+    let wiki_manifest = if args.no_brief {
+        None
+    } else {
+        refresh_wiki_brief(project.as_ref(), &path).await
+    };
 
     let storage = Storage::new(profile)?;
     let (mut instances, groups) = storage.load_with_groups()?;
@@ -183,7 +185,8 @@ pub async fn run(profile: &str, args: GoArgs) -> Result<()> {
     };
 
     let running = crate::tmux::Session::new(&instances[idx].id, &instances[idx].title)?.exists();
-    if !running {
+    let started_now = !running;
+    if started_now {
         instances[idx].start_with_size(crate::terminal::get_size(), &config)?;
         println!("Started: {}", instances[idx].command);
     }
@@ -193,6 +196,39 @@ pub async fn run(profile: &str, args: GoArgs) -> Result<()> {
         group_tree.create_group(&instances[idx].group_path);
     }
     storage.save_with_groups(&instances, &group_tree)?;
+
+    if started_now {
+        if let Some(manifest) = wiki_manifest.as_ref() {
+            if matches!(instances[idx].tool.as_str(), "codex" | "claude") {
+                match super::session::wiki_context::auto_present_new_go_session(
+                    profile,
+                    &instances[idx],
+                    manifest,
+                )
+                .await
+                {
+                    Ok(Some(receipt)) => println!(
+                        "Wiki context: {} ({})",
+                        super::session::wiki_context::presentation_status_label(
+                            receipt.presentation_status
+                        ),
+                        receipt.receipt_id
+                    ),
+                    Ok(None) => println!("Wiki context: no usable projection to present"),
+                    Err(error) => println!("Wiki context presentation failed: {error}"),
+                }
+            } else {
+                println!(
+                    "Wiki context prepared; automatic presentation supports only Codex and Claude"
+                );
+            }
+        }
+    } else if wiki_manifest.is_some() {
+        println!(
+            "Running session was not modified; use `forager session context-sync {}` explicitly.",
+            instances[idx].id
+        );
+    }
 
     if args.no_attach {
         println!("Session ready (not attaching): {}", instances[idx].id);
@@ -208,23 +244,43 @@ pub async fn run(profile: &str, args: GoArgs) -> Result<()> {
 async fn refresh_wiki_brief(
     project: Option<&crate::session::project_registry::ProjectRegistryEntry>,
     path: &std::path::Path,
-) {
-    let Some(entry) = project else {
-        return;
-    };
-    let Some(wiki_profile) = entry.wiki_profile.clone() else {
-        return;
-    };
-    let out = path.join(".wiki-brief.md");
-    let brief_args = super::offdesk::WikiBriefArgs::scoped_to_file(entry.key.clone(), out.clone());
-    match super::offdesk::wiki_brief(&wiki_profile, brief_args).await {
-        Ok(()) => println!(
-            "Wiki brief refreshed: {} (plane: {})",
-            out.display(),
-            wiki_profile
-        ),
-        Err(error) => println!("Wiki brief skipped: {error}"),
+) -> Option<crate::offdesk::WikiContextManifestV1> {
+    let target = wiki_brief_refresh_target(project, path)?;
+    let brief_args =
+        super::offdesk::WikiBriefArgs::scoped_to_file(target.project_key, target.out.clone());
+    match super::offdesk::wiki_brief(&target.wiki_profile, brief_args).await {
+        Ok(manifest) => {
+            println!(
+                "Wiki brief refreshed: {} (plane: {})",
+                target.out.display(),
+                target.wiki_profile
+            );
+            manifest
+        }
+        Err(error) => {
+            println!("Wiki brief skipped: {error}");
+            None
+        }
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct WikiBriefRefreshTarget {
+    project_key: String,
+    wiki_profile: String,
+    out: PathBuf,
+}
+
+fn wiki_brief_refresh_target(
+    project: Option<&crate::session::project_registry::ProjectRegistryEntry>,
+    path: &std::path::Path,
+) -> Option<WikiBriefRefreshTarget> {
+    let entry = project?;
+    Some(WikiBriefRefreshTarget {
+        project_key: entry.key.clone(),
+        wiki_profile: entry.wiki_profile.clone()?,
+        out: path.join(".wiki-brief.md"),
+    })
 }
 
 fn run_hook_check(path: &std::path::Path, trust_hooks: bool) -> Result<()> {
@@ -279,4 +335,35 @@ fn unique_session_title(instances: &[Instance], tool: &str, path: &str) -> Strin
         }
     }
     format!("{base}-{}", uuid::Uuid::new_v4())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::project_registry::ProjectRegistryEntry;
+
+    fn project(wiki_profile: Option<&str>) -> ProjectRegistryEntry {
+        ProjectRegistryEntry {
+            key: "forager".to_string(),
+            display_name: "Forager".to_string(),
+            workspace_patterns: vec!["forager-cli".to_string()],
+            session_group: None,
+            wiki_profile: wiki_profile.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn wiki_brief_refresh_target_records_current_go_scope() {
+        let root = PathBuf::from("/workspace/forager-cli");
+        assert_eq!(
+            wiki_brief_refresh_target(Some(&project(Some("forager-ops"))), &root),
+            Some(WikiBriefRefreshTarget {
+                project_key: "forager".to_string(),
+                wiki_profile: "forager-ops".to_string(),
+                out: root.join(".wiki-brief.md"),
+            })
+        );
+        assert_eq!(wiki_brief_refresh_target(None, &root), None);
+        assert_eq!(wiki_brief_refresh_target(Some(&project(None)), &root), None);
+    }
 }

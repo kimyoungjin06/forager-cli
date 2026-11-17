@@ -1,0 +1,82 @@
+{
+  "schema": "document_identity_crosswalk.v1",
+  "precedence": {
+    "current_path_and_bytes": "filesystem_observation",
+    "reviewed_lifecycle_state": "lifecycle_ledger",
+    "artifact_role_and_retention_evidence": "artifact_index",
+    "ambiguous_match_action": "report_conflict_and_block_retention_selection"
+  },
+  "retention_target_contract": {
+    "approval_ledger": "existing_offdesk_approval_ledger",
+    "catalog_only_source_kind": "document",
+    "artifact_backed_source_kind": "artifact",
+    "exact_current_path_and_hash_required": true,
+    "fabricated_artifact_identity_allowed": false,
+    "duplicate_approval_allowed": false,
+    "existing_application_receipt_authority": "plan_provenance_only",
+    "existing_application_receipt_mutation_authorized": false,
+    "ambiguous_match_action": "block_without_minting_target"
+  },
+  "cases": [
+    {
+      "case_id": "catalog_only_document",
+      "observation_id": "doc_observation_catalog_only",
+      "document_id": null,
+      "artifact_ids": [],
+      "current_path_exact": true,
+      "content_hash_exact": true,
+      "expected": {
+        "status": "mint",
+        "retention_target_id": "retention_target_document_catalog_only",
+        "source_kind": "document",
+        "fabricated_artifact_identity": false,
+        "finding_codes": []
+      }
+    },
+    {
+      "case_id": "artifact_backed_document",
+      "observation_id": "doc_observation_artifact_backed",
+      "document_id": "document_artifact_backed",
+      "artifact_ids": ["artifact_report"],
+      "current_path_exact": true,
+      "content_hash_exact": true,
+      "expected": {
+        "status": "reuse",
+        "retention_target_id": "retention_target_artifact_report",
+        "source_kind": "artifact",
+        "fabricated_artifact_identity": false,
+        "finding_codes": []
+      }
+    },
+    {
+      "case_id": "ambiguous_artifact_matches",
+      "observation_id": "doc_observation_ambiguous",
+      "document_id": "document_ambiguous",
+      "artifact_ids": ["artifact_one", "artifact_two"],
+      "current_path_exact": true,
+      "content_hash_exact": true,
+      "expected": {
+        "status": "blocked",
+        "retention_target_id": null,
+        "source_kind": null,
+        "fabricated_artifact_identity": false,
+        "finding_codes": ["multiple_artifact_matches"]
+      }
+    },
+    {
+      "case_id": "stale_content_hash",
+      "observation_id": "doc_observation_stale",
+      "document_id": "document_stale",
+      "artifact_ids": ["artifact_stale"],
+      "current_path_exact": true,
+      "content_hash_exact": false,
+      "expected": {
+        "status": "blocked",
+        "retention_target_id": null,
+        "source_kind": null,
+        "fabricated_artifact_identity": false,
+        "finding_codes": ["content_hash_mismatch"]
+      }
+    }
+  ]
+}

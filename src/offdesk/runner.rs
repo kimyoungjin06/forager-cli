@@ -1,6 +1,6 @@
 //! Gated background runner launch and durable polling.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
@@ -9,13 +9,14 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use uuid::Uuid;
 
+use crate::process;
 use crate::tmux::{self, Session};
 
 use super::adaptive_wiki::{build_runtime_projection, AdaptiveWikiProjectionPolicy};
 use super::approval::ExecutionBrief;
 use super::background::{
     BackgroundProbe, BackgroundRecoveryDecision, BackgroundRunStore, BackgroundRunnerKind,
-    BackgroundRunnerPhase, NotificationDecision,
+    BackgroundRunnerPhase, BackgroundTerminationRecord, NotificationDecision,
 };
 use super::implementation_packet::{
     implementation_packet_record_from_path, operator_safe_implementation_packet_summary,
@@ -70,6 +71,12 @@ pub struct LocalCommandLaunchSpec {
     pub working_dir: PathBuf,
     pub log_artifact_path: Option<PathBuf>,
     pub result_artifact_path: Option<PathBuf>,
+    /// Internal adapter input, never inferred from the current/shared cgroup.
+    pub containment_parent: Option<PathBuf>,
+    pub host_policy_attestation:
+        Option<super::shift_host_policy::OffdeskShiftHostPolicyAttestationV1>,
+    pub read_policy: Option<super::read_policy::ReadPolicy>,
+    pub read_policy_root_identity_sha256: Option<String>,
 }
 
 impl LocalCommandLaunchSpec {
@@ -79,6 +86,10 @@ impl LocalCommandLaunchSpec {
             working_dir: working_dir.into(),
             log_artifact_path: None,
             result_artifact_path: None,
+            containment_parent: None,
+            host_policy_attestation: None,
+            read_policy: None,
+            read_policy_root_identity_sha256: None,
         }
     }
 }
@@ -99,6 +110,23 @@ pub struct BackgroundPollOutcome {
     pub next_safe_action: OffdeskNextSafeAction,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notification: Option<NotificationDecision>,
+}
+
+pub const BACKGROUND_TERMINATION_REPORT_SCHEMA: &str = "background_termination_report.v1";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BackgroundTerminationReport {
+    pub schema: &'static str,
+    pub ticket_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+    pub runner_kind: BackgroundRunnerKind,
+    pub previous_phase: BackgroundRunnerPhase,
+    pub phase: BackgroundRunnerPhase,
+    pub changed: bool,
+    pub runtime_was_alive: bool,
+    pub runtime_alive: bool,
+    pub evidence: String,
 }
 
 pub fn launch_background_run(
@@ -146,6 +174,25 @@ pub fn launch_background_command_with_gate_outcome(
     command_spec: LocalCommandLaunchSpec,
 ) -> Result<BackgroundLaunchOutcome> {
     let request = with_adaptive_wiki_runtime_context(request, &gate_outcome);
+    ensure!(
+        command_spec.read_policy.is_some()
+            == command_spec.read_policy_root_identity_sha256.is_some(),
+        "read policy requires an exact approved working directory identity"
+    );
+    if let Some(policy) = &command_spec.read_policy {
+        super::read_policy::validate_runners(policy, std::iter::once(request.runner_kind))?;
+        ensure!(
+            command_spec.host_policy_attestation.is_none()
+                && command_spec.containment_parent.is_none(),
+            "read policy cannot be combined with host policy or explicit containment"
+        );
+    }
+    if command_spec.containment_parent.is_some()
+        && (request.runner_kind != BackgroundRunnerKind::LocalBackground
+            || command_spec.host_policy_attestation.is_some())
+    {
+        bail!("explicit containment only supports unattested local-background commands");
+    }
     if matches!(
         request.runner_kind,
         BackgroundRunnerKind::GithubRunner | BackgroundRunnerKind::RemoteWorker
@@ -166,7 +213,7 @@ pub fn launch_background_command_with_gate_outcome(
 
     match probe.runner_kind {
         BackgroundRunnerKind::LocalBackground => {
-            spawn_local_background_command(&mut probe, &command_spec)?;
+            spawn_local_background_command(store, &mut probe, &command_spec)?;
         }
         BackgroundRunnerKind::LocalTmux => {
             spawn_local_tmux_command(&mut probe, &command_spec)?;
@@ -302,6 +349,167 @@ pub fn poll_background_runs(
     Ok(outcomes)
 }
 
+/// Terminate one verified local background runtime and persist the evidence.
+///
+/// A PID is never sufficient authority by itself. Local process termination
+/// requires the launch-time process identity to match the current process, and
+/// tmux termination additionally requires the exact ticket-derived session.
+pub fn terminate_background_run(
+    store: &BackgroundRunStore,
+    ticket_id: &str,
+    terminated_by: &str,
+    reason: Option<&str>,
+    now: DateTime<Utc>,
+) -> Result<BackgroundTerminationReport> {
+    let mut probes = store.load()?;
+    let index = probes
+        .iter()
+        .position(|probe| probe.ticket_id == ticket_id)
+        .with_context(|| format!("background ticket not found: {ticket_id}"))?;
+    let probe = &mut probes[index];
+    let previous_phase = probe.phase;
+
+    if probe.termination.is_some() || probe.phase == BackgroundRunnerPhase::Terminated {
+        return Ok(BackgroundTerminationReport {
+            schema: BACKGROUND_TERMINATION_REPORT_SCHEMA,
+            ticket_id: probe.ticket_id.clone(),
+            task_id: probe.task_id.clone(),
+            runner_kind: probe.runner_kind,
+            previous_phase,
+            phase: BackgroundRunnerPhase::Terminated,
+            changed: false,
+            runtime_was_alive: false,
+            runtime_alive: false,
+            evidence: "background runner was already terminated".to_string(),
+        });
+    }
+
+    if matches!(
+        probe.runner_kind,
+        BackgroundRunnerKind::GithubRunner | BackgroundRunnerKind::RemoteWorker
+    ) {
+        bail!(
+            "runner kind {:?} cannot be terminated by the local operator",
+            probe.runner_kind
+        );
+    }
+
+    refresh_probe_runtime_evidence(probe, now)?;
+    let runtime_was_alive = probe.runtime_handle_alive;
+    if runtime_was_alive {
+        terminate_verified_local_runtime(probe)?;
+        refresh_probe_runtime_evidence(probe, now)?;
+        if probe.runtime_handle_alive {
+            bail!("verified background runtime is still alive after termination");
+        }
+    }
+
+    let terminated_by = operator_safe_text(terminated_by.trim());
+    let terminated_by = if terminated_by.is_empty() {
+        "operator".to_string()
+    } else {
+        terminated_by
+    };
+    let reason = reason
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty())
+        .map(operator_safe_text)
+        .unwrap_or_else(|| "operator requested runtime termination".to_string());
+    probe.phase = BackgroundRunnerPhase::Terminated;
+    probe.runtime_handle_alive = false;
+    probe.termination = Some(BackgroundTerminationRecord {
+        terminated_at: now,
+        terminated_by,
+        reason,
+        previous_phase,
+        runtime_pid: probe.runtime_pid,
+        tmux_session_name: probe.tmux_session_name.clone(),
+    });
+    probe.last_observed_at = Some(now);
+    probe.last_recovery_evidence = Some(if runtime_was_alive {
+        "verified local background runtime terminated".to_string()
+    } else {
+        "local background runtime was already stopped; termination recorded".to_string()
+    });
+    probe.last_recovery_terminal = Some(true);
+    store.save(&probes)?;
+
+    Ok(BackgroundTerminationReport {
+        schema: BACKGROUND_TERMINATION_REPORT_SCHEMA,
+        ticket_id: ticket_id.to_string(),
+        task_id: probes[index].task_id.clone(),
+        runner_kind: probes[index].runner_kind,
+        previous_phase,
+        phase: BackgroundRunnerPhase::Terminated,
+        changed: runtime_was_alive,
+        runtime_was_alive,
+        runtime_alive: false,
+        evidence: probes[index]
+            .last_recovery_evidence
+            .clone()
+            .unwrap_or_default(),
+    })
+}
+
+fn terminate_verified_local_runtime(probe: &BackgroundProbe) -> Result<()> {
+    let pid = probe
+        .runtime_pid
+        .context("live background runtime is missing its recorded PID")?;
+    let expected_identity = probe
+        .runtime_identity
+        .as_deref()
+        .context("live background runtime predates verified termination identity")?;
+    let current_identity = process::process_identity(pid)
+        .context("recorded background runtime is no longer available for identity verification")?;
+    if current_identity != expected_identity {
+        bail!("recorded background PID now belongs to a different process");
+    }
+
+    match probe.runner_kind {
+        BackgroundRunnerKind::LocalBackground => {
+            process::kill_process_tree(pid);
+            if process::process_identity(pid).as_deref() == Some(expected_identity) {
+                bail!("local background process tree survived termination");
+            }
+        }
+        BackgroundRunnerKind::LocalTmux => {
+            let (session, expected_session) =
+                if let Some(evidence) = &probe.read_policy_launch_evidence {
+                    super::read_policy_tmux::task_session(
+                        &probe.ticket_id,
+                        &evidence.working_directory_identity_sha256,
+                    )?
+                } else {
+                    (
+                        Session::new(&probe.ticket_id, "offdesk")?,
+                        Session::generate_name(&probe.ticket_id, "offdesk"),
+                    )
+                };
+            let recorded_session = probe
+                .tmux_session_name
+                .as_deref()
+                .context("live tmux runtime is missing its recorded session")?;
+            if recorded_session != expected_session {
+                bail!("recorded tmux session is not the exact ticket-derived session");
+            }
+            let current_pane_pid = session
+                .get_pane_pid()
+                .context("recorded tmux session has no verifiable pane PID")?;
+            if current_pane_pid != pid {
+                bail!("recorded tmux pane PID no longer matches the runtime probe");
+            }
+            session.kill()?;
+            if session.exists() {
+                bail!("tmux session survived termination");
+            }
+        }
+        BackgroundRunnerKind::GithubRunner | BackgroundRunnerKind::RemoteWorker => {
+            unreachable!("external runners are rejected before local termination")
+        }
+    }
+    Ok(())
+}
+
 fn emit_runner_work_slice_receipts(
     probe: &BackgroundProbe,
     decision: &BackgroundRecoveryDecision,
@@ -426,6 +634,7 @@ fn runner_phase_label(phase: BackgroundRunnerPhase) -> &'static str {
         BackgroundRunnerPhase::StaleLostCallback => "stale_lost_callback",
         BackgroundRunnerPhase::Reconstructable => "reconstructable",
         BackgroundRunnerPhase::RecoveryAcknowledged => "recovery_acknowledged",
+        BackgroundRunnerPhase::Terminated => "terminated",
     }
 }
 
@@ -468,7 +677,9 @@ fn background_mode_lifecycle(
         | BackgroundRunnerPhase::StaleNoAck
         | BackgroundRunnerPhase::StaleLostCallback
         | BackgroundRunnerPhase::Reconstructable => OffdeskModeLifecycle::Blocked,
-        BackgroundRunnerPhase::RecoveryAcknowledged => OffdeskModeLifecycle::Cancelled,
+        BackgroundRunnerPhase::RecoveryAcknowledged | BackgroundRunnerPhase::Terminated => {
+            OffdeskModeLifecycle::Cancelled
+        }
         BackgroundRunnerPhase::Launched
         | BackgroundRunnerPhase::HandoffEmitted
         | BackgroundRunnerPhase::PickupAcknowledged => OffdeskModeLifecycle::Running,
@@ -507,9 +718,14 @@ fn prepare_command_probe_metadata(
 }
 
 fn spawn_local_background_command(
+    store: &BackgroundRunStore,
     probe: &mut BackgroundProbe,
     spec: &LocalCommandLaunchSpec,
 ) -> Result<()> {
+    ensure!(
+        spec.read_policy.is_some() == spec.read_policy_root_identity_sha256.is_some(),
+        "read policy requires an exact approved working directory identity"
+    );
     let working_dir = probe_working_dir(probe)?;
     let log_path = probe_log_path(probe)?;
     let log = OpenOptions::new()
@@ -519,17 +735,90 @@ fn spawn_local_background_command(
         .with_context(|| format!("failed to open background log {}", log_path.display()))?;
     let stderr = log.try_clone()?;
 
-    let child = Command::new("sh")
-        .arg("-c")
-        .arg(&spec.command)
-        .current_dir(&working_dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::from(log))
-        .stderr(Stdio::from(stderr))
-        .spawn()
-        .with_context(|| format!("failed to spawn command in {}", working_dir.display()))?;
+    let child = if let Some(attestation) = &spec.host_policy_attestation {
+        let (child, evidence) = super::shift_host_policy::spawn_attested_local_background_command(
+            attestation,
+            &spec.command,
+            &working_dir,
+            Stdio::from(log),
+            Stdio::from(stderr),
+            Utc::now(),
+        )?;
+        probe.host_policy_launch_evidence = Some(evidence);
+        child
+    } else {
+        let (mut command, receipt) = if spec.containment_parent.is_some() {
+            super::local_exit::contained_command(&working_dir, &spec.command)?
+        } else {
+            super::local_exit::command(&working_dir, &spec.command)?
+        };
+        if let Some(parent) = &spec.containment_parent {
+            let binding = process::prepare_contained_command(&mut command, parent)?;
+            let path = working_dir
+                .join(&receipt.relative_path)
+                .with_file_name("containment.json");
+            let record = serde_json::json!({
+                "schema": "offdesk_containment_binding.v1",
+                "ticket_id": probe.ticket_id,
+                "task_id": probe.task_id,
+                "project_key": probe.project_key,
+                "request_id": probe.request_id,
+                "nonce": receipt.nonce,
+                "containment": binding
+            });
+            let mut file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)?;
+            file.write_all(&serde_json::to_vec(&record)?)?;
+            file.sync_all()?;
+            std::fs::File::open(
+                path.parent()
+                    .context("containment evidence parent missing")?,
+            )?
+            .sync_all()?;
+            probe.local_exit_receipt = Some(receipt.clone());
+            probe.runtime_handle_alive = false;
+            // Persist the evidence locator before user code can run. A failed
+            // placement leaves a held prepared record, never a fallback launch.
+            store.upsert(probe.clone())?;
+        }
+        probe.local_exit_receipt = Some(receipt);
+        let read_evidence = spec
+            .read_policy
+            .as_ref()
+            .map(|policy| {
+                super::read_policy::apply_to_command_bound(
+                    policy,
+                    &mut command,
+                    &working_dir,
+                    spec.read_policy_root_identity_sha256.as_deref(),
+                )
+            })
+            .transpose()?;
+        // Runtime identity is supplied by the admitted launch, never inherited.
+        command.env("FORAGER_OFFDESK_RUNTIME_BINDING", serde_json::to_string(&serde_json::json!({
+            "schema":"offdesk_runtime_binding.v1", "task_id":probe.task_id,
+            "request_id":probe.request_id, "project_key":probe.project_key, "ticket_id":probe.ticket_id
+        }))?);
+        let child = command
+            .current_dir(&working_dir)
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(log))
+            .stderr(Stdio::from(stderr))
+            .spawn()
+            .with_context(|| format!("failed to spawn command in {}", working_dir.display()))?;
+        probe.read_policy_launch_evidence = read_evidence;
+        child
+    };
 
-    probe.runtime_pid = Some(child.id());
+    let pid = child.id();
+    let Some(identity) = process::process_identity(pid) else {
+        process::kill_process_tree(pid);
+        bail!("failed to record background process identity");
+    };
+    probe.runtime_pid = Some(pid);
+    probe.runtime_identity = Some(identity);
     probe.runtime_handle_alive = true;
     Ok(())
 }
@@ -538,6 +827,9 @@ fn spawn_local_tmux_command(
     probe: &mut BackgroundProbe,
     spec: &LocalCommandLaunchSpec,
 ) -> Result<()> {
+    if spec.host_policy_attestation.is_some() {
+        bail!("selected isolation policy does not support local-tmux task launches");
+    }
     if !tmux::is_tmux_available() {
         bail!("tmux is not available");
     }
@@ -546,21 +838,68 @@ fn spawn_local_tmux_command(
     let log_path = probe_log_path(probe)?;
     let session_name = Session::generate_name(&probe.ticket_id, "offdesk");
     let session = Session::new(&probe.ticket_id, "offdesk")?;
+    if let Some(policy) = &spec.read_policy {
+        let root_identity = spec
+            .read_policy_root_identity_sha256
+            .as_deref()
+            .context("restricted tmux root identity missing")?;
+        let (session, session_name) =
+            super::read_policy_tmux::task_session(&probe.ticket_id, root_identity)?;
+        let (command, receipt) = super::local_exit::command(&working_dir, &spec.command)?;
+        let binding = super::read_policy_tmux::launch(
+            &std::env::current_exe()?,
+            &session,
+            &working_dir,
+            &command,
+            policy,
+            spec.read_policy_root_identity_sha256
+                .as_deref()
+                .context("restricted tmux root identity missing")?,
+            Some(&log_path),
+        )?;
+        probe.read_policy_launch_evidence = Some(binding.receipt.evidence);
+        probe.local_exit_receipt = Some(receipt);
+        probe.tmux_session_name = Some(session_name);
+        probe.runtime_pid = Some(binding.receipt.helper_pid);
+        probe.runtime_identity = Some(binding.receipt.helper_identity);
+        probe.runtime_handle_alive = session.exists();
+        return Ok(());
+    }
     let command = redirect_command_to_log(&spec.command, &log_path);
     session.create(&path_to_string(&working_dir), Some(&command))?;
 
     probe.tmux_session_name = Some(session_name);
     probe.runtime_pid = session.get_pane_pid();
+    let Some(pid) = probe.runtime_pid else {
+        session.kill()?;
+        bail!("failed to record tmux pane PID");
+    };
+    let Some(identity) = process::process_identity(pid) else {
+        session.kill()?;
+        bail!("failed to record tmux process identity");
+    };
+    probe.runtime_identity = Some(identity);
     probe.runtime_handle_alive = session.exists();
     Ok(())
 }
 
 fn refresh_probe_runtime_evidence(probe: &mut BackgroundProbe, now: DateTime<Utc>) -> Result<()> {
+    if let (Some(root), Some(receipt)) = (&probe.working_dir, &mut probe.local_exit_receipt) {
+        // A lost or torn receipt is uncertainty, never a successful exit.
+        let _ = super::local_exit::refresh(Path::new(root), receipt);
+    }
     if let Some(pid) = probe.runtime_pid {
         probe.runtime_handle_alive = process_alive(pid);
+        if probe.local_exit_receipt.is_some() {
+            probe.runtime_handle_alive &= probe
+                .runtime_identity
+                .as_ref()
+                .is_some_and(|expected| process::process_identity(pid).as_ref() == Some(expected));
+        }
     }
     if let Some(session_name) = &probe.tmux_session_name {
-        probe.runtime_handle_alive = tmux_session_alive(session_name);
+        probe.runtime_handle_alive = tmux_session_alive(session_name)
+            && (probe.local_exit_receipt.is_none() || probe.runtime_handle_alive);
     }
 
     if let Some(log_path) = probe.log_artifact_path.as_deref() {
@@ -666,19 +1005,7 @@ fn read_log_tail(path: &Path) -> Result<Option<String>> {
 }
 
 fn process_alive(pid: u32) -> bool {
-    #[cfg(target_os = "linux")]
-    {
-        Path::new("/proc").join(pid.to_string()).exists()
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        Command::new("kill")
-            .arg("-0")
-            .arg(pid.to_string())
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
-    }
+    process::process_identity(pid).is_some()
 }
 
 fn tmux_session_alive(session_name: &str) -> bool {
@@ -698,6 +1025,36 @@ mod tests {
         ApprovalMode, SchedulerGateStatus,
     };
     use tempfile::tempdir;
+
+    #[test]
+    fn supervised_poll_rejects_live_pid_with_missing_or_wrong_identity() -> Result<()> {
+        let root = tempdir()?;
+        let mut probe =
+            BackgroundProbe::new("identity-test", BackgroundRunnerKind::LocalBackground);
+        probe.working_dir = Some(root.path().display().to_string());
+        probe.runtime_pid = Some(std::process::id());
+        probe.local_exit_receipt = Some(super::super::local_exit::LocalExitReceipt {
+            relative_path: "missing.json".into(),
+            nonce: "test".into(),
+            status: None,
+            wait_scope: None,
+        });
+        for identity in [None, Some("not-this-process".to_owned())] {
+            probe.runtime_identity = identity;
+            refresh_probe_runtime_evidence(&mut probe, Utc::now())?;
+            assert!(!probe.runtime_handle_alive);
+            assert_eq!(
+                probe.evaluate(Utc::now()).phase,
+                BackgroundRunnerPhase::StaleLostCallback
+            );
+        }
+        probe.runtime_identity = process::process_identity(std::process::id());
+        assert!(probe.runtime_identity.is_some());
+        refresh_probe_runtime_evidence(&mut probe, Utc::now())?;
+        assert!(probe.runtime_handle_alive);
+        assert!(!probe.evaluate(Utc::now()).terminal);
+        Ok(())
+    }
 
     fn brief(now: DateTime<Utc>) -> ExecutionBrief {
         ExecutionBrief {
@@ -839,6 +1196,161 @@ mod tests {
     }
 
     #[test]
+    fn read_policy_errors_never_execute_an_unrestricted_fallback() -> Result<()> {
+        for variant in 0..4 {
+            let temp = tempdir()?;
+            let store = BackgroundRunStore::new(temp.path());
+            let mut spec = LocalCommandLaunchSpec::new("touch must-not-run", temp.path());
+            spec.read_policy = Some(super::super::read_policy::ReadPolicy::canonical());
+            let mut request = launch_request();
+            if variant != 0 {
+                spec.read_policy_root_identity_sha256 = Some("b".repeat(64));
+            }
+            if variant == 1 {
+                request.runner_kind = BackgroundRunnerKind::LocalTmux;
+            }
+            if variant == 2 {
+                spec.containment_parent = Some(temp.path().to_owned());
+            }
+            let outcome = launch_background_command_with_gate_outcome(
+                &store,
+                request,
+                proceed_outcome(Vec::new(), Vec::new()),
+                Utc::now(),
+                spec,
+            );
+            assert!(
+                outcome.is_err(),
+                "variant {variant} bypassed mandatory policy"
+            );
+            assert!(!temp.path().join("must-not-run").exists());
+            assert!(store.load()?.is_empty());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn containment_rejects_fake_parent_without_executing_command() -> Result<()> {
+        let temp = tempdir()?;
+        let store = BackgroundRunStore::new(temp.path());
+        let mut probe = build_background_probe(launch_request(), Utc::now());
+        let mut spec = LocalCommandLaunchSpec::new("touch must-not-run", temp.path());
+        spec.containment_parent = Some(temp.path().to_owned());
+        prepare_command_probe_metadata(&store, &mut probe, &spec)?;
+        assert!(spawn_local_background_command(&store, &mut probe, &spec).is_err());
+        assert!(!temp.path().join("must-not-run").exists());
+        assert!(store.load()?.is_empty());
+        Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "run only inside a disposable delegated service"]
+    fn contained_runner_survives_supervisor_loss_as_observable_domain() -> Result<()> {
+        use crate::process::{inspect_cgroup_v2, CgroupV2Identity};
+        use std::time::{Duration as WaitDuration, Instant};
+        let parent = PathBuf::from(std::env::var("FORAGER_TEST_DELEGATED_PARENT")?);
+        let temp = tempdir()?;
+        let store = BackgroundRunStore::new(temp.path());
+        let mut probe = build_background_probe(launch_request(), Utc::now());
+        // The descendant has a finite fallback even if an assertion fails.
+        let source = "setsid /bin/sh -c 'cat /proc/self/cgroup > membership.tmp && mv membership.tmp membership; n=0; while [ ! -f release ] && [ \"$n\" -lt 500 ]; do n=$((n+1)); sleep 0.01; done' >/dev/null 2>&1 & exit 0";
+        let mut spec = LocalCommandLaunchSpec::new(source, temp.path());
+        spec.containment_parent = Some(parent.clone());
+        prepare_command_probe_metadata(&store, &mut probe, &spec)?;
+        spawn_local_background_command(&store, &mut probe, &spec)?;
+        let deadline = Instant::now() + WaitDuration::from_secs(4);
+        while !temp.path().join("membership").exists() && Instant::now() < deadline {
+            std::thread::sleep(WaitDuration::from_millis(10));
+        }
+        let prepared = store.load()?.remove(0);
+        assert!(prepared.runtime_pid.is_none());
+        let mut receipt = prepared
+            .local_exit_receipt
+            .expect("pre-exec persisted locator");
+        let evidence = temp
+            .path()
+            .join(&receipt.relative_path)
+            .with_file_name("containment.json");
+        let record: serde_json::Value = serde_json::from_slice(&fs::read(evidence)?)?;
+        assert_eq!(record["ticket_id"], probe.ticket_id);
+        assert_eq!(record["task_id"], "task");
+        assert_eq!(record["nonce"], receipt.nonce);
+        let task: super::super::OffdeskTask = serde_json::from_value(serde_json::json!({
+            "task_id":"task", "request_id":"request", "project_key":"project",
+            "status":"failed", "capability_id":"background.launch", "runner_kind":"local_background",
+            "command":source, "workdir":temp.path(), "background_ticket_id":probe.ticket_id,
+            "created_at":Utc::now(), "updated_at":Utc::now()
+        }))?;
+        let assert_recovery = |expected: &str| -> Result<()> {
+            let before = serde_json::to_vec(&store.load()?)?;
+            let report = super::super::runtime_occupancy::inspect(temp.path(), &task)?;
+            assert_eq!(report.reason, expected);
+            assert!(!report.release_verified);
+            assert!(!report.automatic_recovery);
+            assert!(!super::super::runtime_occupancy::released(
+                temp.path(),
+                &task
+            )?);
+            assert_eq!(before, serde_json::to_vec(&store.load()?)?);
+            Ok(())
+        };
+        let path = PathBuf::from(record["containment"]["path"].as_str().unwrap());
+        assert_eq!(path.parent(), Some(parent.as_path()));
+        let identity: CgroupV2Identity =
+            serde_json::from_value(record["containment"]["identity"].clone())?;
+        let membership = fs::read_to_string(temp.path().join("membership"))?;
+        assert!(membership.contains(path.file_name().unwrap().to_str().unwrap()));
+        assert!(inspect_cgroup_v2(&path, Some(&identity))?.populated);
+        assert_recovery("containment_populated")?;
+        assert!(process::seal_empty_cgroup_v2(&path, &identity).is_err());
+        assert!(inspect_cgroup_v2(&path, Some(&identity))?.populated);
+        nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(probe.runtime_pid.unwrap() as i32),
+            nix::sys::signal::Signal::SIGKILL,
+        )?;
+        assert!(inspect_cgroup_v2(&path, Some(&identity))?.populated);
+        fs::write(temp.path().join("release"), "release owned test descendant")?;
+        let deadline = Instant::now() + WaitDuration::from_secs(8);
+        while inspect_cgroup_v2(&path, Some(&identity))?.populated && Instant::now() < deadline {
+            std::thread::sleep(WaitDuration::from_millis(10));
+        }
+        assert!(!inspect_cgroup_v2(&path, Some(&identity))?.populated);
+        assert_recovery("containment_empty_admission_unfenced")?;
+        assert!(super::super::local_exit::refresh(temp.path(), &mut receipt).is_err());
+        super::super::OffdeskTaskStore::new(temp.path()).save(std::slice::from_ref(&task))?;
+        for _ in 0..2 {
+            assert_eq!(
+                super::super::containment_seal::seal_task(temp.path(), &task.task_id)?,
+                super::super::containment_seal::SealJournalState::Completed
+            );
+        }
+        assert!(process::seal_empty_cgroup_v2(&path, &identity).is_err());
+        assert!(inspect_cgroup_v2(&path, Some(&identity)).is_err());
+        assert_recovery("containment_sealed_migration_unverified")?;
+        // An opened but removed destination must fail before any user code.
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", "touch must-not-run"])
+            .current_dir(temp.path());
+        let binding = process::prepare_contained_command(&mut command, &parent)?;
+        let removed = PathBuf::from(binding["path"].as_str().unwrap());
+        let removed_identity = serde_json::from_value(binding["identity"].clone())?;
+        // Empty subgroups still prevent closure, even when populated is zero.
+        fs::create_dir(removed.join("test-child"))?;
+        assert!(process::seal_empty_cgroup_v2(&removed, &removed_identity).is_err());
+        fs::remove_dir(removed.join("test-child"))?;
+        process::seal_empty_cgroup_v2(&removed, &removed_identity)?;
+        // Reusing the path cannot redirect the already prepared command.
+        fs::create_dir(&removed)?;
+        assert!(inspect_cgroup_v2(&removed, Some(&removed_identity)).is_err());
+        assert!(command.spawn().is_err());
+        assert!(!temp.path().join("must-not-run").exists());
+        fs::remove_dir(&removed)?;
+        Ok(())
+    }
+
+    #[test]
     fn poll_marks_heartbeat_stale_from_timestamp() -> Result<()> {
         let temp = tempdir()?;
         let store = BackgroundRunStore::new(temp.path());
@@ -863,6 +1375,118 @@ mod tests {
             .last_recovery_evidence
             .as_deref()
             .is_some_and(|evidence| evidence.contains("heartbeat is stale")));
+        Ok(())
+    }
+
+    #[test]
+    fn terminate_background_run_stops_only_matching_local_process() -> Result<()> {
+        let temp = tempdir()?;
+        let store = BackgroundRunStore::new(temp.path());
+        let now = Utc::now();
+        let mut child = Command::new("sh").args(["-c", "sleep 60"]).spawn()?;
+        let pid = child.id();
+        let identity = process::process_identity(pid).expect("spawned process identity");
+        let mut probe = BackgroundProbe::new("ticket", BackgroundRunnerKind::LocalBackground);
+        probe.task_id = Some("task".to_string());
+        probe.runtime_pid = Some(pid);
+        probe.runtime_identity = Some(identity);
+        probe.runtime_handle_alive = true;
+        store.upsert(probe)?;
+
+        let result =
+            terminate_background_run(&store, "ticket", "test", Some("stop requested"), now);
+        if result.is_err() {
+            let _ = child.kill();
+        }
+        let report = result?;
+        let _ = child.wait();
+
+        assert!(report.changed);
+        assert!(report.runtime_was_alive);
+        assert!(!report.runtime_alive);
+        assert_eq!(report.phase, BackgroundRunnerPhase::Terminated);
+        let stored = store.load()?.remove(0);
+        assert_eq!(stored.phase, BackgroundRunnerPhase::Terminated);
+        let termination = stored.termination.expect("termination evidence");
+        assert_eq!(termination.terminated_by, "test");
+        assert_eq!(termination.reason, "stop requested");
+        assert_eq!(termination.runtime_pid, Some(pid));
+        Ok(())
+    }
+
+    #[test]
+    fn terminate_background_run_rejects_reused_or_mismatched_pid() -> Result<()> {
+        let temp = tempdir()?;
+        let store = BackgroundRunStore::new(temp.path());
+        let mut child = Command::new("sh").args(["-c", "sleep 60"]).spawn()?;
+        let pid = child.id();
+        let mut probe = BackgroundProbe::new("ticket", BackgroundRunnerKind::LocalBackground);
+        probe.task_id = Some("task".to_string());
+        probe.runtime_pid = Some(pid);
+        probe.runtime_identity = Some("different-launch".to_string());
+        probe.runtime_handle_alive = true;
+        store.upsert(probe)?;
+
+        let error = terminate_background_run(&store, "ticket", "test", None, Utc::now())
+            .expect_err("mismatched identity must fail closed");
+        assert!(error.to_string().contains("different process"));
+        assert!(process::process_identity(pid).is_some());
+        let stored = store.load()?.remove(0);
+        assert_eq!(stored.phase, BackgroundRunnerPhase::Launched);
+        assert!(stored.termination.is_none());
+
+        let _ = child.kill();
+        let _ = child.wait();
+        Ok(())
+    }
+
+    #[test]
+    fn terminate_background_run_records_already_stopped_local_runtime() -> Result<()> {
+        let temp = tempdir()?;
+        let store = BackgroundRunStore::new(temp.path());
+        let mut probe = BackgroundProbe::new("ticket", BackgroundRunnerKind::LocalBackground);
+        probe.task_id = Some("task".to_string());
+        store.upsert(probe)?;
+
+        let report = terminate_background_run(&store, "ticket", "test", None, Utc::now())?;
+
+        assert!(!report.changed);
+        assert!(!report.runtime_was_alive);
+        assert_eq!(report.phase, BackgroundRunnerPhase::Terminated);
+        assert!(report.evidence.contains("already stopped"));
+        Ok(())
+    }
+
+    #[test]
+    fn terminate_background_run_stops_exact_ticket_tmux_session() -> Result<()> {
+        if !tmux::is_tmux_available() {
+            return Ok(());
+        }
+        let temp = tempdir()?;
+        let store = BackgroundRunStore::new(temp.path());
+        let ticket_id = Uuid::new_v4().to_string();
+        let mut probe = BackgroundProbe::new(&ticket_id, BackgroundRunnerKind::LocalTmux);
+        probe.task_id = Some("task".to_string());
+        let spec = LocalCommandLaunchSpec::new("sleep 60", temp.path());
+        prepare_command_probe_metadata(&store, &mut probe, &spec)?;
+        spawn_local_tmux_command(&mut probe, &spec)?;
+        let session = Session::new(&ticket_id, "offdesk")?;
+        store.upsert(probe)?;
+
+        let result =
+            terminate_background_run(&store, &ticket_id, "test", Some("tmux stop"), Utc::now());
+        if result.is_err() {
+            let _ = session.kill();
+        }
+        let report = result?;
+
+        assert!(report.changed);
+        assert_eq!(report.runner_kind, BackgroundRunnerKind::LocalTmux);
+        assert!(!session.exists());
+        assert_eq!(
+            store.load()?.remove(0).phase,
+            BackgroundRunnerPhase::Terminated
+        );
         Ok(())
     }
 }

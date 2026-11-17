@@ -78,7 +78,10 @@ personal settings and stay out of active repo config.
 
 ## Hook Trust System
 
-When Forager encounters hooks in a repo for the first time, it prompts you to review and approve them before execution. This prevents untrusted repos from running arbitrary commands.
+When Forager encounters untrusted hooks, the interactive path prompts for
+trust before running them. `--trust-hooks` explicitly bypasses that prompt and
+records trust; it does not inspect whether the commands are appropriate. Review
+the hook bytes before selecting it.
 
 - Trust decisions are stored globally (shared across all profiles)
 - If hook commands change (e.g., someone updates `.forager/config.toml`), Forager prompts for re-approval
@@ -93,9 +96,12 @@ forager add --trust-hooks .
 
 Settings are resolved in this order (later overrides earlier):
 
-1. **Global config** (`~/.forager/config.toml`)
-2. **Profile config** (`~/.forager/profiles/<name>/config.toml`)
+1. **Global config** (`<app-dir>/config.toml`)
+2. **Profile config** (`<app-dir>/profiles/<name>/config.toml`)
 3. **Repo config** (`.forager/config.toml`)
+
+Resolve `<app-dir>` with `forager doctor`; see the platform paths in
+[Configuration](configuration.md#file-locations).
 
 Legacy `~/.agent-of-empires`, `~/.config/agent-of-empires`, and `.aoe/config.toml`
 paths are used when they already exist and the new Forager paths do not.

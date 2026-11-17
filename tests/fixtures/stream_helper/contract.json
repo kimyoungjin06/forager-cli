@@ -1,0 +1,77 @@
+{
+  "schema": "forager_stream_helper_task_proposal.v1",
+  "task_id": "C5.1a-helper-proposal-r102",
+  "owning_task": "C5.1a",
+  "state": "prepared_not_selected",
+  "launch_authorized": false,
+  "qualification_complete": false,
+  "write_paths": [
+    "scripts/offdesk_stream_frames.py"
+  ],
+  "immutable_paths": [
+    "scripts/offdesk_request_telemetry.py",
+    ".runtime/check_stream_helper.py",
+    ".runtime/HELPER_VECTORS.json"
+  ],
+  "api": {
+    "constructor": "StreamFrames(*, mode: str, max_bytes: int = 65536)",
+    "feed": "feed(chunk: bytes) -> list[bytes]",
+    "finish": "finish() -> list[bytes]",
+    "counters": {
+      "dropped_events": "monotonic integer, once per rejected event or NDJSON line",
+      "buffered_bytes": "reported retained inspection bytes, bounded by 2*max_bytes+3"
+    }
+  },
+  "scope": [
+    "UTF-8-valid SSE payload framing and selected NDJSON line framing only",
+    "No JSON classification, transport, telemetry integration, dependencies or networking",
+    "Bytewise framing preserves valid UTF-8 payload bytes; not a full EventSource implementation",
+    "Ignore one initial SSE BOM; CR, LF and CRLF delimit lines across arbitrary chunks",
+    "Join SSE data fields with LF, remove one optional space after colon, dispatch on blank line",
+    "A data field with empty value emits empty bytes; blocks with no data emit nothing",
+    "Discard incomplete SSE at EOF; NDJSON may emit its final unterminated nonempty line",
+    "NDJSON splits LF, removes CR only immediately before LF, skips empty lines",
+    "finish releases pending storage, is idempotent; feed after finish raises ValueError",
+    "Input feed(b'') is a no-op; decoder instances have independent state"
+  ],
+  "local_inspection_policy": [
+    "Raw line and joined SSE data payload each at most max_bytes",
+    "Exceeding either bound drops the whole SSE event until a blank boundary; NDJSON drops until LF",
+    "Do not reinterpret the tail of an oversized line as a new event",
+    "Increment a rejection once, including an oversized pending event at EOF; recover at the next boundary",
+    "Limits and drop counters are Forager policy, not WHATWG requirements",
+    "Reported retention is an observable claim; host must inspect actual data structures independently"
+  ],
+  "checks": {
+    "vectors": "HELPER_VECTORS.json",
+    "checker": "check_stream_helper.py",
+    "case_count": 32,
+    "expected_tests": 97,
+    "post_edit_argv": [
+      "/usr/bin/python3",
+      "-I",
+      "-S",
+      ".runtime/check_stream_helper.py",
+      "--source-root",
+      ".",
+      "--json-report",
+      ".night/helper-model-check.json"
+    ],
+    "host_report_path": ".night/helper-host-check.json"
+  },
+  "gates": [
+    "Actual local-model authored helper edit, no operator implementation supplied",
+    "Two real distinct native context IDs with an actual model progress save and exact first-command pinned recovery",
+    "One selected model post-edit checker and independent host replay, both complete and passing",
+    "Host independently inspects scoped diff and memory retention; hash checker, vectors and frozen runtime before/after",
+    "Preserve raw failures, stop reason, accounting, source identity and owned runtime release evidence",
+    "Successful helper remains pending review; no C5.1a completion or task acceptance inferred",
+    "A later separately selected model-authored relay integration must pass all original 12 HTTP cases plus regressions"
+  ],
+  "reference": {
+    "url": "https://html.spec.whatwg.org/multipage/server-sent-events.html#event-stream-interpretation",
+    "checked_on": "2026-10-26",
+    "section": "9.2.5 and 9.2.6",
+    "not_a_full_conformance_suite": true
+  }
+}

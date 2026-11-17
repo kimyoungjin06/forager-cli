@@ -10,7 +10,7 @@ For workflow guidance, see the [Workflow Guide](workflow.md).
 |---------|-----|-----|
 | Create new branch | Use `-b` flag | Always creates new branch |
 | Use existing branch | Omit `-b` flag | Not supported |
-| Branch validation | Checks if branch exists | None (always creates) |
+| Branch validation | Checks branch selection | Requests a new branch; Git rejects invalid or existing names |
 
 ## CLI Commands
 
@@ -30,7 +30,7 @@ forager worktree info <session>
 # Find orphaned worktrees
 forager worktree cleanup
 
-# Remove session (prompts for worktree cleanup)
+# Remove session, preserving its worktree
 forager remove <session>
 
 # Remove session and delete worktree
@@ -53,7 +53,6 @@ When creating a session with a worktree branch name in the TUI, it automatically
 
 ```toml
 [worktree]
-enabled = false
 path_template = "../{repo-name}-worktrees/{branch}"
 bare_repo_path_template = "./{branch}"
 auto_cleanup = true
@@ -88,12 +87,16 @@ path_template = "/absolute/path/to/worktrees/{repo-name}/{branch}"
 path_template = "../wt/{branch}-{session-id}"
 ```
 
+The retired `worktree.enabled` key does not control creation. Request a worktree
+explicitly with `-w` or the TUI branch field.
+
 ## Cleanup Behavior
 
 | Scenario | Cleanup Prompt? |
 |----------|-----------------|
-| Forager-managed worktree | Yes |
-| Manual worktree | No |
+| Managed worktree, CLI without `--delete-worktree` | No; worktree is preserved |
+| Managed worktree, TUI deletion | Offered according to cleanup settings |
+| Manual worktree | Not automatically selected for deletion |
 | `--delete-worktree` flag | Yes (deletes worktree) |
 | Non-worktree session | No |
 
@@ -105,8 +108,12 @@ Forager automatically detects bare repos and uses `bare_repo_path_template` inst
 
 | Item | Path |
 |------|------|
-| Config | `~/.forager/config.toml` (`~/.config/forager/config.toml` on Linux) |
-| Sessions | `~/.forager/profiles/<profile>/sessions.json` |
+| Config | `<app-dir>/config.toml` |
+| Sessions | `<app-dir>/profiles/<profile>/sessions.json` |
+
+On Linux, `<app-dir>` defaults to `$XDG_CONFIG_HOME/forager` or `~/.config/forager`;
+on macOS it is `~/.forager`. Use `forager doctor` to resolve active and legacy
+paths. See [Configuration](configuration.md#file-locations).
 
 ## Error Messages
 

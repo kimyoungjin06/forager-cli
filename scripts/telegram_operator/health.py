@@ -16,11 +16,14 @@ from typing import Any
 from .agent import agent_runtime_status as resolve_agent_runtime_status
 from .common import load_json, unique_nonempty, utc_now
 from .persistence import RemoteOperatorStateError, load_state, parse_utc_timestamp
+from .config import public_control_generation_id
 from .project_candidates import workspace_roots
 from .projects import find_project_dir, load_registry
 from .rendering import sanitize_text
 from .reply_outbox import outbox_health_issue, outbox_inspection
 from .update_journal import journal_health_issue
+from .transport_health import classify_transport_issues, failure_age, TRANSPORT_FAILURE_COUNT, TRANSPORT_FAILURE_SECONDS
+from .delivery_attention import hold_summary
 
 HEALTH_SCHEMA = "remote_operator_telegram_health.v1"
 ACTION_READINESS_SCHEMA = "telegram_action_readiness.v1"
@@ -219,10 +222,26 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
         transport_issues.append("telegram_bot_token_missing")
     if not config.get("chat_allowlist_configured"):
         transport_issues.append("telegram_chat_allowlist_missing")
+    if not config.get("user_allowlist_configured"):
+        transport_issues.append("telegram_user_allowlist_missing")
+    transport_issues.extend(
+        str(issue) for issue in config.get("operator_config_issues") or []
+    )
+    listener_state: dict[str, Any] = {}
+    listener_state_valid = True
     try:
-        load_state(args.state_file)
+        listener_state = load_state(args.state_file)
     except RemoteOperatorStateError:
+        listener_state_valid = False
         transport_issues.append("listener_state_unreadable")
+    configured_generation = str(
+        config.get("_control_generation_sha256") or ""
+    ).strip()
+    bound_generation = str(
+        listener_state.get("control_generation_sha256") or ""
+    ).strip()
+    if bound_generation and bound_generation != configured_generation:
+        transport_issues.append("control_generation_mismatch")
     try:
         journal_issue = journal_health_issue(args.update_journal_file)
     except RemoteOperatorStateError:
@@ -239,13 +258,28 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
             "status": "unreadable",
         }
         outbox_issue = "reply_outbox_unreadable"
-    if outbox_issue:
+    delivery_warnings = []
+    if outbox_issue == "reply_delivery_unconfirmed":
+        delivery_warnings.append(outbox_issue)
+    elif outbox_issue:
         transport_issues.append(outbox_issue)
+    # An uncertain delivery must not mask a separate response still awaiting delivery.
+    if reply_outbox.get("pending_count") and "reply_delivery_pending" not in transport_issues:
+        transport_issues.append("reply_delivery_pending")
+    proactive_holds = hold_summary(listener_state if listener_state_valid else None)
+    if proactive_holds["status"] == "unreadable":
+        transport_issues.append("notification_hold_ledger_unreadable")
+    elif proactive_holds["uncertain_count"]:
+        delivery_warnings.append("proactive_delivery_unconfirmed")
+    elif proactive_holds["confirmed_commit_pending_count"]:
+        delivery_warnings.append("proactive_delivery_commit_pending")
     loop_status: dict[str, Any] = {}
     if status_path.exists():
         try:
             loaded = load_json(status_path)
             loop_status = loaded if isinstance(loaded, dict) else {}
+            if not loop_status:
+                transport_issues.append("loop_status_unreadable")
         except (OSError, json.JSONDecodeError):
             transport_issues.append("loop_status_unreadable")
     else:
@@ -271,7 +305,11 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
     if str(last_result.get("status") or "") == "loop_error":
         transport_issues.append("last_loop_internal_error")
     if str(last_result.get("status") or "") == "state_error":
-        transport_issues.append("last_listener_state_error")
+        transport_issues.append("last_loop_state_error")
+    transport_issues, transport_warnings = classify_transport_issues(
+        transport_issues, count=loop_status.get("consecutive_error_count"),
+        age=failure_age(loop_status, dt.datetime.now(dt.timezone.utc)),
+    )
     agent_runtime_status = resolve_agent_runtime_status(args)
     tmux_available = shutil.which("tmux") is not None
     roots = workspace_roots(args)
@@ -285,6 +323,7 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
     elif registry and resolvable_projects < len(registry):
         project_scan_issue = "registered_projects_partially_unresolvable"
     issues.extend(transport_issues)
+    issues.extend(delivery_warnings)
     agent_issue = agent_runtime_issue(agent_runtime_status)
     if agent_issue:
         issues.append(agent_issue)
@@ -292,7 +331,7 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
         issues.append(project_scan_issue)
     if transport_issues:
         health_status = "unhealthy"
-    elif agent_issue or project_scan_issue:
+    elif agent_issue or project_scan_issue or transport_warnings or delivery_warnings:
         health_status = "degraded"
     else:
         health_status = "healthy"
@@ -302,6 +341,8 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
         project_scan_issue=project_scan_issue,
         tmux_available=tmux_available,
     )
+    delivery_issues = [issue for issue in transport_issues if issue in {"reply_delivery_pending", "last_send_transport_error"}]
+    listener_issues = [issue for issue in transport_issues if issue not in delivery_issues]
     return {
         "schema": HEALTH_SCHEMA,
         "generated_at": utc_now(),
@@ -309,6 +350,21 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
         "health_status": health_status,
         "issues": issues,
         "transport_issues": transport_issues,
+        "transport_warnings": transport_warnings,
+        "attention_domains": {
+            "listener": {
+                "status": "unhealthy" if listener_issues else "degraded" if transport_warnings else "healthy",
+                "issues": listener_issues, "warnings": transport_warnings,
+            },
+            "delivery": {
+                "status": "unknown" if reply_outbox.get("status") == "unreadable" or proactive_holds["status"] == "unreadable" else "blocked" if reply_outbox.get("pending_count") or delivery_issues else "attention" if delivery_warnings else "clear",
+                "issues": delivery_issues, "warnings": delivery_warnings, "proactive_holds": proactive_holds,
+                "reply_unconfirmed_count": reply_outbox.get("unconfirmed_count"),
+            },
+            "project_review": {"status": "not_inspected", "source": "project-scoped review surfaces"},
+        },
+        "transport_failure_policy": {"minimum_consecutive_errors": TRANSPORT_FAILURE_COUNT,
+            "minimum_seconds_without_success": TRANSPORT_FAILURE_SECONDS},
         "env_file": str(args.env_file),
         "status_file": str(status_path),
         "state_file": str(args.state_file),
@@ -316,6 +372,16 @@ def listener_health(args: argparse.Namespace, config: dict[str, Any]) -> dict[st
         "reply_outbox_file": str(args.reply_outbox_file),
         "reply_outbox": reply_outbox,
         "token_configured": token_configured,
+        "control_generation_id": public_control_generation_id(
+            configured_generation
+        ),
+        "bound_control_generation_id": public_control_generation_id(
+            bound_generation
+        ),
+        "operator_mode": config.get("operator_mode"),
+        "operator_identity_configured": bool(
+            config.get("operator_identity_configured")
+        ),
         "chat_allowlist_configured": bool(config.get("chat_allowlist_configured")),
         "user_allowlist_configured": bool(config.get("user_allowlist_configured")),
         "listener_status": loop_status.get("status"),

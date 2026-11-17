@@ -232,7 +232,8 @@ mod tests {
         });
 
         let mut result = None;
-        for _ in 0..50 {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while std::time::Instant::now() < deadline {
             result = poller.try_recv_result();
             if result.is_some() {
                 break;

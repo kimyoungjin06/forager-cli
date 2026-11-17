@@ -1,5 +1,9 @@
 # Approval Briefs
 
+Model names in payload examples are illustrative attribution, not automatic
+provider selection. Live relay smoke procedures below send real messages and
+require a configured transport; ordinary documentation checks do not run them.
+
 `approval_brief.v1` is the shared contract for operator approval prompts. It is
 designed for Telegram and other compact operator surfaces where the operator
 needs a decision prompt, not a log dump.

@@ -19,6 +19,11 @@ The pipeline does not replace `approval_brief.v1` or
 
 ## Premise
 
+The diagrams describe the intended evaluation flow. Current CLI paths persist
+records and receipts; an evaluator label or routing hint does not establish
+that an independent reviewer or Council actually performed the evaluation.
+Implemented slices below describe source milestones, not a new task queue.
+
 Offdesk autonomy should keep moving through safe, policy-resolved choices while
 escalating material decisions to the operator with enough context to choose.
 
@@ -54,7 +59,7 @@ Agent raises issue
 
 The canonical artifact is `DecisionRecord`.
 
-Suggested first storage target:
+The current profile-local storage target is:
 
 ```text
 <profile-dir>/offdesk_decisions.jsonl

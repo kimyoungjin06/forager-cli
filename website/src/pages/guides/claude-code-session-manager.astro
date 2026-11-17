@@ -16,7 +16,7 @@ import { sitePath } from '../../lib/paths';
       <header class="mb-12">
         <h1 class="text-4xl md:text-5xl font-bold text-white mb-6 leading-tight">Harness-Backed Agent Session Manager</h1>
         <p class="text-lg text-gray-400 leading-relaxed">
-          AI coding agents -- tools like Claude Code, Codex, Gemini CLI, OpenCode, and Mistral Vibe that write and edit code from a terminal -- are powerful individually. But running multiple instances gets unwieldy fast. Forager gives you a local meta-harness to manage, monitor, isolate, and later review them.
+          Forager lists coding CLI sessions, attaches to their tmux terminals and manages optional Git worktrees. Use it with installed tools such as Claude Code, Codex, Gemini CLI, OpenCode and Mistral Vibe.
         </p>
       </header>
 
@@ -33,7 +33,7 @@ import { sitePath } from '../../lib/paths';
       <section>
         <h2>Running Multiple Agent Instances</h2>
         <p>
-          Real productivity comes from running several agents in parallel. One might be refactoring a module, another writing tests, and a third exploring an API integration. Each needs its own terminal session and its own working directory to avoid conflicts.
+          Parallel sessions can handle separate tasks, such as refactoring a module and writing tests. Give changes separate working directories and review how they interact before merging them.
         </p>
         <p>
           <a href={sitePath('/')}>Forager</a> handles this by creating tmux sessions for each agent instance. Each session can point at a different directory or branch. The TUI dashboard shows all your instances at a glance, regardless of which coding agent you are using.
@@ -43,32 +43,32 @@ import { sitePath } from '../../lib/paths';
       <section>
         <h2>Status Detection Across Agents</h2>
         <p>
-          Forager automatically detects the state of your coding agent sessions. It has built-in support for Claude Code, Codex, Gemini CLI, OpenCode, and Mistral Vibe. The dashboard shows whether each instance is:
+          Forager estimates session state from process and terminal patterns for Claude Code, Codex, Gemini CLI, OpenCode and Mistral Vibe. The dashboard uses labels such as:
         </p>
         <ul>
-          <li><strong>Active</strong>: The agent is generating code or running commands</li>
-          <li><strong>Waiting</strong>: The agent needs your input or approval</li>
-          <li><strong>Idle</strong>: The session is open but no agent is running</li>
+          <li><strong>Running</strong>: Activity patterns suggest the agent is working</li>
+          <li><strong>Waiting</strong>: A prompt or approval pattern was detected</li>
+          <li><strong>Idle</strong>: No recognized activity or waiting pattern was detected</li>
         </ul>
         <p>
-          You do not need to switch into each session to check on progress. A quick glance at the dashboard tells you which agents need your attention and which are still working.
+          Labels help you choose a session to inspect. They can be stale or misclassified and do not establish that a task finished successfully.
         </p>
       </section>
 
       <section>
         <h2>Git Worktrees for Parallel Sessions</h2>
         <p>
-          When you have multiple agents working on different branches of the same repo, <a href={sitePath('/guides/git-worktrees-ai-development/')}>git worktrees</a> keep them isolated. Forager creates a separate worktree for each session, so each agent gets its own branch and working directory.
+          When you request a worktree for a session, <a href={sitePath('/guides/git-worktrees-ai-development/')}>git worktrees</a> give it a separate branch and working directory. They share Git history and do not restrict an agent's access to other files or processes.
         </p>
         <p>
-          This avoids the common problem of two agents trying to modify the same files. Each instance works independently, and you merge the results when they are done.
+          Separate checkouts reduce accidental edits to the same working files. Review overlapping changes and shared resources before merging results.
         </p>
       </section>
 
       <section>
         <h2>Session Persistence</h2>
         <p>
-          All agent sessions run inside tmux, which means they persist even when you close the Forager TUI. You can close your terminal, reopen Forager later, and all your sessions are still running exactly where you left them.
+          Agent sessions run inside tmux and can continue after you close the Forager TUI or disconnect its client. Reattach while the host and tmux server stay running. A reboot or tmux server exit ends the live processes.
         </p>
         <p>
           This is especially useful for long-running tasks. Start an agent on a large refactoring job, close the TUI, and come back later to check the results.

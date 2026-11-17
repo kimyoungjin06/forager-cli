@@ -1,5 +1,8 @@
 //! Linux-specific process utilities
 
+pub mod cgroup;
+pub mod landlock;
+
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs::{self, File, Metadata};
@@ -20,6 +23,55 @@ use tracing::debug;
 
 use super::{BoundedDirectoryRead, DirectoryReadLimit, FilesystemObjectSnapshot};
 
+/// The receipt is emitted only after all adopted descendants have been reaped.
+/// Python runs isolated from user site packages; failure to enable subreaping
+/// exits before launching the user command and produces no release evidence.
+pub fn local_supervisor_command(
+    source: &str,
+    receipt: &Path,
+    nonce: &str,
+    scope: &str,
+) -> std::process::Command {
+    const SUPERVISOR: &str = r#"
+import ctypes, json, os, subprocess, sys
+libc = ctypes.CDLL(None, use_errno=True)
+if libc.prctl(36, 1, 0, 0, 0) != 0:
+    raise OSError(ctypes.get_errno(), 'child subreaper unavailable')
+enabled = ctypes.c_int()
+if libc.prctl(37, ctypes.byref(enabled), 0, 0, 0) != 0 or enabled.value != 1:
+    raise RuntimeError('child subreaper verification failed')
+child = subprocess.Popen(['/bin/sh', '-c', sys.argv[1]])
+status = None
+while True:
+    try:
+        pid, raw = os.waitpid(-1, 0)
+    except InterruptedError:
+        continue
+    except ChildProcessError:
+        break
+    if pid == child.pid:
+        child.returncode = os.waitstatus_to_exitcode(raw)
+        status = child.returncode if child.returncode >= 0 else 128 - child.returncode
+if status is None:
+    raise RuntimeError('primary child exit missing')
+record = {'nonce': sys.argv[3], 'status': status, 'wait_scope': sys.argv[4]}
+fd = os.open(sys.argv[2], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+with os.fdopen(fd, 'w') as stream:
+    json.dump(record, stream)
+    stream.flush()
+    os.fsync(stream.fileno())
+sys.exit(status)
+"#;
+    let mut command = std::process::Command::new("/usr/bin/python3");
+    command
+        .args(["-I", "-S", "-c", SUPERVISOR])
+        .arg(source)
+        .arg(receipt)
+        .arg(nonce)
+        .arg(scope);
+    command
+}
+
 pub fn open_bounded_root(root: &Path) -> io::Result<File> {
     if !root.is_absolute() {
         return Err(io::Error::new(
@@ -29,7 +81,7 @@ pub fn open_bounded_root(root: &Path) -> io::Result<File> {
     }
     let descriptor = open(
         Path::new("/"),
-        OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
+        OFlag::O_PATH | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
         Mode::empty(),
     )
     .map_err(errno_to_io)?;
@@ -48,13 +100,22 @@ pub fn open_bounded_root(root: &Path) -> io::Result<File> {
         let descriptor = openat(
             &directory,
             name,
-            OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
+            OFlag::O_PATH | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
             Mode::empty(),
         )
         .map_err(errno_to_io)?;
         directory = File::from(descriptor);
     }
-    Ok(directory)
+    // Traversing ancestors does not require reading their directory entries.
+    // Reopen only the held target with read access so callers can sync it.
+    let descriptor = openat(
+        &directory,
+        Path::new("."),
+        OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_CLOEXEC | OFlag::O_NOFOLLOW,
+        Mode::empty(),
+    )
+    .map_err(errno_to_io)?;
+    Ok(File::from(descriptor))
 }
 
 pub fn open_bounded_regular_file(root: &File, relative_path: &Path) -> io::Result<File> {
@@ -301,6 +362,10 @@ pub fn bounded_directory_snapshot(
     ))
 }
 
+pub fn filesystem_link_count(metadata: &Metadata) -> u64 {
+    metadata.nlink()
+}
+
 pub fn filesystem_file_identity(metadata: &Metadata) -> (u64, u64) {
     (metadata.dev(), metadata.ino())
 }
@@ -515,8 +580,8 @@ fn find_process_in_group(pgrp: u32) -> Option<u32> {
         return None;
     }
 
-    for entry in fs::read_dir(proc_dir).ok()? {
-        let entry = entry.ok()?;
+    let mut candidates = Vec::new();
+    for entry in fs::read_dir(proc_dir).ok()?.flatten() {
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
 
@@ -532,13 +597,29 @@ fn find_process_in_group(pgrp: u32) -> Option<u32> {
             // Field 5 (0-indexed 4) is the process group ID
             if let Some(proc_pgrp) = parse_stat_field(&content, 4) {
                 if proc_pgrp as u32 == pgrp {
-                    return Some(pid);
+                    candidates.push(pid);
                 }
             }
         }
     }
 
-    None
+    select_group_process(pgrp, candidates)
+}
+
+fn select_group_process(pgrp: u32, candidates: Vec<u32>) -> Option<u32> {
+    // /proc enumeration order is not a process identity. Prefer the leader;
+    // if it has exited, use a deterministic surviving group member.
+    candidates
+        .into_iter()
+        .min_by_key(|pid| (*pid != pgrp, *pid))
+}
+
+#[test]
+fn foreground_group_selection_is_order_independent() {
+    assert_eq!(select_group_process(20, vec![30, 20, 10]), Some(20));
+    assert_eq!(select_group_process(20, vec![10, 30, 20]), Some(20));
+    assert_eq!(select_group_process(20, vec![30, 10]), Some(10));
+    assert_eq!(select_group_process(20, vec![]), None);
 }
 
 /// Parse a specific field from /proc/[pid]/stat
@@ -560,6 +641,78 @@ mod tests {
     use super::*;
     use std::io::Read;
     use std::os::unix::fs::symlink;
+
+    #[test]
+    fn bounded_root_opens_inside_landlock_without_parent_reads() {
+        const CHILD: &str = "FORAGER_BOUNDED_ROOT_LANDLOCK_CHILD";
+        if let Ok(outside) = std::env::var(CHILD) {
+            let root = std::env::current_dir().expect("child root");
+            let handle = open_bounded_root(&root).expect("allowed bounded root");
+            let mut file = create_new_bounded_regular_file(&handle, Path::new("written.txt"))
+                .expect("allowed bounded create");
+            std::io::Write::write_all(&mut file, b"written").expect("write");
+            file.sync_all().expect("sync file");
+            handle.sync_all().expect("sync held directory");
+            assert_eq!(
+                fs::read(root.join("written.txt")).expect("read"),
+                b"written"
+            );
+            assert_eq!(
+                fs::read(&outside)
+                    .expect_err("outside read denied")
+                    .raw_os_error(),
+                Some(nix::libc::EACCES)
+            );
+            assert_eq!(
+                open_bounded_root(Path::new(&outside).parent().expect("parent"))
+                    .expect_err("outside directory denied")
+                    .raw_os_error(),
+                Some(nix::libc::EACCES)
+            );
+            assert!(open_bounded_regular_file(&handle, Path::new("escape")).is_err());
+            return;
+        }
+        if super::super::landlock_abi().is_err() {
+            return;
+        }
+        let fixture = tempfile::tempdir().expect("fixture");
+        let root = fixture.path().join("task");
+        fs::create_dir(&root).expect("task root");
+        let outside = fixture.path().join("outside.txt");
+        fs::write(&outside, b"preserved").expect("outside canary");
+        symlink(&outside, root.join("escape")).expect("escape symlink");
+        let executable = root.join("test-child");
+        fs::copy(
+            std::env::current_exe().expect("test executable"),
+            &executable,
+        )
+        .expect("independent executable copy");
+        let mut command = std::process::Command::new(executable);
+        command.args([
+            "--exact",
+            "process::linux::tests::bounded_root_opens_inside_landlock_without_parent_reads",
+            "--nocapture",
+        ]);
+        crate::offdesk::read_policy::apply_to_command(
+            &crate::offdesk::read_policy::ReadPolicy::canonical(),
+            &mut command,
+            &root,
+        )
+        .expect("canonical restriction");
+        command.env(CHILD, &outside);
+        let output = command.output().expect("restricted child");
+        assert!(
+            output.status.success(),
+            "stdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            fs::read(root.join("written.txt")).expect("child ran"),
+            b"written"
+        );
+        assert_eq!(fs::read(outside).expect("preserved canary"), b"preserved");
+    }
 
     #[test]
     fn test_parse_stat_field() {

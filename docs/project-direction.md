@@ -1,19 +1,20 @@
 # Project Direction
 
-Forager is a local autonomy meta-harness for harness-backed AI agent work.
+Forager currently manages tmux agent sessions, Git worktrees and optional
+Offdesk task records. See [operation status](offdesk-operation-status.md) for
+source capabilities and validation boundaries.
 
-Its purpose is to turn fragile live chat, terminal sessions, and external agent
-harnesses into governed operations: explicit intent, bounded approvals, durable
-runtime evidence, reviewable handoffs, and promoted project knowledge.
+This document describes the direction of development, including goals that
+have not been demonstrated across all harnesses and workloads. "Meta-harness"
+describes the intended architecture around other agents' execution loops.
 
 ## North Star
 
 Forager lets people entrust meaningful work to agents and return to evidence,
 choices, and continuity instead of mystery.
 
-This is the human-facing product promise. It should stay short enough to guide
-taste, positioning, and product judgment. The internal criteria below define how
-the project knows whether that promise is actually being met.
+This is a development goal. The criteria below describe how to assess progress;
+they are not a statement that the goal has been achieved.
 
 ## Direction Statement
 
@@ -41,21 +42,24 @@ The product direction is:
     direction, brand boundary, scope, and completion criteria in a reviewable
     implementation packet.
 
-## What Forager Is
+## Current Role and Intended Extensions
 
 Forager is:
 
 - a tmux-backed manager for agent and terminal sessions;
 - an approval-gated Offdesk runtime for queued or long-running work;
-- a meta-harness that can supervise harness-backed agents from Claude Code,
-  Codex, OpenCode, OpenHands, local LLM scripts, or future agent loops as
-  workloads;
+- a host for installed coding CLIs and explicitly configured commands;
 - a local source of truth for task queues, approvals, runtime probes, recovery,
   result artifacts, closeout packages, and adaptive wiki state;
 - a handoff system that moves work from Ondesk to Offdesk and back through
   bounded artifacts;
 - an operator surface for deciding what is safe to run, trust, preserve,
   promote, or discard.
+
+OpenHands and other future integrations are candidates, not current hosted
+harness support. The [profile inventory](hosted-harness-agents.md) distinguishes
+the available profiles from planned ones. Task records and approval checks do
+not impose a general security sandbox on an agent's tool use.
 
 ## What Forager Is Not
 
@@ -207,7 +211,7 @@ the same underlying state and safety contract should apply everywhere.
 
 ## Practical Completion Criteria
 
-The north star is being met when these internal criteria are true:
+These are target criteria for the north star, not a completed validation list:
 
 - each supported hosted harness agent has a shared local contract: launch
   command, working directory, mutation scope, runtime evidence sources, result
@@ -242,6 +246,68 @@ The north star is being met when these internal criteria are true:
 - old compatibility surfaces fade without breaking existing local state.
 
 ## Near-Term Focus
+
+### Maintenance sequence after the 2026-11-04 core checkpoint
+
+The original source checkpoint `3e01fbc` preserves the qualified core snapshot
+based on `8172701`. This branch now incorporates remote-session policy commit
+`2c8a01f` through explicit reconciliation. The four maintenance packages below
+have implementation candidates and local regression evidence, pending operator
+review. Main integration, production selection and additional executor
+qualification retain their separate decision boundaries.
+
+The task IDs below belong to the existing operator-owned continuity plan.
+This section explains their product outcomes; it is not a second execution
+queue. New work stays Ondesk until its exact selection is approved for Offdesk.
+
+| Order | Owning task | Outcome and completion evidence | Planning range |
+| --- | --- | --- | --- |
+| 1 | QA.1 | Integration fixtures use private HOME/XDG directories and tmux sockets. Success, failure, and interrupted cleanup leave the host profile and unrelated sessions unchanged. | 60 to 120 minutes |
+| 2 | Release.2 | Reconcile the source checkpoint with the newer remote-session policy commit. Keep a reviewed diff, run the affected policy and core regressions, and expose an exact build identity in local diagnostics. | 60 to 120 minutes |
+| 3 | Release.3 | Make frontend replacement repeatable while retaining agent identities. A cooperative startup gate, final old-reader inventory, terminal restoration, and state-compatible rollback decisions cover a reopen during the backup/selector window. | 60 to 120 minutes |
+| 4 | Ops.1 | Separate service health from project review holds. New uncertain-delivery records include time, event kind, safe identity, and attempt outcome; existing digest-only holds retain their unknown status. | 30 to 90 minutes |
+| 5 | C5.1a | Independently qualify actual local-model edits, checks, and recovery across a real context transition using the explicitly selected adapter and budget. | Estimate after adapter and scope selection |
+| 6 | C6.3-local | After C5.1a acceptance, qualify the local adapter through the complete two-project selection, execution, return, and TODO agreement cycle. | Estimate after qualification |
+
+QA.1 is the first package in this implemented sequence. Each range includes verification and
+closeout; stop when the outcome is complete. Release.2 includes a read-only
+mapping of the older aggregate night task to existing evidence, so completed
+subwork is not repeated or silently accepted. Release.3's cooperative gate
+does not claim to prevent arbitrary direct execution of an old binary.
+
+The final two items remain qualification work. The accepted core executor flow
+does not establish arbitrary local-model coding, context recovery, or scientific
+acceptance. Plan preparation does not authorize a new model call, deployment,
+event replay, or modification of another project's accepted records.
+
+During native qualification, give the model time to finish its response. Actual
+reasoning, answer text and tool-argument generation keep the response active
+even when no command has completed. Response activity has its own clock and
+does not increment tool or verified-work counts. Metadata, transport heartbeats,
+empty deltas and repeated native message events do not count as generation.
+The default inactivity interval remains 180 seconds, measured from the latest
+response activity or completed command. Selected phase/window deadlines and
+active-command timeouts remain separate bounds.
+
+Native evidence now records the `response_completion.v1` supervision policy,
+activity state and response timing alongside tool timing. The inactivity stop
+reason changes from `no_tool_progress` to `response_inactive`; consumers matching
+the old reason must handle the new value. Completing a response alone does not
+pass source-edit, check, recovery or acceptance gates. Production runtime
+selection and real-model qualification still need their own evidence.
+
+Private helper selections can bind a `reasoning_policy` to the exact selected
+model with effort `none`, `low`, `medium` or `xhigh`. Both native contexts receive
+the same explicit value. An omitted policy keeps the backend default; invalid
+policies are rejected before native launch. This qualification artifact is not a
+production settings field and does not select a new run or an output-token cap.
+
+The first explicit-low trial, R191, verifies the backend-bound request envelope
+but stops during runner startup and warmup before any answer or tool execution.
+Model readiness is separate from metadata availability and effort correctness.
+Keep that failed result, record native HTTP retries separately from trial
+relaunches, and qualify loading before measuring another bounded helper task.
+Effort performance, recovery, helper checks and production selection remain open.
 
 The current implementation should prioritize:
 

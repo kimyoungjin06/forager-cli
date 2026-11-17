@@ -13,6 +13,7 @@ pub mod repo_config;
 mod storage;
 
 pub use crate::sound::{SoundConfig, SoundConfigOverride};
+pub use auto_orchestrator::AutoOrchestratorStartupPreflightV1;
 pub use config::{
     load_config, load_config_read_only, save_config, ClaudeConfig, Config, DiffConfig,
     SandboxConfig, SessionConfig, ThemeConfig, TmuxMouseMode, TmuxStatusBarMode, UpdatesConfig,
@@ -169,13 +170,17 @@ pub fn normalize_profile_name(profile: &str) -> Result<String> {
 }
 
 pub fn get_profile_dir(profile: &str) -> Result<PathBuf> {
-    let base = get_app_dir()?;
-    let profile_name = normalize_profile_name(profile)?;
-    let dir = base.join("profiles").join(profile_name);
+    let dir = profile_dir_path(profile)?;
     if !dir.exists() {
         fs::create_dir_all(&dir)?;
     }
     Ok(dir)
+}
+
+pub fn profile_dir_path(profile: &str) -> Result<PathBuf> {
+    let base = resolved_app_dir_path()?;
+    let profile_name = normalize_profile_name(profile)?;
+    Ok(base.join("profiles").join(profile_name))
 }
 
 pub fn list_profiles() -> Result<Vec<String>> {

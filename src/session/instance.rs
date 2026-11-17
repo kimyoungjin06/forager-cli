@@ -15,6 +15,10 @@ fn default_true() -> bool {
     true
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalInfo {
     #[serde(default)]
@@ -79,6 +83,11 @@ pub struct Instance {
     pub tool: String,
     #[serde(default)]
     pub yolo_mode: bool,
+    /// True only for the per-project coordinator created by the automatic
+    /// orchestrator provisioner. This is presentation provenance, not extra
+    /// execution authority.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub auto_orchestrator: bool,
     #[serde(default)]
     pub status: Status,
     pub created_at: DateTime<Utc>,
@@ -123,6 +132,7 @@ impl Instance {
             command: String::new(),
             tool: "claude".to_string(),
             yolo_mode: false,
+            auto_orchestrator: false,
             status: Status::Idle,
             created_at: Utc::now(),
             last_accessed_at: None,

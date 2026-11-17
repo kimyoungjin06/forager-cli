@@ -17,7 +17,7 @@ const {
   title,
   description,
   ogTitle = 'Forager',
-  ogDescription = 'Local meta-harness for harness-backed AI agents. Approvals, evidence, recovery, reviewable handoffs, and continuity.',
+  ogDescription = description,
   ogImage = `${publicSiteUrl}/assets/social-preview.png`
 } = Astro.props;
 
@@ -27,7 +27,7 @@ const structuredData = {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
   "name": "Forager",
-  "description": "Local meta-harness for Linux and macOS using tmux to supervise harness-backed AI agent work with approvals, durable evidence, recovery, and reviewable handoffs.",
+  "description": "A tmux-based coding agent session manager for Linux and macOS, with Git worktrees and optional task queues, execution approvals and result review.",
   "url": publicSiteUrl,
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "Linux, macOS",
@@ -51,7 +51,7 @@ const structuredData = {
   },
   "license": "https://github.com/kimyoungjin06/forager-cli/blob/main/LICENSE",
   "codeRepository": "https://github.com/kimyoungjin06/forager-cli",
-  "keywords": ["AI coding agent", "local meta-harness", "harness-backed agents", "offdesk autonomy", "terminal session manager", "tmux", "Claude Code", "Codex", "OpenCode", "OpenHands", "Mistral Vibe", "Gemini CLI", "git worktrees"]
+  "keywords": ["AI coding agent", "terminal session manager", "task queues", "result review", "tmux", "Claude Code", "Codex", "OpenCode", "Mistral Vibe", "Gemini CLI", "git worktrees"]
 };
 ---
 
@@ -62,7 +62,7 @@ const structuredData = {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{title}</title>
   <meta name="description" content={description}>
-  <meta name="keywords" content="AI coding agent, local meta-harness, harness-backed agents, offdesk autonomy, terminal session manager, tmux, Claude Code, Codex, OpenCode, OpenHands, Mistral Vibe, Gemini CLI, git worktrees, Rust, TUI, CLI, developer tools">
+  <meta name="keywords" content="AI coding agent, terminal session manager, task queues, result review, tmux, Claude Code, Codex, OpenCode, Mistral Vibe, Gemini CLI, git worktrees, Rust, TUI, CLI, developer tools">
   <meta name="author" content="Forager Contributors">
   <meta name="robots" content="index, follow">
   <link rel="canonical" href={canonicalURL}>
@@ -98,6 +98,5 @@ const structuredData = {
 </head>
 <body class="gradient-bg min-h-screen text-gray-100 antialiased">
   <slot />
-  <script is:inline src={sitePath('/main.js')}></script>
 </body>
 </html>

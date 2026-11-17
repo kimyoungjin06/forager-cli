@@ -1,5 +1,11 @@
 # Telegram Adapter Decomposition Plan - 2026-06-26
 
+> **Record scope:** Retained decomposition plan and dated progress notes, beginning 2026-06-26.
+> Intermediate line counts, tests and remaining steps belong to their recorded
+> slices; they are not a current source measurement or execution queue.
+> See [current operation scope](offdesk-operation-status.md) and
+> [the daily workflow](guides/operation-cycle.md) for active guidance.
+
 This plan decomposes `scripts/offdesk_remote_operator_telegram.py` without
 changing the operator-facing behavior. It follows the freeze rule in
 `docs/refactor-baseline-20260626.md`: no new mutation-capable remote actions
