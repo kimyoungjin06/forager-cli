@@ -1713,6 +1713,8 @@ fn remote_operator_telegram_multi_operator_requires_exact_private_pair() -> Resu
         let out = temp.path().join(format!("multi_{name}_out.json"));
         let state = temp.path().join(format!("multi_{name}_state.json"));
         let output = remote_operator_command(temp.path())
+            .arg("--forager-bin")
+            .arg(env!("CARGO_BIN_EXE_forager"))
             .arg("--dry-run")
             .arg("--once")
             .arg("--replay-update-file")

@@ -37,7 +37,7 @@ jobs:
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as output:
               output.write(f"TMPDIR={temporary_path}\n")
           PY
-      - run: cargo test --locked --all-targets --all-features
+      - run: cargo test --locked --all-targets --all-features --no-fail-fast
 
   msrv:
     name: Rust 1.88 MSRV

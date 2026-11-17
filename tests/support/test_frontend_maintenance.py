@@ -5,7 +5,9 @@ import json
 import os
 from pathlib import Path
 import pty
+import select
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -22,6 +24,41 @@ spec.loader.exec_module(maintenance)
 
 
 class Fixture:
+    @staticmethod
+    def stop_process(proc):
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+
+    def terminal_pair(self):
+        master, slave = pty.openpty()
+        self.addCleanup(os.close, master)
+        self.addCleanup(os.close, slave)
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 30, 100, 0, 0))
+        return master, slave
+
+    def drain_terminal(self, master):
+        stopped = threading.Event()
+
+        def drain():
+            # A real terminal consumes output. An unread PTY can block rendering
+            # or tmux detach before the frontend can observe maintenance.
+            while not stopped.is_set():
+                if select.select([master], [], [], .05)[0]:
+                    try:
+                        if not os.read(master, 65536):
+                            return
+                    except OSError:
+                        return
+
+        reader = threading.Thread(target=drain, daemon=True)
+        reader.start()
+        self.addCleanup(lambda: (stopped.set(), reader.join(timeout=1)))
+
     def guard(self, operation, paths, command, *, candidate=None):
         selected = candidate or self.old
         return maintenance.guard(operation, paths, command, candidate=selected,
@@ -248,16 +285,15 @@ class FrontendTests(Fixture, unittest.TestCase):
         cli.write_text('#!/bin/sh\nif [ "$1" = "--version" ]; then echo "fixture 1.0"; exit 0; fi\nexit 97\n')
         cli.chmod(0o700)
         env = {**os.environ, 'PATH': str(tools) + ':' + os.environ['PATH']}
-        master, slave = pty.openpty()
-        self.addCleanup(os.close, master)
-        self.addCleanup(os.close, slave)
+        master, slave = self.terminal_pair()
         before = termios.tcgetattr(slave)
         def terminal():
             os.setsid()
             fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
         proc = subprocess.Popen([os.environ['FORAGER_MAINTENANCE_TEST_BINARY']], env=env,
                                 stdin=slave, stdout=slave, stderr=slave, preexec_fn=terminal)
-        self.addCleanup(lambda: proc.poll() is None and (proc.terminate(), proc.wait(timeout=5)))
+        self.drain_terminal(master)
+        self.addCleanup(self.stop_process, proc)
         end = time.monotonic() + 10
         while time.monotonic() < end and proc.poll() is None:
             if not termios.tcgetattr(slave)[3] & termios.ICANON:
@@ -320,16 +356,15 @@ class FrontendTests(Fixture, unittest.TestCase):
         (app / '.schema_version').write_text('11')
         (profile / 'sessions.json').write_text(json.dumps([dict(id='abcdefgh', title='agent',
             project_path=str(self.root), tool='bash', created_at='2026-11-04T00:00:00Z')]))
-        master, slave = pty.openpty()
-        self.addCleanup(os.close, master)
-        self.addCleanup(os.close, slave)
+        master, slave = self.terminal_pair()
         before = termios.tcgetattr(slave)
         def terminal():
             os.setsid()
             fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
         proc = subprocess.Popen([os.environ['FORAGER_MAINTENANCE_TEST_BINARY'], 'session', 'attach', 'abcdefgh'],
                                 stdin=slave, stdout=slave, stderr=slave, preexec_fn=terminal)
-        self.addCleanup(lambda: proc.poll() is None and (proc.terminate(), proc.wait(timeout=5)))
+        self.drain_terminal(master)
+        self.addCleanup(self.stop_process, proc)
         until = time.monotonic() + 10
         while time.monotonic() < until:
             if subprocess.check_output(['tmux', 'list-clients']).strip():
