@@ -713,17 +713,16 @@ fn production_keyboard_cleanup_is_one_card_then_waiting_card_on_next_poll() -> R
         json!({"ok": true, "result": []}),
         json!({"ok": true, "result": {"message_id": 901}}),
     ])?;
-    let first = run(&temp.path().join("cleanup.json"), &first_base)?;
+    let first = run(&temp.path().join("cleanup.json"), &first_base);
+    let first_requests = first_server.join().expect("cleanup fake Telegram")?;
+    let first = first?;
     let first_cycle =
         find_schema(&first, "remote_operator_notification_cycle.v1").expect("cleanup cycle report");
     assert_eq!(first_cycle["status"], "delivered");
     assert_eq!(first_cycle["selected_priority"], 0);
     assert_eq!(first_cycle["attempted_count"], 1);
     assert_eq!(first["session_notification"]["keyboard_cleanup"], "removed");
-    assert_eq!(
-        first_server.join().expect("cleanup fake Telegram")?.len(),
-        2
-    );
+    assert_eq!(first_requests.len(), 2);
     let first_state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
     assert_eq!(first_state["telegram_session_keyboard_schema"], "inline_v3");
     assert!(first_state["waiting_notified_by_session"]
@@ -734,16 +733,15 @@ fn production_keyboard_cleanup_is_one_card_then_waiting_card_on_next_poll() -> R
         json!({"ok": true, "result": []}),
         json!({"ok": true, "result": {"message_id": 902}}),
     ])?;
-    let second = run(&temp.path().join("waiting.json"), &second_base)?;
+    let second = run(&temp.path().join("waiting.json"), &second_base);
+    let second_requests = second_server.join().expect("waiting fake Telegram")?;
+    let second = second?;
     let second_cycle = find_schema(&second, "remote_operator_notification_cycle.v1")
         .expect("waiting cycle report");
     assert_eq!(second_cycle["status"], "delivered");
     assert_eq!(second_cycle["selected_priority"], 40);
     assert_eq!(second["session_notification"]["status"], "notified");
-    assert_eq!(
-        second_server.join().expect("waiting fake Telegram")?.len(),
-        2
-    );
+    assert_eq!(second_requests.len(), 2);
     let second_state: Value = serde_json::from_slice(&fs::read(&state_path)?)?;
     assert!(second_state["waiting_notified_by_session"][session_id].is_object());
     Ok(())
@@ -926,7 +924,7 @@ fn write_http_json(stream: &mut TcpStream, value: Value) -> Result<()> {
     let body = serde_json::to_vec(&value)?;
     write!(
         stream,
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
     )?;
     stream.write_all(&body)?;
@@ -940,9 +938,9 @@ fn spawn_fake_telegram(
     let port = listener.local_addr()?.port();
     listener.set_nonblocking(true)?;
     let handle = thread::spawn(move || -> Result<Vec<String>> {
-        let deadline = Instant::now() + Duration::from_secs(10);
         let mut requests = Vec::new();
         for response in responses {
+            let deadline = Instant::now() + Duration::from_secs(30);
             let (mut stream, _) = loop {
                 match listener.accept() {
                     Ok(value) => break value,

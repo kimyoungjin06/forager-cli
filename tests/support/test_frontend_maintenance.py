@@ -43,11 +43,17 @@ class Fixture:
 import fcntl, json, subprocess, sys, termios
 from pathlib import Path
 fcntl.ioctl(0, termios.TIOCSCTTY, 0)
-before = repr(termios.tcgetattr(0))
+before_attrs = termios.tcgetattr(0)
+before = repr(before_attrs)
 child = subprocess.Popen(json.loads(sys.argv[2]))
 code = child.wait()
-after = repr(termios.tcgetattr(0))
-Path(sys.argv[1]).write_text(json.dumps({'before': before, 'after': after}))
+after_attrs = termios.tcgetattr(0)
+before_config, after_config = list(before_attrs), list(after_attrs)
+# PENDIN is pending-input state, not an unrestored terminal configuration.
+for attributes in [before_config, after_config]:
+    attributes[3] &= ~getattr(termios, 'PENDIN', 0)
+Path(sys.argv[1]).write_text(json.dumps({'before': before, 'after': repr(after_attrs),
+    'configuration_before': repr(before_config), 'configuration_after': repr(after_config)}))
 raise SystemExit(code)
 """
         proc = subprocess.Popen([sys.executable, '-c', supervisor, str(report), json.dumps(command)],
@@ -60,7 +66,7 @@ raise SystemExit(code)
     def assert_terminal_restored(self, report, before):
         observed = json.loads(report.read_text())
         self.assertEqual(observed['before'], repr(before))
-        self.assertEqual(observed['after'], observed['before'])
+        self.assertEqual(observed['configuration_after'], observed['configuration_before'])
 
     def terminal_pair(self):
         master, slave = pty.openpty()

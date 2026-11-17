@@ -2176,6 +2176,20 @@ fn shift_prepare_arm_reconcile_and_disarm_follow_exact_approval_flow() -> Result
     Ok(())
 }
 
+fn hold_fixture_until_launch_ack(home: &Path) -> Result<PathBuf> {
+    let gate = home.join("fixture-launch-ack");
+    let queue = profile_dir(home).join("offdesk_tasks.json");
+    let mut tasks: Value = serde_json::from_slice(&fs::read(&queue)?)?;
+    let command = tasks[0]["command"].as_str().unwrap().to_owned();
+    let quoted_gate = format!("'{}'", gate.to_string_lossy().replace('\'', "'\\''"));
+    tasks[0]["command"] = json!(format!(
+        "forager_fixture_polls=0; while [ ! -f {gate} ] && [ $forager_fixture_polls -lt 1000 ]; do sleep 0.02; forager_fixture_polls=$((forager_fixture_polls + 1)); done; [ -f {gate} ] || exit 97; {command}",
+        gate = quoted_gate,
+    ));
+    fs::write(queue, serde_json::to_vec_pretty(&tasks)?)?;
+    Ok(gate)
+}
+
 #[test]
 fn shift_tick_launches_only_after_revalidating_the_active_manifest() -> Result<()> {
     let temp = tempdir()?;
@@ -2184,6 +2198,7 @@ fn shift_tick_launches_only_after_revalidating_the_active_manifest() -> Result<(
     let stops_at = Utc::now() + Duration::hours(1);
     let (plan_id, review_id) =
         register_review_and_enqueue(temp.path(), &project_root, starts_at, stops_at)?;
+    let launch_ack = hold_fixture_until_launch_ack(temp.path())?;
     let approval_id = prepare_shift_and_approve(
         temp.path(),
         &plan_id,
@@ -2291,6 +2306,7 @@ fn shift_tick_launches_only_after_revalidating_the_active_manifest() -> Result<(
             "--json",
         ])
         .output()?;
+    fs::write(launch_ack, b"observed")?;
     assert!(
         tick.status.success(),
         "shift tick failed: {}",
@@ -3931,6 +3947,7 @@ fn shift_tick_closes_a_reservation_only_crash_without_relaunching() -> Result<()
     let stops_at = Utc::now() + Duration::hours(1);
     let (plan_id, review_id) =
         register_review_and_enqueue(temp.path(), &project_root, starts_at, stops_at)?;
+    let launch_ack = hold_fixture_until_launch_ack(temp.path())?;
     let approval_id = prepare_shift_and_approve(
         temp.path(),
         &plan_id,
@@ -3979,6 +3996,7 @@ fn shift_tick_closes_a_reservation_only_crash_without_relaunching() -> Result<()
             "--json",
         ])
         .output()?;
+    fs::write(launch_ack, b"observed")?;
     assert!(launched.status.success());
     assert_eq!(
         serde_json::from_slice::<Value>(&launched.stdout)?["launched"],
@@ -4264,6 +4282,7 @@ fn shift_tick_records_one_terminal_outcome_for_the_exact_ticket() -> Result<()> 
     tasks[0]["result_artifact_path"] = json!(result_path.display().to_string());
     fs::write(&tasks_path, serde_json::to_vec_pretty(&tasks)?)?;
 
+    let launch_ack = hold_fixture_until_launch_ack(temp.path())?;
     let approval_id = prepare_shift_and_approve(
         temp.path(),
         &plan_id,
@@ -4312,6 +4331,7 @@ fn shift_tick_records_one_terminal_outcome_for_the_exact_ticket() -> Result<()> 
             "--json",
         ])
         .output()?;
+    fs::write(launch_ack, b"observed")?;
     assert!(launched.status.success());
     for _ in 0..50 {
         if result_path.exists() {
