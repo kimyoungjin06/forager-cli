@@ -365,6 +365,7 @@ fn shift_dispatch_requires_fresh_approval_even_with_approved_execution_brief() -
     let stops_at = Utc::now() + Duration::hours(1);
     let (plan_id, review_id) =
         register_review_and_enqueue(temp.path(), &project_root, starts_at, stops_at)?;
+    let launch_ack = hold_fixture_until_launch_ack(temp.path())?;
     let arm_approval = prepare_shift_and_approve(
         temp.path(),
         &plan_id,
@@ -434,6 +435,7 @@ fn shift_dispatch_requires_fresh_approval_even_with_approved_execution_brief() -
     );
 
     let second = forager_command(temp.path()).args(tick_args).output()?;
+    fs::write(launch_ack, b"observed")?;
     assert!(
         second.status.success(),
         "{}",
@@ -441,6 +443,19 @@ fn shift_dispatch_requires_fresh_approval_even_with_approved_execution_brief() -
     );
     let second: Value = serde_json::from_slice(&second.stdout)?;
     assert_eq!(second["launched"], 1);
+    let probes: Value = serde_json::from_slice(&fs::read(
+        profile_dir(temp.path()).join("background_runs.json"),
+    )?)?;
+    let receipt = project_root.join(
+        probes[0]["local_exit_receipt"]["relative_path"]
+            .as_str()
+            .unwrap(),
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !receipt.exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(receipt.exists(), "fixture command did not finish");
     Ok(())
 }
 
@@ -2190,6 +2205,30 @@ fn hold_fixture_until_launch_ack(home: &Path) -> Result<PathBuf> {
     Ok(gate)
 }
 
+fn wait_for_fixture_process_exit(home: &Path) -> Result<()> {
+    let probe = forager::offdesk::BackgroundRunStore::new(profile_dir(home))
+        .load()?
+        .remove(0);
+    let pid = probe.runtime_pid.expect("fixture runtime PID");
+    let identity = probe.runtime_identity.expect("fixture runtime identity");
+    let receipt = PathBuf::from(probe.working_dir.expect("fixture workdir")).join(
+        probe
+            .local_exit_receipt
+            .expect("fixture exit receipt")
+            .relative_path,
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        if receipt.exists()
+            && forager::process::process_identity(pid).as_deref() != Some(identity.as_str())
+        {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    anyhow::bail!("fixture command did not finish before recovery-state injection")
+}
+
 #[test]
 fn shift_tick_launches_only_after_revalidating_the_active_manifest() -> Result<()> {
     let temp = tempdir()?;
@@ -2352,6 +2391,7 @@ fn shift_tick_launches_only_after_revalidating_the_active_manifest() -> Result<(
     assert_eq!(tasks[0]["status"], "launched");
     assert_eq!(tasks[0]["attempt_count"], 1);
 
+    wait_for_fixture_process_exit(temp.path())?;
     tasks[0]["status"] = json!("queued");
     tasks[0]["attempt_count"] = json!(0);
     tasks[0]
@@ -4110,8 +4150,9 @@ fn qualify_polled_failure(expired: bool, identity_drift: bool) -> Result<()> {
         register_review_and_enqueue(temp.path(), &project_root, starts_at, stops_at)?;
     let tasks_path = profile_dir(temp.path()).join("offdesk_tasks.json");
     let mut tasks: Value = serde_json::from_slice(&fs::read(&tasks_path)?)?;
-    tasks[0]["command"] = json!("sleep 1; exit 7");
+    tasks[0]["command"] = json!("exit 7");
     fs::write(&tasks_path, serde_json::to_vec_pretty(&tasks)?)?;
+    let launch_ack = hold_fixture_until_launch_ack(temp.path())?;
     let approval_id = prepare_shift_and_approve(
         temp.path(),
         &plan_id,
@@ -4160,6 +4201,7 @@ fn qualify_polled_failure(expired: bool, identity_drift: bool) -> Result<()> {
             "--json",
         ])
         .output()?;
+    fs::write(launch_ack, b"observed")?;
     assert!(
         launched.status.success(),
         "{}",

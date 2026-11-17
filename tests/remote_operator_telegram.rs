@@ -897,6 +897,8 @@ fn parse_content_length(headers: &str) -> usize {
 }
 
 fn read_http_request(stream: &mut TcpStream) -> Result<(String, Vec<u8>)> {
+    // Accepted sockets can inherit the listener's mode on BSD systems.
+    stream.set_nonblocking(false)?;
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
     let mut data = Vec::new();
     let mut buffer = [0_u8; 4096];
