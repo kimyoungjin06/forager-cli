@@ -12192,8 +12192,16 @@ else:
     Ok(())
 }
 
+fn app_dir(home: &Path) -> PathBuf {
+    if cfg!(target_os = "linux") {
+        home.join(".config/forager")
+    } else {
+        home.join(".forager")
+    }
+}
+
 fn write_project_registry(home: &Path) -> Result<()> {
-    let dir = home.join(".config").join("forager");
+    let dir = app_dir(home);
     fs::create_dir_all(&dir)?;
     fs::write(
         dir.join("projects.toml"),
@@ -12210,7 +12218,7 @@ wiki_profile = "twinpaper-review"
 }
 
 fn write_ambiguous_project_registry(home: &Path) -> Result<()> {
-    let dir = home.join(".config").join("forager");
+    let dir = app_dir(home);
     fs::create_dir_all(&dir)?;
     fs::write(
         dir.join("projects.toml"),

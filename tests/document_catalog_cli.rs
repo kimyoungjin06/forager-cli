@@ -9,9 +9,17 @@ use git2::Repository;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use tempfile::tempdir;
+
+fn app_dir(home: &Path) -> PathBuf {
+    if cfg!(target_os = "linux") {
+        home.join("xdg/forager")
+    } else {
+        home.join(".forager")
+    }
+}
 
 fn forager(home: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_forager"));
@@ -113,7 +121,7 @@ fn lifecycle_catalog_with_missing_profile_is_read_only_and_fail_open() -> Result
             && entry.visibility == forager::document_lifecycle::SearchVisibilityV2::VisibleFailOpen
     }));
     assert_eq!(path_manifest(&root)?, before);
-    assert!(!home.join("xdg/forager").exists());
+    assert!(!app_dir(&home).exists());
     Ok(())
 }
 
@@ -158,7 +166,7 @@ fn lifecycle_search_with_missing_profile_is_read_only_and_fail_open() -> Result<
     );
     assert_eq!(search.cold_matches_omitted, 0);
     assert_eq!(path_manifest(&root)?, before);
-    assert!(!home.join("xdg/forager").exists());
+    assert!(!app_dir(&home).exists());
     Ok(())
 }
 
@@ -266,7 +274,7 @@ fn catalog_observes_links_duplicates_git_and_metadata_without_writes() -> Result
     assert!(!serialized.contains("deletion_recommendation"));
     assert!(!serialized.contains("disposal_recommendation"));
     assert_eq!(before, path_manifest(&root)?);
-    assert!(!home.join("xdg/forager").exists());
+    assert!(!app_dir(&home).exists());
     assert!(!home.join(".config/forager").exists());
     Ok(())
 }

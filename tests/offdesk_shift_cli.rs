@@ -3068,16 +3068,21 @@ pathlib.Path('boundary-pass').write_text('passed')
                 closeout["result_observation"]["reported_status"],
                 "pending_user_review"
             );
-            assert!(closeout["next_actions"]
+            assert!(!closeout["next_actions"]
                 .as_array()
                 .unwrap()
                 .iter()
                 .any(|action| action == "resolve_result_content_conflict_before_acceptance"));
-            assert!(review_report["attention_reasons"]
+            assert!(!review_report["attention_reasons"]
                 .as_array()
                 .unwrap()
                 .iter()
                 .any(|reason| reason == "result_content_requires_review"));
+            assert!(closeout["next_actions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|action| action == "record_user_agreement_before_updating_ondesk"));
         }
         assert_eq!(closeout["review_disposition"], "pending_user_review");
         assert_eq!(closeout["plan_update_authorized"], false);

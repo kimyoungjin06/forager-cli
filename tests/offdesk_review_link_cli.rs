@@ -17,6 +17,14 @@ use std::{
 };
 use tempfile::{tempdir, TempDir};
 
+fn app_dir(home: &Path) -> PathBuf {
+    if cfg!(target_os = "linux") {
+        home.join(".config/forager")
+    } else {
+        home.join(".forager")
+    }
+}
+
 fn hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
@@ -37,7 +45,7 @@ fn fixture() -> Result<Fixture> {
 fn fixture_with_state(state: ReviewState) -> Result<Fixture> {
     let dir = tempdir()?;
     let home = dir.path().join("home");
-    let profile = home.join(".config/forager/profiles/default");
+    let profile = app_dir(&home).join("profiles/default");
     fs::create_dir_all(&profile)?;
     let result = dir.path().join("result.json");
     fs::write(
@@ -180,7 +188,7 @@ fn review_link_cli_preview_confirm_replay_and_drift_are_bounded() -> Result<()> 
     fs::write(&f.result, br#"{"task_id":"other"}"#)?;
     assert!(!run(&f, &flags)?.status.success());
     assert_eq!(linked, fs::read(&queue)?);
-    assert!(!f.home.join(".config/forager/.schema_version").exists());
+    assert!(!app_dir(&f.home).join(".schema_version").exists());
     Ok(())
 }
 
@@ -192,8 +200,8 @@ fn review_link_missing_profile_does_not_initialize_it() -> Result<()> {
         .arg(&f.request)
         .output()?;
     assert!(!out.status.success());
-    assert!(!f.home.join(".config/forager/profiles/absent").exists());
-    assert!(!f.home.join(".config/forager/.schema_version").exists());
+    assert!(!app_dir(&f.home).join("profiles/absent").exists());
+    assert!(!app_dir(&f.home).join(".schema_version").exists());
     Ok(())
 }
 
@@ -529,7 +537,7 @@ fn explicit_historical_boundary_cli_confirms_partial_preserves_journal_and_rejec
             .kind,
         "recorded_partial"
     );
-    assert!(!f.home.join(".config/forager/.schema_version").exists());
+    assert!(!app_dir(&f.home).join(".schema_version").exists());
     if let Some(old) = std::env::var_os("FORAGER_BOUNDARY_LEGACY_TEST_BIN") {
         let rejected = command(Path::new(&old), &f.home)
             .args(["offdesk", "tasks", "--json"])
@@ -636,7 +644,7 @@ fn confirm_prefix_fixture(f: &Fixture) -> Result<Value> {
             .kind,
         "recorded_partial"
     );
-    assert!(!f.home.join(".config/forager/.schema_version").exists());
+    assert!(!app_dir(&f.home).join(".schema_version").exists());
     if let Some(old) = std::env::var_os("FORAGER_PREFIX_LEGACY_TEST_BIN") {
         let p = command(Path::new(&old), &f.home)
             .args(["offdesk", "tasks", "--json"])
@@ -704,7 +712,7 @@ fn selected_real_metadata_shadow_qualifies_all_nano_gaps_before_any_actual_write
     assert_eq!(hash(&raw_journal), input["input_journal_sha256"]);
     let dir = tempdir()?;
     let home = dir.path().join("home");
-    let profile = home.join(".config/forager/profiles/default");
+    let profile = app_dir(&home).join("profiles/default");
     fs::create_dir_all(&profile)?;
     let owner = dir.path().join("TODO.md");
     fs::write(&owner, &source)?;

@@ -10,9 +10,17 @@ use std::collections::BTreeMap;
 use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use tempfile::tempdir;
+
+fn app_dir(home: &Path) -> PathBuf {
+    if cfg!(target_os = "linux") {
+        home.join("xdg/forager")
+    } else {
+        home.join(".forager")
+    }
+}
 
 fn forager(home: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_forager"));
@@ -391,7 +399,7 @@ fn retention_v2_catalog_target_deduplicates_and_appends_one_plan_event() -> Resu
             ])
             .output()?,
     )?;
-    let profile = home.join("xdg/forager/profiles/default");
+    let profile = app_dir(&home).join("profiles/default");
     let application_id = request["approval"]["metadata"]["application_id"]
         .as_str()
         .context("application ID")?;
@@ -922,7 +930,7 @@ fn cli_lifecycle_apply_and_catalog_v2_projection_preserve_files() -> Result<()> 
     let proposal_sha256 = review["proposal_sha256"]
         .as_str()
         .context("proposal hash")?;
-    assert!(!home.join("xdg/forager").exists());
+    assert!(!app_dir(&home).exists());
 
     let request = successful_json(
         forager(&home)
@@ -1025,7 +1033,7 @@ fn cli_lifecycle_apply_and_catalog_v2_projection_preserve_files() -> Result<()> 
     assert_eq!(history["file_mutation_authorized"], false);
     assert_eq!(project_manifest(&project)?, before);
 
-    let profile = home.join("xdg/forager/profiles/default");
+    let profile = app_dir(&home).join("profiles/default");
     let profile_before_catalog = project_manifest(&profile)?;
     let exact_catalog = successful_json(
         forager(&home)
@@ -1354,7 +1362,7 @@ fn catalog_v2_reports_rebind_collision_without_staling_exact_owner() -> Result<(
         .to_string();
 
     let project_before_catalog = project_manifest(&project)?;
-    let profile = home.join("xdg/forager/profiles/default");
+    let profile = app_dir(&home).join("profiles/default");
     let profile_before_catalog = project_manifest(&profile)?;
     let value = successful_json(
         forager(&home)
@@ -1550,7 +1558,7 @@ fn search_v2_filters_only_exact_reviewed_cold_documents_and_stays_read_only() ->
     )?;
 
     let project_arg = project.to_str().context("UTF-8 project path")?;
-    let profile = home.join("xdg/forager/profiles/default");
+    let profile = app_dir(&home).join("profiles/default");
     let project_before_search = project_manifest(&project)?;
     let profile_before_search = project_manifest(&profile)?;
     let default_value = successful_json(

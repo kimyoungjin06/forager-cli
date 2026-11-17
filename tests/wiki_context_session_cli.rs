@@ -7,6 +7,14 @@ use anyhow::{Context, Result};
 use forager::session::Instance;
 use tempfile::TempDir;
 
+fn app_dir(home: &Path) -> PathBuf {
+    if cfg!(target_os = "linux") {
+        home.join(".config/forager")
+    } else {
+        home.join(".forager")
+    }
+}
+
 fn command(home: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_forager"));
     command.env("HOME", home);
@@ -35,7 +43,7 @@ fn setup_registered_session(
 ) -> Result<(PathBuf, Instance)> {
     let project = temp.path().join("workspace/demo-project");
     fs::create_dir_all(&project)?;
-    let config_root = temp.path().join(".config/forager");
+    let config_root = app_dir(temp.path());
     let profile_root = config_root.join("profiles/default");
     fs::create_dir_all(&profile_root)?;
     fs::write(
@@ -61,7 +69,7 @@ fn setup_registered_session(
 fn setup_registered_project(temp: &TempDir, folder: &str) -> Result<PathBuf> {
     let project = temp.path().join("workspace").join(folder);
     fs::create_dir_all(&project)?;
-    let config_root = temp.path().join(".config/forager");
+    let config_root = app_dir(temp.path());
     fs::create_dir_all(&config_root)?;
     fs::write(
         config_root.join("projects.toml"),
@@ -133,7 +141,7 @@ fn context_status_on_missing_profile_is_read_only() -> Result<()> {
         &["session", "context-status", "missing", "--json"],
     )?;
     assert!(!output.status.success());
-    assert!(!temp.path().join(".config/forager").exists());
+    assert!(!app_dir(temp.path()).exists());
 
     let temp = tempfile::tempdir()?;
     let id = unique_session_id();
@@ -144,7 +152,7 @@ fn context_status_on_missing_profile_is_read_only() -> Result<()> {
         &["session", "context-status", &instance.id, "--json"],
     )?;
     assert!(output.status.success());
-    assert!(!temp.path().join(".config/forager/.schema_version").exists());
+    assert!(!app_dir(temp.path()).join(".schema_version").exists());
     Ok(())
 }
 
@@ -158,8 +166,7 @@ fn ambiguous_session_target_fails_before_refresh_or_input() -> Result<()> {
     second.tool = "codex".to_string();
     second.command = "codex".to_string();
     fs::write(
-        temp.path()
-            .join(".config/forager/profiles/default/sessions.json"),
+        app_dir(temp.path()).join("profiles/default/sessions.json"),
         serde_json::to_vec_pretty(&vec![first, second])?,
     )?;
 
@@ -170,9 +177,8 @@ fn ambiguous_session_target_fails_before_refresh_or_input() -> Result<()> {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("Ambiguous session identifier"));
     assert!(!project.join(".wiki-brief.md").exists());
-    assert!(!temp
-        .path()
-        .join(".config/forager/profiles/default/wiki_context_presentations.v1.json")
+    assert!(!app_dir(temp.path())
+        .join("profiles/default/wiki_context_presentations.v1.json")
         .exists());
     Ok(())
 }
@@ -292,7 +298,7 @@ fn idle_session_presents_once_and_unchanged_sync_does_not_duplicate() -> Result<
         1
     );
 
-    let wiki_profile_root = temp.path().join(".config/forager/profiles/demo-wiki");
+    let wiki_profile_root = app_dir(temp.path()).join("profiles/demo-wiki");
     fs::create_dir_all(&wiki_profile_root)?;
     let corrupt_source = wiki_profile_root.join("adaptive_wiki_entries.json");
     fs::write(&corrupt_source, b"{not-json")?;
@@ -334,9 +340,7 @@ fn idle_session_presents_once_and_unchanged_sync_does_not_duplicate() -> Result<
     assert_eq!(status["read_only"], true);
     assert_eq!(status["writes_performed"], false);
 
-    let sessions_path = temp
-        .path()
-        .join(".config/forager/profiles/default/sessions.json");
+    let sessions_path = app_dir(temp.path()).join("profiles/default/sessions.json");
     let mut changed_tool = instance.clone();
     changed_tool.tool = "claude".to_string();
     fs::write(
@@ -357,7 +361,7 @@ fn idle_session_presents_once_and_unchanged_sync_does_not_duplicate() -> Result<
         serde_json::to_vec_pretty(&vec![instance.clone()])?,
     )?;
 
-    let registry_path = temp.path().join(".config/forager/projects.toml");
+    let registry_path = app_dir(temp.path()).join("projects.toml");
     fs::write(
         &registry_path,
         "schema = \"forager_project_registry.v1\"\n\n\
@@ -458,8 +462,7 @@ fn go_presents_one_fresh_brief_to_new_codex_and_claude_sessions() -> Result<()> 
             "{tool}: {stdout}"
         );
         let sessions: Vec<Instance> = serde_json::from_slice(&fs::read(
-            temp.path()
-                .join(".config/forager/profiles/default/sessions.json"),
+            app_dir(temp.path()).join("profiles/default/sessions.json"),
         )?)?;
         let instance = sessions.first().context("go session")?;
         assert_eq!(instance.tool, tool);

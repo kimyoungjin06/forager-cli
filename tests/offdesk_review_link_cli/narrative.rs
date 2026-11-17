@@ -158,7 +158,7 @@ fn selected_real_nano_narrative_shadow_closes_one_partial_review_without_a_new_j
     assert_eq!(approved_plan.tasks.len(), 11);
     let dir = tempdir()?;
     let home = dir.path().join("home");
-    let profile = home.join(".config/forager/profiles/default");
+    let profile = app_dir(&home).join("profiles/default");
     fs::create_dir_all(&profile)?;
     let owner = dir.path().join("TODO.md");
     let approved = dir.path().join("approved.md");
