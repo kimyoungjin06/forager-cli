@@ -1687,7 +1687,14 @@ mod tests {
         let temp = tempdir()?;
         let now = Utc::now();
         let store = OffdeskTaskStore::new(temp.path());
-        store.enqueue(OffdeskTask::new(task_input(now, "true"), now))?;
+        let gate = temp.path().join("launch-ack");
+        let quoted_gate = format!("'{}'", gate.to_string_lossy().replace('\'', "'\\''"));
+        let command = format!(
+            "forager_fixture_polls=0; while [ ! -f {quoted_gate} ] && [ $forager_fixture_polls -lt 1000 ]; do sleep 0.02; forager_fixture_polls=$((forager_fixture_polls + 1)); done; [ -f {quoted_gate} ]"
+        );
+        let mut input = task_input(now, &command);
+        input.workdir = temp.path().to_string_lossy().into_owned();
+        store.enqueue(OffdeskTask::new(input, now))?;
 
         // A global operator pause holds new dispatch: the task stays queued.
         let pause = crate::offdesk::operator_pause::OperatorPauseStore::new(temp.path());
@@ -1702,11 +1709,25 @@ mod tests {
 
         // Resuming releases dispatch; the task launches on the next tick.
         pause.resume(Some("test"), now)?;
-        let report = run_offdesk_tick(temp.path(), OffdeskTickOptions::new(now))?;
+        let report = run_offdesk_tick(temp.path(), OffdeskTickOptions::new(now));
+        fs::write(gate, b"observed")?;
+        let report = report?;
         assert!(!report.dispatch_paused);
         assert_eq!(report.held, 0);
         assert_eq!(report.launched, 1);
         assert_eq!(store.load()?.remove(0).status, OffdeskTaskStatus::Launched);
+        let probe = BackgroundRunStore::new(temp.path()).load()?.remove(0);
+        let receipt = temp.path().join(
+            probe
+                .local_exit_receipt
+                .expect("fixture exit receipt")
+                .relative_path,
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !receipt.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(receipt.exists(), "fixture command did not finish");
         Ok(())
     }
 
