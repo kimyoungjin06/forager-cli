@@ -1330,6 +1330,7 @@ fn session_text_input_reports_queued_without_claiming_agent_acknowledgement() {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn concurrent_claude_codex_and_generic_tmux_routes_only_exact_bound_messages() {
     if !tool_available("tmux", "-V") || !tool_available("python3", "--version") {
         eprintln!("Skipping test: tmux or python3 not available");

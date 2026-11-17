@@ -29,6 +29,11 @@ wait receipts can establish the selected background runtime's release; a parent
 exit on other platforms alone keeps retry/reuse held. These limits are separate
 from interactive tmux session support on macOS.
 
+Bound native invocation publication currently requires Linux `renameat2`.
+Its successful publication and complete bounded-cycle qualifications run on
+Linux; other platforms keep explicit unavailable or held checks. These test
+boundaries do not add native invocation support on macOS.
+
 ## Configured Workflow
 
 The commands support this operator workflow. Available interfaces and local

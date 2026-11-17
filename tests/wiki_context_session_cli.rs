@@ -43,8 +43,9 @@ fn setup_registered_session(
 ) -> Result<(PathBuf, Instance)> {
     let project = temp.path().join("workspace/demo-project");
     fs::create_dir_all(&project)?;
-    let config_root = app_dir(temp.path());
-    let profile_root = config_root.join("profiles/default");
+    let config_root = temp.path().join(".config/forager");
+    let profile_root = app_dir(temp.path()).join("profiles/default");
+    fs::create_dir_all(&config_root)?;
     fs::create_dir_all(&profile_root)?;
     fs::write(
         config_root.join("projects.toml"),
@@ -69,7 +70,7 @@ fn setup_registered_session(
 fn setup_registered_project(temp: &TempDir, folder: &str) -> Result<PathBuf> {
     let project = temp.path().join("workspace").join(folder);
     fs::create_dir_all(&project)?;
-    let config_root = app_dir(temp.path());
+    let config_root = temp.path().join(".config/forager");
     fs::create_dir_all(&config_root)?;
     fs::write(
         config_root.join("projects.toml"),
@@ -361,7 +362,7 @@ fn idle_session_presents_once_and_unchanged_sync_does_not_duplicate() -> Result<
         serde_json::to_vec_pretty(&vec![instance.clone()])?,
     )?;
 
-    let registry_path = app_dir(temp.path()).join("projects.toml");
+    let registry_path = temp.path().join(".config/forager/projects.toml");
     fs::write(
         &registry_path,
         "schema = \"forager_project_registry.v1\"\n\n\

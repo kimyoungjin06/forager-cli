@@ -2391,6 +2391,7 @@ fn shift_tick_launches_only_after_revalidating_the_active_manifest() -> Result<(
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn ondesk_bound_shift_rechecks_source_before_real_background_launch() -> Result<()> {
     qualify_bound_shift_cycle(false, false)
 }
@@ -4091,7 +4092,7 @@ fn qualify_polled_failure(expired: bool, identity_drift: bool) -> Result<()> {
         register_review_and_enqueue(temp.path(), &project_root, starts_at, stops_at)?;
     let tasks_path = profile_dir(temp.path()).join("offdesk_tasks.json");
     let mut tasks: Value = serde_json::from_slice(&fs::read(&tasks_path)?)?;
-    tasks[0]["command"] = json!("exit 7");
+    tasks[0]["command"] = json!("sleep 1; exit 7");
     fs::write(&tasks_path, serde_json::to_vec_pretty(&tasks)?)?;
     let approval_id = prepare_shift_and_approve(
         temp.path(),

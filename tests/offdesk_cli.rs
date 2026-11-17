@@ -13152,6 +13152,7 @@ fn offdesk_task_lifecycle_presentation_redacts_legacy_json_and_human_reports() -
 
     record_fixture_exit_evidence(&profile_dir)?;
 
+    let before_retry = fs::read(profile_dir.join("offdesk_tasks.json"))?;
     let retry_json_output = forager_command(temp.path())
         .args([
             "offdesk",
@@ -13161,6 +13162,15 @@ fn offdesk_task_lifecycle_presentation_redacts_legacy_json_and_human_reports() -
             "--json",
         ])
         .output()?;
+    if !cfg!(target_os = "linux") {
+        assert!(!retry_json_output.status.success());
+        assert_eq!(
+            fs::read(profile_dir.join("offdesk_tasks.json"))?,
+            before_retry
+        );
+        assert!(!String::from_utf8_lossy(&retry_json_output.stderr).contains(secret));
+        return Ok(());
+    }
     assert!(retry_json_output.status.success());
     let retry_json_stdout = String::from_utf8_lossy(&retry_json_output.stdout);
     assert!(!retry_json_stdout.contains(secret));
@@ -13181,6 +13191,7 @@ fn offdesk_task_lifecycle_presentation_redacts_legacy_json_and_human_reports() -
 
 #[test]
 #[serial]
+#[cfg(target_os = "linux")]
 fn offdesk_retry_task_requeues_failed_task_and_tick_launches() -> Result<()> {
     let temp = tempdir()?;
     let profile_dir = profile_dir(temp.path());
@@ -13225,6 +13236,7 @@ fn offdesk_retry_task_requeues_failed_task_and_tick_launches() -> Result<()> {
 
 #[test]
 #[serial]
+#[cfg(target_os = "linux")]
 fn offdesk_plain_retry_preserves_denied_approval_and_tick_denies() -> Result<()> {
     let temp = tempdir()?;
     let profile_dir = profile_dir(temp.path());
@@ -13275,6 +13287,7 @@ fn offdesk_plain_retry_preserves_denied_approval_and_tick_denies() -> Result<()>
 
 #[test]
 #[serial]
+#[cfg(target_os = "linux")]
 fn offdesk_retry_new_approval_supersedes_denied_and_tick_creates_pending() -> Result<()> {
     let temp = tempdir()?;
     let profile_dir = profile_dir(temp.path());
@@ -13370,6 +13383,7 @@ fn offdesk_retry_new_approval_reports_supersede_even_when_retry_noops() -> Resul
 
 #[test]
 #[serial]
+#[cfg(target_os = "linux")]
 fn offdesk_resume_task_marks_resume_artifact_resumed_and_tick_launches() -> Result<()> {
     let temp = tempdir()?;
     let profile_dir = profile_dir(temp.path());
@@ -15859,5 +15873,41 @@ fn offdesk_learning_scan_emits_candidates_once_and_tick_auto_scans() -> Result<(
         "secret leaked into candidate: {}",
         candidates[0].human_summary
     );
+    Ok(())
+}
+
+#[test]
+#[cfg(not(target_os = "linux"))]
+fn parent_only_exit_evidence_keeps_retry_and_resume_held() -> Result<()> {
+    for (status, action) in [("failed", "retry-task"), ("resume_pending", "resume-task")] {
+        let temp = tempdir()?;
+        let profile = profile_dir(temp.path());
+        fs::create_dir_all(&profile)?;
+        let queue = profile.join("offdesk_tasks.json");
+        let now = Utc::now();
+        fs::write(
+            &queue,
+            serde_json::to_vec(&json!([durable_task(status, now, "true", temp.path())]))?,
+        )?;
+        let resume = profile.join("task_resume_state.json");
+        fs::write(&resume, serde_json::to_vec(&json!([resume_state(now)]))?)?;
+        record_fixture_exit_evidence(&profile)?;
+        let queue_before = fs::read(&queue)?;
+        let resume_before = fs::read(&resume)?;
+        let probes_before = fs::read(profile.join("background_runs.json"))?;
+        let out = forager_command(temp.path())
+            .args(["offdesk", action, "task", "--json"])
+            .output()?;
+        assert!(
+            !out.status.success(),
+            "parent-only receipt released {action}"
+        );
+        assert_eq!(fs::read(&queue)?, queue_before);
+        assert_eq!(fs::read(&resume)?, resume_before);
+        assert_eq!(
+            fs::read(profile.join("background_runs.json"))?,
+            probes_before
+        );
+    }
     Ok(())
 }

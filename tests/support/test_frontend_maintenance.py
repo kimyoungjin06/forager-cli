@@ -7,6 +7,7 @@ from pathlib import Path
 import pty
 import select
 import shutil
+import signal
 import struct
 import subprocess
 import sys
@@ -27,12 +28,39 @@ class Fixture:
     @staticmethod
     def stop_process(proc):
         if proc.poll() is None:
-            proc.terminate()
+            os.killpg(proc.pid, signal.SIGTERM)
             try:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                proc.kill()
+                os.killpg(proc.pid, signal.SIGKILL)
                 proc.wait(timeout=5)
+
+    def frontend(self, command, master, slave, env=None):
+        report = self.root / 'terminal-restoration.json'
+        # Keep the controlling session alive while observing terminal cleanup.
+        # Darwin revokes the child's slave handles when its session leader exits.
+        supervisor = r"""
+import fcntl, json, subprocess, sys, termios
+from pathlib import Path
+fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+before = repr(termios.tcgetattr(0))
+child = subprocess.Popen(json.loads(sys.argv[2]))
+code = child.wait()
+after = repr(termios.tcgetattr(0))
+Path(sys.argv[1]).write_text(json.dumps({'before': before, 'after': after}))
+raise SystemExit(code)
+"""
+        proc = subprocess.Popen([sys.executable, '-c', supervisor, str(report), json.dumps(command)],
+                                env=env, stdin=slave, stdout=slave, stderr=slave,
+                                start_new_session=True)
+        self.drain_terminal(master)
+        self.addCleanup(self.stop_process, proc)
+        return proc, report
+
+    def assert_terminal_restored(self, report, before):
+        observed = json.loads(report.read_text())
+        self.assertEqual(observed['before'], repr(before))
+        self.assertEqual(observed['after'], observed['before'])
 
     def terminal_pair(self):
         master, slave = pty.openpty()
@@ -287,13 +315,8 @@ class FrontendTests(Fixture, unittest.TestCase):
         env = {**os.environ, 'PATH': str(tools) + ':' + os.environ['PATH']}
         master, slave = self.terminal_pair()
         before = termios.tcgetattr(slave)
-        def terminal():
-            os.setsid()
-            fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
-        proc = subprocess.Popen([os.environ['FORAGER_MAINTENANCE_TEST_BINARY']], env=env,
-                                stdin=slave, stdout=slave, stderr=slave, preexec_fn=terminal)
-        self.drain_terminal(master)
-        self.addCleanup(self.stop_process, proc)
+        proc, report = self.frontend([os.environ['FORAGER_MAINTENANCE_TEST_BINARY']],
+                                     master, slave, env)
         end = time.monotonic() + 10
         while time.monotonic() < end and proc.poll() is None:
             if not termios.tcgetattr(slave)[3] & termios.ICANON:
@@ -303,7 +326,7 @@ class FrontendTests(Fixture, unittest.TestCase):
             self.fail('TUI did not enter raw terminal mode')
         maintenance.begin('idle-tui', 'fixture')
         self.assertEqual(proc.wait(timeout=10), 0)
-        self.assertEqual(termios.tcgetattr(slave), before)
+        self.assert_terminal_restored(report, before)
         maintenance.finish('idle-tui', cancel=True)
 
     def test_unsafe_gate_symlink_blocks_startup_without_touching_external_file(self):
@@ -358,13 +381,8 @@ class FrontendTests(Fixture, unittest.TestCase):
             project_path=str(self.root), tool='bash', created_at='2026-11-04T00:00:00Z')]))
         master, slave = self.terminal_pair()
         before = termios.tcgetattr(slave)
-        def terminal():
-            os.setsid()
-            fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
-        proc = subprocess.Popen([os.environ['FORAGER_MAINTENANCE_TEST_BINARY'], 'session', 'attach', 'abcdefgh'],
-                                stdin=slave, stdout=slave, stderr=slave, preexec_fn=terminal)
-        self.drain_terminal(master)
-        self.addCleanup(self.stop_process, proc)
+        proc, report = self.frontend([os.environ['FORAGER_MAINTENANCE_TEST_BINARY'],
+                                      'session', 'attach', 'abcdefgh'], master, slave)
         until = time.monotonic() + 10
         while time.monotonic() < until:
             if subprocess.check_output(['tmux', 'list-clients']).strip():
@@ -389,7 +407,7 @@ class FrontendTests(Fixture, unittest.TestCase):
         self.assertEqual(subprocess.check_output(['tmux', 'display-message', '-p', '-t', session, '#{pane_pid}']), pid)
         if identity is not None:
             self.assertEqual(maintenance.process_identity(int(pid))[1], identity)
-        self.assertEqual(termios.tcgetattr(slave), before)
+        self.assert_terminal_restored(report, before)
         if not unsafe_policy:
             maintenance.finish('attached', cancel=True)
 

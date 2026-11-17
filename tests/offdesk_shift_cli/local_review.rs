@@ -1222,6 +1222,7 @@ fn prepared_native_controls(mode: &str, extra_controls: &[&str]) -> Result<Fixtu
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn selected_worker_execution_contract_is_shared_with_approval_and_actual_stub_execution(
 ) -> Result<()> {
     let f = prepared_native_controls("stale", &["require_bound_worker_execution_contract"])?;
@@ -1267,6 +1268,7 @@ fn selected_worker_execution_contract_is_shared_with_approval_and_actual_stub_ex
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn bound_execution_contract_does_not_admit_fixed_or_unsupported_worker_actions() -> Result<()> {
     for (mode, extras) in [
         ("fixed", vec!["require_bound_worker_execution_contract"]),
@@ -1301,6 +1303,7 @@ fn bound_execution_contract_does_not_admit_fixed_or_unsupported_worker_actions()
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn telegram_confirmation_binds_selected_worker_contract_without_dispatch() -> Result<()> {
     let f = prepared_native_controls("stale", &["require_bound_worker_execution_contract"])?;
     let review = inspect(&f, &SCOPE)?;
@@ -1349,6 +1352,7 @@ fn telegram_confirmation_binds_selected_worker_contract_without_dispatch() -> Re
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn selected_worker_limit_drift_refuses_confirmation_without_consuming_approval() -> Result<()> {
     let f = prepared_native_controls("stale", &["require_bound_worker_execution_contract"])?;
     let (review, id) = pending_review(&f)?;
@@ -1369,6 +1373,7 @@ fn selected_worker_limit_drift_refuses_confirmation_without_consuming_approval()
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn bound_native_invocations_complete_two_disposable_tasks_without_provider_calls_or_acceptance(
 ) -> Result<()> {
     complete_native_tasks(&prepared_native()?)
@@ -1468,17 +1473,20 @@ fn prepared_codex_format(read_policy: bool, format: &str) -> Result<Fixture> {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn codex_contract_uses_admitted_ticket_and_completes_two_fake_reviews_without_bridge() -> Result<()>
 {
     complete_codex_reviews(false)
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn codex_contract_selector_reports_extract_host_quotes_for_two_projects() -> Result<()> {
     complete_codex_reviews(true)
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn codex_contract_evidence_ids_bind_full_supplied_catalog_for_two_projects() -> Result<()> {
     complete_codex_reviews_format("evidence-v3")
 }
@@ -1656,6 +1664,7 @@ fn complete_codex_fixture(format: &str) -> Result<Fixture> {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn codex_contract_evidence_ids_refuse_rebound_helper_or_missing_catalog() -> Result<()> {
     use forager::offdesk::workflow::codex_review_invocation;
     use sha2::{Digest, Sha256};
@@ -1710,6 +1719,7 @@ fn codex_contract_evidence_ids_refuse_rebound_helper_or_missing_catalog() -> Res
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn codex_contract_requires_read_isolation_and_refuses_source_or_ticket_drift() -> Result<()> {
     let held = prepared_codex(false)?;
     assert_eq!(inspect(&held, &SCOPE)?["requestable"], false);
@@ -1828,6 +1838,7 @@ fn complete_native_tasks(f: &Fixture) -> Result<()> {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn native_invocation_input_drift_blocks_confirmation_and_nonshift_dispatch() -> Result<()> {
     let f = prepared_native()?;
     let (review, id) = pending_review(&f)?;
@@ -1865,6 +1876,7 @@ fn native_invocation_input_drift_blocks_confirmation_and_nonshift_dispatch() -> 
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn native_entry_reservation_holds_even_without_preparation_requirements() -> Result<()> {
     let f = prepared_native()?;
     let path = profile_dir(f.home.path()).join("offdesk_shifts.v1.json");
@@ -1892,6 +1904,7 @@ fn native_entry_reservation_holds_even_without_preparation_requirements() -> Res
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn pending_native_entry_publication_holds_fresh_approval_without_consuming_partial_bytes(
 ) -> Result<()> {
     let f = prepared_native()?;
@@ -1930,6 +1943,7 @@ fn pending_native_entry_publication_holds_fresh_approval_without_consuming_parti
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn stale_native_preflight_is_rechecked_once_inside_each_approved_project_task() -> Result<()> {
     let f = prepared_native_mode("stale")?;
     let roots = [
@@ -1996,6 +2010,7 @@ fn stale_native_preflight_is_rechecked_once_inside_each_approved_project_task() 
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn failed_entry_preflight_preserves_failure_and_never_starts_the_native_worker_or_next_project(
 ) -> Result<()> {
     let f = prepared_native_mode("stale")?;
@@ -2081,6 +2096,7 @@ fn failed_entry_preflight_preserves_failure_and_never_starts_the_native_worker_o
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn fixed_native_invocations_do_not_implicitly_select_entry_recheck() -> Result<()> {
     let f = prepared_native()?;
     let path = profile_dir(f.home.path()).join("offdesk_shifts.v1.json");
@@ -2102,6 +2118,7 @@ fn fixed_native_invocations_do_not_implicitly_select_entry_recheck() -> Result<(
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn future_shift_start_must_leave_the_selected_entry_preflight_and_closeout_window() -> Result<()> {
     let f = prepared_native_mode("stale")?;
     let path = profile_dir(f.home.path()).join("offdesk_shifts.v1.json");
@@ -2118,5 +2135,34 @@ fn future_shift_start_must_leave_the_selected_entry_preflight_and_closeout_windo
     let before = snapshot(f.home.path())?;
     assert!(!request(&f, &review, &SCOPE)?.status.success());
     assert_eq!(snapshot(f.home.path())?, before);
+    Ok(())
+}
+
+#[test]
+#[cfg(not(target_os = "linux"))]
+fn native_publication_refuses_missing_linux_atomic_primitive_without_worker_execution() -> Result<()>
+{
+    let f = Fixture::new()?;
+    let before = f.queue()?;
+    let task = &before[0];
+    let root = Path::new(task["workdir"].as_str().unwrap());
+    let out = Command::new("python3")
+        .arg(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/support/native_invocation_fixture.py"),
+        )
+        .args([
+            root.to_str().unwrap(),
+            task["task_id"].as_str().unwrap(),
+            task["request_id"].as_str().unwrap(),
+            task["project_key"].as_str().unwrap(),
+            &rfc3339(f.stop - Duration::minutes(1)),
+        ])
+        .output()?;
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("requires Linux renameat2"));
+    assert!(!root.join(".runtime/invocation.json").exists());
+    assert!(!root.join(".night/fake-worker-started").exists());
+    assert_eq!(f.queue()?, before);
     Ok(())
 }
