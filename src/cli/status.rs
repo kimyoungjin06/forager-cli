@@ -906,13 +906,21 @@ mod tests {
         let rows = session_status_rows(&[instance], &[]);
         session.kill()?;
         assert_eq!(rows.len(), 1);
-        let identity = rows[0]
-            .remote_session_identity
-            .as_ref()
-            .context("live status omitted remote session identity")?;
-        identity.validate()?;
-        assert_eq!(identity.schema, "remote_session_identity.v1");
-        assert!(rows[0].remote_session_identity_status.is_none());
+        if cfg!(target_os = "linux") {
+            let identity = rows[0]
+                .remote_session_identity
+                .as_ref()
+                .context("live status omitted remote session identity")?;
+            identity.validate()?;
+            assert_eq!(identity.schema, "remote_session_identity.v1");
+            assert!(rows[0].remote_session_identity_status.is_none());
+        } else {
+            assert!(rows[0].remote_session_identity.is_none());
+            assert_eq!(
+                rows[0].remote_session_identity_status.as_deref(),
+                Some("unavailable")
+            );
+        }
         Ok(())
     }
 

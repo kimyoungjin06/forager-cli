@@ -40,13 +40,16 @@ class Fixture:
         for key in ['TMUX', 'TMUX_PANE', 'FORAGER_PROFILE', 'AGENT_OF_EMPIRES_PROFILE']:
             os.environ.pop(key, None)
         self.old = self.root / 'old-forager'
-        shutil.copyfile(shutil.which('sleep'), self.old)
+        # A reader needs its own native image. System sleep can be a script
+        # or multicall launcher whose executable identity changes when copied.
+        source = self.root / 'reader.c'
+        source.write_text('#include <unistd.h>\nint main(void) { for (;;) pause(); }\n')
+        subprocess.run([shutil.which('cc') or 'cc', str(source), '-o', str(self.old)],
+                       check=True, capture_output=True)
         self.old.chmod(0o700)
 
     def spawn_old(self):
-        # Multicall coreutils dispatches by argv[0]; retain sleep's applet name
-        # while executing the copied image used by the reader-identity checks.
-        proc = subprocess.Popen(['sleep', '60'], executable=str(self.old))
+        proc = subprocess.Popen([str(self.old)])
         def stop():
             if proc.poll() is None:
                 proc.terminate()

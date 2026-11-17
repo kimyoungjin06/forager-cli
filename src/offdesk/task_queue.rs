@@ -1623,8 +1623,14 @@ mod tests {
         assert!(store.retry_task("task", now).is_err());
         probe.local_exit_receipt.as_mut().unwrap().wait_scope = scope;
         probes.save(&[probe])?;
-        assert!(store.retry_task("task", now)?.changed);
-        assert!(store.load()?[0].background_ticket_id.is_none());
+        if cfg!(target_os = "linux") {
+            assert!(store.retry_task("task", now)?.changed);
+            assert!(store.load()?[0].background_ticket_id.is_none());
+        } else {
+            let before = store.load()?;
+            assert!(store.retry_task("task", now).is_err());
+            assert_eq!(store.load()?, before);
+        }
         Ok(())
     }
 

@@ -27,13 +27,13 @@ jobs:
           else
             brew install tmux
           fi
-      - name: Use canonical test temporary directory
+      - name: Use short canonical test temporary directory
         run: |
           python3 - <<'PY'
           import os
           import tempfile
           from pathlib import Path
-          temporary_path = Path(tempfile.gettempdir()).resolve(strict=True)
+          temporary_path = Path(tempfile.mkdtemp(prefix='fg-', dir='/tmp')).resolve(strict=True)
           with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as output:
               output.write(f"TMPDIR={temporary_path}\n")
           PY

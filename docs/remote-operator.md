@@ -31,6 +31,11 @@ The sections below distinguish implemented interfaces from design requirements
 and staged implementation notes. A local health report describes the selected
 installation, not every project's readiness.
 
+Exact live-session machine identity and descendant-wait release verification
+currently use Linux support. Other platforms can report identity as unavailable
+or keep a retry held when release is unverified. Interactive tmux sessions on
+macOS do not establish those remote identity or release guarantees.
+
 ## Health and review domains
 
 The health report separates `attention_domains.listener`, `.delivery`, and

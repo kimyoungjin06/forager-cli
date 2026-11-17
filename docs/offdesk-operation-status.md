@@ -23,6 +23,12 @@ inspect your own installation. This page is documentation, not a live health
 report. The detailed implementation inventory below preserves its original
 scope and historical observations.
 
+Exact live-session machine identity is currently implemented on Linux. On
+other platforms the status surface reports it as unavailable. Linux descendant
+wait receipts can establish the selected background runtime's release; a parent
+exit on other platforms alone keeps retry/reuse held. These limits are separate
+from interactive tmux session support on macOS.
+
 ## Configured Workflow
 
 The commands support this operator workflow. Available interfaces and local
