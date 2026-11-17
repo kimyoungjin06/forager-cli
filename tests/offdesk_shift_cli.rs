@@ -2205,6 +2205,30 @@ fn hold_fixture_until_launch_ack(home: &Path) -> Result<PathBuf> {
     Ok(gate)
 }
 
+fn wait_for_fixture_process_exit(home: &Path) -> Result<()> {
+    let probe = forager::offdesk::BackgroundRunStore::new(profile_dir(home))
+        .load()?
+        .remove(0);
+    let pid = probe.runtime_pid.expect("fixture runtime PID");
+    let identity = probe.runtime_identity.expect("fixture runtime identity");
+    let receipt = PathBuf::from(probe.working_dir.expect("fixture workdir")).join(
+        probe
+            .local_exit_receipt
+            .expect("fixture exit receipt")
+            .relative_path,
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        if receipt.exists()
+            && forager::process::process_identity(pid).as_deref() != Some(identity.as_str())
+        {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    anyhow::bail!("fixture command did not finish before recovery-state injection")
+}
+
 #[test]
 fn shift_tick_launches_only_after_revalidating_the_active_manifest() -> Result<()> {
     let temp = tempdir()?;
@@ -2367,6 +2391,7 @@ fn shift_tick_launches_only_after_revalidating_the_active_manifest() -> Result<(
     assert_eq!(tasks[0]["status"], "launched");
     assert_eq!(tasks[0]["attempt_count"], 1);
 
+    wait_for_fixture_process_exit(temp.path())?;
     tasks[0]["status"] = json!("queued");
     tasks[0]["attempt_count"] = json!(0);
     tasks[0]
