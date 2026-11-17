@@ -34,6 +34,12 @@ Its successful publication and complete bounded-cycle qualifications run on
 Linux; other platforms keep explicit unavailable or held checks. These test
 boundaries do not add native invocation support on macOS.
 
+On macOS, a short-lived background command can finish before the launcher's
+`ps` identity observation and produce `failed to record background process
+identity`. The command may already have executed, so inspect the existing
+attempt and its receipts before choosing a retry. Synchronized CI fixtures
+check dispatch contracts; a production fix for this timing case remains open.
+
 ## Configured Workflow
 
 The commands support this operator workflow. Available interfaces and local
