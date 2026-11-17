@@ -844,7 +844,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     fn restrictive_provider_rejects_workdirs_masked_by_private_tmp() -> Result<()> {
         let launcher = File::open(LINUX_BWRAP_PATH)?;
-        let workdir = tempfile::tempdir()?;
+        let workdir = tempfile::tempdir_in("/tmp")?;
         let error = bubblewrap_command(
             &launcher,
             OffdeskShiftHostPolicyProviderV1::LinuxBubblewrapExternalIpAndOutsideWorkdirWriteDeny,

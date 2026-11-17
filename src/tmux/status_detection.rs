@@ -61,11 +61,7 @@ fn is_prompt_like(trimmed: &str) -> bool {
     // render as "1. Yes", so only reject a leading number followed by a
     // non-menu separator.
     let after_digits = trimmed.trim_start_matches(|c: char| c.is_ascii_digit());
-    if after_digits.len() < trimmed.len() && after_digits.trim_start().starts_with([':', '+', '-'])
-    {
-        return false;
-    }
-    true
+    !(after_digits.len() < trimmed.len() && after_digits.trim_start().starts_with([':', '+', '-']))
 }
 
 /// True when the bottom of the pane contains a Codex activity status line.

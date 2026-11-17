@@ -23,14 +23,25 @@ fn doctor_reports_each_alias_image_without_creating_user_state() -> Result<()> {
         );
         let report: serde_json::Value = serde_json::from_slice(&output.stdout)?;
         assert_eq!(report["build"]["version"], env!("CARGO_PKG_VERSION"));
-        assert_eq!(
-            report["build"]["executable_sha256"],
-            format!("{:x}", Sha256::digest(fs::read(binary)?))
-        );
-        assert_eq!(
-            report["build"]["running_image_verified"],
-            cfg!(target_os = "linux")
-        );
+        // CI debug images can exceed the diagnostic hasher's 256 MiB budget.
+        if fs::metadata(binary)?.len() > 256 * 1024 * 1024 {
+            assert!(report["build"]["executable_sha256"].is_null());
+            assert_eq!(report["build"]["running_image_verified"], false);
+            assert_eq!(
+                report["build"]["unavailable_reason"],
+                "image_unavailable_changed_or_exceeds_byte_budget"
+            );
+        } else {
+            assert_eq!(
+                report["build"]["executable_sha256"],
+                format!("{:x}", Sha256::digest(fs::read(binary)?))
+            );
+            assert_eq!(
+                report["build"]["running_image_verified"],
+                cfg!(target_os = "linux")
+            );
+            assert!(report["build"]["unavailable_reason"].is_null());
+        }
         assert!(!temp.path().join("home").exists());
         assert!(!temp.path().join("config").exists());
     }

@@ -35,7 +35,8 @@ Some integration tests require `tmux` to be available and will skip if it's not 
 ## Building the public website
 
 The website combines Astro pages and mdBook documentation under `/forager-cli/`.
-Use Node.js 22.12 or later, npm, mdBook, and the Rust toolchain:
+Use Node.js 22.23.4 or later, npm, mdBook, and the Rust toolchain. The website
+workflows currently pin Node.js 22.23.5:
 
 ```bash
 cargo run --locked -p xtask -- gen-docs

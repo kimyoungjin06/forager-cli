@@ -3938,10 +3938,7 @@ fn task_matches_tasks_filter(task: &OffdeskTask, args: &TasksArgs) -> bool {
             return false;
         }
     }
-    if !args.status.is_empty() && !args.status.contains(&task.status) {
-        return false;
-    }
-    true
+    args.status.is_empty() || args.status.contains(&task.status)
 }
 
 async fn decisions(profile: &str, args: DecisionsArgs) -> Result<()> {
@@ -3963,15 +3960,11 @@ fn decision_matches_filter(record: &DecisionRecord, args: &DecisionsArgs) -> boo
             return false;
         }
     }
-    if !args.status.is_empty()
-        && !args
+    args.status.is_empty()
+        || args
             .status
             .iter()
             .any(|status| status == record.status.as_str())
-    {
-        return false;
-    }
-    true
 }
 
 async fn decision(profile: &str, args: DecisionArgs) -> Result<()> {
