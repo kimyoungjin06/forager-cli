@@ -34,8 +34,9 @@ facts. It should not depend on chat history. A typical profile records:
 
 ## Example Command Pattern
 
-Concrete projects can provide their own profile builders. A builder should be
-read-only and write both machine and human artifacts:
+Concrete projects can provide their own profile builders. The script below
+is a project-supplied example, not a bundled Forager command. A builder should
+leave target source files unchanged and write machine and human output artifacts:
 
 ```bash
 scripts/build_module_operation_profile.py \

@@ -4,30 +4,8 @@ This guide describes interface contracts and versioned qualification examples.
 Those examples preserve their recorded test state. Use current local `status`,
 `doctor`, and operator deployment records to identify the selected runtime.
 
-## Inspecting a stopped task's runtime
-
-Use `forager -p <profile> offdesk task-recovery <exact-task-id> --json`
-to inspect local-background release evidence. This source-only diagnostic does
-not initialize a profile, migrate data, signal processes, clear tickets or retry
-work. A live supervisor, reused PID, missing binding or missing descendant-wait
-receipt keeps release unverified. If a supervisor dies without its receipt,
-descendant identities cannot be reconstructed from the dead parent: keep the
-workdir held and investigate externally. Do not clear its ticket to bypass the
-hold. A verified receipt still requires the normal lifecycle and approval gates.
-Other runners and legacy parent-only receipts do not establish release here.
-
-New explicitly contained launches also report `containment_populated`,
-`containment_empty_admission_unfenced`, `containment_observation_unverified`, or
-`containment_binding_missing_or_invalid`. All four retain the hold. Empty means
-only that the exactly identified cgroup was observed empty; it does not guarantee
-that processes cannot enter later or previously migrated out. Deleting the
-binding file or cgroup never converts uncertainty into release authorization.
-
-The internal closure journal adds `containment_seal_incomplete` (intent without
-confirmed completion), `containment_seal_journal_invalid` (unreadable or mismatched
-records), and `containment_sealed_migration_unverified` (closure recorded but prior
-migration unverified). These also retain the hold. Do not delete a journal to
-force another attempt. The diagnostic remains read-only; it never starts closure.
+Start with project setup, the configured launch path and return review below.
+Detailed plan transactions and runtime qualification follow the daily workflow.
 
 ## Operating modes
 
@@ -75,9 +53,233 @@ manifest before arming a window; timer execution consumes its bound routine clai
 | Runtime execution | Forager | `local-tmux` background ticket | The process launched and wrote health/result artifacts | That the result is safe to use without review |
 | Closeout | Forager planner plus reviewer | `forager offdesk closeout` | What to keep, inspect, archive, or return to Ondesk | Permission to move or delete files |
 | Ondesk return | Operator plus live harness | `RETURN_PACKAGE.md`, `prompt-package` | What the next fresh harness should read first | That wiki candidates are promoted |
-| Wiki promotion | Operator review | `forager offdesk wiki ...` | Reviewed durable knowledge | Hidden automatic memory truth |
+| Wiki promotion | Operator review | `forager offdesk wiki ...` | A stored promotion decision and provenance | Correctness of the lesson or automatic user acceptance |
+
+## Starting A Project
+
+Run initialization before trying to hand a project to Offdesk:
+
+```bash
+forager project init /path/to/project \
+  --project-key <project> \
+  --operation-target <module-or-path> \
+  --include-git \
+  --json
+```
+
+Read these first:
+
+- `PROJECT_ONBOARDING.md`;
+- `ONDESK_START_PACKAGE.md`;
+- `MODULE_OPERATION_PREFLIGHT.json`;
+- `OFFDESK_READY_CHECK.json`.
+
+`OFFDESK_READY_CHECK.json` can say Ondesk is ready while Offdesk remains
+blocked. That is expected. Offdesk needs a task-specific evidence bundle,
+review artifact, module preflight, and runtime approval.
+
+## Ondesk To Offdesk
+
+Use Ondesk records to preserve operator intent before leaving the desk:
+
+```bash
+forager ondesk note --project-key <project> --mode planning \
+  --text "Next Offdesk task should inspect X and avoid Y."
+forager ondesk prompt-package --project-key <project>
+```
+
+Then prepare the Offdesk task. The exact producer can be a CLI flow or a
+project-specific helper, but the contract is the same for every project:
+
+- write a deterministic evidence bundle;
+- review the exact prepared manifest;
+- point to a module operation preflight artifact;
+- generate a human launch review packet;
+- enqueue only after the operator understands the packet.
+
+The launch packet should answer:
+
+- What project and module scope will be touched?
+- What command will run, from which workdir, with which runner?
+- Which evidence and review artifacts were used?
+- What blockers exist?
+- Which approval is still required?
+- Which actions remain forbidden?
+
+## Launch And Monitor
+
+Hosted harness prompt packets can name first reads and a task-specific read
+scope, but local tmux runners do not confine filesystem reads to those paths.
+The prompt packet reports `read_scope_enforced=false`. If a task requires strict
+source isolation, use a separately verified read-confining host policy before
+launch. Treat an agent's `evidence_read` list as a claim to audit against its
+tool trace, not proof that no other file was opened.
+
+```bash
+forager offdesk tick --project-key <project> --task-id <task-id> --limit 1 --json
+forager offdesk pending --json
+# Match the approval to the selected task and prepared command before approving.
+forager offdesk ok <approval-id> --json
+forager offdesk tick --project-key <project> --task-id <task-id> --limit 1 --json
+forager offdesk poll <ticket-id> --json
+```
+
+For long Python workloads, prefer `local-tmux`. A healthy tmux-backed run should
+be inspectable through:
+
+- an Offdesk background ticket;
+- a tmux session name while the process is alive;
+- `heartbeat.json`;
+- `progress.jsonl`;
+- `offdesk-runner.log`;
+- `result.json` after completion;
+- `REPORT.md` and post-run review artifacts.
+
+`poll` reconciles runtime observations into profile state; it is not a
+read-only listing. Use the exact ticket ID from the selected launch.
+
+Do not report completion from a single status field. Use task state, poll
+evidence, runner log, heartbeat/progress, and result-review evidence together.
+
+## Offdesk To Ondesk
+
+When runtime finishes, run closeout before resuming live work:
+
+```bash
+forager offdesk closeout --project-key <project> --task-id <task-id> --dry-run
+```
+
+Closeout is a review packet, not a cleanup executor. The expected morning path
+is:
+
+1. Inspect `result.json`, `REPORT.md`, and review artifacts.
+2. Generate closeout.
+3. Review `COMMERCIAL_REVIEW_PACKET.md`.
+4. Record a `closeout-review` verdict.
+5. Start the next harness from `RETURN_PACKAGE.md` or
+   `forager ondesk prompt-package --project-key <project>`.
+
+`RETURN_PACKAGE.md` includes focused documentation governance recommendations
+from `project audit-docs` when the closeout workdir can be audited. This keeps
+the Ondesk return surface action-oriented while leaving full audit inventories
+in machine JSON.
+
+Prefer task-scoped closeout for morning handoff when a specific Offdesk run is
+being returned. Project-wide closeout is useful for backlog review, but it can
+mix older debug, cancelled, and completed tasks into the same return package.
+When runtime artifacts include `prepared_task.json` or `manifest.json`, closeout
+uses their target repo field for documentation governance before falling back to
+the runtime workdir.
+
+For a current project-level governance view, add `--include-doc-audit` to
+`forager ondesk prompt-package`. The prompt package will then identify the
+governance source as `fresh_project_audit`, `latest_closeout_return_package`, or
+`fresh_project_audit_unavailable` instead of leaving the next harness to infer
+freshness from artifact paths. When a matching closeout is present, the fresh
+audit uses the closeout workdir recorded in `closeout_plan.json` before falling
+back to the current session or shell directory.
 
 ## Morning Return and Agreement
+
+### Operating contract
+
+This is the operating contract for both an existing harness session left open
+overnight and a fresh session. It does not claim that automatic session
+refresh, project-orchestrator messaging, TODO synchronization, or an approval
+UI is implemented. Perform the checks explicitly where automation is absent.
+
+### Roles and durable context
+
+The overall Offdesk orchestrator coordinates project selection, shared budgets,
+resources, and the run summary. A project orchestrator explains that project's
+decisions, results, dependencies, and uncertainties from durable records.
+These are logical roles, not a requirement to keep multiple model sessions
+alive. Neither role replaces runtime approval checks or user acceptance.
+
+If a project orchestrator is unavailable, inspect the preserved plan, execution
+receipts, and task reports and distinguish recorded evidence from inference.
+Leave unanswered questions explicit. Consulting an orchestrator does not grant
+permission to spawn agents, rerun experiments, or make new changes.
+
+### Resume sequence
+
+1. Resolve the project, authoritative Ondesk plan, task IDs, current plan
+   version, branch/worktree, local uncommitted changes, and active owners.
+   Compare them with the session's last known state. Reuse the old session only
+   when its execution context is suitable; preserving a conversation is less
+   important than restoring the correct task context.
+2. Read relevant Offdesk return reports and evidence. Distinguish reported
+   execution outcomes from accepted task completion. Surface pending review
+   without silently changing the Ondesk baseline to match overnight claims.
+3. Discuss the results with the user, consulting the project orchestrator or
+   durable records as needed. Ask why an approach was chosen, what changed,
+   which checks actually ran, what remains unverified, and how results affect
+   today's goal. Read direct evidence when a summary is insufficient.
+4. Produce a bounded agreement record with task ID, baseline version,
+   disposition, evidence references, unresolved questions, proposed TODO
+   changes, and the user's decision or applicable prior authority. Distinguish
+   accept, partial acceptance, rework, and defer. Do not describe agent-only
+   agreement as user acceptance.
+5. Recheck the baseline before applying authorized TODO changes. If another
+   writer changed it, reconcile rather than overwriting it. Link accepted
+   results to existing tasks; create new tasks only for genuinely remaining
+   work. Code integration, canonical documentation changes, and wiki promotion
+   retain their own review and authorization boundaries.
+6. Reread the updated plan and confirm the next owned task before execution.
+   Other sessions should learn of the new plan version at a safe interaction
+   boundary and refresh before their next mutation. Do not force input into a
+   running terminal or assume all sessions have acknowledged the change.
+
+### Report and document discipline
+
+Use an existing task record for the agreement where possible, rather than
+creating a new Markdown file for each exchange. A task closeout report must be
+understandable without reading all scratch notes: include goal and scope,
+changes, verified findings, direct evidence, applicable versions/conditions,
+limitations, unresolved work, and proposed updates to the owning documents.
+Prefer source code, test receipts, data, and original references over citing a
+temporary note's conclusion. Preserve provenance and irreplaceable evidence.
+
+Task closure, report review, and canonical acceptance are different states.
+A failed or incomplete effort can have a closeout report without its goal
+being completed. Reviewed reports are starting points, not immunity from new
+contradictory evidence. Working-note status never authorizes automatic deletion.
+
+The shared-plan integration writer applies agreed changes; task agents submit
+bounded results rather than independently rewriting shared TODOs or
+`PROJECT_STATE.md`. Ownership claims must be checked against actual execution
+state. Written guidance alone does not provide atomic claims or fencing.
+
+## Wiki Boundary
+
+Offdesk can create wiki candidates or run-local trial entries, but it should
+not silently promote canonical knowledge. Promotion belongs to Ondesk morning
+review or an explicit operator-reviewed wiki command.
+
+This keeps adaptive wiki useful without making it a hidden memory backend.
+
+## Stop Conditions
+
+Stop and inspect before continuing when:
+
+- `LAUNCH_DRY_RUN.md` has blockers;
+- the pending approval action is not `dispatch.runtime` for the expected task;
+- the runner is `local-background` for a long Python workload;
+- `offdesk poll` reports stale callback, stale heartbeat, or missing result;
+- closeout proposes file movement or deletion;
+- a wiki change would promote candidate knowledge without review.
+
+For the concrete validation flow, see
+[`Offdesk Runtime Smoke`](offdesk-runtime-smoke.md). For the realistic long-run
+validation sequence, see
+[`Offdesk Long-Run Validation`](offdesk-long-run-validation.md).
+For the current baseline and remaining work queue, see
+[`Offdesk Operation Status`](../offdesk-operation-status.md).
+
+## Advanced local plan and return contracts
+
+These interfaces bind selected artifacts and decisions. They do not perform
+the operator review described above on their own.
 
 ### Local checkpoint byte verification
 
@@ -724,266 +926,6 @@ omit `shift_review`; they do not claim overnight-report binding. Existing absent
 fields are not rewritten. Populated bindings require the new binary; old
 binaries cannot read those new journal entries.
 
-### Operating contract
-
-This is the operating contract for both an existing harness session left open
-overnight and a fresh session. It does not claim that automatic session
-refresh, project-orchestrator messaging, TODO synchronization, or an approval
-UI is implemented. Perform the checks explicitly where automation is absent.
-
-### Roles and durable context
-
-The overall Offdesk orchestrator coordinates project selection, shared budgets,
-resources, and the run summary. A project orchestrator explains that project's
-decisions, results, dependencies, and uncertainties from durable records.
-These are logical roles, not a requirement to keep multiple model sessions
-alive. Neither role replaces runtime approval checks or user acceptance.
-
-If a project orchestrator is unavailable, inspect the preserved plan, execution
-receipts, and task reports and distinguish recorded evidence from inference.
-Leave unanswered questions explicit. Consulting an orchestrator does not grant
-permission to spawn agents, rerun experiments, or make new changes.
-
-### Resume sequence
-
-1. Resolve the project, authoritative Ondesk plan, task IDs, current plan
-   version, branch/worktree, local uncommitted changes, and active owners.
-   Compare them with the session's last known state. Reuse the old session only
-   when its execution context is suitable; preserving a conversation is less
-   important than restoring the correct task context.
-2. Read relevant Offdesk return reports and evidence. Distinguish reported
-   execution outcomes from accepted task completion. Surface pending review
-   without silently changing the Ondesk baseline to match overnight claims.
-3. Discuss the results with the user, consulting the project orchestrator or
-   durable records as needed. Ask why an approach was chosen, what changed,
-   which checks actually ran, what remains unverified, and how results affect
-   today's goal. Read direct evidence when a summary is insufficient.
-4. Produce a bounded agreement record with task ID, baseline version,
-   disposition, evidence references, unresolved questions, proposed TODO
-   changes, and the user's decision or applicable prior authority. Distinguish
-   accept, partial acceptance, rework, and defer. Do not describe agent-only
-   agreement as user acceptance.
-5. Recheck the baseline before applying authorized TODO changes. If another
-   writer changed it, reconcile rather than overwriting it. Link accepted
-   results to existing tasks; create new tasks only for genuinely remaining
-   work. Code integration, canonical documentation changes, and wiki promotion
-   retain their own review and authorization boundaries.
-6. Reread the updated plan and confirm the next owned task before execution.
-   Other sessions should learn of the new plan version at a safe interaction
-   boundary and refresh before their next mutation. Do not force input into a
-   running terminal or assume all sessions have acknowledged the change.
-
-### Report and document discipline
-
-Use an existing task record for the agreement where possible, rather than
-creating a new Markdown file for each exchange. A task closeout report must be
-understandable without reading all scratch notes: include goal and scope,
-changes, verified findings, direct evidence, applicable versions/conditions,
-limitations, unresolved work, and proposed updates to the owning documents.
-Prefer source code, test receipts, data, and original references over citing a
-temporary note's conclusion. Preserve provenance and irreplaceable evidence.
-
-Task closure, report review, and canonical acceptance are different states.
-A failed or incomplete effort can have a closeout report without its goal
-being completed. Reviewed reports are starting points, not immunity from new
-contradictory evidence. Working-note status never authorizes automatic deletion.
-
-The shared-plan integration writer applies agreed changes; task agents submit
-bounded results rather than independently rewriting shared TODOs or
-`PROJECT_STATE.md`. Ownership claims must be checked against actual execution
-state. Written guidance alone does not provide atomic claims or fencing.
-
-## Starting A Project
-
-Run initialization before trying to hand a project to Offdesk:
-
-```bash
-forager project init /path/to/project \
-  --project-key <project> \
-  --operation-target <module-or-path> \
-  --include-git \
-  --json
-```
-
-Read these first:
-
-- `PROJECT_ONBOARDING.md`;
-- `ONDESK_START_PACKAGE.md`;
-- `MODULE_OPERATION_PREFLIGHT.json`;
-- `OFFDESK_READY_CHECK.json`.
-
-`OFFDESK_READY_CHECK.json` can say Ondesk is ready while Offdesk remains
-blocked. That is expected. Offdesk needs a task-specific evidence bundle,
-review artifact, module preflight, and runtime approval.
-
-## Ondesk To Offdesk
-
-Use Ondesk records to preserve operator intent before leaving the desk:
-
-```bash
-forager ondesk note --project-key <project> --mode planning \
-  --text "Next Offdesk task should inspect X and avoid Y."
-forager ondesk prompt-package --project-key <project>
-```
-
-Then prepare the Offdesk task. The exact producer can be a CLI flow or a
-project-specific helper, but the contract is the same for every project:
-
-- write a deterministic evidence bundle;
-- review the exact prepared manifest;
-- point to a module operation preflight artifact;
-- generate a human launch review packet;
-- enqueue only after the operator understands the packet.
-
-The launch packet should answer:
-
-- What project and module scope will be touched?
-- What command will run, from which workdir, with which runner?
-- Which evidence and review artifacts were used?
-- What blockers exist?
-- Which approval is still required?
-- Which actions remain forbidden?
-
-## Launch And Monitor
-
-Hosted harness prompt packets can name first reads and a task-specific read
-scope, but local tmux runners do not confine filesystem reads to those paths.
-The prompt packet reports `read_scope_enforced=false`. If a task requires strict
-source isolation, use a separately verified read-confining host policy before
-launch. Treat an agent's `evidence_read` list as a claim to audit against its
-tool trace, not proof that no other file was opened.
-
-For bounded `local-background` tasks, source now supports an explicit
-`shift prepare --read-policy linux-landlock-workdir-and-runtime-only` option.
-First run `shift read-policy-probe --json`. It uses Linux Landlock to limit
-ordinary filesystem reads to the exact task directory and listed runtime paths,
-and denies ordinary writes outside that directory except explicit stdio and
-`/dev/null`. Approval binds this policy and the root identity; failure to install
-it prevents launch. It clears the child environment and uses workdir-local
-`HOME` and `TMPDIR`. Stage necessary inputs explicitly. This does not protect
-local tmux or return sessions and does not restrict network, IPC, metadata,
-preopened descriptors, hardlink aliases or nested mounts. The complete task
-directory is visible. See the [read-policy implementation](https://github.com/kimyoungjin06/forager-cli/blob/main/src/offdesk/read_policy.rs)
-for the exact runtime exceptions and compatibility boundary. Installed services
-have not been changed by source qualification.
-
-The separate `bound_shift_landlock_real_codex` qualification now passed one
-real Codex 0.160.1 / gpt-6.1-sol background task through that adapter. It
-observed one inspection command, matched three input hashes and denied-access
-checks, verified supervisor exit 0 and one outcome, and preserved review-pending
-status without a second dispatch. The owned shift was disarmed and temporary
-auth was removed. The test requires `FORAGER_LANDLOCK_CODEX_TRIAL=1` plus explicit
-`FORAGER_LANDLOCK_CODEX_EVIDENCE`, `FORAGER_LANDLOCK_AUTH_FILE`,
-`FORAGER_LANDLOCK_CODEX_BINARY`, and `FORAGER_LANDLOCK_CODEX_MODEL` inputs.
-Its driver stages the locally preserved R9 summary/policy evidence; the normal
-test suite ignores this external-model case. This is a bounded background
-reading/reporting qualification. It does not qualify native return confinement,
-arbitrary task correctness or scientific acceptance. Staged authentication and
-runtime files are visible inside the approved workdir/runtime boundary.
-
-The opt-in `ondesk_return_container_tui_reads_context_without_task_authority`
-test exercises native Codex return delivery inside an owned disposable
-container. Its wrapper uses a read-only root, dropped capabilities, no new
-privileges, an unprivileged user, and exact bind mounts. A preflight checks
-allowed reads, denied input writes, and denied reads of unmounted host research,
-memory, and symlink targets. Codex uses full access inside this container; the
-container supplies the host filesystem boundary. Runtime files, an explicit
-authentication bridge, and evidence mounts remain visible. This is a test
-wrapper, not an integrated Forager sandbox or proof that only packet files can
-be read. The existing native VM test keeps its separate sandbox preflight.
-Current Codex packaging needs both `codex` and the matching
-`codex-code-mode-host`; keep its temporary account directory outside `/tmp` so
-helper installation can proceed. Preserve failed delivery attempts and use a
-new disposable fixture after correcting startup failures.
-
-The normal runtime path is:
-
-```bash
-forager offdesk tick --limit 1 --json
-forager offdesk pending --json
-forager offdesk ok <approval-id> --json
-forager offdesk tick --limit 1 --json
-forager offdesk poll --json
-```
-
-For long Python workloads, prefer `local-tmux`. A healthy tmux-backed run should
-be inspectable through:
-
-- an Offdesk background ticket;
-- a tmux session name while the process is alive;
-- `heartbeat.json`;
-- `progress.jsonl`;
-- `offdesk-runner.log`;
-- `result.json` after completion;
-- `REPORT.md` and post-run review artifacts.
-
-Do not report completion from a single status field. Use task state, poll
-evidence, runner log, heartbeat/progress, and result-review evidence together.
-
-## Offdesk To Ondesk
-
-When runtime finishes, run closeout before resuming live work:
-
-```bash
-forager offdesk closeout --project-key <project> --task-id <task-id> --dry-run
-```
-
-Closeout is a review packet, not a cleanup executor. The expected morning path
-is:
-
-1. Inspect `result.json`, `REPORT.md`, and review artifacts.
-2. Generate closeout.
-3. Review `COMMERCIAL_REVIEW_PACKET.md`.
-4. Record a `closeout-review` verdict.
-5. Start the next harness from `RETURN_PACKAGE.md` or
-   `forager ondesk prompt-package --project-key <project>`.
-
-`RETURN_PACKAGE.md` includes focused documentation governance recommendations
-from `project audit-docs` when the closeout workdir can be audited. This keeps
-the Ondesk return surface action-oriented while leaving full audit inventories
-in machine JSON.
-
-Prefer task-scoped closeout for morning handoff when a specific Offdesk run is
-being returned. Project-wide closeout is useful for backlog review, but it can
-mix older debug, cancelled, and completed tasks into the same return package.
-When runtime artifacts include `prepared_task.json` or `manifest.json`, closeout
-uses their target repo field for documentation governance before falling back to
-the runtime workdir.
-
-For a current project-level governance view, add `--include-doc-audit` to
-`forager ondesk prompt-package`. The prompt package will then identify the
-governance source as `fresh_project_audit`, `latest_closeout_return_package`, or
-`fresh_project_audit_unavailable` instead of leaving the next harness to infer
-freshness from artifact paths. When a matching closeout is present, the fresh
-audit uses the closeout workdir recorded in `closeout_plan.json` before falling
-back to the current session or shell directory.
-
-## Wiki Boundary
-
-Offdesk can create wiki candidates or run-local trial entries, but it should
-not silently promote canonical knowledge. Promotion belongs to Ondesk morning
-review or an explicit operator-reviewed wiki command.
-
-This keeps adaptive wiki useful without making it a hidden memory backend.
-
-## Stop Conditions
-
-Stop and inspect before continuing when:
-
-- `LAUNCH_DRY_RUN.md` has blockers;
-- the pending approval action is not `dispatch.runtime` for the expected task;
-- the runner is `local-background` for a long Python workload;
-- `offdesk poll` reports stale callback, stale heartbeat, or missing result;
-- closeout proposes file movement or deletion;
-- a wiki change would promote candidate knowledge without review.
-
-For the concrete validation flow, see
-[`Offdesk Runtime Smoke`](offdesk-runtime-smoke.md). For the realistic long-run
-validation sequence, see
-[`Offdesk Long-Run Validation`](offdesk-long-run-validation.md).
-For the current baseline and remaining work queue, see
-[`Offdesk Operation Status`](../offdesk-operation-status.md).
-
 ### Explicit historical journal boundaries
 
 An existing journal can contain a historical discontinuity even when its current
@@ -1150,3 +1092,79 @@ decision. An unbound or changed receipt, invalid result, later owner/evidence
 drift, or unresolved gate keeps review pending. Existing partial/rework/deferred
 closure remains nonaccepted. This derived classification adds no stored queue
 schema, migration, deployment permission or scientific acceptance.
+## Runtime qualification notes
+
+The versions and deployment observations below are point-in-time qualification
+records. Match your installed runtime and selected runner before applying them.
+
+### Inspecting a stopped task's runtime
+
+Use `forager -p <profile> offdesk task-recovery <exact-task-id> --json`
+to inspect local-background release evidence. This source-only diagnostic does
+not initialize a profile, migrate data, signal processes, clear tickets or retry
+work. A live supervisor, reused PID, missing binding or missing descendant-wait
+receipt keeps release unverified. If a supervisor dies without its receipt,
+descendant identities cannot be reconstructed from the dead parent: keep the
+workdir held and investigate externally. Do not clear its ticket to bypass the
+hold. A verified receipt still requires the normal lifecycle and approval gates.
+Other runners and legacy parent-only receipts do not establish release here.
+
+New explicitly contained launches also report `containment_populated`,
+`containment_empty_admission_unfenced`, `containment_observation_unverified`, or
+`containment_binding_missing_or_invalid`. All four retain the hold. Empty means
+only that the exactly identified cgroup was observed empty; it does not guarantee
+that processes cannot enter later or previously migrated out. Deleting the
+binding file or cgroup never converts uncertainty into release authorization.
+
+The internal closure journal adds `containment_seal_incomplete` (intent without
+confirmed completion), `containment_seal_journal_invalid` (unreadable or mismatched
+records), and `containment_sealed_migration_unverified` (closure recorded but prior
+migration unverified). These also retain the hold. Do not delete a journal to
+force another attempt. The diagnostic remains read-only; it never starts closure.
+
+### Bounded background read policies and return experiments
+
+For bounded `local-background` tasks, source now supports an explicit
+`shift prepare --read-policy linux-landlock-workdir-and-runtime-only` option.
+First run `shift read-policy-probe --json`. It uses Linux Landlock to limit
+ordinary filesystem reads to the exact task directory and listed runtime paths,
+and denies ordinary writes outside that directory except explicit stdio and
+`/dev/null`. Approval binds this policy and the root identity; failure to install
+it prevents launch. It clears the child environment and uses workdir-local
+`HOME` and `TMPDIR`. Stage necessary inputs explicitly. This does not protect
+local tmux or return sessions and does not restrict network, IPC, metadata,
+preopened descriptors, hardlink aliases or nested mounts. The complete task
+directory is visible. See the [read-policy implementation](https://github.com/kimyoungjin06/forager-cli/blob/main/src/offdesk/read_policy.rs)
+for the exact runtime exceptions and compatibility boundary. Installed services
+have not been changed by source qualification.
+
+The separate `bound_shift_landlock_real_codex` qualification now passed one
+real Codex 0.160.1 / gpt-6.1-sol background task through that adapter. It
+observed one inspection command, matched three input hashes and denied-access
+checks, verified supervisor exit 0 and one outcome, and preserved review-pending
+status without a second dispatch. The owned shift was disarmed and temporary
+auth was removed. The test requires `FORAGER_LANDLOCK_CODEX_TRIAL=1` plus explicit
+`FORAGER_LANDLOCK_CODEX_EVIDENCE`, `FORAGER_LANDLOCK_AUTH_FILE`,
+`FORAGER_LANDLOCK_CODEX_BINARY`, and `FORAGER_LANDLOCK_CODEX_MODEL` inputs.
+Its driver stages the locally preserved R9 summary/policy evidence; the normal
+test suite ignores this external-model case. This is a bounded background
+reading/reporting qualification. It does not qualify native return confinement,
+arbitrary task correctness or scientific acceptance. Staged authentication and
+runtime files are visible inside the approved workdir/runtime boundary.
+
+The opt-in `ondesk_return_container_tui_reads_context_without_task_authority`
+test exercises native Codex return delivery inside an owned disposable
+container. Its wrapper uses a read-only root, dropped capabilities, no new
+privileges, an unprivileged user, and exact bind mounts. A preflight checks
+allowed reads, denied input writes, and denied reads of unmounted host research,
+memory, and symlink targets. Codex uses full access inside this container; the
+container supplies the host filesystem boundary. Runtime files, an explicit
+authentication bridge, and evidence mounts remain visible. This is a test
+wrapper, not an integrated Forager sandbox or proof that only packet files can
+be read. The existing native VM test keeps its separate sandbox preflight.
+Current Codex packaging needs both `codex` and the matching
+`codex-code-mode-host`; keep its temporary account directory outside `/tmp` so
+helper installation can proceed. Preserve failed delivery attempts and use a
+new disposable fixture after correcting startup failures.
+
+The normal runtime path is:

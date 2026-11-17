@@ -1,6 +1,7 @@
 # Project Initialization
 
-`forager project init` creates a read-only operation packet for a new project.
+`forager project init` scans a project without changing its files and writes
+an operation packet to the selected profile/output directory.
 It is the bootstrap step before Ondesk/Offdesk/wiki work starts.
 
 In the full operation cycle, initialization is the first bounded artifact. It
@@ -291,8 +292,8 @@ and a restore plan, appends one entry, and writes
 
 Treat the packet as a scope map, not as a green light:
 
-- `ready_for_ondesk_start=true` means a fresh harness has enough first reads to
-  begin with context.
+- `ready_for_ondesk_start=true` reports structural packet readiness. The
+  selected first reads still need review for adequacy and task relevance.
 - `ready_for_offdesk_runtime=false` is normal until a specific task has a clean
   evidence bundle, module preflight, workload review, and runtime approval.
 - `MODULE_OPERATION_PREFLIGHT.json` should be referenced by later prepare

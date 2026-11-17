@@ -1,5 +1,12 @@
 # Remote Session Creation And Isolation Plan
 
+> **Record scope:** Dated S2 design, adverse-review history and source qualification record.
+> The status and next-step statements below belong to that workstream; they
+> do not report a fresh CI result, authorize a launch or make its checklist a
+> second operator-owned task plan.
+> See [current operation scope](offdesk-operation-status.md) and
+> [the daily workflow](guides/operation-cycle.md) for active guidance.
+
 Updated: 2026-09-02
 
 Status: S2-A verified; S2-B Linux local gates and independent review passed,

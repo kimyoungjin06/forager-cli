@@ -26,7 +26,7 @@ import { sitePath } from '../../lib/paths';
           <li><strong>Ondesk planning:</strong> create focused sessions, use separate branch checkouts, and select tasks with an explicit scope, runner and stop conditions.</li>
           <li><strong>Offdesk execution:</strong> queue durable tasks behind approval gates, provider fallback checks, recovery records, and audit trails.</li>
           <li><strong>Morning review:</strong> inspect task status, background probes, debug bundles, maintenance reports, Council decisions, result artifacts, implementation packet coverage, and closeout needs.</li>
-          <li><strong>Closeout:</strong> generate the dry-run cleanup plan, commercial review packet, and Ondesk return package before resuming hands-on work.</li>
+          <li><strong>Closeout:</strong> generate the dry-run cleanup plan, review packet, and Ondesk return package before resuming hands-on work.</li>
           <li><strong>Knowledge promotion:</strong> promote adaptive wiki candidates only after reviewing evidence, counterexamples, scope, and freshness.</li>
         </ol>
       </section>
@@ -69,7 +69,7 @@ forager offdesk closeout --dry-run</code></pre>
         </p>
         <pre><code>forager offdesk closeout --project-key &lt;project&gt; --dry-run</code></pre>
         <p>
-          Closeout writes a plan, cleanup manifest, commercial review packet, and return package. It does not move, delete, archive, or mutate project files.
+          Closeout writes a plan, cleanup manifest, review packet, and return package. It does not move, delete, archive, or mutate project files.
         </p>
         <pre><code>forager offdesk closeout-review --closeout-id &lt;closeout-id&gt; --verdict approved</code></pre>
         <p>
@@ -100,7 +100,7 @@ forager offdesk wiki export-markdown --output ./adaptive-wiki-review</code></pre
           <li>Compare completion claims with the task's requirements and checks. A terminal status or result file alone does not establish success.</li>
           <li>Do not let wiki context change commands, workdirs, provider choices, models, or approvals.</li>
           <li>Use Council output as a read-only recommendation, not as permission to mutate state.</li>
-          <li>Do not move, delete, or archive closeout candidates without commercial review and explicit human approval.</li>
+          <li>Review exact paths and applicable operator authority before separately moving, deleting, or archiving closeout candidates. The closeout verdict alone does not authorize cleanup.</li>
           <li>Convert failures into recovery tasks, maintenance requests, or revised plans instead of silent retries.</li>
         </ul>
       </section>

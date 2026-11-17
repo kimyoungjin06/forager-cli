@@ -58,6 +58,10 @@ establish those outcomes.
 
 ## Product and implementation references
 
+Retained plans and historical baselines are grouped separately in the
+navigation. Their original test counts and pending steps retain their dated
+scope; they are not a second current task queue.
+
 [Project direction](project-direction.md) describes the product's goals.
 [Harness contracts](hosted-harness-agents.md),
 [functional definitions](functional-definitions.md),

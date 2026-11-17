@@ -9,6 +9,12 @@ local files, or another surface, but the functional contract should stay stable.
 
 ## Reading Rule
 
+This is a requirements and interface reference. Implemented paths and local
+checks must be qualified for their exact source, runner and workload; a listed
+acceptance criterion is not a recorded PASS. Human-facing "accepted truth"
+means a recorded acceptance decision. It does not prove correctness or safety.
+Literal schema and field names retain their existing spelling.
+
 For every capability, ask:
 
 - What user problem does this solve?
@@ -92,7 +98,8 @@ Readiness states:
 - Defined: the user problem, actors, and authorization boundary are written.
 - Contracted: durable state and JSON projection fields are named.
 - Implemented: at least one CLI or runtime path produces the contract.
-- Validated: tests or smoke runs prove the contract against realistic state.
+- Validated: named tests or smoke runs exercised the contract under recorded
+  conditions; retain their version, inputs and unresolved cases.
 - Operational: the capability is wired into the normal operator workflow.
 
 Rule:
@@ -139,7 +146,7 @@ new UI should project these contracts instead of inventing a separate model.
 | `decision_receipt` | FD-004 | Proof that an approval, rejection, or natural-language response was handled. | Surfaces show final status and consequence before implementation continues. |
 | `offdesk_task` | FD-005 | Unattended workload scope, guardrails, heartbeat, and stop conditions. | Summaries show progress, ETA, blockers, and interruption safety. |
 | `runtime_evidence` | FD-005 | Heartbeat, progress events, logs, and process handle evidence. | Human surfaces summarize; machine surfaces retain artifact refs. |
-| `next_safe_action` | FD-006 | The single safest continuation action after interruption or closeout. | Every operator-facing surface must agree on the first action. |
+| `next_safe_action` | FD-006 | The recommended bounded continuation after interruption or closeout. | Every operator-facing surface must agree on the first action. |
 | `closeout_receipt.v1` | FD-007 | Completion status, accepted-truth state, evidence, and unresolved risk. | Never collapse `execution_complete` into `accepted`. |
 | `review_surface.v1` | FD-008 | Rich review packet shared by WebUI, Ondesk handoff, and detail views. | Rich surfaces consume this packet as their read model. |
 | `workstation_surface.v1` | FD-008 | Workstation-level dashboard packet for health, capacity, project portfolio, latest decision state, top attention, scoped provenance, latest action-envelope receipt verdicts, latest decision-action execution results, post-closeout runtime handoffs, and accepted-truth recovery candidates. | Web dashboard consumes this packet read-only; append-only decision ledgers are projected through the latest record per decision id so receipted decisions do not remain open through older entries. |
@@ -452,8 +459,8 @@ Open Design Questions:
 ## FD-007 Closeout And Accepted Truth
 
 Purpose:
-- Separate "the agent finished" from "the result is accepted, safe, and ready to
-  use."
+- Separate "the agent finished" from a recorded review decision about the
+  result, its evidence and remaining follow-ups.
 
 Actors:
 - Operator.

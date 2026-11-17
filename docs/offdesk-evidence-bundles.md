@@ -5,6 +5,10 @@ Before analysis, writing, critique, or long autonomous work, a deterministic
 collector should create an evidence bundle. The bundle is read-only evidence,
 not execution authority.
 
+This is a project-integration contract. Forager does not automatically supply
+a source collector for every project. Configure the selected builder and
+reviewer, and verify the resulting artifacts for the task.
+
 ## Contract
 
 An evidence bundle is a pair of files:

@@ -59,20 +59,16 @@ local source location when preparing public changes.
 
 The demo GIF in the docs is created using [VHS](https://github.com/charmbracelet/vhs).
 
+The retained `assets/demo.tape` is an author-specific recording script. It
+contains fixed project paths and starts interactive agents with typed prompts.
+Prepare a copy with your own disposable project paths, profile and selected
+agent before running it. Do not delete an existing real profile to recreate a
+recording; inspect and retire only resources owned by that recording.
+
 ```bash
-# Install VHS
-brew install vhs
-
-# Clear the demo profile
-rm -rf ~/.forager/profiles/demo
-
-# Ensure demo directories exist
-mkdir -p /tmp/demo-projects/api-server /tmp/demo-projects/web-app
-
-# Generate the GIF (from repo root)
-vhs assets/demo.tape
+# After preparing a disposable copy of the tape and its projects:
+vhs /path/to/prepared-demo.tape
 ```
 
-This creates an uncommitted `docs/assets/demo.gif`. The committed static preview
-is `docs/assets/tui.png`, and the demo uses `-p demo` to run in a separate
-profile.
+The tape writes an uncommitted `docs/assets/demo.gif`. The committed static
+preview is `docs/assets/tui.png`. A documentation build does not run the tape.

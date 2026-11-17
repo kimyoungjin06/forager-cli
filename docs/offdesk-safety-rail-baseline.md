@@ -1,5 +1,11 @@
 # Offdesk Safety Rail Baseline
 
+> **Record scope:** Historical stabilization baseline, with validation recorded on 2026-05-19.
+> The words "current" and "shipped" in the original body refer to that baseline.
+> Its tests, invariants and examples are preserved as recorded, not rerun here.
+> See [current operation scope](offdesk-operation-status.md) and
+> [the daily workflow](guides/operation-cycle.md) for active guidance.
+
 This page records the current stabilization baseline before the next Offdesk
 adaptive-agent phase. It is the short operator and review entry point for the
 larger provider fallback, checkpoint, capability, redaction, and adaptive wiki

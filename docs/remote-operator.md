@@ -1,5 +1,36 @@
 # Remote Operator
 
+The current adapter uses Telegram to inspect projects, prepare plans and carry
+out explicitly confirmed, task-bound actions. Slack, mobile apps and other
+transports are architecture proposals, not supplied adapters.
+
+## Start here
+
+1. Install Forager and use the matching source checkout or
+   [operator bundle](installation.md#telegram-operator-bundle) for the Python tools.
+2. Configure a private Telegram credential file, allowed operator/chat identity
+   and workspace root using [Telegram setup](#telegram-setup). Start with a
+   local dry run and health inspection before enabling a listener service.
+3. Use `/projects`, `/status` and `/pending` to inspect state. Follow the
+   [planning runbook](#start-a-planning-cycle-from-telegram) to prepare work;
+   plan approval and runtime approval are separate decisions.
+4. Inspect task evidence and the closeout packet on return. A stored review
+   verdict records a decision; it does not establish result correctness.
+
+| Configuration | Available command behavior |
+| --- | --- |
+| Default listener | Inspection, planning and confirmed bound workflow actions; free-form shell dispatch is disabled |
+| Optional local dispatch allowlist | `/run <closeout-id> <name>` queues a locally configured command template after confirmation and preflight |
+| Optional `--enable-runtime-dispatch` | `/dispatch <closeout-id> <runner> -- <command>` accepts an operator-supplied command for guarded queueing |
+
+The last option permits remote command execution through the queue. Review the
+[dispatch boundary](#runtime-dispatch-opt-in) before enabling it. `/pause` holds
+new dispatch; it does not terminate commands already running.
+
+The sections below distinguish implemented interfaces from design requirements
+and staged implementation notes. A local health report describes the selected
+installation, not every project's readiness.
+
 ## Health and review domains
 
 The health report separates `attention_domains.listener`, `.delivery`, and
@@ -16,15 +47,6 @@ unknown attempt count until the send call is observed. Message bodies and button
 payloads are excluded. Existing digest-only records retain unknown times and
 attempts. A confirmed Telegram receipt survives failed local bookkeeping and
 prevents release for retry through either notification or session hold paths.
-
-The Remote Operator layer lets an operator supervise Offdesk work from a
-remote surface such as Telegram, Slack, a mobile app, or a small web console.
-It is not a remote shell. It is a transport-agnostic control surface for
-planning, approval, observation, interruption, and closeout.
-
-The first likely transport is Telegram, but Telegram must remain an adapter.
-The durable contract belongs to Forager's Offdesk registry, approval gate, and
-runtime evidence model.
 
 ## Purpose
 
@@ -44,12 +66,16 @@ The operator should be able to start a night or lunch-break planning cycle from
 a phone, make a small number of high-leverage decisions, and return later to a
 reviewable closeout packet instead of raw chat logs.
 
-## Non-Goals
+## Default command boundary
 
-Remote Operator must not provide:
+<a id="non-goals"></a>
 
-- arbitrary shell execution;
-- direct `git push`, deletion, file movement, or package installation commands;
+The default listener provides no free-form shell dispatch and no dedicated
+`git push`, deletion, file-movement or package-installation commands. The
+optional dispatch modes above can queue commands with such effects, so their
+configuration and task approval must cover the exact command.
+
+The workflow must retain these boundaries:
 - direct task launch that bypasses `offdesk gate`;
 - direct provider or model retargeting without the existing approval boundary;
 - access to secrets, environment variables, raw token values, or sensitive
@@ -127,6 +153,10 @@ num_ctx = 8192
 num_predict = 768
 ```
 
+These model names and limits illustrate a classifier configuration. They are
+not a model ranking, a coding qualification or a required budget for all
+workloads. Select a configured endpoint and settings for the intended role.
+
 The same values can be overridden by CLI arguments or environment variables
 such as `OFFDESK_REMOTE_OPERATOR_AGENT_INTENT_MODE`,
 `OFFDESK_REMOTE_OPERATOR_AGENT_BASE_URL`, `OFFDESK_REMOTE_OPERATOR_AGENT_MODELS`,
@@ -185,6 +215,10 @@ button must not duplicate a review, consume the wrong approval, or launch work
 twice.
 
 ## Current Implementation Status
+
+"Implemented" here identifies source interfaces and receipt paths. It does not
+claim that every installation or workload has passed field qualification. The
+legacy phrase "accepted truth" below means recorded review acceptance.
 
 The current Telegram implementation covers read-only inspection, remote Plan
 Mode preparation, explicit plan-review approval, launch-preparation packet
@@ -459,7 +493,7 @@ status but cannot approve mutations.
 
 ## Telegram Transport Policy
 
-The current Telegram adapter exposes a small safe command surface:
+The current Telegram adapter includes these inspection and planning controls:
 
 ```text
 /status
@@ -467,7 +501,9 @@ The current Telegram adapter exposes a small safe command surface:
 /plans
 /show <plan_id>
 /pending
-freeform planning text
+/tasks [task-id]
+/tasks <project> <task-id> <request-id>
+/plan <request>
 project-selection buttons
 plan-session buttons through 계획 승인
 ```
@@ -475,24 +511,24 @@ plan-session buttons through 계획 승인
 ### Grounded freeform chat
 
 Plain text routes to the local chat agent (Ollama). The chat prompt is
-grounded with two payload sections so answers come from real state instead of
-guesses:
+supplied with two payload sections to inform its replies. The model can still
+misinterpret state, omit limits or give incorrect instructions:
 
 - `operator_snapshot`: live read-only state gathered per message in
   `build_chat_operator_snapshot()`: workstation surface summary
   (attention counts, capacity, health, up to 5 open decision titles),
   `autonomy_armed`, and workspace project folder hints discovered under the
-  operator's workspace roots. Every section degrades gracefully; chat still
-  works if a probe fails.
+  operator's workspace roots. Unavailable probes are represented without granting action readiness;
+  a reply depends on the configured agent being reachable.
 - `supported_commands`: the complete slash-command surface from
   `telegram_operator/routing.py::COMMAND_SURFACE` (keep in sync with
   `parse_remote_command`).
 
 A deterministic guard (`telegram_operator/agent.py::scrub_unknown_commands`)
 rewrites any slash command outside the real surface to `/help` in model
-replies, so the agent can never teach the operator a command that bounces
-with `unsupported_remote_operator_command`. Filesystem paths and URLs are
-left untouched.
+replies. This filters unknown command names, not incorrect arguments or
+misleading descriptions of supported commands. Filesystem paths and URLs are
+left untouched; validate any proposed action against the CLI and current state.
 
 The following command classes are future design targets, not current Telegram
 runtime authority:
@@ -539,7 +575,8 @@ bounded approval or decision request rather than execute the text directly.
 
 ## Security And Audit
 
-Remote Operator requires:
+The following are design requirements. Implementation coverage is identified
+in the phase notes below; this list is not a universal completed checklist:
 
 - configured allowlist of transport user IDs and chat IDs;
 - one owner for mutation approvals during the initial release;
@@ -674,6 +711,8 @@ to false. They are intended for Telegram or another transport adapter to
 render. The `pending` projection reads approval rows without resolving or
 expiring them.
 
+<a id="telegram-setup"></a>
+
 The Telegram adapter starts from these read-only commands and adds bounded Plan
 Mode and task-bound action receipts. Mutation-capable actions remain behind the
 confirmation, observed-state, approval, and task-binding gates described later:
@@ -798,13 +837,15 @@ FRESH pending confirmation suppresses proposals. An expired pending
 confirmation (for example last night's unanswered proposal card) is cleared
 by the scan instead of blocking proposals forever.
 
-Approval runs `offdesk_autonomy_run.py --arm` (window until 09:00 local by
-default). While armed, three systemd user timers do the night work: an
+If the optional autonomy setup is installed, approval runs
+`offdesk_autonomy_run.py --arm` (window until 09:00 local by default).
+These clock times describe that recipe, not a selected window for a new run. While armed, three systemd user timers do the night work: an
 `offdesk tick` heartbeat every 10 minutes (launching only already-approved
 tasks), the operator-owned nightly distillation playbook at 02:00
 (candidate-only), and the 08:50 morning brief (/attention card + wiki
 candidate-queue summary), which then disarms for the day. `/pause` still
-halts dispatch instantly regardless of the armed state. Install the timers
+holds new dispatch regardless of the armed state; it does not stop an
+already-running command. Install the timers
 with `scripts/install_offdesk_autonomy_timers.py --install --enable`; they
 are inert unless armed.
 
@@ -952,9 +993,11 @@ re-verifies the closeout against the latest canonical decision receipt, then
 process: the queued command runs later only through `forager offdesk tick` and
 the scheduler gate.
 
-### Curated dispatch allowlist (safer alternative)
+### Curated dispatch allowlist
 
-`/run` is the safe alternative to free-form `/dispatch`. Instead of typing a
+<a id="curated-dispatch-allowlist-safer-alternative"></a>
+
+`/run` restricts selection to configured templates. Instead of typing a
 command, the operator names a pre-vetted template from a local allowlist. The
 runner and command come from a JSON file on the trusted machine, never from the
 Telegram message, so a compromised chat can only trigger commands that were
@@ -1001,15 +1044,18 @@ note that no autonomous work has started. `/remember <text>` records an
 adaptive wiki candidate. With an explicit or sticky project focus it uses the
 registry's `wiki_profile` and project scope; without a focus it uses the
 listener profile and user-global scope. It is not promoted knowledge and
-cannot affect runtime behavior until local wiki review promotes it.
+is excluded from the normal promoted projection until local wiki review
+promotes it. Explicit experimental trial overlays have their own run-local
+selection path; see [Adaptive Wiki](adaptive-wiki.md).
 
 Chat keeps a small rolling history of recent turns per chat in local listener
 state so follow-up questions can be answered in context. Assistant history uses
 the exact semantic text sent to Telegram, not an internal pre-render response.
 When the agent asks a clarification, that question is retained as clarification
 context for the next chat turn without refreshing an unrelated decision or wiki
-card. The history is bounded, expires with `--context-max-age-sec`, never leaves
-the local state file. Conversation history grants no additional authority;
+card. The history is bounded and expires with `--context-max-age-sec`. It is
+stored locally, and recent turns are included in requests to the configured
+model endpoint. An on-premise GPU endpoint can be on another machine. Conversation history grants no additional authority;
 only the separately validated single-session delivery path can send tmux input.
 Project focus has its own 24-hour default expiry via
 `--project-focus-max-age-sec`.
@@ -1375,7 +1421,9 @@ Telegram can now replace the local `ok/cancel` step only for the exact matching
 approval it created. It can also enqueue only the reviewed bound task. Launch
 uses task-scoped tick only; monitor uses task-scoped tick with `--limit 0`.
 Closeout packet creation can run only after a completed task-scoped monitor.
-Closeout review remains local until the next bridge is implemented.
+Closeout review can be recorded locally or through the existing handoff-bound
+Telegram verdict bridge. Inspect the exact resulting receipt and follow-ups;
+a generic confirmation is not result acceptance.
 
 ### Respond To A Watchdog Alert
 
@@ -1416,6 +1464,9 @@ Resume remote planning only after health is `healthy` or the remaining
 degradation is explicitly acceptable for read-only inspection.
 
 ## Acceptance Criteria
+
+These are criteria for evaluating the design, not a report that all scenarios
+have passed on the reader's installation.
 
 Remote Operator is ready for practical planning use when:
 

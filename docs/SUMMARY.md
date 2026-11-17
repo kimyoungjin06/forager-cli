@@ -33,7 +33,6 @@
 - [Configuration Reference](guides/configuration.md)
 - [v0.14.0 Release Notes](releases/v0.14.0.md)
 - [Brand System](brand-system.md)
-- [Offdesk Safety Rail Baseline](offdesk-safety-rail-baseline.md)
 - [Offdesk Evidence Bundles](offdesk-evidence-bundles.md)
 - [Offdesk Agent Modes](offdesk-agent-modes.md)
 - [Forager And Orchestrator Boundary](forager-orchestrator-boundary.md)
@@ -54,3 +53,13 @@
 - [Hermes Pattern Review](hermes-pattern-review.md)
 - [Development](development.md)
 - [Credits](credits.md)
+
+# Retained development records
+
+- [Safety Rail Baseline (2026-05-19)](offdesk-safety-rail-baseline.md)
+- [Refactor Baseline (2026-06-26)](refactor-baseline-20260626.md)
+- [Telegram Decomposition Notes](telegram-adapter-decomposition-plan-20260626.md)
+- [Historical Workstation Rename](rename-forager.md)
+- [Retired Sandbox Audit](sandbox-audit.md)
+- [UI Design And Milestones](ui-surface-todo.md)
+- [WebUI Design And Milestones](web-dashboard-control-plane-todo.md)

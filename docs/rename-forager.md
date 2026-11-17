@@ -1,5 +1,11 @@
 # Forager Rename Plan
 
+> **Record scope:** Historical migration record for a particular workstation. Paths and shell
+> commands below document that migration, including removal operations. They
+> are not installation instructions or authorization to repeat those operations.
+> See [current operation scope](offdesk-operation-status.md) and
+> [the daily workflow](guides/operation-cycle.md) for active guidance.
+
 Forager is the new primary product name. The `aoe` binary and existing storage
 paths remain compatibility surfaces during the transition.
 

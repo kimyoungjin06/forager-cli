@@ -1,6 +1,6 @@
 # Project State
 
-Updated: 2026-11-16
+Updated: 2026-11-17
 
 This is the public source-development entrypoint. Start with the
 [README](README.md) for installation and ordinary use. The workspace's live
@@ -18,6 +18,9 @@ The current source update prepares the repository and website for publication:
   status estimates, recorded reviews and task-specific validation are distinct.
 - The website groups its workspace routes, supports keyboard/mobile navigation
   and provides a shared installation command with copy-failure feedback.
+- Document bodies distinguish design requirements, source interfaces, tagged
+  releases and dated observations. Historical originals and adverse evidence
+  remain available; user instructions follow the selected source.
 - CLI reference text is generated from the current command definitions.
 - Static-site link validation and dependency auditing gate Pages publication.
 

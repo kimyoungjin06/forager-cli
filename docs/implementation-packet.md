@@ -126,8 +126,9 @@ preserve the same responsibilities:
 
 ## `recursive_alignment_review.v1`
 
-The recursive alignment review is the self-check that prevents narrow subtask
-success from replacing real project progress.
+The recursive alignment review records a self-check for scope and goal drift.
+A `pass` or `safe_to_delegate` label is the author's assessment, not independent
+execution qualification. Inspect the supporting evidence and selected reviewer.
 
 Recommended minimum shape:
 

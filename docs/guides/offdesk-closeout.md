@@ -49,16 +49,17 @@ offdesk_closeouts/<timestamp>_<closeout-id>/
 The closeout command is a dry-run planner. It does not move, delete, archive,
 or mutate project files.
 
-Generating the packet is not the same as approving the closeout. After a
-commercial model or operator reviews `COMMERCIAL_REVIEW_PACKET.md`, record the
-verdict:
+Generating the packet is not the same as approving the closeout. After an
+operator or selected reviewer inspects `COMMERCIAL_REVIEW_PACKET.md` and the
+underlying evidence, record the verdict. Despite its historical filename, the
+packet does not require a commercial model. This command records supplied
+review metadata; it does not invoke a model or verify review depth or correctness:
 
 ```bash
 forager offdesk closeout-review \
   --closeout-id <closeout-id> \
   --verdict approved \
-  --reviewer gpt-5.5 \
-  --review-provider gpt-5.5 \
+  --reviewer operator \
   --review-file <path-to-review-output>
 ```
 
@@ -74,7 +75,9 @@ visible.
 closeout_receipt_<timestamp>.json
 ```
 
-The receipt separates the review verdict from accepted truth:
+The receipt separates the verdict from recorded acceptance. The legacy
+"accepted truth" terminology names this stored decision, not a correctness
+guarantee:
 
 - `accepted`: the closeout was approved with no tracked follow-ups.
 - `approved_with_followups`: the closeout verdict is approved, but open
@@ -98,10 +101,10 @@ Closeout classifies files but does not apply changes:
   after review.
 - `delete_candidate`: disabled by default in the first closeout surface.
 
-Any future `move`, `archive`, or `delete` action must pass both:
-
-- commercial model review of the closeout packet;
-- explicit human approval recorded through the normal approval path.
+The planner supplies no cleanup executor. Before separately performing a
+`move`, `archive`, or `delete`, review the exact candidate paths and obtain the
+authority required for that action. A recorded closeout verdict does not supply
+that authority. Apply any additional model-review policy selected for the project.
 
 Never auto-delete or auto-move:
 
@@ -111,10 +114,12 @@ Never auto-delete or auto-move:
 - artifacts referenced by reports, wiki candidates, approvals, or resume
   records.
 
-## Commercial Review
+## Review Packet
 
-`COMMERCIAL_REVIEW_PACKET.md` is the model-facing review packet. It asks a
-strong commercial model to return only a verdict:
+<a id="commercial-review"></a>
+
+`COMMERCIAL_REVIEW_PACKET.md` preserves its existing filename. An operator or
+explicitly selected model reviewer can use it to prepare a verdict:
 
 ```json
 {

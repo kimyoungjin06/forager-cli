@@ -36,9 +36,10 @@ is also built as a legacy compatibility alias.
 
 Release installations verify the published SHA-256 checksum before extracting
 or replacing the local binary. A missing or malformed checksum stops the
-installation. Releases beginning with v0.14.0 also publish
-`release-provenance.json`, which binds every archive checksum to the exact Git
-tag and source commit.
+installation. The published v0.14.0 assets also include
+`release-provenance.json`, binding archive checksums to its tag and source
+commit. Inspect the selected release's assets rather than assuming that an
+older version contains the current bundle or provenance format.
 
 After installation, the script writes a private `forager_install_receipt.v1`
 record containing the version, source commit when provenance is available,
@@ -50,8 +51,9 @@ another path.
 
 ### Telegram Operator Bundle
 
-Each release also publishes a platform-independent
-`forager-operator-<version>.tar.gz` bundle. It contains the Telegram operator,
+The published v0.14.0 release includes the platform-independent
+`forager-operator-0.14.0.tar.gz` bundle. Select the operator bundle matching your
+binary when one is provided for that release. It contains the Telegram operator,
 watchdog, service installer, Wiki helpers, and the operational documentation
 needed to run them with an installed `forager` binary. Verify the adjacent
 `.sha256` file, extract the bundle, and follow `docs/remote-operator.md` inside

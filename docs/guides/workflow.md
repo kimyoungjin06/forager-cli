@@ -1,10 +1,22 @@
 # Workflow Guide
 
-This guide covers the recommended setup and daily workflow for using `forager` with git worktrees.
+Use an existing Git clone for your first session. Optional worktrees give
+parallel tasks separate working directories and branches. They still share Git
+objects and the host filesystem; task ownership remains an operator decision.
 
-## Project Setup: Bare Git Repos
+```bash
+cd /path/to/project
+forager add . -c codex
+forager
+```
 
-The recommended way to set up a project is using a "bare repo" structure. This keeps your main repository and all worktrees organized under a single directory:
+Choose an installed agent with `-c`. See [Quick Start](../quick-start.md) for
+attachment and keyboard controls, and [Operation Cycle](operation-cycle.md)
+when preparing unattended work.
+
+## Optional Project Setup: Bare Git Repos
+
+For a new checkout, one optional layout uses a "bare repo" structure. This keeps your main repository and all worktrees organized under a single directory:
 
 ```
 my-project/
@@ -78,7 +90,7 @@ You'll see your sessions in Agent View. Keep one session on `main` for general q
 
 This creates:
 - A new branch from your current HEAD
-- A new worktree at `./feat-auth-refactor/`
+- A new worktree at the configured path (`./feat-auth-refactor/` in the bare layout above)
 - A new session with an agent working in that worktree
 
 **4. Work on your feature** (Agent View)
@@ -102,7 +114,7 @@ This creates:
 ## Tips
 
 - **Keep one session on main**: Use it for codebase questions and its terminal for `git pull`
-- **One task, one session**: Each worktree maps to one Forager session. Keeps context isolated.
+- **One task, one session**: Assign each task a separate worktree and session by convention. Forager does not enforce exclusive task ownership.
 - **Pull before creating**: Always update main before creating new sessions so branches start fresh
 - **Let agents stay focused**: Git operations happen in the paired terminal, not in agent sessions
 

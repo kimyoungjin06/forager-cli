@@ -1,5 +1,11 @@
 # Refactor Baseline - 2026-06-26
 
+> **Record scope:** Historical baseline recorded on 2026-06-26. The source sizes, checks and
+> freeze rules below describe that checkpoint, not current measurements or a
+> new restriction on development.
+> See [current operation scope](offdesk-operation-status.md) and
+> [the daily workflow](guides/operation-cycle.md) for active guidance.
+
 This document freezes the current complexity baseline before the staged
 Offdesk and Telegram decomposition work. It is a measurement and scope-control
 artifact, not a new feature spec.

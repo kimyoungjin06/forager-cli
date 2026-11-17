@@ -1,5 +1,11 @@
 # UI Surface TODO
 
+> **Record scope:** Retained UI design and implementation notes. Dates, fixture counts and
+> completed slices describe their recorded source checkpoints. They do not
+> certify a deployed UI or form the current operator-owned TODO queue.
+> See [current operation scope](offdesk-operation-status.md) and
+> [the daily workflow](guides/operation-cycle.md) for active guidance.
+
 Updated: 2026-06-18
 
 This backlog turns the current UI review into implementation-sized work. It is

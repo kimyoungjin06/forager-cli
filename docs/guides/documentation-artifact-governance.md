@@ -364,6 +364,11 @@ forager -p <profile> offdesk wiki export-markdown
 whether `wiki-vault/index.md` is missing or older than canonical adaptive wiki
 state and emits a focused `reexport_adaptive_wiki_projection` recommendation.
 
+`audit-docs` checks structural signals such as entrypoints, metadata, paths
+and projection freshness. It does not establish factual accuracy, scientific
+validity or the semantic quality of document bodies. The recommendations below
+include operator review beyond those automatic checks.
+
 ## Audit Checklist
 
 A basic audit should report:
