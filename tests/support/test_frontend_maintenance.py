@@ -44,7 +44,9 @@ class Fixture:
         self.old.chmod(0o700)
 
     def spawn_old(self):
-        proc = subprocess.Popen([str(self.old), '60'])
+        # Multicall coreutils dispatches by argv[0]; retain sleep's applet name
+        # while executing the copied image used by the reader-identity checks.
+        proc = subprocess.Popen(['sleep', '60'], executable=str(self.old))
         def stop():
             if proc.poll() is None:
                 proc.terminate()
